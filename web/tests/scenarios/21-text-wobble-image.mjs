@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

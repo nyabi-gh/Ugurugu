@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // Measures the wasm engine against one or more .ugu documents: document open
 // time, first-render and stroke-begin latency, per-batch stroke append+render

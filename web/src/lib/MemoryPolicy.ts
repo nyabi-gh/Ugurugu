@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // The numbers come from docs/web-port-progress.md, which derived them from
 // the wasm heap measurements: an open document costs roughly the file size

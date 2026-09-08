@@ -4,8 +4,8 @@
 
 # Ugurugu
 
-[![Latest Release](https://img.shields.io/github/v/release/nyattic/Ugurugu?style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e&color=ffc94a)](https://github.com/nyattic/Ugurugu/releases/latest)
-[![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnyattic%2FUgurugu%2Fdownload-badge%2Fdownloads.json&style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e)](https://github.com/nyattic/Ugurugu/releases)
+[![Latest Release](https://img.shields.io/github/v/release/nyabi-gh/Ugurugu?style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e&color=ffc94a)](https://github.com/nyabi-gh/Ugurugu/releases/latest)
+[![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnyabi-gh%2FUgurugu%2Fdownload-badge%2Fdownloads.json&style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e)](https://github.com/nyabi-gh/Ugurugu/releases)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-ffc94a?style=for-the-badge&logo=gnu&logoColor=white&labelColor=1e1b2e)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-ffc94a?style=for-the-badge&logo=qt&logoColor=white&labelColor=1e1b2e)
 
@@ -19,7 +19,7 @@ made with WiggleWiggleTool.
 
 > [!NOTE]
 > If something goes wrong, please open a
-> [GitHub Issue](https://github.com/nyattic/Ugurugu/issues) and tell
+> [GitHub Issue](https://github.com/nyabi-gh/Ugurugu/issues) and tell
 > us what you were doing and what happened. Attaching the `.ugu` file, when
 > possible, makes the problem much easier to find.
 >
@@ -30,14 +30,14 @@ made with WiggleWiggleTool.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
-| Windows | Windows 10 or later, 64-bit | [Windows installer](https://github.com/nyattic/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
-| macOS | macOS 14 or later, Apple Silicon | [macOS installer](https://github.com/nyattic/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
+| Windows | Windows 10 or later, 64-bit | [Windows installer](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
+| macOS | macOS 14 or later, Apple Silicon | [macOS installer](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
 
 ### Windows
 
 Run the downloaded Setup file. If Windows shows an unrecognized-app warning,
 choose **More info → Run anyway**. For your safety, only use files from the
-official [Releases page](https://github.com/nyattic/Ugurugu/releases/latest).
+official [Releases page](https://github.com/nyabi-gh/Ugurugu/releases/latest).
 
 ### macOS
 
@@ -213,7 +213,7 @@ distributed under GPL-3.0-or-later along with the rest of the project.
 
 ## License
 
-Copyright (C) 2026 Nyabi (nyattic)
+Copyright (C) 2026 Nyabi (nyabi-gh)
 
 This program is free software: you can redistribute it and/or modify it
 under the terms of the [GNU General Public License](LICENSE) as published by

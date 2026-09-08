@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // Checks a built web shell against the itch.io HTML5 limits documented in
 // docs/web-itchio-feasibility.md section 4: an index.html entry point, no

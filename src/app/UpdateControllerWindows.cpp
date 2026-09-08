@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "app/ReleaseNotes.hpp"
 #include "app/UpdateCheckPolicy.hpp"
@@ -40,7 +40,7 @@ namespace ugurugu
 namespace
 {
 
-constexpr auto repositoryUrl = "https://github.com/nyattic/Ugurugu";
+constexpr auto repositoryUrl = "https://github.com/nyabi-gh/Ugurugu";
 constexpr auto lastAutomaticCheckKey = "updates/lastAutomaticCheck";
 
 std::unique_ptr<Velopack::UpdateManager> createUpdateManager()

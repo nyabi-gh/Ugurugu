@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import type { Font, PathCommand } from "opentype.js";
 import fontUrl from "../../../resources/fonts/PretendardJP-Medium.otf?url";

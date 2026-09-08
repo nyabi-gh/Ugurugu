@@ -76,7 +76,7 @@ Because Qt is static here, the relinking route the desktop packages satisfy by
 shipping replaceable dynamic libraries is met instead by publishing the
 complete corresponding source. Ugurugu is GPL-3.0-or-later and its whole
 source — engine, bridge and web shell — is at
-<https://github.com/nyattic/Ugurugu>. `BUILDING.md` names the exact toolchain
+<https://github.com/nyabi-gh/Ugurugu>. `BUILDING.md` names the exact toolchain
 the binary was produced with (Qt 6.11.1, Emscripten 4.0.7) and the
 `wasm-release` preset that rebuilds the engine, so a recipient can relink it
 against a modified Qt of the same version.

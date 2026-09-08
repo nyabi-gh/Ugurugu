@@ -387,9 +387,9 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" | \
             out/build/macos-distribution/_deps/sparkle-src/bin/generate_appcast \
               --ed-key-file - \
-              --download-url-prefix "https://github.com/nyattic/Ugurugu/releases/download/${RELEASE_TAG}/" \
-              --release-notes-url-prefix "https://github.com/nyattic/Ugurugu/releases/download/${RELEASE_TAG}/" \
-              --link "https://github.com/nyattic/Ugurugu" \
+              --download-url-prefix "https://github.com/nyabi-gh/Ugurugu/releases/download/${RELEASE_TAG}/" \
+              --release-notes-url-prefix "https://github.com/nyabi-gh/Ugurugu/releases/download/${RELEASE_TAG}/" \
+              --link "https://github.com/nyabi-gh/Ugurugu" \
               --embed-release-notes \
               --maximum-versions 1 \
               --maximum-deltas 0 \
@@ -647,7 +647,7 @@ jobs:
             --packDir "$env:RUNNER_TEMP\Ugurugu" `
             --mainExe Ugurugu.exe `
             --packTitle Ugurugu `
-            --packAuthors nyattic `
+            --packAuthors nyabi-gh `
             --icon resources/icons/Ugurugu.ico `
             --releaseNotes $releaseNotes `
             --runtime win10-x64 `

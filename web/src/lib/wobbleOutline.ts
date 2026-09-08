@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // The active tool is ringed by a hand-drawn outline that redraws itself a few
 // times a second — the same trick the engine plays on every stroke, applied to

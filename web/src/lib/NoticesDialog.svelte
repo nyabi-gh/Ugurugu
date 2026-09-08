@@ -1,6 +1,6 @@
 <!--
 SPDX-License-Identifier: GPL-3.0-or-later
-Copyright (C) 2026 Nyabi (nyattic)
+Copyright (C) 2026 Nyabi (nyabi-gh)
 -->
 <script lang="ts">
     // The licence notice the browser build owes its users. The desktop
@@ -24,7 +24,7 @@ Copyright (C) 2026 Nyabi (nyattic)
         dialog?.querySelector("button")?.focus();
     });
 
-    const sourceUrl = "https://github.com/nyattic/Ugurugu";
+    const sourceUrl = "https://github.com/nyabi-gh/Ugurugu";
     const qtObligationsUrl =
         "https://www.qt.io/licensing/open-source-lgpl-obligations";
 
@@ -45,7 +45,7 @@ Copyright (C) 2026 Nyabi (nyattic)
         {
             title: "Ugurugu",
             body:
-                "Copyright © 2026 Nyabi (nyattic). Licensed under the GNU " +
+                "Copyright © 2026 Nyabi (nyabi-gh). Licensed under the GNU " +
                 "General Public License, version 3 or later. The app icon " +
                 "artwork is copyright © seuppi and is distributed under the " +
                 "same licence.",

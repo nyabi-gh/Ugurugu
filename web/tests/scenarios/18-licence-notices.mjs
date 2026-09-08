@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import {
     check,
@@ -36,7 +36,7 @@ export default async function run({ browser, origin }) {
     }
     check(
         (await page.locator("#notices-source").getAttribute("href")) ===
-            "https://github.com/nyattic/Ugurugu",
+            "https://github.com/nyabi-gh/Ugurugu",
         "the notice links to the complete source",
     );
 

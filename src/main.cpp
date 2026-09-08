@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Ugurugu, a paint program for wobbling line animation.
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 //
 // This program is free software: you can redistribute it and/or
 // modify it under the terms of the GNU General Public License as

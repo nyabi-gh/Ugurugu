@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // Writes a deterministic stress document for the web port measurements: many
 // layers and dense strokes near the coordinate spread of a real drawing so

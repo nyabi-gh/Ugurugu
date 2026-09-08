@@ -29,13 +29,13 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Nyabi (nyattic). Licensed under GPL-3.0-or-later.</string>
+    <string>Copyright © 2026 Nyabi (nyabi-gh). Licensed under GPL-3.0-or-later.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>SUEnableAutomaticChecks</key>
     <true/>
     <key>SUFeedURL</key>
-    <string>https://github.com/nyattic/Ugurugu/releases/latest/download/appcast.xml</string>
+    <string>https://github.com/nyabi-gh/Ugurugu/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>mLaqOS+6ecy63XvvlA7/LdNrLJO4fLrSWmy+2B/w2ow=</string>
     <!-- Keep in step with UpdateCheckPolicy::automaticCheckIntervalSeconds,

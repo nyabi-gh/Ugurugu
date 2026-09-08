@@ -248,7 +248,7 @@ CI의 `Wasm engine parity` job이 이제 셸을 빌드해 브라우저 스위트
 
 **라이선스 고지.** 웹 빌드는 Qt를 **정적 링크**하는데 셸에 고지 UI가 아예 없었다.
 
-- 상단 바의 About 버튼이 고지 패널을 연다. GPL-3.0-or-later, 전체 소스 위치(<https://github.com/nyattic/Ugurugu>), 이 빌드의 엔진 ABI·스키마 버전, 그리고 Qt 6.11.1(LGPL-3.0, 정적 링크와 재링크 경로)·Pretendard JP(OFL 1.1)·Svelte 5(MIT)·Emscripten 4.0.7(MIT/NCSA)을 적는다.
+- 상단 바의 About 버튼이 고지 패널을 연다. GPL-3.0-or-later, 전체 소스 위치(<https://github.com/nyabi-gh/Ugurugu>), 이 빌드의 엔진 ABI·스키마 버전, 그리고 Qt 6.11.1(LGPL-3.0, 정적 링크와 재링크 경로)·Pretendard JP(OFL 1.1)·Svelte 5(MIT)·Emscripten 4.0.7(MIT/NCSA)을 적는다.
 - 라이선스 원문은 링크만 걸지 않고 **패키지에 함께 올린다**. `sync-engine.mjs`가 `resources/licenses/`와 저장소 루트에서 `public/licenses/`로 복사하고, 브라우저 스위트가 패널이 가리키는 6개 파일을 실제로 받아 본다. Emscripten·Svelte 원문을 `resources/licenses/`에 추가한 것도 이 때문이다 — CI에는 emsdk가 없으므로 툴체인 디렉터리에서 가져올 수 없다.
 - `THIRD_PARTY_NOTICES.md`에 웹 절을 넣고, 데스크톱 Qt 절의 "동적 라이브러리라 교체 가능" 문장이 웹에도 적용되는 것처럼 읽히던 것을 갈랐다.
 
