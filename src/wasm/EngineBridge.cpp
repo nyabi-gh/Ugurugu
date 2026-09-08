@@ -24,7 +24,7 @@ extern "C"
     // instead of a missing-export TypeError somewhere later.
     EMSCRIPTEN_KEEPALIVE int ugu_abi_version()
     {
-        return 8;
+        return 9;
     }
 
     EMSCRIPTEN_KEEPALIVE int ugu_schema_version()

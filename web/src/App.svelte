@@ -19,6 +19,10 @@
     import MobileChrome from "./lib/MobileChrome.svelte";
     import ToolIcon from "./lib/ToolIcon.svelte";
     import ToolOptions from "./lib/ToolOptions.svelte";
+    import TextOptions from "./lib/TextOptions.svelte";
+    import { textGeometry } from "./lib/TextGeometry";
+    import type { TextDraft, TextGeometry } from "./lib/TextGeometry";
+    import { decodeImage } from "./lib/ImageImport";
     import ToolRail from "./lib/ToolRail.svelte";
     import { CanvasPresenter } from "./lib/CanvasPresenter";
     import { SelectionOverlay } from "./lib/SelectionOverlay";
@@ -73,6 +77,7 @@
     let overlayCanvas: HTMLCanvasElement;
     let viewportElement: HTMLElement;
     let fileInput: HTMLInputElement;
+    let imageInput: HTMLInputElement;
     let presenter: CanvasPresenter | null = null;
     let overlay: SelectionOverlay | null = null;
 
@@ -89,6 +94,41 @@
 
     let colorHex = $state("#1d2129");
     let tool = $state<ToolId>("brush");
+    const textDraft = $state<TextDraft>({
+        text: "Ugurugu",
+        size: 64,
+        width: 4,
+        filled: false,
+        x: 20,
+        y: 20,
+    });
+    let textShape = $state.raw<TextGeometry | null>(null);
+    let textMessage = $state("");
+    let textApplying = $state(false);
+    let importingImage = $state(false);
+    let documentGeneration = 0;
+    const textReady = $derived(
+        !!textShape &&
+            !textApplying &&
+            !!meta &&
+            layers.some(
+                (layer) =>
+                    layer.active &&
+                    !layer.group &&
+                    layer.visible &&
+                    layer.opacity > 0,
+            ) &&
+            Number.isFinite(textDraft.width) &&
+            textDraft.width >= 1 &&
+            textDraft.width <= 128 &&
+            Number.isFinite(textDraft.x) &&
+            Number.isFinite(textDraft.y) &&
+            textDraft.x >= 0 &&
+            textDraft.y >= 0 &&
+            textDraft.x <= (meta?.width ?? 0) &&
+            textDraft.y <= (meta?.height ?? 0),
+    );
+
     const settings = $state(loadToolSettings());
     let thumbnails = $state<LayerThumbnail[]>([]);
     let recentColors = $state<string[]>(loadRecentColors());
@@ -528,7 +568,137 @@
         }
     });
 
+    $effect(() => {
+        const enabled = tool === "text" && !!meta;
+        const content = textDraft.text;
+        const size = textDraft.size;
+        textShape = null;
+        if (!enabled) return;
+        textMessage = "Preparing text…";
+        let cancelled = false;
+        void textGeometry(content, size)
+            .then((shape) => {
+                if (!cancelled) {
+                    textShape = shape;
+                    textMessage = "Apply adds the text as one undoable edit.";
+                }
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) textMessage = describe(error);
+            });
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    $effect(() => {
+        const shape = textShape;
+        const preview =
+            tool === "text" &&
+            shape &&
+            Number.isFinite(textDraft.x) &&
+            Number.isFinite(textDraft.y) &&
+            Number.isFinite(textDraft.width)
+                ? {
+                      path: shape.path,
+                      x: textDraft.x,
+                      y: textDraft.y,
+                      width: Math.max(1, textDraft.width),
+                      filled: textDraft.filled,
+                      color: colorHex,
+                  }
+                : null;
+        overlay?.setText(preview);
+        overlay?.draw(view);
+    });
+
+    function applyText() {
+        const shape = textShape;
+        const layerId = layers.find((layer) => layer.active)?.id;
+        if (!textReady || !shape || !layerId || tool !== "text") return;
+        const draft = $state.snapshot(textDraft);
+        const color = colorHex;
+        const generation = documentGeneration;
+        stopPlayback();
+        cancelTransformForBoundary(
+            "The selection transform was canceled before adding text.",
+        );
+        textApplying = true;
+        enqueue(async () => {
+            try {
+                if (generation !== documentGeneration)
+                    throw new Error(
+                        "The document changed; place the text again.",
+                    );
+                const index = layers.findIndex((layer) => layer.id === layerId);
+                if (index < 0)
+                    throw new Error("The text layer no longer exists.");
+                present(
+                    await engine.text(
+                        frameIndex,
+                        index,
+                        shape.commands,
+                        draft.x,
+                        draft.y,
+                        draft.width,
+                        draft.filled,
+                        (0xff000000 | parseInt(color.slice(1), 16)) >>> 0,
+                    ),
+                );
+                contentRevision += 1;
+                recordRecentColor(color);
+                tool = "brush";
+                status = "Text added";
+                scheduleThumbnailRefresh();
+            } finally {
+                textApplying = false;
+            }
+        });
+    }
+
+    function onImageChosen(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = "";
+        if (!file || !meta || importingImage) return;
+        const generation = documentGeneration;
+        stopPlayback();
+        if (tool === "text") tool = "brush";
+        cancelTransformForBoundary(
+            "The selection transform was canceled before importing an image.",
+        );
+        importingImage = true;
+        // Reserve the queue before decoding: a later New/Open cannot overtake
+        // the import and receive pixels chosen for the previous document.
+        enqueue(async () => {
+            try {
+                if (generation !== documentGeneration)
+                    throw new Error(
+                        "The document changed; import the image again.",
+                    );
+                status = `Importing ${file.name}…`;
+                const image = await decodeImage(file, profile);
+                present(
+                    await engine.insertImage(
+                        frameIndex,
+                        image.pixels,
+                        image.width,
+                        image.height,
+                        file.name,
+                    ),
+                );
+                contentRevision += 1;
+                status = `${file.name} added as a new layer`;
+                scheduleThumbnailRefresh();
+            } finally {
+                importingImage = false;
+            }
+        });
+    }
+
     function adoptDocument(next: DocumentMeta, name: string) {
+        documentGeneration += 1;
+        if (tool === "text") tool = "brush";
         meta = next;
         documentName = name;
         frameIndex = 0;
@@ -620,6 +790,7 @@
     }
 
     function togglePlayback() {
+        if (tool === "text") tool = "brush";
         if (playing) {
             stopPlayback();
             return;
@@ -1160,6 +1331,12 @@
         cancelTransformForBoundary(
             "The pending selection transform was canceled.",
         );
+        if (tool === "text") {
+            const { x, y } = canvasPosition(event);
+            textDraft.x = Math.round(x);
+            textDraft.y = Math.round(y);
+            return;
+        }
         if (tool === "bucket") {
             bucketFill(event);
             return;
@@ -1426,6 +1603,7 @@
     }
 
     function undo() {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         cancelTransformForBoundary(
             "The pending selection transform was canceled before undoing.",
@@ -1438,6 +1616,7 @@
     }
 
     function redo() {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         cancelTransformForBoundary(
             "The pending selection transform was canceled before redoing.",
@@ -1453,6 +1632,7 @@
         action: (frame: number) => Promise<RegionUpdate>,
         boundary = "document change",
     ) {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         cancelTransformForBoundary(
             `The pending selection transform was canceled before the ` +
@@ -1471,13 +1651,25 @@
 
     // Unlike the other document changes this one leaves playback running: the
     // point of moving a wobble slider is to watch the drawing move.
-    function wobbleChanged(next: WobbleSettings) {
+    function wobbleChanged(
+        next: WobbleSettings | null,
+        layerId: string | null = null,
+    ) {
         cancelTransformForBoundary(
             "The pending selection transform was canceled before the wobble " +
                 "change.",
         );
         enqueue(async () => {
-            present(await engine.wobble(frameIndex, next));
+            if (layerId) {
+                const index = layers.findIndex((layer) => layer.id === layerId);
+                if (index < 0) {
+                    status = "That layer no longer exists";
+                    return;
+                }
+                present(await engine.layerWobble(frameIndex, index, next));
+            } else if (next) {
+                present(await engine.wobble(frameIndex, next));
+            }
             contentRevision += 1;
         });
     }
@@ -1493,6 +1685,7 @@
         id: string,
         action: (frame: number, index: number) => Promise<RegionUpdate>,
     ) {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         cancelTransformForBoundary(
             "The pending selection transform was canceled before the layer " +
@@ -1511,6 +1704,7 @@
     }
 
     function onSliderInput(event: Event) {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         frameIndex = Number((event.currentTarget as HTMLInputElement).value);
         requestRender(frameIndex);
@@ -1527,18 +1721,25 @@
     }
 
     async function downloadDocument() {
-        try {
-            const bytes = await engine.serialize();
-            downloadBlob(
-                new Blob([bytes], { type: "application/octet-stream" }),
-                documentName,
-            );
-        } catch (error) {
-            status = `Save failed: ${describe(error)}`;
+        if (tool === "text" && textShape && !textApplying) {
+            status = "Apply or cancel the text preview before saving.";
+            return;
         }
+        return enqueueExclusive(async () => {
+            try {
+                const bytes = await engine.serialize();
+                downloadBlob(
+                    new Blob([bytes], { type: "application/octet-stream" }),
+                    documentName,
+                );
+            } catch (error) {
+                status = `Save failed: ${describe(error)}`;
+            }
+        });
     }
 
     function exportFramePng() {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         // Export encodes the committed document, so a floating transform that
         // is not in it must not be left on screen either.
@@ -1561,6 +1762,7 @@
     }
 
     function exportGif() {
+        if (tool === "text") tool = "brush";
         stopPlayback();
         cancelTransformForBoundary(
             "The pending selection transform was canceled before exporting.",
@@ -1621,6 +1823,13 @@
                 event.preventDefault();
                 return;
             }
+        }
+        if (focus?.closest("button") && event.key === "Enter") {
+            return;
+        }
+        if (!typing && tool === "text") {
+            if (event.key === "Enter") { applyText(); event.preventDefault(); return; }
+            if (event.key === "Escape") { tool = "brush"; event.preventDefault(); return; }
         }
         const handled = handleShortcut(event, {
             undo,
@@ -1721,6 +1930,11 @@
     onblur={onWindowBlur}
 />
 
+<!-- File inputs survive mobile sheet dismissal and desktop/mobile switches. -->
+<input id="open-document" bind:this={fileInput} type="file" accept=".ugu" hidden onchange={onFileChosen} />
+<input id="import-image" bind:this={imageInput} type="file" accept="image/png,image/jpeg,image/webp"
+    hidden disabled={!meta || importingImage} onchange={onImageChosen} />
+
 {#snippet historyActions()}
     <button
         id="undo"
@@ -1753,15 +1967,9 @@
     >
         Size
     </button>
-    <label class="file-button">
-        Open
-        <input
-            bind:this={fileInput}
-            type="file"
-            accept=".ugu"
-            onchange={onFileChosen}
-        />
-    </label>
+    <button id="open-document-button" class="file-button" onclick={() => fileInput.click()}>Open</button>
+    <button id="import-image-button" class="file-button" disabled={!meta || importingImage}
+        onclick={() => imageInput.click()}>{importingImage ? "Importing…" : "Import image"}</button>
     <button id="save-document" onclick={downloadDocument} disabled={!meta}>
         Save
     </button>
@@ -1804,7 +2012,13 @@
 {/snippet}
 
 {#snippet toolOptions()}
-    <ToolOptions {tool} {settings} {presets} {eraserPresets} />
+    {#if tool === "text"}
+        <TextOptions draft={textDraft} ready={textReady} message={textMessage}
+            canvasWidth={meta?.width ?? 0} canvasHeight={meta?.height ?? 0}
+            onapply={applyText} oncancel={() => (tool = "brush")} />
+    {:else}
+        <ToolOptions {tool} {settings} {presets} {eraserPresets} />
+    {/if}
 {/snippet}
 
 {#snippet wobblePanel()}
@@ -1812,7 +2026,9 @@
         <WobblePanel
             wobble={meta.wobble}
             frameCount={meta.frameCount}
+            layer={layers.find((layer) => layer.active)}
             onchange={wobbleChanged}
+            onfollow={(id) => wobbleChanged(null, id)}
         />
     {/if}
 {/snippet}
@@ -2595,7 +2811,5 @@
         color: var(--paper);
     }
 
-    .file-button input {
-        display: none;
-    }
+
 </style>

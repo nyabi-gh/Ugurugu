@@ -193,6 +193,9 @@ jobs:
         run: node tools/wasm_engine_smoke.mjs examples/Wave.ugu |
           tee "$RUNNER_TEMP/wasm.txt"
 
+      - name: Verify wasm content editing
+        run: node tools/wasm_content_smoke.mjs
+
       - name: Build the native probe
         run: |
           cmake --preset macos-debug

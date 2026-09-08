@@ -37,6 +37,12 @@ Copyright (C) 2026 Nyabi (nyattic)
 
     const notices = [
         {
+            title: "OpenType.js 2.0.0",
+            body: "Copyright © Frederik De Bleser and contributors. Text outlines are read using OpenType.js under the MIT License.",
+            file: "OpenType-LICENSE.txt",
+            fileLabel: "OpenType.js MIT text",
+        },
+        {
             title: "Ugurugu",
             body:
                 "Copyright © 2026 Nyabi (nyattic). Licensed under the GNU " +

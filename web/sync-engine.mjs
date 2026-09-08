@@ -15,6 +15,7 @@ for (const [source, name] of [
     ["../LICENSE", "GPL-3.0.txt"],
     ["../resources/licenses/LGPL-3.0.txt", "LGPL-3.0.txt"],
     ["../resources/licenses/Svelte-LICENSE.txt", "Svelte-LICENSE.txt"],
+    ["../resources/licenses/OpenType-LICENSE.txt", "OpenType-LICENSE.txt"],
     ["../resources/licenses/Emscripten-LICENSE.txt", "Emscripten-LICENSE.txt"],
     ["../resources/fonts/OFL.txt", "Pretendard-OFL.txt"],
     ["../THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.txt"],

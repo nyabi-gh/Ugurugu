@@ -69,6 +69,7 @@ WebAssembly with a small C ABI bridge. It expects:
 cmake --preset wasm-release
 cmake --build --preset wasm-release
 node tools/wasm_engine_smoke.mjs
+node tools/wasm_content_smoke.mjs
 ```
 
 The preset is macOS-only. On Windows, configure the same build
@@ -169,3 +170,10 @@ python -m fontTools.subset resources/fonts/PretendardJP-Medium.otf \
   --flavor=woff2 --layout-features='' --no-hinting --desubroutinize \
   --unicodes='U+0020-007E,U+00A0-00FF,U+00D7,U+00B7,U+2010-2027,U+2030,U+20A9,U+2190-2193,U+3000-303F,U+3130-318F,U+AC00-D7A3'
 ```
+
+The web text tool loads the original `resources/fonts/PretendardJP-Medium.otf`
+through Vite only when text is used, alongside OpenType.js. The UI keeps its
+existing WOFF2 subset. Both the font licence and the OpenType.js licence ship
+in the web notices panel. `npm run test:browser -- text-wobble-image` runs the
+content-editing regression scenario; append `--screenshots` to save desktop
+and phone-sized text-panel screenshots in the system temporary directory.

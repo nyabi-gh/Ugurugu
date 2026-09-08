@@ -23,6 +23,7 @@ add_executable(
     src/wasm/BridgeDocument.cpp
     src/wasm/BridgeDocument.hpp
     src/wasm/EngineBridge.cpp
+    src/wasm/EngineBridgeContent.cpp
     src/wasm/EngineBridgeClipboard.cpp
     src/wasm/EngineBridgeExport.cpp
     src/wasm/EngineBridgeLayers.cpp

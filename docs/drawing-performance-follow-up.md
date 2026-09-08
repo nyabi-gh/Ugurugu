@@ -6,6 +6,10 @@
 - 범위: Qt 데스크톱 앱의 그리기 입력, 미리보기, 프레임 캐시와 배포 검증
 - 제외 범위: 웹 이식, `.ugu` 파일 형식 변경, 근거 없는 GPU renderer 재작성
 
+> 상태 정리(2026-09-08): **진행 중**. 2.2.10 게시와 P1 두 건의 구현·회귀
+> 테스트 추가는 완료됐다. P1 정량 A/B, 저장소 내 성능 probe, P2 계측과 실제
+> 업데이트 smoke는 완료 기록이 없다. P3 GPU 작업은 조건부 보류다.
+
 ## 1. 현재 상태
 
 2.2.9 이후 제품 변경은 `05276c8`과, 2026-08-18에 구현한 아래 P1 두 건
@@ -183,7 +187,7 @@ probe가 최소한 기록할 항목:
 - [x] 설치 앱 package smoke, JPEG plugin, 라이선스, ad-hoc codesign 검증
 - [x] 세 언어 release-note HTML 변환과 앱 bundle version 확인
 
-릴리즈 권한과 외부 서비스가 필요한 항목은 남아 있다.
+외부 릴리즈 운영은 아래 체크 상태까지 완료됐다. 실제 업데이트 검증은 남아 있다.
 
 - [x] release 준비 커밋과 이 문서를 원격에 반영한다.
 - [x] 같은 SHA의 main CI가 macOS와 Windows에서 모두 통과하는지 확인한다.
@@ -205,10 +209,10 @@ probe가 최소한 기록할 항목:
 
 ## 5. 권장 실행 순서
 
-1. 현재 범위 그대로 2.2.10을 릴리즈하고 실제 태블릿 smoke를 기록한다.
+1. 게시된 2.2.10의 실제 업데이트·태블릿 smoke를 기록한다.
 2. native desktop probe를 저장소에 추가해 같은 조건을 재현 가능하게 만든다.
 3. 성공 승격 뒤 중복 interaction warmup만 격리해 A/B한다.
-4. 취소 token을 render loop 내부까지 전달한다.
+4. 구현된 render loop 취소 token의 잔여 CPU와 정상 렌더 비용을 A/B한다.
 5. 프로파일이 입증할 때만 UI-thread patch copy와 scheduler를 바꾼다.
 6. CPU 변경 후에도 남은 병목이 GPU upload/합성으로 확인될 때만 GPU 작업을
    검토한다.

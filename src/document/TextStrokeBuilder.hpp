@@ -38,4 +38,8 @@ QPainterPath layoutPath(const QString &text, const QFont &font);
 // DocumentController::addStroke rejects strokes with any point outside it.
 QVector<Stroke> build(const Options &options);
 
+// Font-independent entry point for headless clients which supply glyph paths.
+// The path uses the same top-left-relative coordinates as layoutPath().
+QVector<Stroke> buildFromPath(QPainterPath path, const Options &options);
+
 }

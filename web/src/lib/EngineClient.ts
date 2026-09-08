@@ -1,4 +1,6 @@
 export interface LayerInfo {
+    // null inherits the whole drawing; otherwise this is the layer override.
+    wobble: WobbleSettings | null;
     index: number;
     // Stable identity. Row indexes shift under every add, remove and move, so
     // anything queued has to name the layer by this instead.
@@ -299,6 +301,56 @@ export class EngineClient {
 
     async setFillOptions(options: FillOptions): Promise<void> {
         await this.#request({ type: "fillOptions", ...options });
+    }
+
+    layerWobble(
+        frame: number,
+        index: number,
+        wobble: WobbleSettings | null,
+    ): Promise<RegionUpdate> {
+        return this.#regionRequest({
+            type: "layerWobble",
+            frame,
+            index,
+            wobble,
+        });
+    }
+
+    text(
+        frame: number,
+        index: number,
+        commands: number[],
+        x: number,
+        y: number,
+        width: number,
+        filled: boolean,
+        color: number,
+    ): Promise<RegionUpdate> {
+        return this.#regionRequest({
+            type: "text",
+            frame,
+            index,
+            commands,
+            x,
+            y,
+            width,
+            filled,
+            color,
+        });
+    }
+
+    async insertImage(
+        frame: number,
+        pixels: ArrayBuffer,
+        width: number,
+        height: number,
+        name: string,
+    ): Promise<RegionUpdate> {
+        const response = await this.#request<RegionResponse>(
+            { type: "insertImage", frame, pixels, width, height, name },
+            [pixels],
+        );
+        return EngineClient.#toRegion(response);
     }
 
     bucketFill(frame: number, x: number, y: number): Promise<RegionUpdate> {

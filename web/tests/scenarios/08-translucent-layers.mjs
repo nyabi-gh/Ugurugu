@@ -27,7 +27,7 @@ export default async function run({ browser, origin }) {
     const transparentPath = scratchFile("transparent.ugu");
     await writeFile(transparentPath, JSON.stringify(saved));
 
-    await page.locator('input[type="file"]').setInputFiles(transparentPath);
+    await page.locator('#open-document').setInputFiles(transparentPath);
     await page.waitForFunction(
         () =>
             document

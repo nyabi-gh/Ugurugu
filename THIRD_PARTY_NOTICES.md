@@ -93,3 +93,10 @@ Copyright © 2010–2014 Emscripten authors, see the project's AUTHORS file.
 
 Available under both the MIT License and the University of Illinois/NCSA Open
 Source License. See `Emscripten-LICENSE.txt`.
+
+### OpenType.js (web text tool)
+
+OpenType.js 2.0.0 is used to read glyph outlines from the bundled Pretendard JP
+font. Copyright Frederik De Bleser and contributors; MIT License. The complete
+notice is in `resources/licenses/OpenType-LICENSE.txt` and is included in the
+web package. Source: <https://github.com/opentypejs/opentype.js>.

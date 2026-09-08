@@ -48,6 +48,25 @@ class TextStrokeBuilderTests final : public QObject
     Q_OBJECT
 
 private slots:
+    void suppliedGlyphPathMatchesFontLayout()
+    {
+        auto options = defaultOptions();
+        options.filled = true;
+        const auto native = TextStrokeBuilder::build(options);
+        const auto path =
+            TextStrokeBuilder::layoutPath(options.text, options.font);
+        options.text.clear();
+        const auto headless = TextStrokeBuilder::buildFromPath(path, options);
+        QCOMPARE(headless.size(), native.size());
+        for (qsizetype index = 0; index < native.size(); ++index)
+        {
+            QCOMPARE(headless[index].mode, native[index].mode);
+            QCOMPARE(headless[index].points, native[index].points);
+            QCOMPARE(headless[index].fillCoverage, native[index].fillCoverage);
+            QCOMPARE(headless[index].seed, native[index].seed);
+        }
+    }
+
     void buildsClosedOutlineContoursDeterministically()
     {
         const TextStrokeBuilder::Options options = defaultOptions();

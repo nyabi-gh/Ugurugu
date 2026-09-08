@@ -32,6 +32,7 @@ export interface ShortcutActions {
 // Tool letters match the desktop rail.
 const toolKeys: Record<string, ToolId> = {
     b: "brush",
+    t: "text",
     e: "eraser",
     l: "lasso",
     w: "wand",

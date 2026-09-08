@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyattic)
 
+#include "document/DocumentLimits.hpp"
 #include "render/LayerThumbnailRenderer.hpp"
 #include "wasm/BridgeDocument.hpp"
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QString>
+
+#include <algorithm>
+#include <cmath>
 
 using namespace ugurugu::wasm;
 
@@ -305,6 +311,104 @@ extern "C"
         handle->controller->setLayerParentGroup(layer->id, groupId);
         invalidateSplit(handle);
         clearError();
+    }
+
+    // Empty text means that this layer inherits the whole drawing settings.
+    EMSCRIPTEN_KEEPALIVE const char *ugu_layer_wobble(
+        BridgeDocument *handle, int index)
+    {
+        const auto *layer = layerAtIndex(handle, index);
+        if (!layer || !layer->wobbleAmount || !layer->motion)
+        {
+            return "";
+        }
+        const auto &motion = *layer->motion;
+        handle->scratchText =
+            QJsonDocument(QJsonObject{{"amount", *layer->wobbleAmount},
+                              {"style", static_cast<int>(motion.style)},
+                              {"poseCount", motion.poseCount},
+                              {"detail", motion.detail},
+                              {"linked", motion.linked},
+                              {"randomness", motion.randomness},
+                              {"brokenLine", motion.brokenLine},
+                              {"breakAmount", motion.breakAmount},
+                              {"breakRange", motion.breakRange}})
+                .toJson(QJsonDocument::Compact);
+        return handle->scratchText.constData();
+    }
+
+    EMSCRIPTEN_KEEPALIVE int ugu_layer_set_wobble(BridgeDocument *handle,
+        int index,
+        int enabled,
+        double amount,
+        int style,
+        int poseCount,
+        int detail,
+        double linked,
+        double randomness,
+        int brokenLine,
+        double breakAmount,
+        double breakRange)
+    {
+        const auto *layer = layerAtIndex(handle, index);
+        if (!layer || layer->kind != ugurugu::LayerKind::Paint)
+        {
+            setError(StatusLayerNotDrawable,
+                QByteArrayLiteral("choose a paint layer for layer wobble"));
+            return 0;
+        }
+        auto motion = motionFromValues(style,
+            poseCount,
+            detail,
+            linked,
+            randomness,
+            brokenLine,
+            breakAmount,
+            breakRange);
+        if (enabled && (!motion || !std::isfinite(amount)))
+        {
+            setError(StatusInvalidArgument,
+                QByteArrayLiteral("the wobble settings are out of range"));
+            return 0;
+        }
+        const QUuid id = layer->id;
+        std::optional<qreal> normalizedAmount;
+        if (enabled)
+        {
+            normalizedAmount = std::clamp(amount,
+                ugurugu::DocumentLimits::minimumWobbleAmount,
+                ugurugu::DocumentLimits::maximumWobbleAmount);
+            if (motion->style != ugurugu::MotionStyle::Classic)
+            {
+                motion->poseCount = std::min(motion->poseCount,
+                    handle->controller->document().animationFrames);
+            }
+        }
+        else
+        {
+            motion.reset();
+        }
+        if (layer->wobbleAmount != normalizedAmount || layer->motion != motion)
+        {
+            // One released web control is one edit, including the explicit
+            // Follow action. Do not coalesce it with the preceding override.
+            auto *history = handle->controller->undoStack();
+            history->beginMacro(QStringLiteral("Change layer wobble"));
+            handle->controller->setLayerWobbleOverride(
+                id, normalizedAmount, motion);
+            history->endMacro();
+        }
+        const auto *updated = handle->controller->document().layer(id);
+        if (!updated || updated->wobbleAmount != normalizedAmount
+            || updated->motion != motion)
+        {
+            setError(StatusDocumentInvalid,
+                QByteArrayLiteral("the layer settings could not be committed"));
+            return 0;
+        }
+        invalidateSplit(handle);
+        clearError();
+        return 1;
     }
 
     // Renders the layer subtree at index as a static thumbnail (frame 0,

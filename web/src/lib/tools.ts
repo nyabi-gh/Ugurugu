@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyattic)
 
 export type ToolId =
+    | "text"
     | "brush"
     | "eraser"
     | "lasso"
@@ -26,6 +27,7 @@ const brushTool: ToolDefinition = {
 // Shortcuts match the desktop tool rail so muscle memory carries over.
 export const tools: ToolDefinition[] = [
     brushTool,
+    { id: "text", label: "Text", shortcut: "T", hint: "Place wobbling text" },
     {
         id: "eraser",
         label: "Eraser",

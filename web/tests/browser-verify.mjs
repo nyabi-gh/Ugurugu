@@ -31,6 +31,8 @@ import licenceNotices from "./scenarios/18-licence-notices.mjs";
 import documentProperties from "./scenarios/19-document-properties.mjs";
 import clipboardAndLayers from "./scenarios/20-clipboard-and-layers.mjs";
 
+import textWobbleImage from "./scenarios/21-text-wobble-image.mjs";
+
 // Order matters only in that the cheapest, most fundamental checks come first:
 // a failure in scenario 1 makes every later one meaningless.
 const scenarios = [
@@ -54,9 +56,10 @@ const scenarios = [
     ["licence-notices", licenceNotices],
     ["document-properties", documentProperties],
     ["clipboard-and-layers", clipboardAndLayers],
+    ["text-wobble-image", textWobbleImage],
 ];
 
-const filter = process.argv[2];
+const filter = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
 const selected = scenarios.filter(([name]) => !filter || name.includes(filter));
 if (selected.length === 0) {
     console.error(`No scenario matches "${filter}"`);
@@ -81,4 +84,4 @@ if (failures.length > 0) {
     console.error(`\n${failures.length} check(s) failed`);
     process.exit(1);
 }
-console.log("\nOK: recovery and export scenarios verified");
+console.log(`\nOK: ${selected.length} browser scenarios verified`);

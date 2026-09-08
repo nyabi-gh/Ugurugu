@@ -24,7 +24,7 @@ export default async function run({ browser, origin }) {
 
     const corrupt = scratchFile("corrupt.ugu");
     await writeFile(corrupt, "this is not a ugu document");
-    await page.locator('input[type="file"]').setInputFiles(corrupt);
+    await page.locator('#open-document').setInputFiles(corrupt);
     await page.waitForFunction(
         () =>
             document

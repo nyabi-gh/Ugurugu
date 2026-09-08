@@ -23,6 +23,8 @@
             fill="currentColor"
             stroke="none"
         />
+    {:else if name === "text"}
+        <path d="M5 5h14M12 5v15M8 20h8M5 5v3M19 5v3" />
     {:else if name === "eraser"}
         <path d="M14.6 4.4 19.8 9.6 11.6 17.6 6.4 12.4Z" />
         <path d="M9.2 9.7 14.4 14.9" />

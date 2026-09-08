@@ -6,7 +6,7 @@ importScripts("ugurugu_engine_spike.js");
 // Must match ugu_abi_version() in src/wasm/EngineBridge.cpp. A stale artifact
 // under public/engine used to surface as "… is not a function" deep inside an
 // unrelated call; refusing here names the real problem instead.
-const expectedAbiVersion = 8;
+const expectedAbiVersion = 9;
 
 const enginePromise = createUguruguEngine().then((engine) => {
     const version = engine._ugu_abi_version?.();
@@ -45,7 +45,9 @@ function layerList(engine) {
     const count = engine._ugu_document_layer_count(handle);
     const layers = [];
     for (let index = 0; index < count; index += 1) {
+        const wobble = engine.UTF8ToString(engine._ugu_layer_wobble(handle, index));
         layers.push({
+            wobble: wobble ? JSON.parse(wobble) : null,
             index,
             // Stable across adds, removes and moves, unlike index. The shell
             // resolves a queued layer operation back to a row through it.
@@ -618,6 +620,34 @@ self.onmessage = async (event) => {
             fullRender(engine, Math.min(event.data.frame, count - 1));
             regionReply(engine, id, documentMeta(engine));
             return;
+        } else if (type === "text") {
+            const values = new Float64Array(event.data.commands);
+            const pointer = engine._malloc(values.byteLength);
+            if (!pointer) throw new Error("Not enough memory for text.");
+            try {
+                engine.HEAPU8.set(new Uint8Array(values.buffer), pointer);
+                if (!engine._ugu_text_path(handleFor(), event.data.index, pointer,
+                    values.length, event.data.x, event.data.y, event.data.width,
+                    event.data.filled ? 1 : 0, event.data.color)) {
+                    throw engineError(engine);
+                }
+            } finally { engine._free(pointer); }
+            fullRender(engine, event.data.frame);
+        } else if (type === "insertImage") {
+            const pixels = new Uint8Array(event.data.pixels);
+            const name = new TextEncoder().encode(event.data.name + "\0");
+            const pointer = engine._malloc(pixels.length);
+            const namePointer = engine._malloc(name.length);
+            try {
+                if (!pointer || !namePointer) throw new Error("Not enough memory for the image.");
+                engine.HEAPU8.set(pixels, pointer);
+                engine.HEAPU8.set(name, namePointer);
+                if (!engine._ugu_insert_image(handleFor(), pointer, pixels.length,
+                    event.data.width, event.data.height, namePointer)) {
+                    throw engineError(engine);
+                }
+            } finally { engine._free(pointer); engine._free(namePointer); }
+            fullRender(engine, event.data.frame);
         } else if (type === "layerActivate") {
             engine._ugu_layer_activate(handleFor(), event.data.index);
             fullRender(engine, event.data.frame);
@@ -649,6 +679,16 @@ self.onmessage = async (event) => {
             fullRender(engine, event.data.frame);
             regionReply(engine, id, documentMeta(engine));
             return;
+        } else if (type === "layerWobble") {
+            const settings = event.data.wobble ?? documentMeta(engine).wobble;
+            if (!engine._ugu_layer_set_wobble(handleFor(), event.data.index,
+                event.data.wobble ? 1 : 0, settings.amount, settings.style,
+                settings.poseCount, settings.detail, settings.linked,
+                settings.randomness, settings.brokenLine ? 1 : 0,
+                settings.breakAmount, settings.breakRange)) {
+                throw engineError(engine);
+            }
+            fullRender(engine, event.data.frame);
         } else if (type === "animationFrames") {
             const handle = handleFor();
             engine._ugu_set_animation_frames(handle, event.data.frames);

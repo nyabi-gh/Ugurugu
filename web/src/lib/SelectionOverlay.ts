@@ -23,6 +23,10 @@ export class SelectionOverlay {
     #drag: DragShape | null = null;
     #dashOffset = 0;
     #frame = 0;
+    #text: { path: Path2D; x: number; y: number; color: string; width: number; filled: boolean } | null = null;
+
+    setText(text: { path: Path2D; x: number; y: number; color: string; width: number; filled: boolean } | null) { this.#text = text; }
+
     // Pending floating transform. The engine keeps sending the committed
     // outline while a selection is being moved, so the ants are mapped through
     // this on the way to the screen instead of being re-read every frame.
@@ -76,7 +80,7 @@ export class SelectionOverlay {
     }
 
     get hasContent(): boolean {
-        return this.#contours.length > 0 || this.#drag !== null;
+        return this.#contours.length > 0 || this.#drag !== null || this.#text !== null;
     }
 
     resize(width: number, height: number, devicePixelRatio: number) {
@@ -117,6 +121,22 @@ export class SelectionOverlay {
         }
 
         const viewport: Viewport = { width: cssWidth, height: cssHeight };
+        if (this.#text) {
+            const text = this.#text;
+            const origin = toViewport(view, viewport, text.x, text.y);
+            context.save();
+            context.translate(origin.x, origin.y);
+            context.rotate(view.rotation * Math.PI / 180);
+            context.scale(view.scale, view.scale);
+            context.lineJoin = "round";
+            context.lineCap = "round";
+            context.lineWidth = text.width;
+            context.strokeStyle = text.color;
+            context.fillStyle = text.color;
+            if (text.filled) context.fill(text.path);
+            context.stroke(text.path);
+            context.restore();
+        }
         const path = new Path2D();
         for (const contour of this.#contours) {
             for (let index = 0; index + 1 < contour.length; index += 2) {

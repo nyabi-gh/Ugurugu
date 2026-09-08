@@ -143,8 +143,13 @@ QVector<Stroke> build(const Options &options)
     {
         return strokes;
     }
-    QPainterPath path = layoutPath(options.text, options.font);
-    if (path.isEmpty())
+    return buildFromPath(layoutPath(options.text, options.font), options);
+}
+
+QVector<Stroke> buildFromPath(QPainterPath path, const Options &options)
+{
+    QVector<Stroke> strokes;
+    if (options.canvasSize.isEmpty() || path.isEmpty())
     {
         return strokes;
     }
