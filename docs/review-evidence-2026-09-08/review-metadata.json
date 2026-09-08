@@ -1,0 +1,26 @@
+{
+  "src": {
+    "files": 266,
+    "lines": 59001
+  },
+  "tests": {
+    "files": 54,
+    "lines": 29380
+  },
+  "web/src": {
+    "files": 29,
+    "lines": 8514
+  },
+  "web/tests": {
+    "files": 22,
+    "lines": 2866
+  },
+  "commit": "e883cdd56178725dfcbb83336dbadebd7eb92cbb",
+  "version": "2.2.10",
+  "toolchain": {
+    "Qt": "6.11.2 (local), 6.11.1 (distribution pin)",
+    "CMake": "4.4.3",
+    "AppleClang": "21.0.0.21000333",
+    "Node": "24.20.0"
+  }
+}

@@ -1,0 +1,31 @@
+Test project /Users/nyabi/Documents/Code/Ugurugu/out/build/macos-release
+      Start  1: ugurugu_app_tests
+      Start  2: ugurugu_document_tests
+      Start  3: ugurugu_render_tests
+      Start  4: ugurugu_gif_tests
+ 1/13 Test  #1: ugurugu_app_tests ................   Passed    1.25 sec
+      Start  5: ugurugu_webp_tests
+ 2/13 Test  #5: ugurugu_webp_tests ...............   Passed    0.03 sec
+      Start  6: ugurugu_mask_tests
+ 3/13 Test  #4: ugurugu_gif_tests ................   Passed    1.45 sec
+      Start  7: ugurugu_release_notes_tests
+ 4/13 Test  #7: ugurugu_release_notes_tests ......   Passed    0.03 sec
+      Start  8: ugurugu_stabilizer_tests
+ 5/13 Test  #6: ugurugu_mask_tests ...............   Passed    0.22 sec
+      Start  9: ugurugu_ui_shell_tests
+ 6/13 Test  #8: ugurugu_stabilizer_tests .........   Passed    0.03 sec
+      Start 10: ugurugu_ui_selection_tests
+ 7/13 Test #10: ugurugu_ui_selection_tests .......   Passed    5.08 sec
+      Start 11: ugurugu_ui_viewport_tests
+ 8/13 Test  #2: ugurugu_document_tests ...........   Passed    7.29 sec
+      Start 12: ugurugu_ui_drawing_tools_tests
+ 9/13 Test #12: ugurugu_ui_drawing_tools_tests ...   Passed    0.95 sec
+      Start 13: ugurugu_ui_session_tests
+10/13 Test #11: ugurugu_ui_viewport_tests ........   Passed    2.39 sec
+11/13 Test  #9: ugurugu_ui_shell_tests ...........   Passed    8.11 sec
+12/13 Test #13: ugurugu_ui_session_tests .........   Passed    1.70 sec
+13/13 Test  #3: ugurugu_render_tests .............   Passed   38.18 sec
+
+100% tests passed out of 13
+
+Total Test time (real) =  38.19 sec

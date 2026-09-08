@@ -1,0 +1,11 @@
+Recorded from tool outputs on 2026-09-08, not a new test run.
+
+Native: Release build with warnings-as-errors, 339 build steps, successful.
+CTest: 13/13 suites passed; real time 38.19 seconds.
+Node badge tests: 4/4 passed.
+Svelte check: 0 errors, 0 warnings.
+Vite 7.3.6 build: successful; 147 modules; 768 ms.
+WARNING: wasm engine not built; the shell will not load a document.
+Bundle: JS 133.36 kB / gzip 45.88 kB; CSS 27.39 kB / gzip 4.91 kB; font 584.60 kB.
+itch.io package check: passed, 12 files, 0.79 MiB uncompressed (shell only).
+Translation: each ko/ja 723 current source texts, 0 new; unfinished/empty/placeholder mismatch 0.

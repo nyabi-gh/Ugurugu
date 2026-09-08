@@ -1,0 +1,4 @@
+QUEUE_SAVE_REPRO: ["serialize committed=0","downloaded value=0","strokeEnd committed=1"]
+AUTOSAVE_DOCUMENT_SWAP_REPRO: {"records":[{"name":"A.ugu","byte":65}],"newDocumentName":"B.ugu","newDocumentRevision":1,"writeCount":1,"expectedWrites":2}
+STORAGE_INITIALIZATION_REPRO: actual initial preference expression throws uncaught SecurityError
+KEYBOARD_CONTROL_REPRO: {"events":["stepFrame(1)","togglePlayback"],"handledRange":true,"handledButton":true,"meaning":"App prevents default for both"}

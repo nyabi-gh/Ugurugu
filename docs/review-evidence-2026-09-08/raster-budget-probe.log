@@ -1,0 +1,3 @@
+Command: clang++ -std=c++20 /private/tmp/ugurugu-raster-budget-probe.cpp /Users/nyabi/Documents/Code/Ugurugu/src/io/serializer/RasterAssetTable.cpp -I/Users/nyabi/Documents/Code/Ugurugu/src -o /private/tmp/ugurugu-raster-budget-probe -F/opt/homebrew/lib -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtGui.framework -DQT_GUI_LIB -I/opt/homebrew/lib/QtCore.framework/Headers -I/opt/homebrew/lib/QtCore.framework -DQT_CORE_LIB -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/opt/homebrew/include -F/opt/homebrew/lib -framework QtGui -framework QtCore
+Run: /private/tmp/ugurugu-raster-budget-probe
+compressed=8168 decoded_budget=4 declared=4 status=2 (Invalid=2) max_rss_before=12828672 max_rss_after=23511040 delta=10682368

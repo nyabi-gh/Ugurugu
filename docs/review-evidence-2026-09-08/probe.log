@@ -1,0 +1,12 @@
+initial gif=1 webp=1
+wobble_off gif=0 webp=1
+post_export_sync_then_on gif=1 webp=0
+capture_large=1440x900
+capture_small=1024x768
+text_draft placement=1 unsaved=0
+[2026-09-08 09:38:48.400] [info] Saved project /var/folders/20/4v3sgx5n4hzcg8qlhrjvz4680000gn/T/qt_temp-UtQbNM/text-draft.ugu
+after_save placement=1 unsaved=0 strokes=0
+after_new_document placement=1 content=Review text draft unsaved=0
+apply_old_draft_to_new applied=1 strokes=22
+color_wheel tab_focus=0 right_changes_color=0 accessible_name_empty=1
+move_then_rotate transformable=1 rotated=1 center_before=110,100 center_after=140,90

@@ -1,0 +1,5 @@
+Source: /private/tmp/ugurugu-core-probe.cpp
+Build: clang++ -std=c++20 /private/tmp/ugurugu-core-probe.cpp -o /private/tmp/ugurugu-core-probe [pkg-config --cflags --libs Qt6Core Qt6Gui]
+Run: /private/tmp/ugurugu-core-probe
+compressed=8168 declared=4 actual=8388608
+delta*old=18,30 old*delta=15,26 expected=15,26
