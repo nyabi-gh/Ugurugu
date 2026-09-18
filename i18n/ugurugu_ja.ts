@@ -3986,4 +3986,19 @@ Alt+click does the same from the brush, eraser or paint bucket.</source>
         <translation>タブレットの筆圧を反映</translation>
     </message>
 </context>
+<context>
+    <name>SavePathDialog</name>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="141"/>
+        <source>Replace existing file?</source>
+        <translation>既存のファイルを置き換えますか？</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="143"/>
+        <source>The file &quot;%1&quot; already exists.
+Do you want to replace it?</source>
+        <translation>ファイル「%1」は既に存在します。
+置き換えますか？</translation>
+    </message>
+</context>
 </TS>

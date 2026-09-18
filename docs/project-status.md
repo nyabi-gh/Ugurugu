@@ -1,10 +1,10 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `c3be95b798c608c160f0eaa3e24833cf08f50de2` 이후 현재 작업 트리
+정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `2f702725e490a60e77a326790621d8c88b2401ef` 이후 현재 작업 트리
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
-문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정은 현재 작업 트리에 반영했지만, 네이티브·WASM·macOS 패키지 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
+문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인은 현재 작업 트리에 반영했지만, 네이티브·WASM·macOS 패키지 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
 
 ## 1. 핵심 판단
 
@@ -47,7 +47,7 @@
 | 2026-09-08 종합 검토 | macOS Release / Qt 6.11.2, CTest 13/13, 소스 함수·offscreen 집중 재현, 두 크기 UI 캡처 | 배포 Qt 6.11.1 전체 행렬, 실제 펜·GPU·Windows |
 | 2026-09-08 웹 기능 추가 | 브라우저 21시나리오·194체크, WASM 스모크, 관련 네이티브 2스위트, Svelte 검사. 당시 완전 패키지 17파일·11.40MiB | 모든 브라우저·모바일·iframe 권한·배포 의무 검토 |
 | 2026-09-16 Android 계획 작성 | `73004d7`, macOS Qt 6.11.2 재빌드·13/13, Svelte 오류·경고 0 기록 | Android 빌드·APK·S Pen·S8 실측 |
-| 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
+| 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6·최종 저장 경로 확인 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
 
 9월 8일 초기 검토의 12파일·0.79MiB 웹 빌드는 **WASM 없는 셸**이었다. 이후 실엔진 패키지 기록과 혼동하지 않는다. 13은 CTest 스위트 수이지 개별 테스트 수가 아니다.
 
@@ -76,14 +76,15 @@
 - 구현됨: 같은 2.9 계열의 수정 버전 2.9.6으로 올리고, 공식 배포본에서 직접 계산한 SHA-256 `52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192`를 CMake에 고정했다. [공식 2.9.6 릴리스](https://github.com/sparkle-project/Sparkle/releases/tag/2.9.6).
 - 남음: macOS에서 실제 패키지의 framework 버전과 서명, 신규 설치, 2.9.4 포함 기존 앱에서 업데이트, 관리자 권한 경로를 검증한다. delta 비활성화만으로 이 installer 문제를 닫지 않는다.
 
-### D05 · P1 · 최종 저장 이름의 덮어쓰기 확인 — 미해결
+### D05 · P1 · 최종 저장 이름의 덮어쓰기 확인 — 검증 대기
 
-근거: [MainWindow.cpp](../src/ui/MainWindow.cpp)의 `normalizedPath`·저장, [MainWindowExport.cpp](../src/ui/MainWindowExport.cpp), [MainWindowSettings.cpp](../src/ui/MainWindowSettings.cpp).
+근거: [SavePathDialog.cpp](../src/ui/SavePathDialog.cpp), [MainWindow.cpp](../src/ui/MainWindow.cpp)의 저장, [MainWindowExport.cpp](../src/ui/MainWindowExport.cpp), [MainWindowSettings.cpp](../src/ui/MainWindowSettings.cpp).
 
-대화상자가 반환한 이름을 확인한 **뒤** 확장자를 정규화한다. 함수는 접미사가 없을 때뿐 아니라 기대 접미사와 다를 때도 확장자를 덧붙인다. 대화상자가 확장자를 자동 보정하지 않는 경로에서는 확인 대상과 실제 교체 파일이 달라질 수 있다. 모든 OS 기본 대화상자에서 재현됐다는 뜻은 아니다.
+기존에는 대화상자가 반환한 이름을 확인한 **뒤** 확장자를 정규화했다. 함수는 접미사가 없을 때뿐 아니라 기대 접미사와 다를 때도 확장자를 덧붙였으므로, 대화상자가 확장자를 자동 보정하지 않는 경로에서는 확인 대상과 실제 교체 파일이 달라질 수 있었다. 모든 OS 기본 대화상자에서 재현됐다는 뜻은 아니다.
 
-- 조치: 대화상자의 기본 접미사와 최종 경로 검증을 맞추고, 최종 대상이 기존 파일이면 확인한다. 프로젝트·이미지·애니메이션·프리셋을 모두 포함한다.
-- 완료: 확장자 없음/다른 접미사/같은 이름 파일, native/non-native 대화상자, 취소 시 기존 파일 보존. `QSaveFile`의 원자성은 유지한다.
+- 구현됨: 공용 저장 대화상자가 형식별 기본 접미사를 선택 전에 설정한다. 알려진 이미지 접미사는 선택 필터보다 우선해 PNG/JPEG 명시를 보존하고, 알 수 없는 접미사는 선택 형식의 접미사를 덧붙인다. 정규화로 경로가 바뀌고 그 최종 대상이 이미 있으면 별도 확인한다. 프로젝트·PNG/JPEG·GIF/WebP·WWP 프리셋이 같은 경로를 사용하며 기존 `QSaveFile` 저장은 유지한다. [Qt `defaultSuffix`](https://doc.qt.io/qt-6/qfiledialog.html#defaultSuffix-prop), [Qt overwrite 확인 기본값](https://doc.qt.io/qt-6/qfiledialog.html#Option-enum).
+- 회귀 추가: 기본 접미사, 확장자 없음·다른 접미사·대소문자가 다른 같은 접미사, 정규화 뒤 확인 취소 시 기존 파일 보존, 이미 확인된 같은 이름 경로를 검사한다.
+- 남음: Qt가 있는 환경에서 offscreen/non-native 회귀를 실행하고 Windows·macOS native 대화상자에서 접미사 없음·다른 접미사·취소를 수용 검증한다. 이 검증 전에는 해결로 닫지 않는다.
 
 ### R03 · P1 · 웹 저장 순서 — 부분 해결
 

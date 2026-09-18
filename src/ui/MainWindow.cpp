@@ -26,6 +26,7 @@
 #include "ui/LayerDock.hpp"
 #include "ui/PaletteDockAreaManager.hpp"
 #include "ui/PopoverToolButton.hpp"
+#include "ui/SavePathDialog.hpp"
 #include "ui/SelectionActionBar.hpp"
 #include "ui/SettingsDialog.hpp"
 #include "ui/ShortcutBinding.hpp"
@@ -912,15 +913,17 @@ bool MainWindow::save()
 
 bool MainWindow::saveAs()
 {
-    const QString selected = QFileDialog::getSaveFileName(this,
+    const QString filePath = SavePathDialog::getSaveFileName(this,
         tr("Save project"),
         saveDialogStartPath(projectExtension()),
-        tr("Ugurugu projects (*.%1)").arg(projectExtension()));
-    if (selected.isEmpty())
+        {{tr("Ugurugu projects (*.%1)").arg(projectExtension()),
+            projectExtension(),
+            {}}});
+    if (filePath.isEmpty())
     {
         return false;
     }
-    return saveToFile(normalizedPath(selected, projectExtension()));
+    return saveToFile(filePath);
 }
 
 bool MainWindow::saveToFile(const QString &filePath)
@@ -1586,17 +1589,6 @@ void MainWindow::applyWobbleAnimationEnabled(bool enabled)
         exportImageAction->setProperty("shortcutLabel", label);
         exportImageAction->setEnabled(!m_exportWorker.isBusy());
     }
-}
-
-QString MainWindow::normalizedPath(
-    const QString &filePath, const QString &extension) const
-{
-    if (QFileInfo(filePath).suffix().compare(extension, Qt::CaseInsensitive)
-        == 0)
-    {
-        return filePath;
-    }
-    return filePath + QStringLiteral(".") + extension;
 }
 
 QString MainWindow::saveDialogStartPath(const QString &extension) const

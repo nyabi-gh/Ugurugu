@@ -123,8 +123,6 @@ private:
     void applyWobbleAnimationEnabled(bool enabled);
     void setTimelineVisible(bool visible);
     static bool timelineVisibleSetting();
-    QString normalizedPath(
-        const QString &filePath, const QString &extension) const;
     QString saveDialogStartPath(const QString &extension) const;
 
     // Outlives every other member but not the child widgets: Qt deletes those

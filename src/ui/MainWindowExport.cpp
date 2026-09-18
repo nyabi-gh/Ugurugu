@@ -6,8 +6,8 @@
 #include "ui/CanvasWidget.hpp"
 #include "ui/GifExportDialog.hpp"
 #include "ui/MainWindow.hpp"
+#include "ui/SavePathDialog.hpp"
 
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QProgressDialog>
@@ -74,13 +74,14 @@ void MainWindow::exportAnimation(ExportWorker::Kind kind)
         webP ? QStringLiteral("webp") : QStringLiteral("gif");
     const QString filter =
         webP ? tr("WebP images (*.webp)") : tr("GIF images (*.gif)");
-    const QString selected = QFileDialog::getSaveFileName(
-        this, exportTitle, saveDialogStartPath(extension), filter);
-    if (selected.isEmpty())
+    const QString filePath = SavePathDialog::getSaveFileName(this,
+        exportTitle,
+        saveDialogStartPath(extension),
+        {{filter, extension, {}}});
+    if (filePath.isEmpty())
     {
         return;
     }
-    const QString filePath = normalizedPath(selected, extension);
     m_canvas->releaseTransientRenderCaches();
     m_controller.releaseTransientCaches();
     const ExportWorker::AnimationOptions workerOptions{
@@ -123,25 +124,20 @@ void MainWindow::exportImage()
     }
     const QString pngFilter = tr("PNG images (*.png)");
     const QString jpegFilter = tr("JPEG images (*.jpg *.jpeg)");
-    QString selectedFilter = pngFilter;
-    const QString selected = QFileDialog::getSaveFileName(this,
+    const QString filePath = SavePathDialog::getSaveFileName(this,
         tr("Export current frame"),
         saveDialogStartPath(QStringLiteral("png")),
-        pngFilter + QStringLiteral(";;") + jpegFilter,
-        &selectedFilter);
-    if (selected.isEmpty())
+        {{pngFilter, QStringLiteral("png"), {}},
+            {jpegFilter,
+                QStringLiteral("jpg"),
+                {QStringLiteral("jpg"), QStringLiteral("jpeg")}}});
+    if (filePath.isEmpty())
     {
         return;
     }
-    const QString suffix = QFileInfo(selected).suffix().toLower();
-    const bool jpeg = suffix == QStringLiteral("jpg")
-                      || suffix == QStringLiteral("jpeg")
-                      || (suffix.isEmpty() && selectedFilter == jpegFilter);
-    const QString filePath =
-        suffix == QStringLiteral("jpeg")
-            ? selected
-            : normalizedPath(selected,
-                  jpeg ? QStringLiteral("jpg") : QStringLiteral("png"));
+    const QString suffix = QFileInfo(filePath).suffix().toLower();
+    const bool jpeg =
+        suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
     m_canvas->releaseTransientRenderCaches();
     m_controller.releaseTransientCaches();
     if (m_exportWorker.startImage(

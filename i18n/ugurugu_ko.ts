@@ -3986,4 +3986,19 @@ Alt+click does the same from the brush, eraser or paint bucket.</source>
         <translation>필압 반영</translation>
     </message>
 </context>
+<context>
+    <name>SavePathDialog</name>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="141"/>
+        <source>Replace existing file?</source>
+        <translation>기존 파일을 바꾸시겠습니까?</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="143"/>
+        <source>The file &quot;%1&quot; already exists.
+Do you want to replace it?</source>
+        <translation>파일 &quot;%1&quot;이(가) 이미 있습니다.
+바꾸시겠습니까?</translation>
+    </message>
+</context>
 </TS>

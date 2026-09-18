@@ -5,9 +5,12 @@
 #include "support/UiTestSuites.hpp"
 #include "ui/PaletteDockTitleBar.hpp"
 #include "ui/PopoverToolButton.hpp"
+#include "ui/SavePathDialog.hpp"
 
+#include <QFileDialog>
 #include <QFutureWatcher>
 #include <QImageReader>
+#include <QMessageBox>
 #include <QScopeGuard>
 #include <QScrollArea>
 #include <QSemaphore>
@@ -100,6 +103,148 @@ private slots:
         settings.remove(QStringLiteral("dock"));
         settings.remove(QStringLiteral("window"));
         settings.sync();
+    }
+
+    void configuresTheSaveDialogDefaultSuffix()
+    {
+        QWidget parent;
+        bool inspected = false;
+        QTimer::singleShot(0,
+            &parent,
+            [&inspected]()
+            {
+                auto *dialog = qobject_cast<QFileDialog *>(
+                    QApplication::activeModalWidget());
+                if (!dialog)
+                {
+                    return;
+                }
+                inspected = true;
+                QCOMPARE(dialog->defaultSuffix(), QStringLiteral("ugu"));
+                dialog->reject();
+            });
+        QTimer::singleShot(1000,
+            &parent,
+            []()
+            {
+                if (QWidget *dialog = QApplication::activeModalWidget())
+                {
+                    dialog->close();
+                }
+            });
+
+        const QString filePath = SavePathDialog::getSaveFileName(&parent,
+            QStringLiteral("Save project"),
+            QDir::temp().filePath(QStringLiteral("Untitled.ugu")),
+            {{QStringLiteral("Ugurugu projects (*.ugu)"),
+                QStringLiteral("ugu"),
+                {}}});
+
+        QVERIFY(inspected);
+        QVERIFY(filePath.isEmpty());
+    }
+
+    void normalizesSaveExtensions()
+    {
+        const SavePathDialog::Format format{
+            QStringLiteral("Ugurugu projects (*.ugu)"),
+            QStringLiteral("ugu"),
+            {}};
+        QCOMPARE(SavePathDialog::confirmedFinalPath(
+                     nullptr, QStringLiteral("drawing"), format),
+            QStringLiteral("drawing.ugu"));
+        QCOMPARE(SavePathDialog::confirmedFinalPath(
+                     nullptr, QStringLiteral("drawing.txt"), format),
+            QStringLiteral("drawing.txt.ugu"));
+        QCOMPARE(SavePathDialog::confirmedFinalPath(
+                     nullptr, QStringLiteral("drawing.UGU"), format),
+            QStringLiteral("drawing.UGU"));
+
+        const SavePathDialog::Format jpegFormat{
+            QStringLiteral("JPEG images (*.jpg *.jpeg)"),
+            QStringLiteral("jpg"),
+            {QStringLiteral("jpg"), QStringLiteral("jpeg")}};
+        QCOMPARE(SavePathDialog::confirmedFinalPath(
+                     nullptr, QStringLiteral("drawing.jpeg"), jpegFormat),
+            QStringLiteral("drawing.jpeg"));
+    }
+
+    void cancelingFinalOverwritePreservesTheExistingFile_data()
+    {
+        QTest::addColumn<QString>("selectedName");
+        QTest::newRow("missing extension") << QStringLiteral("drawing");
+        QTest::newRow("different extension") << QStringLiteral("drawing.txt");
+    }
+
+    void cancelingFinalOverwritePreservesTheExistingFile()
+    {
+        QFETCH(QString, selectedName);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString selectedPath = directory.filePath(selectedName);
+        const QString finalPath = selectedPath + QStringLiteral(".ugu");
+        QFile existing(finalPath);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        QCOMPARE(existing.write("existing project"), qint64(16));
+        existing.close();
+
+        QWidget parent;
+        bool inspected = false;
+        QTimer::singleShot(0,
+            &parent,
+            [&inspected, &finalPath]()
+            {
+                auto *dialog = qobject_cast<QMessageBox *>(
+                    QApplication::activeModalWidget());
+                if (!dialog
+                    || dialog->objectName()
+                           != QStringLiteral("finalOverwriteConfirmation"))
+                {
+                    return;
+                }
+                inspected = true;
+                QVERIFY(dialog->text().contains(
+                    QDir::toNativeSeparators(finalPath)));
+                dialog->button(QMessageBox::No)->click();
+            });
+        QTimer::singleShot(1000,
+            &parent,
+            []()
+            {
+                if (QWidget *dialog = QApplication::activeModalWidget())
+                {
+                    dialog->close();
+                }
+            });
+
+        const SavePathDialog::Format format{
+            QStringLiteral("Ugurugu projects (*.ugu)"),
+            QStringLiteral("ugu"),
+            {}};
+        QVERIFY(
+            SavePathDialog::confirmedFinalPath(&parent, selectedPath, format)
+                .isEmpty());
+        QVERIFY(inspected);
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArrayLiteral("existing project"));
+    }
+
+    void acceptsAnAlreadyConfirmedFinalSavePath()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString finalPath =
+            directory.filePath(QStringLiteral("drawing.ugu"));
+        QFile existing(finalPath);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        existing.close();
+        const SavePathDialog::Format format{
+            QStringLiteral("Ugurugu projects (*.ugu)"),
+            QStringLiteral("ugu"),
+            {}};
+
+        QCOMPARE(SavePathDialog::confirmedFinalPath(nullptr, finalPath, format),
+            finalPath);
     }
 
     void launchesAndEdits()

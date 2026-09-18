@@ -7,6 +7,7 @@
 #include "ui/CanvasWidget.hpp"
 #include "ui/DrawingToolSettings.hpp"
 #include "ui/MainWindow.hpp"
+#include "ui/SavePathDialog.hpp"
 #include "ui/SettingsDialog.hpp"
 #include "ui/TimelineBar.hpp"
 #include "ui/WwpPresetCodec.hpp"
@@ -423,16 +424,14 @@ void MainWindow::exportWwpPreset()
             tr("Could not prepare the preset."));
         return;
     }
-    const QString selected = QFileDialog::getSaveFileName(this,
+    const QString filePath = SavePathDialog::getSaveFileName(this,
         tr("Export WWP preset"),
         saveDialogStartPath(QStringLiteral("wwpreset")),
-        tr("Ugurugu presets (*.wwpreset)"));
-    if (selected.isEmpty())
+        {{tr("Ugurugu presets (*.wwpreset)"), QStringLiteral("wwpreset"), {}}});
+    if (filePath.isEmpty())
     {
         return;
     }
-    const QString filePath =
-        normalizedPath(selected, QStringLiteral("wwpreset"));
     QSaveFile file(filePath);
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size()
         || !file.commit())

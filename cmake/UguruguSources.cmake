@@ -229,6 +229,8 @@ set(UGURUGU_UI_SOURCES
     src/ui/PopoverOptionButton.hpp
     src/ui/ResponsiveGrid.cpp
     src/ui/ResponsiveGrid.hpp
+    src/ui/SavePathDialog.cpp
+    src/ui/SavePathDialog.hpp
     src/ui/SelectionActionBar.cpp
     src/ui/SelectionActionBar.hpp
     src/ui/SelectionShapeButton.cpp
