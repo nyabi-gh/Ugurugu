@@ -2075,6 +2075,105 @@ private slots:
         QVERIFY(!canvas.hasSelection());
     }
 
+    void composesFloatingSelectionActionsInDocumentOrder()
+    {
+        Document document = Document::createDefault(QSize(120, 100));
+        document.background = Qt::transparent;
+        document.wobbleAmount = 0.0;
+        Stroke source;
+        source.color = QColor(35, 95, 225);
+        source.width = 12.0;
+        source.points = {
+            {QPointF(20.0, 42.0), 1.0}, {QPointF(48.0, 58.0), 1.0}};
+        source.brush.antialiasing = false;
+        document.layers.first().strokes.append(source);
+
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(480, 400);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        canvas.setTool(CanvasWidget::Tool::Lasso);
+
+        const auto widgetPoint = [&canvas](const QPointF &documentPoint)
+        {
+            return CanvasWidgetTestAccess::mapFromDocument(
+                canvas, documentPoint)
+                .toPoint();
+        };
+        dragFreehandQuad(&canvas,
+            widgetPoint(QPointF(10.0, 30.0)),
+            widgetPoint(QPointF(58.0, 70.0)),
+            Qt::NoModifier);
+        QTRY_VERIFY(canvas.hasTransformableSelection());
+        const QImage sourceMask = CanvasWidgetTestAccess::selectionMask(canvas);
+        const Document originalDocument = controller.document();
+        const QImage originalFrame = RenderEngine::render(originalDocument, 0);
+
+        const QPointF moveDelta(18.0, 6.0);
+        const QPointF moveStart(34.0, 50.0);
+        CanvasWidgetTestAccess::beginSelectionMove(canvas, moveStart);
+        QVERIFY(canvas.hasSelectionTransformSession());
+        const QRectF sourceBounds =
+            CanvasWidgetTestAccess::selectionTransformSourceBounds(canvas);
+        CanvasWidgetTestAccess::continueSelectionMove(
+            canvas, moveStart + moveDelta);
+        CanvasWidgetTestAccess::commitSelectionMove(canvas);
+        QVERIFY(canvas.hasPendingSelectionTransform());
+        const QPointF center =
+            CanvasWidgetTestAccess::displayedSelectionBounds(canvas).center();
+        QVERIFY(canvas.rotateSelection(90.0));
+        const QPointF flipCenter =
+            CanvasWidgetTestAccess::displayedSelectionBounds(canvas).center();
+        QVERIFY(canvas.flipSelectionHorizontally());
+
+        QTransform move;
+        move.translate(moveDelta.x(), moveDelta.y());
+        QTransform rotation;
+        rotation.translate(center.x(), center.y());
+        rotation.rotate(90.0);
+        rotation.translate(-center.x(), -center.y());
+        QTransform flip;
+        flip.translate(flipCenter.x(), flipCenter.y());
+        flip.scale(-1.0, 1.0);
+        flip.translate(-flipCenter.x(), -flipCenter.y());
+        const QTransform expectedTransform = move * rotation * flip;
+        QCOMPARE(canvas.pendingSelectionTransform(), expectedTransform);
+
+        const QPointF sourcePoint = sourceBounds.topLeft() + QPointF(7.0, 5.0);
+        QPointF expectedPoint = sourcePoint + moveDelta;
+        expectedPoint = QPointF(center.x() - (expectedPoint.y() - center.y()),
+            center.y() + (expectedPoint.x() - center.x()));
+        expectedPoint.setX(2.0 * flipCenter.x() - expectedPoint.x());
+        const QPointF actualPoint =
+            canvas.pendingSelectionTransform().map(sourcePoint);
+        QVERIFY(qAbs(actualPoint.x() - expectedPoint.x()) < 0.0001);
+        QVERIFY(qAbs(actualPoint.y() - expectedPoint.y()) < 0.0001);
+
+        const std::optional<PixelSelectionOp> expectedOperation =
+            makePixelSelectionOp(sourceMask, expectedTransform, true, true);
+        QVERIFY(expectedOperation.has_value());
+        Document expectedDocument = originalDocument;
+        Stroke operation;
+        operation.mode = StrokeMode::PixelSelection;
+        operation.pixelSelectionOp = *expectedOperation;
+        expectedDocument.layers.first().strokes.append(operation);
+        const QImage expectedFrame = RenderEngine::render(expectedDocument, 0);
+        QCOMPARE(RenderEngine::render(
+                     canvas.documentWithPendingSelectionTransform(), 0),
+            expectedFrame);
+
+        QVERIFY(canvas.applySelectionTransform());
+        QCOMPARE(RenderEngine::render(controller.document(), 0), expectedFrame);
+        controller.undoStack()->undo();
+        QCOMPARE(RenderEngine::render(controller.document(), 0), originalFrame);
+        controller.undoStack()->redo();
+        QCOMPARE(RenderEngine::render(controller.document(), 0), expectedFrame);
+    }
+
     void immediateUndoRedoRestoresTransformedSelectionMask()
     {
         Document document = Document::createDefault(QSize(120, 100));

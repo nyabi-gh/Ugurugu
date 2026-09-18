@@ -1,10 +1,10 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `9172ac668e1949496e1cc1df2759b80bdd327839` 이후 현재 작업 트리
+정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
-문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인, D06의 격리된 Windows 패키지 smoke는 현재 작업 트리에 반영했지만, 네이티브·WASM·실제 설치 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
+문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인, D06의 격리된 Windows 패키지 smoke, D01/R02의 변환 합성 수정은 현재 작업 트리에 반영했지만, 네이티브·WASM·실제 설치 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
 
 ## 1. 핵심 판단
 
@@ -135,12 +135,12 @@
 
 ## 4. 렌더·변환·입력·접근성
 
-### D01 / R02 · P1 · 이미지와 선택 변환의 합성 순서 — 미해결
+### D01 / R02 · P1 · 이미지와 선택 변환의 합성 순서 — 검증 대기
 
-근거: [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 마스크 없는 `duplicateStrokes`·`transformStrokes`, [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)와 [CanvasWidgetSelection.cpp](../src/ui/CanvasWidgetSelection.cpp)의 세션 누적. `delta * existing`이 자산→문서 배치와 문서 좌표 delta의 순서를 뒤집는다. Qt는 곱의 왼쪽 변환을 먼저 적용한다. [Qt 변환 합성](https://doc.qt.io/qt-6/qtransform.html#combining-transforms).
+근거: Qt는 `QTransform` 곱의 왼쪽 변환을 먼저 적용한다. [Qt 변환 합성](https://doc.qt.io/qt-6/qtransform.html#combining-transforms). [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 마스크 없는 `duplicateStrokes`·`transformStrokes`는 자산→문서 배치 뒤에 문서 좌표 delta를 적용하도록 `existing * delta`로 결합한다. [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)와 [CanvasWidgetSelection.cpp](../src/ui/CanvasWidgetSelection.cpp)의 떠 있는 선택 세션도 기존 누적 변환 뒤에 새 이동·회전·크기·뒤집기 delta를 붙인다. 마스크 분기의 직렬화된 `PixelSelectionOp` 계약은 바꾸지 않았다.
 
-- 조치: 자산·문서·뷰 좌표 계약을 명시하고 코어와 UI의 합성 경로를 함께 대조한다. 마스크 분기는 별도 `PixelSelectionOp` 경로이므로 같은 코드로 가정하지 않는다.
-- 완료: 축소·중앙 배치된 이미지에 이동→회전→뒤집기를 연속 적용하고 독립적인 점 매핑 oracle·픽셀 결과·undo/redo와 비교한다. 항등 행렬/순수 이동만으로는 충분하지 않다. 저장된 모든 행렬을 일괄 뒤집지 않는다.
+- 회귀: [StrokeCommandTests.cpp](../tests/StrokeCommandTests.cpp)는 비균일 축소·중앙 배치 이미지의 복제와 이동→회전→뒤집기를 독립적인 점 매핑 oracle, 렌더 픽셀, undo/redo와 비교한다. [UiSelectionTests.cpp](../tests/UiSelectionTests.cpp)는 떠 있는 선택 영역에서 같은 연속 동작의 누적 행렬, 미리보기·커밋 픽셀, undo/redo를 비교한다.
+- 남음: Qt 6.10 이상이 있는 Windows/macOS에서 document·UI selection suite를 실행해 통과를 확인한다. 이 PC에는 Qt SDK가 없어 실제 native suite는 실행하지 못했으므로 그전에는 해결로 닫지 않는다.
 
 ### D02 · P1 · 우글거림 OFF에서 pen-up 프리뷰 승격 — 미해결
 

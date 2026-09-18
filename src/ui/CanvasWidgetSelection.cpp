@@ -707,7 +707,7 @@ void CanvasWidget::continueSelectionMove(const QPointF &documentPosition)
         documentPosition - m_moveStartPosition, baseBounds);
     QTransform translation;
     translation.translate(delta.x(), delta.y());
-    setPendingSelectionTransform(translation * m_moveBaseTransform);
+    setPendingSelectionTransform(m_moveBaseTransform * translation);
 }
 
 void CanvasWidget::commitSelectionMove()
@@ -1159,7 +1159,7 @@ bool CanvasWidget::flipSelection(bool horizontal)
     delta.scale(horizontal ? -1.0 : 1.0, horizontal ? 1.0 : -1.0);
     delta.translate(-center.x(), -center.y());
     if (!setPendingSelectionTransform(
-            delta * m_selectionTransformSession.transform))
+            m_selectionTransformSession.transform * delta))
     {
         if (!alreadyActive)
         {

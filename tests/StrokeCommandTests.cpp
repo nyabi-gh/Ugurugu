@@ -67,6 +67,142 @@ private slots:
         QCOMPARE(controller.document().layers.first().strokes.size(), 2);
     }
 
+    void composesPlacedImageTransformsInDocumentCoordinates()
+    {
+        DocumentController controller;
+        controller.newDocument(QSize(100, 80));
+        QImage image(QSize(20, 12), QImage::Format_RGBA8888);
+        image.fill(Qt::transparent);
+        for (int y = 1; y < 5; ++y)
+        {
+            for (int x = 2; x < 9; ++x)
+            {
+                image.setPixelColor(x, y, QColor(225, 45, 35, 255));
+            }
+        }
+        for (int y = 6; y < 11; ++y)
+        {
+            for (int x = 12; x < 19; ++x)
+            {
+                image.setPixelColor(x, y, QColor(30, 105, 230, 255));
+            }
+        }
+        QCOMPARE(controller.insertImage(image, QStringLiteral("placed.png")),
+            DocumentController::InsertImageResult::Inserted);
+        const QUuid layerId = controller.document().activeLayerId;
+        const QUuid strokeId =
+            controller.document().layer(layerId)->strokes.first().id;
+        const QTransform placement(0.5, 0.0, 0.0, 0.75, 45.0, 35.5);
+        QVERIFY(controller.setImageTransform(
+            layerId, strokeId, placement, SamplingMode::Nearest));
+        const QByteArray placedState =
+            DocumentSerializer::toJson(controller.document());
+        const QImage placedFrame =
+            RenderEngine::render(controller.document(), 0);
+
+        const QPointF duplicateDelta(20.0, 8.0);
+        QVERIFY(
+            controller.duplicateStrokes(layerId, {strokeId}, duplicateDelta));
+        const Stroke &duplicate =
+            controller.document().layer(layerId)->strokes.last();
+        QVERIFY(duplicate.imageOp.has_value());
+        QTransform duplicateTranslation;
+        duplicateTranslation.translate(duplicateDelta.x(), duplicateDelta.y());
+        const QTransform expectedDuplicate = placement * duplicateTranslation;
+        QCOMPARE(duplicate.imageOp->transform, expectedDuplicate);
+        const QPointF assetPoint(16.0, 8.0);
+        const QPointF expectedDuplicatePoint(
+            assetPoint.x() * 0.5 + 65.0, assetPoint.y() * 0.75 + 43.5);
+        const QPointF actualDuplicatePoint =
+            duplicate.imageOp->transform.map(assetPoint);
+        QVERIFY(qAbs(actualDuplicatePoint.x() - expectedDuplicatePoint.x())
+                < 0.0001);
+        QVERIFY(qAbs(actualDuplicatePoint.y() - expectedDuplicatePoint.y())
+                < 0.0001);
+        Document expectedDuplicateDocument = controller.document();
+        expectedDuplicateDocument.layer(layerId)
+            ->strokes.last()
+            .imageOp->transform = expectedDuplicate;
+        const QImage duplicatedFrame =
+            RenderEngine::render(expectedDuplicateDocument, 0);
+        QCOMPARE(
+            RenderEngine::render(controller.document(), 0), duplicatedFrame);
+
+        controller.undoStack()->undo();
+        QCOMPARE(
+            DocumentSerializer::toJson(controller.document()), placedState);
+        QCOMPARE(RenderEngine::render(controller.document(), 0), placedFrame);
+        controller.undoStack()->redo();
+        QCOMPARE(controller.document()
+                     .layer(layerId)
+                     ->strokes.last()
+                     .imageOp->transform,
+            expectedDuplicate);
+        QCOMPARE(
+            RenderEngine::render(controller.document(), 0), duplicatedFrame);
+        controller.undoStack()->undo();
+
+        const QPointF moveDelta(20.0, 8.0);
+        QVERIFY(controller.moveStrokes(layerId, {strokeId}, moveDelta));
+        const QPointF center(70.0, 48.0);
+        QVERIFY(controller.rotateStrokes(layerId, {strokeId}, center, 90.0));
+        QVERIFY(controller.flipStrokes(layerId, {strokeId}, center, true));
+
+        QTransform move;
+        move.translate(moveDelta.x(), moveDelta.y());
+        QTransform rotation;
+        rotation.translate(center.x(), center.y());
+        rotation.rotate(90.0);
+        rotation.translate(-center.x(), -center.y());
+        QTransform flip;
+        flip.translate(center.x(), center.y());
+        flip.scale(-1.0, 1.0);
+        flip.translate(-center.x(), -center.y());
+        const QTransform expectedTransform = placement * move * rotation * flip;
+        const Stroke &transformed =
+            controller.document().layer(layerId)->strokes.first();
+        QVERIFY(transformed.imageOp.has_value());
+        QCOMPARE(transformed.imageOp->transform, expectedTransform);
+
+        QPointF expectedPoint(
+            assetPoint.x() * 0.5 + 45.0, assetPoint.y() * 0.75 + 35.5);
+        expectedPoint += moveDelta;
+        expectedPoint = QPointF(center.x() - (expectedPoint.y() - center.y()),
+            center.y() + (expectedPoint.x() - center.x()));
+        expectedPoint.setX(2.0 * center.x() - expectedPoint.x());
+        const QPointF actualPoint =
+            transformed.imageOp->transform.map(assetPoint);
+        QVERIFY(qAbs(actualPoint.x() - expectedPoint.x()) < 0.0001);
+        QVERIFY(qAbs(actualPoint.y() - expectedPoint.y()) < 0.0001);
+
+        Document expectedDocument = controller.document();
+        expectedDocument.layer(layerId)->strokes.first().imageOp->transform =
+            expectedTransform;
+        const QImage transformedFrame =
+            RenderEngine::render(expectedDocument, 0);
+        QCOMPARE(
+            RenderEngine::render(controller.document(), 0), transformedFrame);
+
+        for (int operation = 0; operation < 3; ++operation)
+        {
+            controller.undoStack()->undo();
+        }
+        QCOMPARE(
+            DocumentSerializer::toJson(controller.document()), placedState);
+        QCOMPARE(RenderEngine::render(controller.document(), 0), placedFrame);
+        for (int operation = 0; operation < 3; ++operation)
+        {
+            controller.undoStack()->redo();
+        }
+        QCOMPARE(controller.document()
+                     .layer(layerId)
+                     ->strokes.first()
+                     .imageOp->transform,
+            expectedTransform);
+        QCOMPARE(
+            RenderEngine::render(controller.document(), 0), transformedFrame);
+    }
+
     void rotatesOnlyTheSelectedPartOfAnIntersectingStroke()
     {
         Document document = Document::createDefault(QSize(100, 100));

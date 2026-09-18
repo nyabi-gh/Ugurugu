@@ -505,7 +505,7 @@ bool CanvasWidget::scaleSelection(qreal factor)
     delta.scale(factor, factor);
     delta.translate(-center.x(), -center.y());
     if (!setPendingSelectionTransform(
-            delta * m_selectionTransformSession.transform))
+            m_selectionTransformSession.transform * delta))
     {
         if (!alreadyActive)
         {
@@ -536,7 +536,7 @@ bool CanvasWidget::rotateSelection(qreal degrees)
     delta.rotate(degrees);
     delta.translate(-center.x(), -center.y());
     if (!setPendingSelectionTransform(
-            delta * m_selectionTransformSession.transform))
+            m_selectionTransformSession.transform * delta))
     {
         if (!alreadyActive)
         {
