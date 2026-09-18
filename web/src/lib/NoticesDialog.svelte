@@ -92,6 +92,14 @@ Copyright (C) 2026 Nyabi (nyabi-gh)
             file: "Emscripten-LICENSE.txt",
             fileLabel: "MIT and NCSA text",
         },
+        {
+            title: "zlib 1.3.2",
+            body:
+                "Copyright © 1995–2026 Jean-loup Gailly and Mark Adler. " +
+                "Licensed under the zlib License.",
+            file: "zlib-LICENSE.txt",
+            fileLabel: "zlib License text",
+        },
     ];
 
     function onKeyDown(event: KeyboardEvent) {

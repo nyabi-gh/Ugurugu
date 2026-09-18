@@ -53,6 +53,8 @@ int main(int argc, char **argv)
         QDir(resourceRoot).filePath(QStringLiteral("Pretendard-OFL.txt"));
     const QString loggingLicenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("spdlog-LICENSE.txt"));
+    const QString compressionLicenseFile =
+        QDir(resourceRoot).filePath(QStringLiteral("zlib-LICENSE.txt"));
     const QString updaterLicenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("Sparkle-LICENSE.txt"));
 
@@ -71,6 +73,7 @@ int main(int argc, char **argv)
         || !QFileInfo(noticesFile).isFile()
         || !QFileInfo(fontLicenseFile).isFile()
         || !QFileInfo(loggingLicenseFile).isFile()
+        || !QFileInfo(compressionLicenseFile).isFile()
         || !QFileInfo(updaterLicenseFile).isFile())
     {
         return fail(QStringLiteral(

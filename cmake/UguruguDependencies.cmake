@@ -91,9 +91,9 @@ if(APPLE)
     FetchContent_Declare(
         sparkle
         URL
-        "https://github.com/sparkle-project/Sparkle/releases/download/2.9.4/Sparkle-2.9.4.tar.xz"
+        "https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-2.9.6.tar.xz"
         URL_HASH
-        "SHA256=ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
+        "SHA256=52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(sparkle)

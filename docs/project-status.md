@@ -1,10 +1,10 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `928376ef3afcba6638eb4de467af4216ad46135c`
+정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `c3be95b798c608c160f0eaa3e24833cf08f50de2` 이후 현재 작업 트리
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
-이번 작업은 문서 정리와 소스 대조다. 제품 코드·의존성은 수정하지 않았고, 아래 개선안을 구현하거나 새 빌드·실기기 검증을 완료한 것이 아니다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
+문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정은 현재 작업 트리에 반영했지만, 네이티브·WASM·macOS 패키지 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
 
 ## 1. 핵심 판단
 
@@ -37,7 +37,7 @@
 | 데스크톱 | Qt Widgets·Concurrent, `CanvasWidget` 입력/프리뷰, `MainWindow` 저장·복구·액션, QRhi 표시 경로. [UguruguTargets.cmake](../cmake/UguruguTargets.cmake) |
 | 웹 | Svelte 5 / TypeScript → EngineClient → Worker → C ABI → 같은 엔진. WebGL 표시와 Canvas2D fallback. [App.svelte](../web/src/App.svelte), [BridgeDocument.hpp](../src/wasm/BridgeDocument.hpp) |
 | 저장 계약 | 현행 `.ugu` schema 13 / algorithm 3. [SerializerSchema.hpp](../src/io/serializer/SerializerSchema.hpp). Android V1도 이 계약을 유지하는 계획 |
-| 도구·의존성 | CMake 최소 3.31, 데스크톱 Qt 최소 6.10 / WASM 최소 6.11, 배포 Qt 6.11.1 고정. Sparkle 2.9.4는 아래 보안 후속 대상 |
+| 도구·의존성 | CMake 최소 3.31, 데스크톱 Qt 최소 6.10 / WASM 최소 6.11, 배포 Qt 6.11.1 고정. Sparkle 2.9.6과 zlib 1.3.2를 hash 고정 |
 | 배포 | macOS 서명·공증·Sparkle, Windows Velopack 설치·업데이트, 웹 itch.io 패키지. 빌드 성공과 실제 설치·업데이트 성공은 별도 |
 
 ### 증거 범위
@@ -47,7 +47,7 @@
 | 2026-09-08 종합 검토 | macOS Release / Qt 6.11.2, CTest 13/13, 소스 함수·offscreen 집중 재현, 두 크기 UI 캡처 | 배포 Qt 6.11.1 전체 행렬, 실제 펜·GPU·Windows |
 | 2026-09-08 웹 기능 추가 | 브라우저 21시나리오·194체크, WASM 스모크, 관련 네이티브 2스위트, Svelte 검사. 당시 완전 패키지 17파일·11.40MiB | 모든 브라우저·모바일·iframe 권한·배포 의무 검토 |
 | 2026-09-16 Android 계획 작성 | `73004d7`, macOS Qt 6.11.2 재빌드·13/13, Svelte 오류·경고 0 기록 | Android 빌드·APK·S Pen·S8 실측 |
-| 2026-09-18 현재 정리 | 로컬 소스·문서·이력 대조. CMake preset 열람 가능 | Qt 실행 도구와 빌드 산출물 확인 불가로 네이티브 빌드·CTest·새 성능 측정 미실행 |
+| 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
 
 9월 8일 초기 검토의 12파일·0.79MiB 웹 빌드는 **WASM 없는 셸**이었다. 이후 실엔진 패키지 기록과 혼동하지 않는다. 13은 CTest 스위트 수이지 개별 테스트 수가 아니다.
 
@@ -55,25 +55,26 @@
 
 ## 3. 데이터·보안·저장 경계 — 먼저 처리
 
-### D04 / R01 · P1 · 실제 압축 해제 출력 상한과 반복 검증 — 미해결
+### D04 / R01 · P1 · 실제 압축 해제 출력 상한과 반복 검증 — 부분 해결
 
 근거: [RasterAssetTable.cpp](../src/io/serializer/RasterAssetTable.cpp)의 래스터 등록, [DocumentJsonCodec.cpp](../src/io/serializer/DocumentJsonCodec.cpp)의 마스크 decode, [DocumentSerializer.cpp](../src/io/DocumentSerializer.cpp)의 `fromJson`·`prepare`, [DocumentValidation.cpp](../src/io/serializer/DocumentValidation.cpp).
 
-헤더의 예상 크기를 확인해도 `qUncompress`의 실제 출력량을 제한하지는 못한다. 과거 probe에서는 8,168바이트 압축 입력이 8,388,608바이트로 해제된 뒤 거절됐고, 작은 예산에서도 사후 거절 전 RSS 증가가 관찰됐다. 이는 제한 우회 근거이지 원격 코드 실행이나 실제 제품 OOM 재현은 아니다. [Qt qUncompress 계약](https://doc.qt.io/qt-6/qbytearray.html#qUncompress).
+기존 `qUncompress` 경로는 헤더의 예상 크기를 확인해도 실제 출력량을 제한하지 못했다. 과거 probe에서는 8,168바이트 압축 입력이 8,388,608바이트로 해제된 뒤 거절됐고, 작은 예산에서도 사후 거절 전 RSS 증가가 관찰됐다. 이는 제한 우회 근거이지 원격 코드 실행이나 실제 제품 OOM 재현은 아니다. [Qt qUncompress 계약](https://doc.qt.io/qt-6/qbytearray.html#qUncompress).
 
-`fromJson` 안에서는 최초 자산 등록과 두 번의 문서 검증으로 decode/hash가 3회 수행될 수 있다. 일반 열기의 controller `prepare`까지 포함하면 4회 경로다. 자산 총 바이트 제한은 있지만 별도 개수 상한은 없다. “자산이 완전히 무제한”이라는 표현은 사용하지 않는다.
+현재 작업 트리는 [BoundedCompression.cpp](../src/io/serializer/BoundedCompression.cpp)에서 zlib 1.3.2의 `inflate` 출력 버퍼를 예상 크기로 먼저 고정한다. qCompress 헤더, 정확한 출력 길이, 전체 입력 소비, 정상 스트림 종료를 모두 확인하며 래스터와 세 마스크 decode 경로의 직접 `qUncompress` 사용을 제거했다. zlib는 데스크톱과 WASM 공통 CMake 경로에 정적 연결하고 패키지 고지를 추가했다.
 
-- 조치: 공용 bounded decoder로 실제 출력량·정확한 길이·정상 스트림 종료를 검사한다. 지원되는 zlib 의존성 방식을 먼저 선택하며 Qt private target을 자동 채택하지 않는다.
-- 조치: 자산 개수·누적 decode 비용을 제한하고 검증 결과를 재사용한다. 정규화 전/후 검증의 서로 다른 불변조건은 유지한다.
+래스터 테이블은 `maximumRasterAssets` 개수 상한을 decode 전에 검사한다. `fromJson` 최초 등록의 검증 결과를 정규화 전·후 문서 검증에서 다시 대조하므로 그 구간의 decode/hash는 3회에서 1회로 줄었다. 일반 열기의 controller `prepare` 검증은 신뢰 경계를 유지해 한 번 더 수행하므로 전체는 4회에서 2회가 됐다.
+
+- 구현됨: oversized·truncated·trailing stream과 래스터·현행/구형 clip mask·binary mask, 자산 개수 상한 회귀를 추가했다.
 - 추가 조사: Wawa PNG는 전체 decode 전에 크기·비용을 검사할 수 있는지 확인한다. `QImageReader` 64MiB 한도는 고비트 심도 입력과 배포/테스트 환경 차이를 별도 검증한다.
-- 완료: 래스터와 각 마스크 경로의 헤더/출력 불일치·초과·잘림·잘못된 종료 테스트, 정상 파일 round-trip, 퍼저 corpus, peak memory·decode 횟수 비교. 네이티브와 WASM 양쪽 통과.
+- 남음: Qt가 있는 환경에서 native suite와 WASM build/parity를 통과시키고, 퍼저 corpus·peak memory·decode 횟수 비교를 기록한다. 이 검증 전에는 해결로 닫지 않는다.
 
-### D16 · P1 · Sparkle 보안 후속 — 미해결
+### D16 · P1 · Sparkle 보안 후속 — 검증 대기
 
-현재 고정 버전 2.9.4는 공식 권고 GHSA-3x7w-j75x-ppq5의 영향 범위 `<=2.9.5`에 포함된다. 수정 버전은 2.9.6이다. 시스템 권한 installer에서 경로 검증과 이동 사이의 symlink 교체와 관련된 **로컬·높은 공격 복잡도** 문제이며, Ugurugu의 모든 설치가 공격 가능하다고 단정하지 않는다. [공식 보안 권고](https://github.com/sparkle-project/Sparkle/security/advisories/GHSA-3x7w-j75x-ppq5).
+기존 2.9.4는 공식 권고 GHSA-3x7w-j75x-ppq5의 영향 범위 `<=2.9.5`에 포함된다. 시스템 권한 installer에서 경로 검증과 이동 사이의 symlink 교체와 관련된 **로컬·높은 공격 복잡도** 문제이며, Ugurugu의 모든 설치가 공격 가능하다고 단정하지 않는다. [공식 보안 권고](https://github.com/sparkle-project/Sparkle/security/advisories/GHSA-3x7w-j75x-ppq5).
 
-- 조치: 다음 배포 전 호환 가능한 수정 버전·hash·지원 macOS 하한·서명 구성을 함께 검토한다. “최신 버전”이라는 이유만으로 major/minor 업그레이드를 결정하지 않는다.
-- 완료: 실제 패키지의 버전과 서명, 신규 설치, 기존 버전에서 업데이트, 관리자 권한 경로를 검증한다. delta 비활성화만으로 이 installer 문제를 닫지 않는다.
+- 구현됨: 같은 2.9 계열의 수정 버전 2.9.6으로 올리고, 공식 배포본에서 직접 계산한 SHA-256 `52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192`를 CMake에 고정했다. [공식 2.9.6 릴리스](https://github.com/sparkle-project/Sparkle/releases/tag/2.9.6).
+- 남음: macOS에서 실제 패키지의 framework 버전과 서명, 신규 설치, 2.9.4 포함 기존 앱에서 업데이트, 관리자 권한 경로를 검증한다. delta 비활성화만으로 이 installer 문제를 닫지 않는다.
 
 ### D05 · P1 · 최종 저장 이름의 덮어쓰기 확인 — 미해결
 
@@ -240,6 +241,8 @@ AA/가변 필압 긴 획의 반복 래스터, 빈 레이어 표면 할당, 선�
 배포 유지 사항: 의존성 URL/hash·Actions SHA 고정, main CI 통과 확인, macOS 서명·공증·Gatekeeper·rpath 감사, 테스트별 설정/복구 경로 격리, 번역·SPDX 게이트. 검증을 편하게 하려고 완화하지 않는다.
 
 배포 후속은 아직 남아 있다. 2.2.10의 당시 CI·release 성공 기록은 실제 **2.2.9→2.2.10 updater UI·설치 완료·재실행** 검증을 대신하지 않는다. 앱 내부 세 언어 release notes dialog, Windows 실기기 설치/업데이트도 별도 확인한다.
+
+2026-09-18 `npm audit`은 현재 lockfile의 전이 의존성 `devalue 5.9.0`과 `nanoid 3.3.17`에 각각 [입력 기반 DoS](https://github.com/advisories/GHSA-9rgm-9g3h-6x36), [0 크기 custom generator 무한 반복](https://github.com/advisories/GHSA-2v37-7h3g-55p8) 권고를 보고했고 자동 수정 가능 버전은 제시하지 않았다. 둘을 실제 제품 취약점으로 단정하거나 검증 없이 override하지 않는다. 업스트림 호환 버전과 브라우저 런타임 도달 가능성을 확인하는 별도 의존성 후속으로 남긴다.
 
 Qt 번들 내 외부 구성요소 고지·소스/재링크 제공 범위, 웹 정적 링크 의무, Android APK 교체/재패키징 경로는 실제 artifact 기준으로 감사한다. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)의 존재만으로 충족 또는 위반을 판정하지 않는다. SBOM·CMake 의존성 갱신 점검은 후속 개선안이다.
 

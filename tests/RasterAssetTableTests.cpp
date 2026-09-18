@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
+#include "io/serializer/BoundedCompression.hpp"
 #include "io/serializer/RasterAssetTable.hpp"
 #include "support/DocumentTestSuites.hpp"
 
 #include <QColorSpace>
+#include <QtEndian>
 #include <QtTest>
 
 #include <limits>
@@ -19,6 +21,29 @@ class RasterAssetTableTests final : public QObject
     Q_OBJECT
 
 private slots:
+    void boundsDecodedOutputAndRequiresTheWholeStream()
+    {
+        const QByteArray original("bounded payload");
+        const QByteArray compressed = qCompress(original, 6);
+        const std::optional<QByteArray> restored =
+            uncompressQtPayload(compressed, original.size());
+        QVERIFY(restored.has_value());
+        QCOMPARE(*restored, original);
+        QVERIFY(!uncompressQtPayload(compressed, original.size() + 1).has_value());
+
+        QByteArray oversized = qCompress(QByteArray(4096, 'x'), 6);
+        qToBigEndian<quint32>(16, reinterpret_cast<uchar *>(oversized.data()));
+        QVERIFY(!uncompressQtPayload(oversized, 16).has_value());
+
+        QByteArray trailing = compressed;
+        trailing.append("trailing");
+        QVERIFY(!uncompressQtPayload(trailing, original.size()).has_value());
+
+        QByteArray truncated = compressed;
+        truncated.chop(1);
+        QVERIFY(!uncompressQtPayload(truncated, original.size()).has_value());
+    }
+
     void canonicalizesDeduplicatesAndDecodes()
     {
         QImage source(QSize(8, 6), QImage::Format_ARGB32);

@@ -27,8 +27,8 @@ for the bundled libraries and the full relinking obligations are available
 from <https://www.qt.io/licensing/open-source-lgpl-obligations> and
 <https://code.qt.io/>.
 
-The browser build links Qt statically instead; see the web section below for
-how the same obligation is met there.
+The browser build links Qt and zlib statically instead; see the web section
+below for how the same obligation is met there.
 
 ## spdlog 1.16.0
 
@@ -44,6 +44,12 @@ Copyright © 2010 Google Inc. and other contributors.
 Licensed under the BSD 3-Clause License with the additional patent grant
 reproduced in `libwebp-PATENTS.txt`. See `libwebp-LICENSE.txt`.
 
+## zlib 1.3.2
+
+Copyright © 1995–2026 Jean-loup Gailly and Mark Adler.
+
+Licensed under the zlib License. See `zlib-LICENSE.txt`.
+
 ## Pretendard JP
 
 Copyright © 2021 Kil Hyung-jin.
@@ -51,7 +57,7 @@ Copyright © 2021 Kil Hyung-jin.
 Licensed under the SIL Open Font License 1.1. See
 `Pretendard-OFL.txt`.
 
-## Sparkle 2.9.4 (macOS packages)
+## Sparkle 2.9.6 (macOS packages)
 
 Copyright © 2006–2017 the Sparkle contributors.
 
@@ -67,10 +73,10 @@ Licensed under the MIT License. See `Velopack-LICENSE.txt`.
 ## Web (WebAssembly) build
 
 The browser build is a different package from the desktop ones. Its engine is
-a single `.wasm` binary with Qt 6 Core and Gui linked **statically**; spdlog,
-libwebp, Sparkle and Velopack are not part of it. The shell around it adds the
-components below. License texts travel with the upload under `licenses/`, and
-the in-app Notices panel points at them.
+a single `.wasm` binary with Qt 6 Core, Gui and zlib linked **statically**;
+spdlog, libwebp, Sparkle and Velopack are not part of it. The shell around it
+adds the components below. License texts travel with the upload under
+`licenses/`, and the in-app Notices panel points at them.
 
 Because Qt is static here, the relinking route the desktop packages satisfy by
 shipping replaceable dynamic libraries is met instead by publishing the

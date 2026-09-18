@@ -53,6 +53,10 @@ bool normalizeAndValidate(Document &document)
     }
 
     Document candidate = document;
+    if (candidate.rasterAssets.size() > DocumentLimits::maximumRasterAssets)
+    {
+        return false;
+    }
     quint64 rasterDecodedBytes = 0;
     qint64 rasterPayloadBytes = 0;
     for (auto asset = candidate.rasterAssets.cbegin();

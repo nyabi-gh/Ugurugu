@@ -23,6 +23,20 @@ for (const [source, name] of [
     await copyFile(here(source), here(`public/licenses/${name}`));
 }
 
+try {
+    await copyFile(
+        here("../out/build/wasm-release/_deps/zlib-src/LICENSE"),
+        here("public/licenses/zlib-LICENSE.txt"),
+    );
+} catch (error) {
+    if (error.code !== "ENOENT") {
+        throw error;
+    }
+    console.warn(
+        "zlib source not built; its licence is absent from this shell-only build",
+    );
+}
+
 // The wasm engine comes from the wasm-release CMake preset. It is absent in CI,
 // which builds the shell only to type-check and bundle it.
 try {

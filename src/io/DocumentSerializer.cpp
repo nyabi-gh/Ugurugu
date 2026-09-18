@@ -826,11 +826,18 @@ std::optional<Document> DocumentSerializer::fromJson(
         referencedBinaryMasks = *parsedMasks;
     }
     QMap<QString, RasterAsset> rasterAssets;
+    RasterAssetTable validatedRasterAssets;
     if (*fileSchemaVersion >= 11)
     {
-        RasterAssetTable table;
         const QJsonArray entries =
             root.value(QStringLiteral("rasterAssets")).toArray();
+        if (entries.size() > DocumentLimits::maximumRasterAssets)
+        {
+            setError(error,
+                DocumentSerializer::tr(
+                    "The project contains too many raster assets."));
+            return std::nullopt;
+        }
         for (const auto &entryValue : entries)
         {
             if (!entryValue.isObject())
@@ -856,7 +863,7 @@ std::optional<Document> DocumentSerializer::fromJson(
             const QByteArray compressed = QByteArray::fromBase64(
                 entry.value(QStringLiteral("data")).toString().toLatin1());
             const RasterAssetRegistrationResult result =
-                table.registerPayload(id, *size, compressed);
+                validatedRasterAssets.registerPayload(id, *size, compressed);
             if (result.status != RasterAssetRegistrationStatus::Registered)
             {
                 setError(error,
@@ -983,7 +990,11 @@ std::optional<Document> DocumentSerializer::fromJson(
             error, DocumentSerializer::tr("The active layer ID is invalid."));
         return std::nullopt;
     }
-    if (!validateDocument(document, *fileSchemaVersion, error))
+    if (!validateDocument(document,
+            *fileSchemaVersion,
+            error,
+            nullptr,
+            &validatedRasterAssets))
     {
         return std::nullopt;
     }
@@ -994,7 +1005,8 @@ std::optional<Document> DocumentSerializer::fromJson(
                                    "operations or too much mask data."));
         return std::nullopt;
     }
-    if (!validateDocument(document, schemaVersion, error))
+    if (!validateDocument(
+            document, schemaVersion, error, nullptr, &validatedRasterAssets))
     {
         return std::nullopt;
     }

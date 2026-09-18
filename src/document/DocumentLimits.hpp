@@ -47,6 +47,7 @@ struct DocumentLimits final
     static constexpr quint64 maximumDistinctClipMaskBytes =
         256ULL * 1024ULL * 1024ULL;
     static constexpr quint64 maximumRasterAssetPixels = 4096ULL * 4096ULL;
+    static constexpr int maximumRasterAssets = maximumTotalStrokes;
     static constexpr quint64 maximumDistinctRasterDecodedBytes =
         256ULL * 1024ULL * 1024ULL;
     static constexpr qint64 maximumDistinctRasterPayloadBytes =

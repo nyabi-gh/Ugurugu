@@ -84,7 +84,8 @@ bool validateCollectionBudgets(const QJsonArray &layers, QString *error)
 bool validateDocument(const Document &document,
     int fileSchemaVersion,
     QString *error,
-    DocumentValidationStats *stats)
+    DocumentValidationStats *stats,
+    const RasterAssetTable *validatedRasterAssets)
 {
     if (document.size.width() < DocumentLimits::minimumCanvasEdge
         || document.size.height() < DocumentLimits::minimumCanvasEdge
@@ -119,6 +120,13 @@ bool validateDocument(const Document &document,
         setError(error, DocumentSerializer::tr("The layer count is invalid."));
         return false;
     }
+    if (document.rasterAssets.size() > DocumentLimits::maximumRasterAssets)
+    {
+        setError(error,
+            DocumentSerializer::tr(
+                "The project contains too many raster assets."));
+        return false;
+    }
     if (fileSchemaVersion < 11 && !document.rasterAssets.isEmpty())
     {
         setError(error,
@@ -126,16 +134,39 @@ bool validateDocument(const Document &document,
                 "Raster assets require a newer project version."));
         return false;
     }
+    if (validatedRasterAssets
+        && validatedRasterAssets->entries().size()
+               != document.rasterAssets.size())
+    {
+        setError(error,
+            DocumentSerializer::tr(
+                "The project contains an invalid raster asset."));
+        return false;
+    }
     RasterAssetTable rasterAssets;
     for (auto asset = document.rasterAssets.cbegin();
         asset != document.rasterAssets.cend();
         ++asset)
     {
-        const RasterAssetRegistrationResult result =
-            rasterAssets.registerPayload(
-                asset->id, asset->size, asset->compressedRgba);
-        if (asset.key() != asset->id
-            || result.status != RasterAssetRegistrationStatus::Registered)
+        bool valid = asset.key() == asset->id;
+        if (validatedRasterAssets)
+        {
+            const auto entry =
+                validatedRasterAssets->entries().constFind(asset.key());
+            valid = valid && entry != validatedRasterAssets->entries().cend()
+                    && entry->id == asset->id && entry->size == asset->size
+                    && entry->compressedRgba == asset->compressedRgba;
+        }
+        else
+        {
+            const RasterAssetRegistrationResult result =
+                rasterAssets.registerPayload(
+                    asset->id, asset->size, asset->compressedRgba);
+            valid =
+                valid
+                && result.status == RasterAssetRegistrationStatus::Registered;
+        }
+        if (!valid)
         {
             setError(error,
                 DocumentSerializer::tr(

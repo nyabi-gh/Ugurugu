@@ -9,6 +9,8 @@ target_link_libraries(
     PUBLIC
     Qt6::Core
     Qt6::Gui
+    PRIVATE
+    ZLIB::ZLIBSTATIC
 )
 ugurugu_target_defaults(ugurugu_engine)
 # LTO covers only our own objects; the prebuilt Qt static archives stay

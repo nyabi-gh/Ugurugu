@@ -5,6 +5,8 @@
 #include "support/DocumentTestHelpers.hpp"
 #include "support/DocumentTestSuites.hpp"
 
+#include <QtEndian>
+
 namespace ugurugu
 {
 
@@ -13,6 +15,124 @@ class DocumentSchemaTests final : public QObject
     Q_OBJECT
 
 private slots:
+    void rejectsCompressedStreamsLargerThanTheirDeclaredOutput()
+    {
+        const auto bomb = [](quint32 declaredBytes)
+        {
+            QByteArray compressed = qCompress(QByteArray(65536, 'x'), 6);
+            qToBigEndian<quint32>(
+                declaredBytes, reinterpret_cast<uchar *>(compressed.data()));
+            return QString::fromLatin1(compressed.toBase64());
+        };
+        const auto reject = [](const QJsonObject &root)
+        {
+            QString error;
+            const std::optional<Document> loaded = DocumentSerializer::fromJson(
+                QJsonDocument(root).toJson(QJsonDocument::Compact), &error);
+            return !loaded && !error.isEmpty();
+        };
+
+        Document clipped = Document::createDefault(QSize(9, 7));
+        Stroke clippedStroke;
+        clippedStroke.points = {
+            {QPointF(1.0, 1.0), 1.0}, {QPointF(7.0, 5.0), 1.0}};
+        clippedStroke.clipMask =
+            QImage(clipped.size, QImage::Format_Grayscale8);
+        clippedStroke.clipMask.fill(255);
+        clipped.layers.first().strokes = {clippedStroke};
+        QJsonObject clippedRoot =
+            QJsonDocument::fromJson(DocumentSerializer::toJson(clipped))
+                .object();
+        QJsonArray clipMasks =
+            clippedRoot.value(QStringLiteral("clipMasks")).toArray();
+        QJsonObject clipMask = clipMasks.first().toObject();
+        clipMask.insert(QStringLiteral("data"), bomb(9U * 7U));
+        clipMasks[0] = clipMask;
+        clippedRoot.insert(QStringLiteral("clipMasks"), clipMasks);
+        QVERIFY(reject(clippedRoot));
+
+        QJsonObject legacyRoot =
+            QJsonDocument::fromJson(DocumentSerializer::toJson(clipped))
+                .object();
+        legacyRoot.insert(QStringLiteral("schemaVersion"), 3);
+        legacyRoot.remove(QStringLiteral("clipMasks"));
+        legacyRoot.remove(QStringLiteral("binaryMasks"));
+        legacyRoot.remove(QStringLiteral("rasterAssets"));
+        QJsonArray layers =
+            legacyRoot.value(QStringLiteral("layers")).toArray();
+        QJsonObject layer = layers.first().toObject();
+        QJsonArray strokes = layer.value(QStringLiteral("strokes")).toArray();
+        QJsonObject stroke = strokes.first().toObject();
+        stroke.remove(QStringLiteral("clipMaskId"));
+        stroke.insert(QStringLiteral("clipMask"),
+            QJsonObject{{QStringLiteral("width"), 9},
+                {QStringLiteral("height"), 7},
+                {QStringLiteral("data"), bomb(12U * 7U)}});
+        strokes[0] = stroke;
+        layer.insert(QStringLiteral("strokes"), strokes);
+        layers[0] = layer;
+        legacyRoot.insert(QStringLiteral("layers"), layers);
+        QVERIFY(reject(legacyRoot));
+
+        Document binary = Document::createDefault(QSize(16, 8));
+        QImage selection(binary.size, QImage::Format_Grayscale8);
+        selection.fill(255);
+        const std::optional<PackedMaskRegion> packed =
+            packBinaryMask(selection);
+        QVERIFY(packed.has_value());
+        Stroke fill;
+        fill.mode = StrokeMode::Fill;
+        fill.points = {{QPointF(4.0, 4.0), 1.0}};
+        fill.fillCoverage = packed;
+        binary.layers.first().strokes = {fill};
+        QJsonObject binaryRoot =
+            QJsonDocument::fromJson(DocumentSerializer::toJson(binary))
+                .object();
+        QJsonArray binaryMasks =
+            binaryRoot.value(QStringLiteral("binaryMasks")).toArray();
+        QJsonObject binaryMask = binaryMasks.first().toObject();
+        binaryMask.insert(QStringLiteral("data"),
+            bomb(static_cast<quint32>(packed->packedMask.size())));
+        binaryMasks[0] = binaryMask;
+        binaryRoot.insert(QStringLiteral("binaryMasks"), binaryMasks);
+        QVERIFY(reject(binaryRoot));
+
+        Document raster = Document::createDefault(QSize(8, 8));
+        QImage pixels(QSize(2, 2), QImage::Format_RGBA8888);
+        pixels.fill(Qt::red);
+        const std::optional<RasterAsset> asset = rasterAssetFromImage(pixels);
+        QVERIFY(asset.has_value());
+        raster.rasterAssets.insert(asset->id, *asset);
+        QJsonObject rasterRoot =
+            QJsonDocument::fromJson(DocumentSerializer::toJson(raster))
+                .object();
+        QJsonArray rasterAssets =
+            rasterRoot.value(QStringLiteral("rasterAssets")).toArray();
+        QJsonObject rasterAsset = rasterAssets.first().toObject();
+        rasterAsset.insert(QStringLiteral("data"), bomb(2U * 2U * 4U));
+        rasterAssets[0] = rasterAsset;
+        rasterRoot.insert(QStringLiteral("rasterAssets"), rasterAssets);
+        QVERIFY(reject(rasterRoot));
+    }
+
+    void rejectsTooManyRasterAssetsBeforeDecodingThem()
+    {
+        Document source = Document::createDefault(QSize(8, 8));
+        QJsonObject root =
+            QJsonDocument::fromJson(DocumentSerializer::toJson(source))
+                .object();
+        QJsonArray assets;
+        for (int i = 0; i <= DocumentLimits::maximumRasterAssets; ++i)
+        {
+            assets.append(QJsonObject());
+        }
+        root.insert(QStringLiteral("rasterAssets"), assets);
+        QString error;
+        QVERIFY(!DocumentSerializer::fromJson(
+            QJsonDocument(root).toJson(QJsonDocument::Compact), &error));
+        QVERIFY(error.contains(QStringLiteral("too many raster assets")));
+    }
+
     void roundTripsJson()
     {
         Document source = Document::createDefault(QSize(321, 123));

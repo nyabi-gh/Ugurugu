@@ -8,6 +8,7 @@
 #include "document/DocumentLimits.hpp"
 #include "document/SelectionOperation.hpp"
 #include "io/DocumentSerializer.hpp"
+#include "io/serializer/BoundedCompression.hpp"
 
 #include <QCryptographicHash>
 
@@ -563,15 +564,17 @@ std::optional<QImage> legacyClipMaskFromJson(const QJsonValue &value,
             error, DocumentSerializer::tr("A stroke clip mask is too large."));
         return std::nullopt;
     }
-    const QByteArray bytes = qUncompress(compressed);
-    if (bytes.size() != mask.sizeInBytes())
+    const std::optional<QByteArray> bytes =
+        uncompressQtPayload(compressed, expectedSize);
+    if (!bytes || bytes->size() != mask.sizeInBytes())
     {
         setError(error,
             DocumentSerializer::tr("A stroke has an invalid clip mask."));
         return std::nullopt;
     }
-    std::memcpy(
-        mask.bits(), bytes.constData(), static_cast<std::size_t>(bytes.size()));
+    std::memcpy(mask.bits(),
+        bytes->constData(),
+        static_cast<std::size_t>(bytes->size()));
     for (int y = 0; y < mask.height(); ++y)
     {
         std::fill(mask.scanLine(y) + mask.width(),
@@ -698,9 +701,10 @@ std::optional<QHash<QString, QImage>> clipMaskTableFromJson(
                     "The project contains an invalid selection mask."));
             return std::nullopt;
         }
-        const QByteArray bytes = qUncompress(compressed);
-        if (static_cast<quint64>(bytes.size()) != canonicalSize
-            || maskContentId(*width, *height, bytes) != id)
+        const std::optional<QByteArray> bytes =
+            uncompressQtPayload(compressed, canonicalSize);
+        if (!bytes || static_cast<quint64>(bytes->size()) != canonicalSize
+            || maskContentId(*width, *height, *bytes) != id)
         {
             setError(error,
                 DocumentSerializer::tr(
@@ -711,7 +715,7 @@ std::optional<QHash<QString, QImage>> clipMaskTableFromJson(
         for (int y = 0; y < *height; ++y)
         {
             std::memcpy(mask.scanLine(y),
-                bytes.constData() + static_cast<qsizetype>(y) * *width,
+                bytes->constData() + static_cast<qsizetype>(y) * *width,
                 static_cast<std::size_t>(*width));
         }
         remainingAssetBytes -= mask.sizeInBytes();
@@ -827,7 +831,16 @@ std::optional<QHash<QString, PackedMaskRegion>> binaryMaskTableFromJson(
                     "The project contains too much binary mask data."));
             return std::nullopt;
         }
-        region.packedMask = qUncompress(compressed);
+        const std::optional<QByteArray> bytes =
+            uncompressQtPayload(compressed, expectedBytes);
+        if (!bytes)
+        {
+            setError(error,
+                DocumentSerializer::tr(
+                    "The project contains an invalid binary mask."));
+            return std::nullopt;
+        }
+        region.packedMask = *bytes;
         if (static_cast<quint64>(region.packedMask.size()) != expectedBytes
             || !isValidPackedMaskRegion(region)
             || binaryMaskContentId(region) != id)

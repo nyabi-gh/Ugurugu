@@ -1494,6 +1494,12 @@
         <translation>プロジェクトに無効なラスターアセットがあります。</translation>
     </message>
     <message>
+        <location filename="../src/io/DocumentSerializer.cpp" line="837"/>
+        <location filename="../src/io/serializer/DocumentValidation.cpp" line="126"/>
+        <source>The project contains too many raster assets.</source>
+        <translation>プロジェクトのラスターアセットが多すぎます。</translation>
+    </message>
+    <message>
         <location filename="../src/io/DocumentSerializer.cpp" line="949"/>
         <source>The project contains duplicate layer IDs.</source>
         <translation>プロジェクトに重複したレイヤーIDが含まれています。</translation>

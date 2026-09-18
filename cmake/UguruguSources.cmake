@@ -56,6 +56,8 @@ set(UGURUGU_ENGINE_SOURCES
     src/io/WawaV10Reader.hpp
     src/io/WawaV10Importer.cpp
     src/io/WawaV10Importer.hpp
+    src/io/serializer/BoundedCompression.cpp
+    src/io/serializer/BoundedCompression.hpp
     src/io/serializer/DocumentJsonCodec.cpp
     src/io/serializer/DocumentJsonCodec.hpp
     src/io/serializer/DocumentValidation.cpp

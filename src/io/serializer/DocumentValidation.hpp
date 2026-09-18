@@ -14,6 +14,8 @@ namespace ugurugu
 namespace serializer_detail
 {
 
+class RasterAssetTable;
+
 // Totals gathered while validating, so a caller that already validated a
 // document does not have to walk it again to learn its budget usage.
 struct DocumentValidationStats
@@ -34,7 +36,8 @@ bool validateCollectionBudgets(const QJsonArray &layers, QString *error);
 bool validateDocument(const Document &document,
     int fileSchemaVersion,
     QString *error,
-    DocumentValidationStats *stats = nullptr);
+    DocumentValidationStats *stats = nullptr,
+    const RasterAssetTable *validatedRasterAssets = nullptr);
 
 // Fills in the per-layer canvas size that documents written before the field
 // existed omit. Run before validation, never after.

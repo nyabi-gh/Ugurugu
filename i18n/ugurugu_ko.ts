@@ -1494,6 +1494,12 @@
         <translation>프로젝트에 올바르지 않은 래스터 자산이 있습니다.</translation>
     </message>
     <message>
+        <location filename="../src/io/DocumentSerializer.cpp" line="837"/>
+        <location filename="../src/io/serializer/DocumentValidation.cpp" line="126"/>
+        <source>The project contains too many raster assets.</source>
+        <translation>프로젝트에 래스터 자산이 너무 많습니다.</translation>
+    </message>
+    <message>
         <location filename="../src/io/DocumentSerializer.cpp" line="949"/>
         <source>The project contains duplicate layer IDs.</source>
         <translation>프로젝트에 중복된 레이어 ID가 있습니다.</translation>

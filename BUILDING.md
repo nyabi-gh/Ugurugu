@@ -7,7 +7,7 @@
 - Qt 6.10 or later, including the Qt Shader Tools module; releases are
   built against Qt 6.11.1
 - An internet connection while configuring so CMake can fetch the
-  pinned spdlog, libwebp, Sparkle, or Velopack dependencies
+  pinned zlib, spdlog, libwebp, Sparkle, or Velopack dependencies
 
 ## macOS
 

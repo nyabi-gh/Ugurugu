@@ -18,6 +18,7 @@ target_link_libraries(
     Qt6::Gui
     spdlog::spdlog
     PRIVATE
+    ZLIB::ZLIBSTATIC
     webp
     libwebpmux
 )
