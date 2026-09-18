@@ -1,10 +1,10 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `2f702725e490a60e77a326790621d8c88b2401ef` 이후 현재 작업 트리
+정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `9172ac668e1949496e1cc1df2759b80bdd327839` 이후 현재 작업 트리
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
-문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인은 현재 작업 트리에 반영했지만, 네이티브·WASM·macOS 패키지 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
+문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인, D06의 격리된 Windows 패키지 smoke는 현재 작업 트리에 반영했지만, 네이티브·WASM·실제 설치 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
 
 ## 1. 핵심 판단
 
@@ -47,7 +47,7 @@
 | 2026-09-08 종합 검토 | macOS Release / Qt 6.11.2, CTest 13/13, 소스 함수·offscreen 집중 재현, 두 크기 UI 캡처 | 배포 Qt 6.11.1 전체 행렬, 실제 펜·GPU·Windows |
 | 2026-09-08 웹 기능 추가 | 브라우저 21시나리오·194체크, WASM 스모크, 관련 네이티브 2스위트, Svelte 검사. 당시 완전 패키지 17파일·11.40MiB | 모든 브라우저·모바일·iframe 권한·배포 의무 검토 |
 | 2026-09-16 Android 계획 작성 | `73004d7`, macOS Qt 6.11.2 재빌드·13/13, Svelte 오류·경고 0 기록 | Android 빌드·APK·S Pen·S8 실측 |
-| 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6·최종 저장 경로 확인 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
+| 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6·최종 저장 경로 확인·Windows 패키지 격리 smoke 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest·실제 Windows 패키지 smoke 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
 
 9월 8일 초기 검토의 12파일·0.79MiB 웹 빌드는 **WASM 없는 셸**이었다. 이후 실엔진 패키지 기록과 혼동하지 않는다. 13은 CTest 스위트 수이지 개별 테스트 수가 아니다.
 
@@ -229,7 +229,7 @@ AA/가변 필압 긴 획의 반복 래스터, 빈 레이어 표면 할당, 선�
 
 | ID·우선순위·상태 | 남은 일 | 완료 기준 |
 |---|---|---|
-| D06 · P1 · 검증 공백 | Windows CI/release 설치 smoke는 SDK의 PATH·QT_PLUGIN_PATH를 격리하지 않음. [ci.yml](../.github/workflows/ci.yml), [release.yml](../.github/workflows/release.yml). Qt SDK 경로 제거·plugin 경로 해제 후 실행 | 누락 plugin/DLL을 의도적으로 뺐을 때 실패하는 설치 검사. Velopack의 외부 vcredist145 prerequisite는 별도 clean-machine 설치로 검증 |
+| D06 · P1 · 부분 해결 | Windows 설치본에 [qt.conf](../resources/windows/qt.conf)를 두어 plugin 기준을 실행 파일 디렉터리로 제한한다. Qt는 원래 실행 파일 옆 경로뿐 아니라 설치 prefix도 탐색하므로 환경변수 정리만으로는 격리가 완전하지 않다. [Qt plugin deployment](https://doc.qt.io/qt-6/deployment-plugins.html), [Using `qt.conf`](https://doc.qt.io/qt-6/qt-conf.html). [TestWindowsPackage.ps1](../tests/TestWindowsPackage.ps1)은 PATH를 Windows 시스템 디렉터리만으로 다시 만들고 Qt/QML plugin 환경변수를 제거한 뒤 실제 `Ugurugu.exe`와 [PackageSmoke.cpp](../tests/PackageSmoke.cpp)를 실행한다. 설정·복구 경로도 임시 profile로 격리하며 CI 설치 트리와 최종 Velopack 설치본이 같은 검사를 사용한다. | 실제 앱 기동과 JPEG read-back이 성공해야 한다. `qwindows.dll` 또는 `Qt6Core.dll`을 뺀 임시 복사본은 반드시 실패한다. 실제 CI/release 성공을 확인하고, Velopack의 외부 `vcredist145-x64` prerequisite는 Qt·개발 도구가 없는 clean Windows 설치에서 별도 검증한다. |
 | D09 · P2 · 미해결 | `.ugu` 파일 연결과 이미 실행 중인 앱에 두 번째 경로 전달 부재. [main.cpp](../src/main.cpp), [Info.plist.in](../resources/macos/Info.plist.in) | 새/기존 인스턴스에서 파일 열기, 공백·한글 경로·dirty 보호. `.wwpreset`은 지원 시 프로젝트와 다른 라우팅 |
 | D10 · P2 · 배포 확인 필요 | 이미지 필터가 광고하는 WebP/TIFF 등과 실제 배포 plugin 구성이 일치하는지 확인. 구성만으로 최종 artifact 지원을 단정하지 않음 | Windows/macOS 설치 산출물에서 PNG/JPEG/WebP/BMP/GIF/TIFF fixture decode. 지원하지 않는 형식은 필터/안내 조정 |
 | D15 · P2 · 미해결/감사 | Wawa·프리셋·복구 오류 literal, Qt 기본 번역 배포, numerus 사용 점검 | ko/en/ja 오류·파일 dialog·복수형 실제 표시. 번역 추출 100%와 사용자 경로 완전 번역을 구분 |

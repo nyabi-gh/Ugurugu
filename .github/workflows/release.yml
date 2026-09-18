@@ -689,13 +689,11 @@ jobs:
             throw "Installed package contains an empty executable or version file"
           }
 
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $process = Start-Process $application -PassThru
-          Start-Sleep -Seconds 5
-          if ($process.HasExited) {
-            throw "Installed application exited with code $($process.ExitCode)"
-          }
-          Stop-Process -Id $process.Id -Force
+          $smoke = Resolve-Path `
+            "out/build/windows-distribution/Release/ugurugu_package_smoke.exe"
+          & ./tests/TestWindowsPackage.ps1 `
+            -PackageRoot $current `
+            -SmokeExecutable $smoke.Path
 
       - name: Create Windows release metadata
         shell: pwsh

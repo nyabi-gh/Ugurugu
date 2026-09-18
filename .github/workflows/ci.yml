@@ -489,22 +489,12 @@ jobs:
           cmake --build --preset ${{ matrix.preset }}
           --target ugurugu_package_smoke_test
 
-      - name: Test installed Windows application
+      - name: Test installed Windows package
         if: matrix.smoke == 'windows'
         shell: pwsh
-        run: |
-          $installRoot = Join-Path $env:RUNNER_TEMP "Ugurugu"
-          cmake --install "out/build/${{ matrix.preset }}" `
-            --config Release `
-            --prefix $installRoot
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $application = Join-Path $installRoot "Ugurugu.exe"
-          $process = Start-Process $application -PassThru
-          Start-Sleep -Seconds 5
-          if ($process.HasExited) {
-            throw "Installed application exited with code $($process.ExitCode)"
-          }
-          Stop-Process -Id $process.Id -Force
+        run: >-
+          cmake --build --preset ${{ matrix.preset }}
+          --config Release --target ugurugu_package_smoke_test
 
       - name: Test diagnostics
         if: failure() && runner.os == 'Windows'

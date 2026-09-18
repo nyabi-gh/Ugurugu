@@ -5,6 +5,10 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#ifdef Q_OS_WIN
+#include <QGuiApplication>
+#include <QLibraryInfo>
+#endif
 #include <QImage>
 #include <QImageReader>
 #include <QImageWriter>
@@ -25,24 +29,42 @@ int fail(const QString &message)
 
 int main(int argc, char **argv)
 {
+#ifdef Q_OS_WIN
+    QGuiApplication application(argc, argv);
+#else
     QCoreApplication application(argc, argv);
+#endif
     if (application.arguments().size() != 2)
     {
         return fail(
-            QStringLiteral("Usage: ugurugu_package_smoke <Ugurugu.app>"));
+            QStringLiteral("Usage: ugurugu_package_smoke <installed package>"));
     }
 
     const QDir bundle(application.arguments().at(1));
+#ifdef Q_OS_WIN
+    const QString pluginRoot = bundle.absolutePath();
+    const QString jpegPlugin =
+        bundle.filePath(QStringLiteral("imageformats/qjpeg.dll"));
+    const QString platformPlugin =
+        bundle.filePath(QStringLiteral("platforms/qwindows.dll"));
+    const QString resourceRoot = bundle.absolutePath();
+    const QString updaterLicenseFile =
+        bundle.filePath(QStringLiteral("Velopack-LICENSE.txt"));
+    const QString qtConfiguration = bundle.filePath(QStringLiteral("qt.conf"));
+#else
     const QString pluginRoot =
         bundle.filePath(QStringLiteral("Contents/PlugIns"));
     const QString jpegPlugin =
         QDir(pluginRoot)
             .filePath(QStringLiteral("imageformats/libqjpeg.dylib"));
-    const QString offscreenPlugin =
+    const QString unexpectedOffscreenPlugin =
         QDir(pluginRoot)
             .filePath(QStringLiteral("platforms/libqoffscreen.dylib"));
     const QString resourceRoot =
         bundle.filePath(QStringLiteral("Contents/Resources"));
+    const QString updaterLicenseFile =
+        QDir(resourceRoot).filePath(QStringLiteral("Sparkle-LICENSE.txt"));
+#endif
     const QString licenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("LICENSE"));
     const QString readmeFile =
@@ -55,20 +77,55 @@ int main(int argc, char **argv)
         QDir(resourceRoot).filePath(QStringLiteral("spdlog-LICENSE.txt"));
     const QString compressionLicenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("zlib-LICENSE.txt"));
-    const QString updaterLicenseFile =
-        QDir(resourceRoot).filePath(QStringLiteral("Sparkle-LICENSE.txt"));
 
     if (!QFileInfo(jpegPlugin).isFile())
     {
-        return fail(QStringLiteral(
-            "The installed application does not contain libqjpeg.dylib."));
+        return fail(QStringLiteral("The installed application does not "
+                                   "contain the JPEG image plugin."));
     }
-    if (QFileInfo::exists(offscreenPlugin))
+#ifdef Q_OS_WIN
+    if (!QFileInfo(platformPlugin).isFile())
+    {
+        return fail(QStringLiteral(
+            "The installed application does not contain qwindows.dll."));
+    }
+    if (!QFileInfo(qtConfiguration).isFile())
+    {
+        return fail(QStringLiteral(
+            "The installed application does not contain qt.conf."));
+    }
+    const QString configuredPluginRoot =
+        QDir::cleanPath(QFileInfo(QLibraryInfo::path(QLibraryInfo::PluginsPath))
+                .absoluteFilePath());
+    const QString expectedPluginRoot =
+        QDir::cleanPath(QFileInfo(pluginRoot).absoluteFilePath());
+    if (configuredPluginRoot.compare(expectedPluginRoot, Qt::CaseInsensitive)
+        != 0)
+    {
+        return fail(QStringLiteral("qt.conf resolved the plugin path outside "
+                                   "the installed application: %1")
+                .arg(configuredPluginRoot));
+    }
+    for (const QString &libraryPath : QCoreApplication::libraryPaths())
+    {
+        const QString resolvedLibraryPath =
+            QDir::cleanPath(QFileInfo(libraryPath).absoluteFilePath());
+        if (resolvedLibraryPath.compare(expectedPluginRoot, Qt::CaseInsensitive)
+            != 0)
+        {
+            return fail(QStringLiteral("Qt retained an external plugin search "
+                                       "path: %1")
+                    .arg(resolvedLibraryPath));
+        }
+    }
+#else
+    if (QFileInfo::exists(unexpectedOffscreenPlugin))
     {
         return fail(
             QStringLiteral("The production application unexpectedly contains "
-                           "libqoffscreen.dylib."));
+                           "the offscreen platform plugin."));
     }
+#endif
     if (!QFileInfo(licenseFile).isFile() || !QFileInfo(readmeFile).isFile()
         || !QFileInfo(noticesFile).isFile()
         || !QFileInfo(fontLicenseFile).isFile()

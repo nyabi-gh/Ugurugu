@@ -161,3 +161,10 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${ugurugu_deploy_script})
+
+if(WIN32)
+    install(
+        FILES resources/windows/qt.conf
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
