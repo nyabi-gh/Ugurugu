@@ -131,7 +131,7 @@ QString SavePathDialog::confirmedFinalPath(
     {
         return {};
     }
-    const QString filePath = normalizedPath(selectedPath, format);
+    QString filePath = normalizedPath(selectedPath, format);
     if (filePath == selectedPath || !QFileInfo::exists(filePath))
     {
         return filePath;
