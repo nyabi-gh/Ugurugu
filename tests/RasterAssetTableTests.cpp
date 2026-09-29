@@ -29,7 +29,8 @@ private slots:
             uncompressQtPayload(compressed, original.size());
         QVERIFY(restored.has_value());
         QCOMPARE(*restored, original);
-        QVERIFY(!uncompressQtPayload(compressed, original.size() + 1).has_value());
+        QVERIFY(
+            !uncompressQtPayload(compressed, original.size() + 1).has_value());
 
         QByteArray oversized = qCompress(QByteArray(4096, 'x'), 6);
         qToBigEndian<quint32>(16, reinterpret_cast<uchar *>(oversized.data()));

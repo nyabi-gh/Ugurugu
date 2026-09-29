@@ -100,7 +100,8 @@ private slots:
         Document raster = Document::createDefault(QSize(8, 8));
         QImage pixels(QSize(2, 2), QImage::Format_RGBA8888);
         pixels.fill(Qt::red);
-        const std::optional<RasterAsset> asset = rasterAssetFromImage(pixels);
+        const std::optional<RasterAsset> asset =
+            serializer_detail::rasterAssetFromImage(pixels);
         QVERIFY(asset.has_value());
         raster.rasterAssets.insert(asset->id, *asset);
         QJsonObject rasterRoot =

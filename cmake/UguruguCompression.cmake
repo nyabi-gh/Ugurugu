@@ -17,3 +17,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(zlib)
 set_property(DIRECTORY "${zlib_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL TRUE)
+# zlib.h includes the unconfigured zconf.h next to it rather than the generated
+# one, so consumers would reference unprefixed symbols the archive lacks.
+target_compile_definitions(zlibstatic INTERFACE Z_PREFIX)
