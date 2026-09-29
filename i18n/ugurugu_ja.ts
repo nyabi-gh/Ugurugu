@@ -209,8 +209,8 @@
     </message>
     <message>
         <location filename="../src/ui/AboutDialog.cpp" line="29"/>
-        <source>&lt;h1&gt;Ugurugu %1&lt;/h1&gt;&lt;p&gt;A drawing app where your pictures wiggle and move.&lt;/p&gt;&lt;p&gt;Copyright (C) 2026 Nyabi (nyattic)&lt;/p&gt;&lt;p&gt;This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.&lt;/p&gt;&lt;p&gt;This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the &lt;a href=&quot;https://www.gnu.org/licenses/gpl-3.0.html&quot;&gt;GNU General Public License&lt;/a&gt; for more details. The full license text is installed with Ugurugu as LICENSE.&lt;/p&gt;&lt;p&gt;Qt, the bundled font and the other included libraries carry their own copyright holders and terms, listed in THIRD_PARTY_NOTICES.md next to the application.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/nyattic/Ugurugu&quot;&gt;github.com/nyattic/Ugurugu&lt;/a&gt;&lt;/p&gt;</source>
-        <translation>&lt;h1&gt;Ugurugu %1&lt;/h1&gt;&lt;p&gt;絵がゆらゆら動き出すお絵かきアプリです。&lt;/p&gt;&lt;p&gt;Copyright (C) 2026 Nyabi (nyattic)&lt;/p&gt;&lt;p&gt;このプログラムはフリーソフトウェアです。フリーソフトウェア財団が公表したGNU General Public Licenseバージョン3、または（選択により）それ以降のバージョンの条件に従って再配布および改変できます。&lt;/p&gt;&lt;p&gt;このプログラムは有用であることを願って配布されますが、いかなる保証もありません。商品性や特定目的への適合性についての黙示的な保証もありません。詳しくは&lt;a href=&quot;https://www.gnu.org/licenses/gpl-3.0.html&quot;&gt;GNU General Public License&lt;/a&gt;を参照してください。ライセンスの全文はLICENSEファイルとしてUguruguと一緒にインストールされます。効力を持つのは英語の原文です。&lt;/p&gt;&lt;p&gt;Qtや同梱のフォントを含むライブラリは、それぞれの著作権者と利用条件に従います。詳しくはアプリケーションと一緒にインストールされるTHIRD_PARTY_NOTICES.mdを参照してください。&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/nyattic/Ugurugu&quot;&gt;github.com/nyattic/Ugurugu&lt;/a&gt;&lt;/p&gt;</translation>
+        <source>&lt;h1&gt;Ugurugu %1&lt;/h1&gt;&lt;p&gt;A drawing app where your pictures wiggle and move.&lt;/p&gt;&lt;p&gt;Copyright (C) 2026 Nyabi (nyabi-gh)&lt;/p&gt;&lt;p&gt;This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.&lt;/p&gt;&lt;p&gt;This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the &lt;a href=&quot;https://www.gnu.org/licenses/gpl-3.0.html&quot;&gt;GNU General Public License&lt;/a&gt; for more details. The full license text is installed with Ugurugu as LICENSE.&lt;/p&gt;&lt;p&gt;Qt, the bundled font and the other included libraries carry their own copyright holders and terms, listed in THIRD_PARTY_NOTICES.md next to the application.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/nyabi-gh/Ugurugu&quot;&gt;github.com/nyabi-gh/Ugurugu&lt;/a&gt;&lt;/p&gt;</source>
+        <translation>&lt;h1&gt;Ugurugu %1&lt;/h1&gt;&lt;p&gt;絵がゆらゆら動き出すお絵かきアプリです。&lt;/p&gt;&lt;p&gt;Copyright (C) 2026 Nyabi (nyabi-gh)&lt;/p&gt;&lt;p&gt;このプログラムはフリーソフトウェアです。フリーソフトウェア財団が公表したGNU General Public Licenseバージョン3、または（選択により）それ以降のバージョンの条件に従って再配布および改変できます。&lt;/p&gt;&lt;p&gt;このプログラムは有用であることを願って配布されますが、いかなる保証もありません。商品性や特定目的への適合性についての黙示的な保証もありません。詳しくは&lt;a href=&quot;https://www.gnu.org/licenses/gpl-3.0.html&quot;&gt;GNU General Public License&lt;/a&gt;を参照してください。ライセンスの全文はLICENSEファイルとしてUguruguと一緒にインストールされます。効力を持つのは英語の原文です。&lt;/p&gt;&lt;p&gt;Qtや同梱のフォントを含むライブラリは、それぞれの著作権者と利用条件に従います。詳しくはアプリケーションと一緒にインストールされるTHIRD_PARTY_NOTICES.mdを参照してください。&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/nyabi-gh/Ugurugu&quot;&gt;github.com/nyabi-gh/Ugurugu&lt;/a&gt;&lt;/p&gt;</translation>
     </message>
 </context>
 <context>
@@ -1492,6 +1492,12 @@
         <location filename="../src/io/serializer/DocumentValidation.cpp" line="141"/>
         <source>The project contains an invalid raster asset.</source>
         <translation>プロジェクトに無効なラスターアセットがあります。</translation>
+    </message>
+    <message>
+        <location filename="../src/io/DocumentSerializer.cpp" line="837"/>
+        <location filename="../src/io/serializer/DocumentValidation.cpp" line="126"/>
+        <source>The project contains too many raster assets.</source>
+        <translation>プロジェクトのラスターアセットが多すぎます。</translation>
     </message>
     <message>
         <location filename="../src/io/DocumentSerializer.cpp" line="949"/>
@@ -3978,6 +3984,21 @@ Alt+click does the same from the brush, eraser or paint bucket.</source>
         <location filename="../src/ui/TabletPressureRow.cpp" line="33"/>
         <source>Use tablet pressure</source>
         <translation>タブレットの筆圧を反映</translation>
+    </message>
+</context>
+<context>
+    <name>SavePathDialog</name>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="141"/>
+        <source>Replace existing file?</source>
+        <translation>既存のファイルを置き換えますか？</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SavePathDialog.cpp" line="143"/>
+        <source>The file &quot;%1&quot; already exists.
+Do you want to replace it?</source>
+        <translation>ファイル「%1」は既に存在します。
+置き換えますか？</translation>
     </message>
 </context>
 </TS>

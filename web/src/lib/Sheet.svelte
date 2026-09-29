@@ -1,6 +1,6 @@
 <!--
 SPDX-License-Identifier: GPL-3.0-or-later
-Copyright (C) 2026 Nyabi (nyattic)
+Copyright (C) 2026 Nyabi (nyabi-gh)
 -->
 <script lang="ts">
     import type { Snippet } from "svelte";

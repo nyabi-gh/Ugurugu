@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "ui/AboutDialog.hpp"
 
@@ -28,7 +28,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     browser->setHtml(
         tr("<h1>Ugurugu %1</h1>"
            "<p>A drawing app where your pictures wiggle and move.</p>"
-           "<p>Copyright (C) 2026 Nyabi (nyattic)</p>"
+           "<p>Copyright (C) 2026 Nyabi (nyabi-gh)</p>"
            "<p>This program is free software: you can redistribute it and/or "
            "modify it under the terms of the GNU General Public License as "
            "published by the Free Software Foundation, either version 3 of "
@@ -42,8 +42,8 @@ AboutDialog::AboutDialog(QWidget *parent)
            "<p>Qt, the bundled font and the other included libraries carry "
            "their own copyright holders and terms, listed in "
            "THIRD_PARTY_NOTICES.md next to the application.</p>"
-           "<p><a href=\"https://github.com/nyattic/Ugurugu\">"
-           "github.com/nyattic/Ugurugu</a></p>")
+           "<p><a href=\"https://github.com/nyabi-gh/Ugurugu\">"
+           "github.com/nyabi-gh/Ugurugu</a></p>")
             .arg(QApplication::applicationVersion()));
     layout->addWidget(browser, 1);
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "document/DocumentOperations.hpp"
 
@@ -53,6 +53,10 @@ bool normalizeAndValidate(Document &document)
     }
 
     Document candidate = document;
+    if (candidate.rasterAssets.size() > DocumentLimits::maximumRasterAssets)
+    {
+        return false;
+    }
     quint64 rasterDecodedBytes = 0;
     qint64 rasterPayloadBytes = 0;
     for (auto asset = candidate.rasterAssets.cbegin();

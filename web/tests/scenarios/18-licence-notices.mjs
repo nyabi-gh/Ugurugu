@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import {
     check,
@@ -28,6 +28,7 @@ export default async function run({ browser, origin }) {
         "Qt 6.11.1",
         "Pretendard JP",
         "Emscripten",
+        "zlib 1.3.2",
     ]) {
         check(
             text?.includes(required),
@@ -36,7 +37,7 @@ export default async function run({ browser, origin }) {
     }
     check(
         (await page.locator("#notices-source").getAttribute("href")) ===
-            "https://github.com/nyattic/Ugurugu",
+            "https://github.com/nyabi-gh/Ugurugu",
         "the notice links to the complete source",
     );
 
@@ -46,7 +47,7 @@ export default async function run({ browser, origin }) {
     const hrefs = await page
         .locator("[role=dialog] a[href*='licenses/']")
         .evaluateAll((links) => links.map((link) => link.href));
-    check(hrefs.length >= 6, `the notice links ${hrefs.length} licence texts`);
+    check(hrefs.length >= 7, `the notice links ${hrefs.length} licence texts`);
     for (const href of hrefs) {
         const response = await page.request.get(href);
         check(

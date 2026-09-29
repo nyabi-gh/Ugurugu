@@ -1,6 +1,6 @@
 # 검토 증거 사용 안내
 
-대상 커밋은 `review-metadata.json`에 기록했다. 상위 폴더의 `project-review-2026-09-08.md`가 결과와 제한을 설명한다.
+대상 커밋은 `review-metadata.json`에 기록했다. 상위 폴더의 [통합 검토·개선 계획](../project-status.md)이 결과와 제한을 설명한다.
 
 - `ctest-release.log`, `native-release-build.log`: 이번 로컬 실행 로그.
 - `checks-summary.txt`: 도구 출력에서 옮긴 결과 요약. 별도의 재실행 로그가 아니다.

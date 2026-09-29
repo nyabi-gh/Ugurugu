@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "document/DocumentBudget.hpp"
 #include "document/DocumentController.hpp"
@@ -544,7 +544,7 @@ bool DocumentController::duplicateStrokes(const QUuid &layerId,
         copy.id = QUuid::createUuid();
         if (copy.imageOp)
         {
-            copy.imageOp->transform = transform * copy.imageOp->transform;
+            copy.imageOp->transform = copy.imageOp->transform * transform;
             if (!isValidImageOp(*copy.imageOp))
             {
                 return rejectHistoryMutation();
@@ -864,7 +864,7 @@ bool DocumentController::transformStrokes(const QUuid &layerId,
         if (transformed.imageOp)
         {
             transformed.imageOp->transform =
-                transform * transformed.imageOp->transform;
+                transformed.imageOp->transform * transform;
             if (!isValidImageOp(*transformed.imageOp))
             {
                 return rejectHistoryMutation();

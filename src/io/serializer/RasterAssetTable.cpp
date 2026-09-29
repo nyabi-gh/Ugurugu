@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "io/serializer/RasterAssetTable.hpp"
 
+#include "io/serializer/BoundedCompression.hpp"
+
 #include <QColorSpace>
 #include <QCryptographicHash>
-#include <QtEndian>
 
 #include <algorithm>
 #include <cstring>
@@ -54,21 +55,7 @@ std::optional<QByteArray> uncompressRaster(
     {
         return std::nullopt;
     }
-    // qCompress stores the uncompressed byte count as a four-byte big-endian
-    // prefix. Validate it before qUncompress so a forged payload cannot choose
-    // an allocation larger than the raster limits.
-    const auto *prefix =
-        reinterpret_cast<const uchar *>(compressed.constData());
-    if (qFromBigEndian<quint32>(prefix) != *expectedBytes)
-    {
-        return std::nullopt;
-    }
-    QByteArray bytes = qUncompress(compressed);
-    if (static_cast<quint64>(bytes.size()) != *expectedBytes)
-    {
-        return std::nullopt;
-    }
-    return bytes;
+    return uncompressQtPayload(compressed, *expectedBytes);
 }
 
 QImage imageFromCanonicalBytes(const QSize &size, const QByteArray &bytes)

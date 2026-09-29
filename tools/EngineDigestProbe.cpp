@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // Prints the same per-frame pixel digests and serialization digest as
 // tools/wasm_engine_smoke.mjs so native and WebAssembly renders of one

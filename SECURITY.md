@@ -25,7 +25,7 @@ attachment is a working exploit.
 
 Report it privately instead, either way:
 
-- [Open a private security advisory](https://github.com/nyattic/Ugurugu/security/advisories/new)
+- [Open a private security advisory](https://github.com/nyabi-gh/Ugurugu/security/advisories/new)
   on GitHub — preferred, because the discussion and the fix stay in one place.
 - Email <contact@nyabi.dev> with `Ugurugu security` in the subject if you would
   rather not use GitHub.
@@ -72,7 +72,7 @@ not something you need permission for.
   to write to Ugurugu's installation directory. At that point the machine is
   compromised regardless of Ugurugu.
 - A plain crash or hang with no memory-safety consequence. Those are welcome as
-  ordinary [issues](https://github.com/nyattic/Ugurugu/issues).
+  ordinary [issues](https://github.com/nyabi-gh/Ugurugu/issues).
 - Unfixed vulnerabilities in Qt, libwebp, spdlog, Sparkle, or Velopack. Report
   those upstream — but do tell us if Ugurugu ships an affected version, and we
   will bump it. Bundled versions are recorded in

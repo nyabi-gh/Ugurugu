@@ -4,8 +4,8 @@
 
 # Ugurugu
 
-[![Latest Release](https://img.shields.io/github/v/release/nyattic/Ugurugu?style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e&color=ffc94a)](https://github.com/nyattic/Ugurugu/releases/latest)
-[![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnyattic%2FUgurugu%2Fdownload-badge%2Fdownloads.json&style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e)](https://github.com/nyattic/Ugurugu/releases)
+[![Latest Release](https://img.shields.io/github/v/release/nyabi-gh/Ugurugu?style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e&color=ffc94a)](https://github.com/nyabi-gh/Ugurugu/releases/latest)
+[![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnyabi-gh%2FUgurugu%2Fdownload-badge%2Fdownloads.json&style=for-the-badge&logo=github&logoColor=white&labelColor=1e1b2e)](https://github.com/nyabi-gh/Ugurugu/releases)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-ffc94a?style=for-the-badge&logo=gnu&logoColor=white&labelColor=1e1b2e)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-ffc94a?style=for-the-badge&logo=qt&logoColor=white&labelColor=1e1b2e)
 
@@ -19,7 +19,7 @@
 
 > [!NOTE]
 > 문제가 생겼다면
-> [GitHub 이슈](https://github.com/nyattic/Ugurugu/issues)에
+> [GitHub 이슈](https://github.com/nyabi-gh/Ugurugu/issues)에
 > 어떤 작업을 했는지와 실제로 일어난 일을 적어 주세요. 가능하면 `.ugu`
 > 파일도 함께 보내 주시면 원인을 찾는 데 큰 도움이 됩니다.
 >
@@ -30,14 +30,14 @@
 
 | 플랫폼 | 지원 환경 | 다운로드 |
 | --- | --- | --- |
-| Windows | Windows 10 이상, 64비트 | [Windows 설치 파일](https://github.com/nyattic/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
-| macOS | macOS 14 이상, Apple Silicon | [macOS 설치 파일](https://github.com/nyattic/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
+| Windows | Windows 10 이상, 64비트 | [Windows 설치 파일](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
+| macOS | macOS 14 이상, Apple Silicon | [macOS 설치 파일](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
 
 ### Windows
 
 다운로드한 Setup 파일을 실행하세요. Windows에서 출처 확인 경고가 나오면
 **추가 정보 → 실행**을 누르면 됩니다. 안전을 위해 반드시 공식
-[Releases 페이지](https://github.com/nyattic/Ugurugu/releases/latest)에서
+[Releases 페이지](https://github.com/nyabi-gh/Ugurugu/releases/latest)에서
 받은 파일만 사용하세요.
 
 ### macOS
@@ -213,7 +213,7 @@ WiggleWiggleTool 10에서 저장한 `.wawa` 파일을 **파일 → 열기**로 �
 
 ## 라이선스
 
-Copyright (C) 2026 Nyabi (nyattic)
+Copyright (C) 2026 Nyabi (nyabi-gh)
 
 이 프로그램은 자유 소프트웨어입니다. 자유 소프트웨어 재단이 공표한
 [GNU General Public License](LICENSE) 버전 3, 또는 (선택에 따라) 그 이후

@@ -65,7 +65,7 @@ foreach(suite IN LISTS UGURUGU_TEST_SUITES)
     endif()
 endforeach()
 
-if(APPLE)
+if(APPLE OR WIN32)
     add_executable(ugurugu_package_smoke tests/PackageSmoke.cpp)
     target_link_libraries(
         ugurugu_package_smoke
@@ -73,12 +73,15 @@ if(APPLE)
         Qt6::Core
         Qt6::Gui
     )
+    ugurugu_target_defaults(ugurugu_package_smoke)
+endif()
+
+if(APPLE)
     set_target_properties(
         ugurugu_package_smoke
         PROPERTIES
         SKIP_BUILD_RPATH TRUE
     )
-    ugurugu_target_defaults(ugurugu_package_smoke)
     add_custom_command(
         TARGET ugurugu_package_smoke
         POST_BUILD
@@ -123,6 +126,37 @@ if(APPLE)
         COMMAND
         /usr/bin/codesign --verify --deep --strict
         "${UGURUGU_PACKAGE_SMOKE_APPLICATION}"
+        DEPENDS Ugurugu ugurugu_package_smoke
+        USES_TERMINAL
+        VERBATIM
+    )
+elseif(WIN32)
+    find_program(
+        UGURUGU_POWERSHELL_EXECUTABLE
+        NAMES pwsh powershell
+        REQUIRED
+    )
+    set(
+        UGURUGU_PACKAGE_SMOKE_ROOT
+        "${CMAKE_CURRENT_BINARY_DIR}/package-smoke"
+    )
+    add_custom_target(
+        ugurugu_package_smoke_test
+        COMMAND
+        "${CMAKE_COMMAND}" -E remove_directory
+        "${UGURUGU_PACKAGE_SMOKE_ROOT}"
+        COMMAND
+        "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}"
+        --config "$<CONFIG>"
+        --prefix "${UGURUGU_PACKAGE_SMOKE_ROOT}/install"
+        COMMAND
+        "${UGURUGU_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -NonInteractive
+        -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/TestWindowsPackage.ps1"
+        -PackageRoot "${UGURUGU_PACKAGE_SMOKE_ROOT}/install"
+        -SmokeExecutable "$<TARGET_FILE:ugurugu_package_smoke>"
         DEPENDS Ugurugu ugurugu_package_smoke
         USES_TERMINAL
         VERBATIM

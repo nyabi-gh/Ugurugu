@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "ui/CanvasWidget.hpp"
 
@@ -505,7 +505,7 @@ bool CanvasWidget::scaleSelection(qreal factor)
     delta.scale(factor, factor);
     delta.translate(-center.x(), -center.y());
     if (!setPendingSelectionTransform(
-            delta * m_selectionTransformSession.transform))
+            m_selectionTransformSession.transform * delta))
     {
         if (!alreadyActive)
         {
@@ -536,7 +536,7 @@ bool CanvasWidget::rotateSelection(qreal degrees)
     delta.rotate(degrees);
     delta.translate(-center.x(), -center.y());
     if (!setPendingSelectionTransform(
-            delta * m_selectionTransformSession.transform))
+            m_selectionTransformSession.transform * delta))
     {
         if (!alreadyActive)
         {

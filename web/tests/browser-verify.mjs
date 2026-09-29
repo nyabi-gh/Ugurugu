@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // Drives the built web shell (web/dist) in headless Chromium: the IndexedDB
 // recovery loop, drawing and selection, exports, the view transform, the

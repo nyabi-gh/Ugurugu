@@ -49,6 +49,11 @@ install(
     DESTINATION "${UGURUGU_DOCUMENTATION_DESTINATION}"
     RENAME libwebp-PATENTS.txt
 )
+install(
+    FILES "${zlib_SOURCE_DIR}/LICENSE"
+    DESTINATION "${UGURUGU_DOCUMENTATION_DESTINATION}"
+    RENAME zlib-LICENSE.txt
+)
 
 if(APPLE)
     install(
@@ -145,6 +150,9 @@ if(WIN32)
     # redistributable when missing and keeps it serviced by Windows Update
     # instead of shipping loose runtime DLLs.
     set(UGURUGU_DEPLOY_RUNTIME_OPTIONS NO_COMPILER_RUNTIME)
+    # resources/windows/qt.conf pins plugins to the executable directory, so
+    # windeployqt has to put them there instead of its default plugins/.
+    install(CODE "set(QT_DEPLOY_PLUGINS_DIR \"${CMAKE_INSTALL_BINDIR}\")")
 endif()
 
 qt_generate_deploy_app_script(
@@ -156,3 +164,10 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${ugurugu_deploy_script})
+
+if(WIN32)
+    install(
+        FILES resources/windows/qt.conf
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()

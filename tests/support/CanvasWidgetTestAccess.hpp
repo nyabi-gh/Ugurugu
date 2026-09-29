@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #pragma once
 
@@ -88,6 +88,33 @@ public:
     static QImage selectionMask(const CanvasWidget &canvas)
     {
         return canvas.m_selectionMask;
+    }
+
+    static QRectF selectionTransformSourceBounds(const CanvasWidget &canvas)
+    {
+        return canvas.m_selectionTransformSession.sourceBounds;
+    }
+
+    static QRectF displayedSelectionBounds(const CanvasWidget &canvas)
+    {
+        return canvas.displayedSelectionBounds();
+    }
+
+    static void beginSelectionMove(
+        CanvasWidget &canvas, const QPointF &documentPosition)
+    {
+        canvas.beginSelectionMove(documentPosition);
+    }
+
+    static void continueSelectionMove(
+        CanvasWidget &canvas, const QPointF &documentPosition)
+    {
+        canvas.continueSelectionMove(documentPosition);
+    }
+
+    static void commitSelectionMove(CanvasWidget &canvas)
+    {
+        canvas.commitSelectionMove();
     }
 
     static std::shared_ptr<const std::atomic_bool>

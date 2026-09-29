@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Nyabi (nyattic)
+// Copyright (C) 2026 Nyabi (nyabi-gh)
 
 // What every scenario under scenarios/ shares: the static server that serves
 // web/dist, the browser lookup, the check counter and the page helpers.
