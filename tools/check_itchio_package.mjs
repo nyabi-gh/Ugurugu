@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-// Checks a built web shell against the itch.io HTML5 limits documented in
-// docs/web-itchio-feasibility.md section 4: an index.html entry point, no
+// Checks a built web shell against the itch.io HTML5 limits from
+// https://itch.io/docs/creators/html5: an index.html entry point, no
 // absolute asset paths, at most 1000 files, 240-character paths, 500 MB total
 // and 200 MB per file after extraction. Run it on the Vite output directory.
 

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-// The numbers come from docs/web-port-progress.md, which derived them from
-// the wasm heap measurements: an open document costs roughly the file size
+// The numbers come from wasm heap measurements taken with
+// tools/wasm_engine_bench.mjs on ugurugu_stress_document_generator output
+// (1024/2048 stress documents): an open document costs roughly the file size
 // times 4.4, plus one render surface per frame (16 MiB at 2048x2048), plus a
 // transient copy the size of the file while serializing. They are deliberately
 // stricter than the engine's own DocumentLimits so the browser tab fails with
