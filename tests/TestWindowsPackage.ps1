@@ -273,6 +273,16 @@ if ($qtConfiguration -notmatch '(?im)^\s*Plugins\s*=\s*\.\s*$') {
     throw 'qt.conf does not restrict plugins to the application directory.'
 }
 
+Add-Type -Namespace UguruguPackageSmoke -Name NativeMethods -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern uint SetErrorMode(uint mode);
+'@
+# Child processes inherit the error mode. Without SEM_FAILCRITICALERRORS the
+# missing-runtime control waits on the loader's "DLL not found" dialog instead
+# of exiting, and SEM_NOGPFAULTERRORBOX keeps crash dialogs from hanging too.
+[UguruguPackageSmoke.NativeMethods]::SetErrorMode(0x0001 -bor 0x0002) |
+    Out-Null
+
 $scratchBase = if ($env:RUNNER_TEMP) {
     $env:RUNNER_TEMP
 }

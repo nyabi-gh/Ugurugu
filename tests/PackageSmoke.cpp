@@ -30,6 +30,17 @@ int fail(const QString &message)
 int main(int argc, char **argv)
 {
 #ifdef Q_OS_WIN
+    // A release Qt without a console window reports a missing platform
+    // plugin with a modal message box, which hangs the package test's
+    // windowless negative control, so check before QGuiApplication loads it.
+    if (argc == 2
+        && !QFileInfo(QDir(QString::fromLocal8Bit(argv[1]))
+                          .filePath(QStringLiteral("platforms/qwindows.dll")))
+            .isFile())
+    {
+        return fail(QStringLiteral(
+            "The installed application does not contain qwindows.dll."));
+    }
     QGuiApplication application(argc, argv);
 #else
     QCoreApplication application(argc, argv);
@@ -45,8 +56,6 @@ int main(int argc, char **argv)
     const QString pluginRoot = bundle.absolutePath();
     const QString jpegPlugin =
         bundle.filePath(QStringLiteral("imageformats/qjpeg.dll"));
-    const QString platformPlugin =
-        bundle.filePath(QStringLiteral("platforms/qwindows.dll"));
     const QString resourceRoot = bundle.absolutePath();
     const QString updaterLicenseFile =
         bundle.filePath(QStringLiteral("Velopack-LICENSE.txt"));
@@ -84,11 +93,6 @@ int main(int argc, char **argv)
                                    "contain the JPEG image plugin."));
     }
 #ifdef Q_OS_WIN
-    if (!QFileInfo(platformPlugin).isFile())
-    {
-        return fail(QStringLiteral(
-            "The installed application does not contain qwindows.dll."));
-    }
     if (!QFileInfo(qtConfiguration).isFile())
     {
         return fail(QStringLiteral(
