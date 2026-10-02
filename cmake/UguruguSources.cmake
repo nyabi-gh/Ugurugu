@@ -102,6 +102,8 @@ set(UGURUGU_ENGINE_SOURCES
     src/render/engine/PreviewScale.cpp
     src/render/engine/PreviewScale.hpp
     src/render/engine/RenderCancellation.hpp
+    src/render/engine/StaticLayerCache.cpp
+    src/render/engine/StaticLayerCache.hpp
     src/render/RenderEngine.cpp
     src/render/RenderEngine.hpp
     src/render/RenderEngineStrokes.cpp

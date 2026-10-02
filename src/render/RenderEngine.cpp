@@ -18,6 +18,7 @@
 #include "render/engine/LayerOperationReplay.hpp"
 #include "render/engine/PreviewScale.hpp"
 #include "render/engine/RenderCancellation.hpp"
+#include "render/engine/StaticLayerCache.hpp"
 
 #include <QHash>
 #include <QPainter>
@@ -37,6 +38,16 @@ QImage RenderEngine::fillRegionMask(const QImage &image, const QPoint &seed)
 {
     return FloodFillMask::fromImage(
         image, seed, FloodFillMask::Comparison::AlphaBoundary, 0);
+}
+
+void RenderEngine::setStaticLayerCacheBudget(qint64 bytes)
+{
+    StaticLayerCache::setBudget(bytes);
+}
+
+void RenderEngine::clearStaticLayerCache()
+{
+    StaticLayerCache::clear();
 }
 
 QImage RenderEngine::render(const Document &document, int frameIndex)
@@ -213,54 +224,6 @@ RenderEngine::LayerSplitFrame RenderEngine::renderLayerSplit(
         static_cast<qreal>(outputSize.width()) / document.size.width(),
         static_cast<qreal>(outputSize.height()) / document.size.height()};
 
-    const auto renderedLayer = [&document,
-                                   &mapping,
-                                   previewStats,
-                                   displayScaleReplay,
-                                   outputSize,
-                                   normalizedFrame,
-                                   frameCount,
-                                   cancellation](const Layer &layer)
-    {
-        QImage native;
-        const QSize initialSize = layer.initialCanvasSize.isValid()
-                                      ? layer.initialCanvasSize
-                                      : DocumentOperations::initialCanvasSize(
-                                            layer.strokes, document.size);
-        const Document layerDocument = documentForLayer(document, layer);
-        if (displayScaleReplay)
-        {
-            QImage displayLayer;
-            if (!renderLayerOperationsAtDisplayScale(displayLayer,
-                    layerDocument,
-                    layer.strokes,
-                    normalizedFrame,
-                    frameCount,
-                    initialSize,
-                    mapping,
-                    previewStats,
-                    cancellation))
-            {
-                return QImage();
-            }
-            return displayLayer;
-        }
-        if (!renderLayerOperations(native,
-                layerDocument,
-                layer.strokes,
-                normalizedFrame,
-                frameCount,
-                initialSize,
-                cancellation))
-        {
-            return QImage();
-        }
-        return native.size() == outputSize ? native
-                                           : native.scaled(outputSize,
-                                                 Qt::IgnoreAspectRatio,
-                                                 Qt::FastTransformation);
-    };
-
     // Each half keeps its own groups and clip chains intact and is composited
     // by the ordinary hierarchy renderer, so a group below or above the target
     // costs the split nothing.
@@ -323,7 +286,14 @@ RenderEngine::LayerSplitFrame RenderEngine::renderLayerSplit(
         split.layerBlendMode = target->blendMode;
         if (split.layerVisible && !target->strokes.isEmpty())
         {
-            layerBase = renderedLayer(*target);
+            layerBase = renderPaintLayerImage(document,
+                *target,
+                normalizedFrame,
+                outputSize,
+                displayScaleReplay ? &mapping : nullptr,
+                previewStats,
+                cancellation)
+                            .image;
             if (layerBase.isNull())
             {
                 return split;
@@ -429,49 +399,17 @@ RenderEngine::LayerRasterFrame RenderEngine::renderLayerRasterFrame(
         }
         else
         {
-            const QSize initialSize =
-                layer.initialCanvasSize.isValid()
-                    ? layer.initialCanvasSize
-                    : DocumentOperations::initialCanvasSize(
-                          layer.strokes, document.size);
-            const Document layerDocument = documentForLayer(document, layer);
-            if (displayScaleReplay)
+            layerImage = renderPaintLayerImage(document,
+                layer,
+                normalizedFrame,
+                outputSize,
+                displayScaleReplay ? &mapping : nullptr,
+                previewStats,
+                cancellation)
+                             .image;
+            if (layerImage.isNull())
             {
-                if (!renderLayerOperationsAtDisplayScale(layerImage,
-                        layerDocument,
-                        layer.strokes,
-                        normalizedFrame,
-                        frameCount,
-                        initialSize,
-                        mapping,
-                        previewStats,
-                        cancellation))
-                {
-                    return frame;
-                }
-            }
-            else
-            {
-                QImage native;
-                if (!renderLayerOperations(native,
-                        layerDocument,
-                        layer.strokes,
-                        normalizedFrame,
-                        frameCount,
-                        initialSize,
-                        cancellation))
-                {
-                    return frame;
-                }
-                layerImage = native.size() == outputSize
-                                 ? native
-                                 : native.scaled(outputSize,
-                                       Qt::IgnoreAspectRatio,
-                                       Qt::FastTransformation);
-                if (layerImage.isNull())
-                {
-                    return frame;
-                }
+                return frame;
             }
             const qint64 imageBytes = layerImage.sizeInBytes();
             if (imageBytes > maximumBytes - retainedBytes)
@@ -508,7 +446,7 @@ QImage RenderEngine::composeLayerRasterFrame(const Document &document,
     {
         return {};
     }
-    const auto renderPaintLayer = [&](const Layer &layer)
+    const auto renderPaintLayer = [&](const Layer &layer) -> PaintLayerImage
     {
         if (layer.id == replacementLayerId)
         {

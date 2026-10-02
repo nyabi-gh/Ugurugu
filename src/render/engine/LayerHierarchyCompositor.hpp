@@ -30,9 +30,43 @@ QPainter::CompositionMode compositionMode(LayerBlendMode mode);
 void prepareLayerComposition(
     QPainter &painter, LayerBlendMode mode, qreal opacity);
 
+// One paint layer's framebuffer as handed to the compositor. A layer known to
+// be fully transparent carries no image: composing it would change nothing,
+// so it costs neither a surface nor a composite. A null image that is not
+// marked transparent is a failed or cancelled render.
+struct PaintLayerImage
+{
+    QImage image;
+    bool transparent = false;
+
+    PaintLayerImage() = default;
+    PaintLayerImage(QImage layerImage)
+        : image(std::move(layerImage))
+    {
+    }
+    static PaintLayerImage empty()
+    {
+        PaintLayerImage result;
+        result.transparent = true;
+        return result;
+    }
+};
+
+// Renders one paint layer of `document` at outputSize, replayed at display
+// scale when `mapping` is given and natively then scaled otherwise. Empty
+// layers come back transparent and frame-invariant layers come from the
+// static layer cache, so every whole-layer render path shares both savings.
+PaintLayerImage renderPaintLayerImage(const Document &document,
+    const Layer &layer,
+    int normalizedFrame,
+    const QSize &outputSize,
+    const PreviewScaleMapping *mapping,
+    RenderEngine::ScaledRenderStats *stats,
+    const std::atomic_bool *cancellation);
+
 // Renders the whole frame. `renderPaintLayer` produces one paint layer's
-// framebuffer; it is a template parameter so a caller can substitute a cached
-// or partially replayed layer without this file knowing how.
+// PaintLayerImage; it is a template parameter so a caller can substitute a
+// cached or partially replayed layer without this file knowing how.
 
 template <typename RenderPaintLayer>
 QImage renderLayerHierarchy(const Document &document,
@@ -272,13 +306,20 @@ QImage renderLayerHierarchy(const Document &document,
         }
 
         surfacePool.discardFreeSurfaces();
-        QImage layerImage = renderPaintLayer(layer);
-        if (layerImage.isNull())
+        PaintLayerImage layerImage = renderPaintLayer(layer);
+        if (layerImage.transparent)
+        {
+            // A transparent clipping base hides everything clipped to it,
+            // which a missing base already does.
+            ++operationIndex;
+            continue;
+        }
+        if (layerImage.image.isNull())
         {
             return {};
         }
-        surfacePool.trackExternal(layerImage);
-        composeLayer(frame, layer, std::move(layerImage));
+        surfacePool.trackExternal(layerImage.image);
+        composeLayer(frame, layer, std::move(layerImage.image));
         ++operationIndex;
     }
 

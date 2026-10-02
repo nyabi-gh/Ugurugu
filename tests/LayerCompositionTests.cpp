@@ -284,6 +284,7 @@ private slots:
             child.name = QStringLiteral("Child %1").arg(index);
             child.parentGroupId = group.id;
             child.initialCanvasSize = document.size;
+            child.strokes.append(layerInk(document.size));
             document.layers.append(group);
             document.layers.append(child);
             if (document.activeLayerId.isNull())
@@ -303,6 +304,78 @@ private slots:
         QVERIFY(stats.hierarchySurfaceReuses > 0);
         QCOMPARE(stats.hierarchyPeakSurfaceCount,
             stats.hierarchyPlannedPeakSurfaceCount);
+    }
+
+    void composesEmptyPaintLayersWithoutSurfaces()
+    {
+        const QSize size(6, 5);
+        Document document = Document::createDefault(size);
+        document.background = QColor(30, 45, 65, 240);
+        document.layers.clear();
+
+        Layer inked;
+        inked.name = QStringLiteral("Inked");
+        inked.initialCanvasSize = size;
+        inked.strokes.append(layerInk(size));
+
+        Layer emptyBase;
+        emptyBase.name = QStringLiteral("Empty base");
+        emptyBase.blendMode = LayerBlendMode::Multiply;
+        emptyBase.initialCanvasSize = size;
+
+        Layer clippedToEmpty;
+        clippedToEmpty.name = QStringLiteral("Clipped to empty");
+        clippedToEmpty.clipToLayerBelow = true;
+        clippedToEmpty.initialCanvasSize = size;
+        clippedToEmpty.strokes.append(layerInk(size));
+
+        Layer emptyClipped;
+        emptyClipped.name = QStringLiteral("Empty clipped");
+        emptyClipped.clipToLayerBelow = true;
+        emptyClipped.blendMode = LayerBlendMode::Screen;
+        emptyClipped.initialCanvasSize = size;
+
+        document.layers = {inked, emptyBase, clippedToEmpty, emptyClipped};
+        document.activeLayerId = inked.id;
+        QVERIFY(!DocumentSerializer::toJson(document).isEmpty());
+
+        // The reference composes a real transparent surface for every empty
+        // layer, which is what the renderer used to allocate.
+        QHash<QUuid, QImage> rasters;
+        QImage transparent(size, QImage::Format_ARGB32_Premultiplied);
+        transparent.fill(Qt::transparent);
+        for (const Layer &layer : document.layers)
+        {
+            QImage raster = transparent;
+            if (!layer.strokes.isEmpty())
+            {
+                QVERIFY(RenderEngine::renderStrokesOnLayer(
+                    raster, document, layer.strokes, 0, size));
+            }
+            rasters.insert(layer.id, raster);
+        }
+        const QImage expected =
+            referenceHierarchyComposition(document, rasters, size);
+        QVERIFY(!expected.isNull());
+
+        RenderEngine::ScaledRenderStats stats;
+        const QImage actual = RenderEngine::renderScaled(document,
+            0,
+            size,
+            RenderEngine::ScaledRenderMode::NativeExact,
+            &stats);
+        QCOMPARE(actual, expected);
+
+        RenderEngine::ScaledRenderStats previewStats;
+        const QImage preview = RenderEngine::renderScaled(document,
+            0,
+            QSize(3, 3),
+            RenderEngine::ScaledRenderMode::DisplayPreview,
+            &previewStats);
+        QVERIFY(!preview.isNull());
+        // The root and the one inked layer; neither empty layer nor the
+        // layer clipped to an empty base needs a surface.
+        QCOMPARE(previewStats.hierarchyPeakSurfaceCount, 2);
     }
 
     void includesHierarchyTransientSurfacesInFourKPreviewBudget()

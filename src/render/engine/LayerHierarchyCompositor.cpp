@@ -8,6 +8,7 @@
 #include "render/ImageResampler.hpp"
 #include "render/engine/DisplayScaleReplay.hpp"
 #include "render/engine/LayerOperationReplay.hpp"
+#include "render/engine/StaticLayerCache.hpp"
 
 #include <QHash>
 #include <QPainterPath>
@@ -43,6 +44,75 @@ void prepareLayerComposition(
     painter.setOpacity(std::clamp(opacity, 0.0, 1.0));
 }
 
+PaintLayerImage renderPaintLayerImage(const Document &document,
+    const Layer &layer,
+    int normalizedFrame,
+    const QSize &outputSize,
+    const PreviewScaleMapping *mapping,
+    RenderEngine::ScaledRenderStats *stats,
+    const std::atomic_bool *cancellation)
+{
+    if (layer.strokes.isEmpty())
+    {
+        return PaintLayerImage::empty();
+    }
+    const int frameCount = std::max(1, document.animationFrames);
+    const QSize initialSize = layer.initialCanvasSize.isValid()
+                                  ? layer.initialCanvasSize
+                                  : DocumentOperations::initialCanvasSize(
+                                        layer.strokes, document.size);
+    const Document layerDocument = documentForLayer(document, layer);
+    const auto render = [&]() -> QImage
+    {
+        if (mapping)
+        {
+            QImage displayLayer;
+            if (!renderLayerOperationsAtDisplayScale(displayLayer,
+                    layerDocument,
+                    layer.strokes,
+                    normalizedFrame,
+                    frameCount,
+                    initialSize,
+                    *mapping,
+                    stats,
+                    cancellation))
+            {
+                return {};
+            }
+            return displayLayer;
+        }
+        QImage native;
+        if (!renderLayerOperations(native,
+                layerDocument,
+                layer.strokes,
+                normalizedFrame,
+                frameCount,
+                initialSize,
+                cancellation))
+        {
+            return {};
+        }
+        return native.size() == outputSize ? native
+                                           : native.scaled(outputSize,
+                                                 Qt::IgnoreAspectRatio,
+                                                 Qt::FastTransformation);
+    };
+    if (!isLayerFrameInvariant(layerDocument, layer))
+    {
+        return render();
+    }
+    const StaticLayerCache::Key key{layer.id,
+        outputSize,
+        document.size,
+        initialSize,
+        mapping != nullptr,
+        frameCount,
+        layerDocument.wobbleAmount,
+        layerDocument.motion};
+    return StaticLayerCache::raster(
+        layerDocument, layer, key, render, cancellation);
+}
+
 QImage renderAtDisplayScale(const Document &document,
     int frameIndex,
     const QSize &outputSize,
@@ -63,33 +133,13 @@ QImage renderAtDisplayScale(const Document &document,
         ((frameIndex % frameCount) + frameCount) % frameCount;
     const auto renderPaintLayer = [&](const Layer &layer)
     {
-        if (layer.strokes.isEmpty())
-        {
-            QImage empty(outputSize, QImage::Format_ARGB32_Premultiplied);
-            if (!empty.isNull())
-            {
-                empty.fill(Qt::transparent);
-            }
-            return empty;
-        }
-        const QSize initialSize = layer.initialCanvasSize.isValid()
-                                      ? layer.initialCanvasSize
-                                      : DocumentOperations::initialCanvasSize(
-                                            layer.strokes, document.size);
-        QImage layerImage;
-        if (!renderLayerOperationsAtDisplayScale(layerImage,
-                documentForLayer(document, layer),
-                layer.strokes,
-                normalizedFrame,
-                frameCount,
-                initialSize,
-                mapping,
-                stats,
-                cancellation))
-        {
-            return QImage();
-        }
-        return layerImage;
+        return renderPaintLayerImage(document,
+            layer,
+            normalizedFrame,
+            outputSize,
+            &mapping,
+            stats,
+            cancellation);
     };
     return renderLayerHierarchy(document,
         outputSize,
@@ -115,41 +165,13 @@ QImage renderAtSize(const Document &document,
 
     const auto renderPaintLayer = [&](const Layer &layer)
     {
-        if (layer.strokes.isEmpty())
-        {
-            QImage empty(outputSize, QImage::Format_ARGB32_Premultiplied);
-            if (!empty.isNull())
-            {
-                empty.fill(Qt::transparent);
-            }
-            return empty;
-        }
-
-        QImage nativeLayer;
-        const QSize initialSize = layer.initialCanvasSize.isValid()
-                                      ? layer.initialCanvasSize
-                                      : DocumentOperations::initialCanvasSize(
-                                            layer.strokes, document.size);
-        if (!renderLayerOperations(nativeLayer,
-                documentForLayer(document, layer),
-                layer.strokes,
-                normalizedFrame,
-                frameCount,
-                initialSize,
-                cancellation))
-        {
-            return QImage();
-        }
-        QImage layerImage = nativeLayer.size() == outputSize
-                                ? nativeLayer
-                                : nativeLayer.scaled(outputSize,
-                                      Qt::IgnoreAspectRatio,
-                                      Qt::FastTransformation);
-        if (layerImage.isNull())
-        {
-            return QImage();
-        }
-        return layerImage;
+        return renderPaintLayerImage(document,
+            layer,
+            normalizedFrame,
+            outputSize,
+            nullptr,
+            nullptr,
+            cancellation);
     };
     return renderLayerHierarchy(document,
         outputSize,
@@ -203,18 +225,18 @@ QImage renderRegion(const Document &document,
             .toAlignedRect()
             .adjusted(-2, -2, 2, 2);
 
-    const auto renderPaintLayer = [&](const Layer &layer)
+    const auto renderPaintLayer = [&](const Layer &layer) -> PaintLayerImage
     {
+        if (layer.strokes.isEmpty())
+        {
+            return PaintLayerImage::empty();
+        }
         QImage region(outputRegion.size(), QImage::Format_ARGB32_Premultiplied);
         if (region.isNull())
         {
             return QImage();
         }
         region.fill(Qt::transparent);
-        if (layer.strokes.isEmpty())
-        {
-            return region;
-        }
         const Document layerDocument = documentForLayer(document, layer);
         const QSize initialSize = layer.initialCanvasSize.isValid()
                                       ? layer.initialCanvasSize

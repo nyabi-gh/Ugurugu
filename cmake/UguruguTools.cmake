@@ -201,3 +201,15 @@ target_link_libraries(
     ugurugu_core
 )
 ugurugu_target_defaults(ugurugu_engine_digest_probe)
+
+add_executable(
+    ugurugu_render_benchmark
+    EXCLUDE_FROM_ALL
+    tools/RenderBenchmark.cpp
+)
+target_link_libraries(
+    ugurugu_render_benchmark
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_render_benchmark)

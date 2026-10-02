@@ -191,6 +191,17 @@ inline QImage patternedSurface(
     return image;
 }
 
+// Inked layers are what the hierarchy budget is sized for; an empty paint
+// layer composes without a surface.
+inline Stroke layerInk(const QSize &size)
+{
+    return makeStroke(StrokeMode::Paint,
+        QColor(220, 90, 40),
+        std::clamp(size.width() * 0.5, 2.0, 32.0),
+        0x51ULL,
+        {QPointF(0.0, 0.0), QPointF(size.width(), size.height())});
+}
+
 inline Document adversarialClippedHierarchy(const QSize &size, int groupCount)
 {
     Document document = Document::createDefault(size);
@@ -205,6 +216,7 @@ inline Document adversarialClippedHierarchy(const QSize &size, int groupCount)
         base.name = QStringLiteral("Base %1").arg(depth);
         base.parentGroupId = parentGroupId;
         base.initialCanvasSize = size;
+        base.strokes.append(layerInk(size));
         document.layers.append(base);
         if (document.activeLayerId.isNull())
         {
@@ -217,6 +229,7 @@ inline Document adversarialClippedHierarchy(const QSize &size, int groupCount)
             clipped.parentGroupId = parentGroupId;
             clipped.clipToLayerBelow = true;
             clipped.initialCanvasSize = size;
+            clipped.strokes.append(layerInk(size));
             document.layers.append(clipped);
             break;
         }

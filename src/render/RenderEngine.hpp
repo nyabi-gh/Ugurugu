@@ -137,6 +137,12 @@ public:
         bool valid = false;
     };
 
+    // Rasters of layers that look the same on every frame are kept across
+    // frames, renders and document snapshots within this many bytes; 0
+    // disables the cache.
+    static void setStaticLayerCacheBudget(qint64 bytes);
+    static void clearStaticLayerCache();
+
     static QImage render(const Document &document, int frameIndex);
     // cancellation, where accepted, is a read-only flag observed at layer and
     // framebuffer-operation boundaries. A render that observes it set returns

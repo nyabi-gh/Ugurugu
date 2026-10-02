@@ -19,6 +19,7 @@ struct MemoryBudget final
     static constexpr qint64 serializationCacheBytes = 64LL * 1024LL * 1024LL;
     static constexpr qint64 rasterAssetEncodedBytes = 72LL * 1024LL * 1024LL;
     static constexpr qint64 rasterDecodeCacheBytes = 128LL * 1024LL * 1024LL;
+    static constexpr qint64 staticLayerCacheBytes = 256LL * 1024LL * 1024LL;
     static constexpr qint64 projectSerializationWorkingBytes =
         512LL * 1024LL * 1024LL;
     static constexpr quint64 animationExportWorkingBytes =
@@ -47,12 +48,14 @@ static_assert(
     MemoryBudget::historyResidentBytes + MemoryBudget::serializationCacheBytes
         + MemoryBudget::rasterAssetEncodedBytes
         + MemoryBudget::rasterDecodeCacheBytes
+        + MemoryBudget::staticLayerCacheBytes
         + static_cast<qint64>(MemoryBudget::maximumPreviewCacheKiB) * 1024LL
     <= MemoryBudget::residentTargetBytes);
 static_assert(
     MemoryBudget::historyResidentBytes + MemoryBudget::serializationCacheBytes
         + MemoryBudget::rasterAssetEncodedBytes
         + MemoryBudget::projectSerializationWorkingBytes
+        + MemoryBudget::staticLayerCacheBytes
         + static_cast<qint64>(MemoryBudget::maximumPreviewCacheKiB) * 1024LL
     <= MemoryBudget::residentTargetBytes);
 static_assert(MemoryBudget::minimumPreviewCacheKiB
