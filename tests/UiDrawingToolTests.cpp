@@ -1128,7 +1128,8 @@ private slots:
         canvas.setTool(CanvasWidget::Tool::Bucket);
         QTRY_VERIFY_WITH_TIMEOUT(
             CanvasWidgetTestAccess::toolReferenceReady(canvas), 5000);
-        const qint64 prepared = CanvasWidgetTestAccess::toolReferenceKey(canvas);
+        const qint64 prepared =
+            CanvasWidgetTestAccess::toolReferenceKey(canvas);
 
         const auto click = [&canvas](const QPointF &documentPosition)
         {
@@ -1148,8 +1149,7 @@ private slots:
         // a reference for the new document replaces it.
         QTRY_VERIFY_WITH_TIMEOUT(
             CanvasWidgetTestAccess::toolReferenceReady(canvas)
-                && CanvasWidgetTestAccess::toolReferenceKey(canvas)
-                       != prepared,
+                && CanvasWidgetTestAccess::toolReferenceKey(canvas) != prepared,
             5000);
 
         // A wall added right before the click must be in the image the fill

@@ -989,8 +989,8 @@ void CanvasWidget::pickColorAt(const QPointF &widgetPosition)
     {
         return;
     }
-    const int x =
-        std::clamp(static_cast<int>(documentPosition.x()), 0, frame.width() - 1);
+    const int x = std::clamp(
+        static_cast<int>(documentPosition.x()), 0, frame.width() - 1);
     const int y = std::clamp(
         static_cast<int>(documentPosition.y()), 0, frame.height() - 1);
     QColor color = frame.pixelColor(x, y);

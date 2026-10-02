@@ -280,8 +280,8 @@ void CanvasWidget::refreshCanvasShadow(const QPolygonF &canvasPolygon)
     // down, plus a pixel of antialiasing.
     constexpr qreal margin = 17.0;
     const qreal ratio = devicePixelRatioF();
-    const QRectF bounds = canvasPolygon.boundingRect().adjusted(
-        -margin, -margin, margin, margin);
+    const QRectF bounds =
+        canvasPolygon.boundingRect().adjusted(-margin, -margin, margin, margin);
     const QPolygonF outline = canvasPolygon.translated(-bounds.topLeft());
     const QSize pixelSize = (bounds.size() * ratio).toSize();
     m_shadowCacheOrigin = bounds.topLeft();

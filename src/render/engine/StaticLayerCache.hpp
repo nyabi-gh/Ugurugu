@@ -16,8 +16,8 @@ namespace render_detail
 {
 
 // True when every frame of the layer rasterizes to the same pixels: no stroke
-// wobbles, no broken-line visibility cycle and no frame-seeded brush jitter. `document`
-// is the layer's own document from documentForLayer().
+// wobbles, no broken-line visibility cycle and no frame-seeded brush jitter.
+// `document` is the layer's own document from documentForLayer().
 bool isLayerFrameInvariant(const Document &document, const Layer &layer);
 
 // Process-wide store of frame-invariant layer rasters, shared by every frame,

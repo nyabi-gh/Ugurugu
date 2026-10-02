@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-#include "support/RenderTestHelpers.hpp"
-#include "support/RenderTestSuites.hpp"
-
 #include "app/MemoryBudget.hpp"
 #include "render/engine/StaticLayerCache.hpp"
+#include "support/RenderTestHelpers.hpp"
+#include "support/RenderTestSuites.hpp"
 
 #include <QtConcurrentMap>
 

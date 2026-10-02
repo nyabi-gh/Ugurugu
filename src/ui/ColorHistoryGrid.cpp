@@ -6,8 +6,8 @@
 #include "ui/Theme.hpp"
 
 #include <QGridLayout>
-#include <QPainter>
 #include <QPaintEvent>
+#include <QPainter>
 #include <QResizeEvent>
 #include <QSettings>
 #include <QSizePolicy>
@@ -234,8 +234,7 @@ void ColorHistoryGrid::refreshButtons()
             button->setEnabled(hasColor);
         }
         button->setSwatch(color, hasColor && color == m_activeColor);
-        const QString name =
-            hasColor ? color.name(QColor::HexArgb) : QString();
+        const QString name = hasColor ? color.name(QColor::HexArgb) : QString();
         if (button->toolTip() != name)
         {
             button->setToolTip(name);

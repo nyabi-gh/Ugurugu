@@ -652,8 +652,8 @@ const RenderEngine::LayerRasterFrame &CanvasWidget::previewLayerRasters(
         // Room for the rasters comes out of the frame cache, but only as much
         // as they need; discarding every cached frame made the whole
         // animation re-render once drawing stopped.
-        const qint64 frameBytes = static_cast<qint64>(renderSize.width())
-                                  * renderSize.height() * 4;
+        const qint64 frameBytes =
+            static_cast<qint64>(renderSize.width()) * renderSize.height() * 4;
         m_frameCache.setMaxCost(PreviewRenderPolicy::frameCacheCostKiB(
             previewSurfaceUsage().pinnedBytes()
                 + estimatedLayerRasterBytes(renderSize),

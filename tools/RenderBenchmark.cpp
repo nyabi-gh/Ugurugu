@@ -119,7 +119,8 @@ int main(int argc, char **argv)
     {
         std::fprintf(stderr,
             "usage: %s <document.ugu> [--size WxH] [--static-layers N] "
-            "[--empty-layers N] [--strokes-per-layer N] [--rounds N] [--exact] [--edit] "
+            "[--empty-layers N] [--strokes-per-layer N] [--rounds N] [--exact] "
+            "[--edit] "
             "[--static-cache-mib N]\n",
             argv[0]);
         return 2;
@@ -169,10 +170,10 @@ int main(int argc, char **argv)
     }
     const QSize outputSize =
         options.outputSize.isValid() ? options.outputSize : document.size;
-    const auto mode = options.nativeExact
-                          ? ugurugu::RenderEngine::ScaledRenderMode::NativeExact
-                          : ugurugu::RenderEngine::ScaledRenderMode::
-                                DisplayPreview;
+    const auto mode =
+        options.nativeExact
+            ? ugurugu::RenderEngine::ScaledRenderMode::NativeExact
+            : ugurugu::RenderEngine::ScaledRenderMode::DisplayPreview;
     const int frameCount = std::max(1, document.animationFrames);
 
     std::printf("document %dx%d layers=%lld frames=%d output=%dx%d mode=%s "

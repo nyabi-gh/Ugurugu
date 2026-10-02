@@ -178,8 +178,7 @@ public:
     static bool toolReferenceReady(const CanvasWidget &canvas)
     {
         return canvas.m_toolReferenceReady
-               && canvas.matchesToolReference(
-                   canvas.preparedToolReference());
+               && canvas.matchesToolReference(canvas.preparedToolReference());
     }
 
     static qint64 toolReferenceKey(const CanvasWidget &canvas)

@@ -1241,16 +1241,16 @@ private slots:
             CanvasWidgetTestAccess::activeStrokePreviewIncludesStroke(canvas));
         QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
             synchronousRenders);
-        QCOMPARE(CanvasWidgetTestAccess::cachedFrameCount(canvas), cachedFrames);
+        QCOMPARE(
+            CanvasWidgetTestAccess::cachedFrameCount(canvas), cachedFrames);
 
         Document expectedDocument =
             CanvasWidgetTestAccess::displayDocument(canvas);
         expectedDocument.layer(expectedDocument.activeLayerId)
             ->strokes.append(CanvasWidgetTestAccess::activeStroke(canvas));
         QCOMPARE(actual.image,
-            RenderEngine::renderScaled(expectedDocument,
-                canvas.currentFrame(),
-                actual.image.size()));
+            RenderEngine::renderScaled(
+                expectedDocument, canvas.currentFrame(), actual.image.size()));
         QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, end);
     }
 
