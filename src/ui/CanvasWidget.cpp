@@ -104,6 +104,9 @@ CanvasWidget::CanvasWidget(DocumentController *controller, QWidget *parent)
             // document, and the clear removes that too.
             cancelActiveInteraction();
             clearSelection();
+            // The outgoing document's pixels must not stand in for the new
+            // one while its first frame renders.
+            m_lastDisplayedFrame = {};
         });
     connect(m_controller,
         &DocumentController::selectionHistoryStateRequested,

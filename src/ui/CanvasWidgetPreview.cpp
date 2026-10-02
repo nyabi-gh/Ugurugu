@@ -186,6 +186,39 @@ QImage CanvasWidget::frameImage(int frame)
     return image;
 }
 
+bool CanvasWidget::backgroundRenderWillDeliver(
+    int frame, const QSize &renderSize) const
+{
+    if (m_interactionFrameDesiredFrame == frame
+        && m_interactionFrameDesiredSize == renderSize)
+    {
+        return true;
+    }
+    if (m_interactionFrameWarmupActive && m_interactionFrameWorkerFrame == frame
+        && m_interactionFrameWorkerSize == renderSize
+        && m_interactionFrameCancellation
+        && !m_interactionFrameCancellation->load(std::memory_order_relaxed))
+    {
+        return true;
+    }
+    if (m_frameCacheWarmupScheduled)
+    {
+        return true;
+    }
+    return m_frameCacheWarmupActive
+           && m_frameCacheWarmupRenderSize == renderSize
+           && m_frameCacheWarmupFrames.contains(frame);
+}
+
+void CanvasWidget::resumeDeferredDisplay()
+{
+    if (m_displayAwaitsBackgroundFrame)
+    {
+        m_displayAwaitsBackgroundFrame = false;
+        requestDisplayUpdate();
+    }
+}
+
 QImage CanvasWidget::activeStrokePreview(
     const Document &document, const QSize &renderSize, bool &resolved)
 {
@@ -535,7 +568,25 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
     }
     if (displayedFrame.isNull())
     {
-        displayedFrame = frameImage(m_currentFrame);
+        // Rendering here while a worker renders the same frame doubled the
+        // work and blocked input for a whole render. The frame already on
+        // screen stays up instead, and delivery repaints.
+        const bool cached = !m_frameCacheStaleFrames.contains(m_currentFrame)
+                            && m_frameCache.object(m_currentFrame);
+        if (!cached && m_lastDisplayedFrame.size() == renderSize
+            && backgroundRenderWillDeliver(m_currentFrame, renderSize))
+        {
+            displayedFrame = m_lastDisplayedFrame;
+            m_displayAwaitsBackgroundFrame = true;
+        }
+        else
+        {
+            displayedFrame = frameImage(m_currentFrame);
+        }
+    }
+    if (!displayedFrame.isNull())
+    {
+        m_lastDisplayedFrame = displayedFrame;
     }
 
     DisplayedFrame result;
@@ -923,6 +974,7 @@ void CanvasWidget::finishInteractionFrameWarmup()
     {
         QTimer::singleShot(0, this, &CanvasWidget::startInteractionFrameWarmup);
     }
+    resumeDeferredDisplay();
 }
 
 void CanvasWidget::cancelInteractionFrameWarmup()
@@ -945,6 +997,7 @@ void CanvasWidget::cancelInteractionFrameWarmup()
         m_interactionFrameWorkerGeneration = 0;
     }
     updateFrameCacheBudget();
+    resumeDeferredDisplay();
 }
 
 void CanvasWidget::clearPreparedInteractionFrame()
@@ -1218,12 +1271,14 @@ void CanvasWidget::cancelFrameCacheWarmup()
     }
     ++m_frameCacheWarmupGeneration;
     m_frameCacheWarmupActive = false;
+    m_frameCacheWarmupScheduled = false;
     m_frameCacheWarmupCancellation.reset();
     m_frameCacheWarmupDocument.reset();
     m_frameCacheWarmupFrames.clear();
     m_frameCacheWarmupRenderSize = {};
     m_frameCacheWarmupPatchBounds = {};
     m_frameCacheWarmupCursor = 0;
+    resumeDeferredDisplay();
 }
 
 void CanvasWidget::scheduleFrameCacheWarmup()
@@ -1236,13 +1291,20 @@ void CanvasWidget::scheduleFrameCacheWarmup()
         return;
     }
     const quint64 generation = m_frameCacheWarmupGeneration;
+    m_frameCacheWarmupScheduled = !m_frameCacheWarmupActive;
     QTimer::singleShot(0,
         this,
         [this, generation]()
         {
-            if (generation != m_frameCacheWarmupGeneration || !m_animating
+            if (generation != m_frameCacheWarmupGeneration)
+            {
+                return;
+            }
+            m_frameCacheWarmupScheduled = false;
+            if (m_frameCacheWarmupActive || !m_animating
                 || !m_wobbleAnimationEnabled || m_drawing)
             {
+                resumeDeferredDisplay();
                 return;
             }
 
@@ -1251,6 +1313,7 @@ void CanvasWidget::scheduleFrameCacheWarmup()
                 std::max(1, m_controller->document().animationFrames);
             if (renderSize.isEmpty() || frameCount <= 1)
             {
+                resumeDeferredDisplay();
                 return;
             }
             if (m_cachedRenderSize != renderSize)
@@ -1282,6 +1345,7 @@ void CanvasWidget::scheduleFrameCacheWarmup()
                 && !m_frameCacheRefreshOutputBounds.isEmpty();
             if (!patchMode && missingFrames.isEmpty())
             {
+                resumeDeferredDisplay();
                 return;
             }
 
@@ -1416,6 +1480,10 @@ void CanvasWidget::renderNextFrameCacheWarmup()
                         PreviewRenderPolicy::cacheCostKiB(image.sizeInBytes());
                     m_frameCache.insert(frame, new QImage(image), cost);
                     m_frameCacheStaleFrames.remove(frame);
+                }
+                if (frame == m_currentFrame)
+                {
+                    resumeDeferredDisplay();
                 }
                 QTimer::singleShot(
                     0, this, &CanvasWidget::renderNextFrameCacheWarmup);

@@ -2118,6 +2118,60 @@ private slots:
         QVERIFY(!CanvasWidgetTestAccess::usingGpuDisplay(canvas));
     }
 
+    void rendersAnInvalidatedFrameOnceAndOffTheGuiThread_data()
+    {
+        QTest::addColumn<bool>("playing");
+        QTest::newRow("paused") << false;
+        QTest::newRow("playing") << true;
+    }
+
+    void rendersAnInvalidatedFrameOnceAndOffTheGuiThread()
+    {
+        QFETCH(bool, playing);
+        Document document = animatedDocument();
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(384, 288);
+        canvas.setAnimating(playing);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        if (playing)
+        {
+            CanvasWidgetTestAccess::stopAnimationTimer(canvas);
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas)
+                && !CanvasWidgetTestAccess::interactionFrameWarmupActive(
+                    canvas),
+            5000);
+        const auto before =
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QVERIFY(!before.image.isNull());
+        const quint64 synchronousRenders =
+            CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas);
+
+        controller.setLayerOpacity(controller.document().activeLayerId, 0.5);
+        const auto held = CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QCOMPARE(held.image, before.image);
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
+
+        const int frame = canvas.currentFrame();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCachedFrame(canvas, frame), 5000);
+        const auto delivered =
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
+        QCOMPARE(delivered.image,
+            RenderEngine::renderScaled(
+                CanvasWidgetTestAccess::displayDocument(canvas),
+                frame,
+                delivered.image.size()));
+    }
+
     void reportsRegionalDirtyBoundsForTheDisplayedFrame()
     {
         // Large enough that the preview render spans several 256-pixel
@@ -2170,11 +2224,20 @@ private slots:
         QApplication::processEvents();
 
         canvas.repaint();
+        const quint64 synchronousRenders =
+            CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas);
+        // Hidden so no paint consumes the delivered frame before the resolve
+        // below observes it.
+        canvas.hide();
         canvas.setCurrentFrame(1);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCachedFrame(canvas, 1), 5000);
         const auto nextFrame =
             CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
         QVERIFY(!nextFrame.image.isNull());
         QCOMPARE(nextFrame.dirtyBounds, nextFrame.image.rect());
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
     }
 
     void zoomsWithPanModifierCtrlDrag()

@@ -306,6 +306,8 @@ private:
     PreviewSurfaceUsage previewSurfaceUsage() const;
     void updateFrameCacheBudget();
     QImage frameImage(int frame);
+    bool backgroundRenderWillDeliver(int frame, const QSize &renderSize) const;
+    void resumeDeferredDisplay();
     void resetFrameCacheStorage();
     bool tryRegionalStrokeInvalidation(
         const QUuid &layerId, const QUuid &strokeId);
@@ -518,6 +520,7 @@ private:
     qsizetype m_frameCacheWarmupCursor = 0;
     quint64 m_frameCacheWarmupGeneration = 0;
     bool m_frameCacheWarmupActive = false;
+    bool m_frameCacheWarmupScheduled = false;
     int m_frameCacheWarmupWorkersRunning = 0;
     QThreadPool m_frameCacheWarmupPool;
     QImage m_colorPickFrame;
@@ -576,6 +579,10 @@ private:
     qint64 m_displayedFrameKey = 0;
     qint64 m_displayedFramePatchedKey = 0;
     QSize m_displayedFrameSize;
+    // The frame on screen, kept so a display waiting on a background render
+    // goes on showing it instead of rendering that frame on the GUI thread.
+    QImage m_lastDisplayedFrame;
+    bool m_displayAwaitsBackgroundFrame = false;
     QTimer m_animationTimer;
     QTimer m_selectionAnimationTimer;
     QTimer m_zoomRenderTimer;
