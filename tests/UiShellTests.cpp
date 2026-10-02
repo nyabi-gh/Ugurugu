@@ -631,6 +631,35 @@ private slots:
         QVERIFY(breakRange->isEnabled());
     }
 
+    void commitsTypedTimelineValuesOnce()
+    {
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(80, 60)));
+        controller.undoStack()->clear();
+        CanvasWidget canvas(&controller);
+        canvas.setAnimating(false);
+        TimelineBar timeline(&controller, &canvas);
+        timeline.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&timeline));
+        QSignalSpy changes(&controller, &DocumentController::documentChanged);
+
+        for (const char *name : {"framesSpin", "fpsSpin"})
+        {
+            QSpinBox *spin =
+                timeline.findChild<QSpinBox *>(QString::fromLatin1(name));
+            QVERIFY(spin);
+            spin->setFocus(Qt::OtherFocusReason);
+            spin->selectAll();
+            QTest::keyClicks(spin, QStringLiteral("24"));
+            QTest::keyClick(spin, Qt::Key_Return);
+        }
+        QCOMPARE(controller.document().animationFrames, 24);
+        QCOMPARE(qRound(controller.document().framesPerSecond), 24);
+        // One edit per field: the "2" typed on the way is never committed.
+        QCOMPARE(changes.count(), 2);
+        QCOMPARE(controller.undoStack()->count(), 2);
+    }
+
     void recordsUsedColorsWithoutRecordingPickerChanges()
     {
         const QString key = QStringLiteral("brush/colorHistory");

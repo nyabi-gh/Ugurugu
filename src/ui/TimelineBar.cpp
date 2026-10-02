@@ -109,6 +109,9 @@ void TimelineBar::buildLayout()
     m_framesSpin->setToolTip(tr("Animation frames"));
     m_framesSpin->setAlignment(Qt::AlignCenter);
     m_framesSpin->setFixedWidth(46);
+    // Both are document edits that discard every cached frame; typing "30"
+    // must not commit 3 frames on the way.
+    m_framesSpin->setKeyboardTracking(false);
     layout->addWidget(m_framesSpin);
 
     layout->addSpacing(4);
@@ -128,6 +131,7 @@ void TimelineBar::buildLayout()
         qRound(DocumentLimits::maximumFramesPerSecond));
     m_fpsSpin->setToolTip(tr("Playback speed (frames per second)"));
     m_fpsSpin->setAccessibleName(tr("Playback speed"));
+    m_fpsSpin->setKeyboardTracking(false);
     fpsLabel->setBuddy(m_fpsSpin);
     layout->addWidget(m_fpsSpin);
 
