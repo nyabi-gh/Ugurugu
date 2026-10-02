@@ -479,19 +479,7 @@ void CanvasWidget::computeWandSelection(
         std::clamp(
             static_cast<int>(documentPosition.y()), 0, size.height() - 1));
 
-    QImage referenceImage;
-    switch (m_wandReference)
-    {
-    case WandReference::ActiveLayer:
-        referenceImage = renderActiveLayerImage();
-        break;
-    case WandReference::ReferenceLayers:
-        referenceImage = renderReferenceLayersImage();
-        break;
-    case WandReference::AllVisibleLayers:
-        referenceImage = renderAllVisibleLayersImage();
-        break;
-    }
+    const QImage referenceImage = toolReferenceImage(wandToolReference());
     if (referenceImage.isNull())
     {
         if (combine == SelectionCombine::Replace)
@@ -572,19 +560,7 @@ void CanvasWidget::applyBucketFill(const QPointF &documentPosition)
         std::clamp(static_cast<int>(documentPosition.y()),
             0,
             document.size.height() - 1));
-    QImage referenceImage;
-    switch (m_wandReference)
-    {
-    case WandReference::ActiveLayer:
-        referenceImage = renderActiveLayerImage();
-        break;
-    case WandReference::ReferenceLayers:
-        referenceImage = renderReferenceLayersImage();
-        break;
-    case WandReference::AllVisibleLayers:
-        referenceImage = renderAllVisibleLayersImage();
-        break;
-    }
+    const QImage referenceImage = toolReferenceImage(wandToolReference());
     if (referenceImage.isNull())
     {
         if (m_wandReference == WandReference::ReferenceLayers)
@@ -1260,57 +1236,6 @@ QPointF CanvasWidget::clampedSelectionDelta(const QPointF &delta) const
         std::clamp(delta.y(),
             -minY,
             static_cast<qreal>(document.size.height()) - maxY));
-}
-
-QImage CanvasWidget::renderActiveLayerImage() const
-{
-    const Document document = displayDocument();
-    const Layer *layer = document.layer(document.activeLayerId);
-    if (!layer)
-    {
-        return {};
-    }
-    return RenderEngine::render(
-        DocumentOperations::isolatedLayerDocument(document, *layer),
-        m_currentFrame);
-}
-
-QImage CanvasWidget::renderReferenceLayersImage() const
-{
-    Document document = displayDocument();
-    if (!document.size.isValid())
-    {
-        return {};
-    }
-    bool hasVisibleReference = false;
-    for (Layer &layer : document.layers)
-    {
-        if (layer.kind != LayerKind::Paint)
-        {
-            continue;
-        }
-        if (!layer.reference)
-        {
-            layer.visible = false;
-            continue;
-        }
-        hasVisibleReference =
-            hasVisibleReference
-            || DocumentOperations::isLayerRenderable(document, layer);
-    }
-    if (!hasVisibleReference)
-    {
-        return {};
-    }
-    document.background = Qt::transparent;
-    return RenderEngine::render(document, m_currentFrame);
-}
-
-QImage CanvasWidget::renderAllVisibleLayersImage() const
-{
-    Document document = displayDocument();
-    document.background = Qt::transparent;
-    return RenderEngine::render(document, m_currentFrame);
 }
 
 void CanvasWidget::drawSelectionOverlay(

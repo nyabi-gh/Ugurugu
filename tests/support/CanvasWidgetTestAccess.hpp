@@ -175,6 +175,18 @@ public:
         canvas.endPan();
     }
 
+    static bool toolReferenceReady(const CanvasWidget &canvas)
+    {
+        return canvas.m_toolReferenceReady
+               && canvas.matchesToolReference(
+                   canvas.preparedToolReference());
+    }
+
+    static qint64 toolReferenceKey(const CanvasWidget &canvas)
+    {
+        return canvas.m_toolReferenceImage.cacheKey();
+    }
+
     static void stopAnimationTimer(CanvasWidget &canvas)
     {
         canvas.m_animationTimer.stop();

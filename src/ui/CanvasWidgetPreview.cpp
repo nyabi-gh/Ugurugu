@@ -1178,7 +1178,7 @@ PreviewSurfaceUsage CanvasWidget::previewSurfaceUsage() const
     {
         usage.composedPreviewBytes += m_activeStrokePreview.sizeInBytes();
     }
-    usage.colorPickBytes = m_colorPickFrame.sizeInBytes();
+    usage.colorPickBytes = m_toolReferenceImage.sizeInBytes();
     usage.strokeTileBytes =
         static_cast<qint64>(m_incrementalStrokeRenderer.cachedTileBytes());
     return usage;
@@ -1248,8 +1248,6 @@ bool CanvasWidget::tryRegionalStrokeInvalidation(
     // as the base the regional patches draw over.
     cancelFrameCacheWarmup();
     cancelInteractionFrameWarmup();
-    m_colorPickFrame = {};
-    m_colorPickFrameIndex = -1;
     m_previewSplit = {};
     m_previewSplitLayer = QUuid();
     m_previewSplitFrame = -1;
@@ -1282,6 +1280,7 @@ bool CanvasWidget::tryRegionalStrokeInvalidation(
     {
         requestInteractionFrameWarmup(m_currentFrame);
     }
+    prepareToolReference();
     return true;
 }
 
@@ -1291,8 +1290,6 @@ void CanvasWidget::invalidateFrames()
     cancelInteractionFrameWarmup();
     resetFrameCacheStorage();
     m_cachedRenderSize = {};
-    m_colorPickFrame = {};
-    m_colorPickFrameIndex = -1;
     m_previewSplit = {};
     m_previewSplitLayer = QUuid();
     m_previewSplitFrame = -1;
@@ -1327,6 +1324,7 @@ void CanvasWidget::invalidateFrames()
     {
         requestInteractionFrameWarmup(m_currentFrame);
     }
+    prepareToolReference();
 }
 
 void CanvasWidget::cancelFrameCacheWarmup()

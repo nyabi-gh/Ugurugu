@@ -4,6 +4,7 @@
 #include "brush/BrushPreset.hpp"
 #include "brush/EraserPreset.hpp"
 #include "document/DocumentLimits.hpp"
+#include "document/DocumentOperations.hpp"
 #include "document/SelectionOperation.hpp"
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
@@ -14,6 +15,7 @@
 #include <QKeyEvent>
 #include <QPainter>
 #include <QRandomGenerator>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
@@ -748,11 +750,220 @@ void CanvasWidget::endColorPick()
         return;
     }
     m_pickingColor = false;
-    m_colorPickFrame = {};
-    m_colorPickFrameIndex = -1;
-    updateFrameCacheBudget();
+    if (preparedToolReference() != ToolReference::Composite)
+    {
+        // An alt-pick replaced the tool's own reference with the composite.
+        cancelToolReference();
+        prepareToolReference();
+    }
     updateCursor();
     requestDisplayUpdate();
+}
+
+CanvasWidget::ToolReference CanvasWidget::wandToolReference() const
+{
+    switch (m_wandReference)
+    {
+    case WandReference::ActiveLayer:
+        return ToolReference::ActiveLayer;
+    case WandReference::ReferenceLayers:
+        return ToolReference::ReferenceLayers;
+    case WandReference::AllVisibleLayers:
+        return ToolReference::AllVisibleLayers;
+    }
+    return ToolReference::None;
+}
+
+CanvasWidget::ToolReference CanvasWidget::preparedToolReference() const
+{
+    switch (m_tool)
+    {
+    case Tool::Eyedropper:
+        return ToolReference::Composite;
+    case Tool::Wand:
+    case Tool::Bucket:
+        return wandToolReference();
+    default:
+        return ToolReference::None;
+    }
+}
+
+std::optional<Document> CanvasWidget::toolReferenceDocument(
+    ToolReference kind) const
+{
+    Document document = displayDocument();
+    switch (kind)
+    {
+    case ToolReference::None:
+        return std::nullopt;
+    case ToolReference::Composite:
+        return document;
+    case ToolReference::ActiveLayer:
+    {
+        const Layer *layer = document.layer(document.activeLayerId);
+        if (!layer)
+        {
+            return std::nullopt;
+        }
+        return DocumentOperations::isolatedLayerDocument(document, *layer);
+    }
+    case ToolReference::ReferenceLayers:
+    {
+        if (!document.size.isValid())
+        {
+            return std::nullopt;
+        }
+        bool hasVisibleReference = false;
+        for (Layer &layer : document.layers)
+        {
+            if (layer.kind != LayerKind::Paint)
+            {
+                continue;
+            }
+            if (!layer.reference)
+            {
+                layer.visible = false;
+                continue;
+            }
+            hasVisibleReference =
+                hasVisibleReference
+                || DocumentOperations::isLayerRenderable(document, layer);
+        }
+        if (!hasVisibleReference)
+        {
+            return std::nullopt;
+        }
+        document.background = Qt::transparent;
+        return document;
+    }
+    case ToolReference::AllVisibleLayers:
+        document.background = Qt::transparent;
+        return document;
+    }
+    return std::nullopt;
+}
+
+bool CanvasWidget::matchesToolReference(ToolReference kind) const
+{
+    const Document &document = m_controller->document();
+    const Document &source = m_toolReferenceSource;
+    return m_toolReferenceKind == kind && m_toolReferenceFrame == m_currentFrame
+           && m_toolReferenceWobble == m_wobbleAnimationEnabled
+           && source.layers.isSharedWith(document.layers)
+           && source.rasterAssets.isSharedWith(document.rasterAssets)
+           && source.size == document.size
+           && source.background == document.background
+           && source.animationFrames == document.animationFrames
+           && source.wobbleAmount == document.wobbleAmount
+           && source.motion == document.motion
+           && source.activeLayerId == document.activeLayerId;
+}
+
+QImage CanvasWidget::toolReferenceImage(ToolReference kind)
+{
+    if (matchesToolReference(kind))
+    {
+        if (!m_toolReferenceReady && m_toolReferenceWatcher.isRunning())
+        {
+            // The worker is already rendering exactly this image; finishing
+            // it is cheaper than starting the same render over here.
+            m_toolReferenceWatcher.waitForFinished();
+            finishToolReference();
+        }
+        if (m_toolReferenceReady)
+        {
+            return m_toolReferenceImage;
+        }
+    }
+    cancelToolReference();
+    const std::optional<Document> document = toolReferenceDocument(kind);
+    if (!document)
+    {
+        return {};
+    }
+    m_toolReferenceSource = m_controller->document();
+    m_toolReferenceWobble = m_wobbleAnimationEnabled;
+    m_toolReferenceFrame = m_currentFrame;
+    m_toolReferenceKind = kind;
+    m_toolReferenceImage = RenderEngine::render(*document, m_currentFrame);
+    m_toolReferenceReady = true;
+    updateFrameCacheBudget();
+    return m_toolReferenceImage;
+}
+
+void CanvasWidget::prepareToolReference()
+{
+    const ToolReference kind = preparedToolReference();
+    if (kind == ToolReference::None || m_animating)
+    {
+        if (kind == ToolReference::None)
+        {
+            cancelToolReference();
+        }
+        return;
+    }
+    if (matchesToolReference(kind)
+        && (m_toolReferenceReady || m_toolReferenceWatcher.isRunning()))
+    {
+        return;
+    }
+    cancelToolReference();
+    std::optional<Document> document = toolReferenceDocument(kind);
+    if (!document)
+    {
+        return;
+    }
+    m_toolReferenceSource = m_controller->document();
+    m_toolReferenceWobble = m_wobbleAnimationEnabled;
+    m_toolReferenceFrame = m_currentFrame;
+    m_toolReferenceKind = kind;
+    const auto cancellation = std::make_shared<std::atomic_bool>(false);
+    m_toolReferenceCancellation = cancellation;
+    const auto source = std::make_shared<const Document>(std::move(*document));
+    const int frame = m_currentFrame;
+    m_toolReferenceWatcher.setFuture(QtConcurrent::run(&m_toolReferencePool,
+        [source, frame, cancellation]()
+        {
+            return RenderEngine::renderScaled(*source,
+                frame,
+                source->size,
+                RenderEngine::ScaledRenderMode::NativeExact,
+                nullptr,
+                cancellation.get());
+        }));
+}
+
+void CanvasWidget::finishToolReference()
+{
+    const QFuture<QImage> future = m_toolReferenceWatcher.future();
+    if (m_toolReferenceReady || !m_toolReferenceCancellation
+        || m_toolReferenceCancellation->load(std::memory_order_relaxed)
+        || future.resultCount() == 0)
+    {
+        return;
+    }
+    m_toolReferenceImage = future.result();
+    m_toolReferenceReady = !m_toolReferenceImage.isNull();
+    m_toolReferenceCancellation.reset();
+    updateFrameCacheBudget();
+}
+
+void CanvasWidget::cancelToolReference()
+{
+    if (m_toolReferenceCancellation)
+    {
+        m_toolReferenceCancellation->store(true, std::memory_order_relaxed);
+        m_toolReferenceCancellation.reset();
+    }
+    m_toolReferenceSource = {};
+    m_toolReferenceKind = ToolReference::None;
+    m_toolReferenceFrame = -1;
+    m_toolReferenceReady = false;
+    if (!m_toolReferenceImage.isNull())
+    {
+        m_toolReferenceImage = {};
+        updateFrameCacheBudget();
+    }
 }
 
 void CanvasWidget::pickColorAt(const QPointF &widgetPosition)
@@ -764,27 +975,25 @@ void CanvasWidget::pickColorAt(const QPointF &widgetPosition)
     {
         return;
     }
-    if (m_colorPickFrame.isNull() || m_colorPickFrameIndex != m_currentFrame)
+    QImage frame;
+    if (hasPendingSelectionTransform())
     {
-        Document document = hasPendingSelectionTransform()
-                                ? displayDocumentWithPendingSelectionTransform()
-                                : displayDocument();
-        m_colorPickFrame = {};
-        m_colorPickFrame = RenderEngine::render(document, m_currentFrame);
-        m_colorPickFrameIndex = m_currentFrame;
-        updateFrameCacheBudget();
+        frame = RenderEngine::render(
+            displayDocumentWithPendingSelectionTransform(), m_currentFrame);
     }
-    if (m_colorPickFrame.isNull())
+    else
+    {
+        frame = toolReferenceImage(ToolReference::Composite);
+    }
+    if (frame.isNull())
     {
         return;
     }
-    const int x = std::clamp(static_cast<int>(documentPosition.x()),
-        0,
-        m_colorPickFrame.width() - 1);
-    const int y = std::clamp(static_cast<int>(documentPosition.y()),
-        0,
-        m_colorPickFrame.height() - 1);
-    QColor color = m_colorPickFrame.pixelColor(x, y);
+    const int x =
+        std::clamp(static_cast<int>(documentPosition.x()), 0, frame.width() - 1);
+    const int y = std::clamp(
+        static_cast<int>(documentPosition.y()), 0, frame.height() - 1);
+    QColor color = frame.pixelColor(x, y);
     if (color.alpha() == 0)
     {
         return;

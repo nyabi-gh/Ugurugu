@@ -154,6 +154,7 @@ CanvasWidget::CanvasWidget(DocumentController *controller, QWidget *parent)
                     requestInteractionFrameWarmup(m_currentFrame);
                 }
             }
+            prepareToolReference();
         });
     // Windows delivers coarse timers as WM_TIMER, which the message queue only
     // generates once nothing else is pending. A stroke keeps pointer packets
@@ -194,6 +195,11 @@ CanvasWidget::CanvasWidget(DocumentController *controller, QWidget *parent)
     m_frameCacheWarmupPool.setMaxThreadCount(
         std::clamp(QThread::idealThreadCount() - 2, 1, 8));
     m_interactionFramePool.setMaxThreadCount(1);
+    m_toolReferencePool.setMaxThreadCount(1);
+    connect(&m_toolReferenceWatcher,
+        &QFutureWatcher<QImage>::finished,
+        this,
+        &CanvasWidget::finishToolReference);
     connect(&m_interactionFrameWatcher,
         &QFutureWatcher<PreparedInteractionFrame>::finished,
         this,
@@ -209,6 +215,7 @@ CanvasWidget::~CanvasWidget()
 {
     cancelFrameCacheWarmup();
     cancelInteractionFrameWarmup();
+    cancelToolReference();
     cancelSelectionVisibilityEvaluation();
 }
 
@@ -948,6 +955,7 @@ void CanvasWidget::setTool(Tool tool)
     }
     m_tool = tool;
     emit toolChanged(tool);
+    prepareToolReference();
     updateCursor();
     requestDisplayUpdate();
 }
@@ -1258,6 +1266,7 @@ void CanvasWidget::setWandReference(WandReference reference)
     }
     m_wandReference = reference;
     emit wandReferenceChanged(reference);
+    prepareToolReference();
 }
 
 void CanvasWidget::setFillComparison(FillComparison comparison)
@@ -1600,6 +1609,7 @@ void CanvasWidget::setCurrentFrame(int frame)
     {
         requestInteractionFrameWarmup(normalized);
     }
+    prepareToolReference();
     emit currentFrameChanged(normalized);
     // Which strokes a selection can edit is resolved against the displayed
     // frame, so scrubbing changes the answer. Playback is excluded: it would

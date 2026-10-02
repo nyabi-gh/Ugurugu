@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 
 class QMouseEvent;
 class QPointingDevice;
@@ -454,9 +455,23 @@ private:
     bool flipSelection(bool horizontal);
     void updateSelectionActionBar();
     QPointF clampedSelectionDelta(const QPointF &delta) const;
-    QImage renderActiveLayerImage() const;
-    QImage renderReferenceLayersImage() const;
-    QImage renderAllVisibleLayersImage() const;
+    // The native-resolution image a pick, wand or bucket click reads.
+    enum class ToolReference
+    {
+        None,
+        Composite,
+        ActiveLayer,
+        ReferenceLayers,
+        AllVisibleLayers
+    };
+    ToolReference wandToolReference() const;
+    ToolReference preparedToolReference() const;
+    std::optional<Document> toolReferenceDocument(ToolReference kind) const;
+    bool matchesToolReference(ToolReference kind) const;
+    QImage toolReferenceImage(ToolReference kind);
+    void prepareToolReference();
+    void finishToolReference();
+    void cancelToolReference();
     void drawSelectionOverlay(QPainter &painter, const QTransform &transform);
 
     DocumentController *m_controller;
@@ -544,8 +559,18 @@ private:
     bool m_frameCacheWarmupScheduled = false;
     int m_frameCacheWarmupWorkersRunning = 0;
     QThreadPool m_frameCacheWarmupPool;
-    QImage m_colorPickFrame;
-    int m_colorPickFrameIndex = -1;
+    // One reference image, rendered ahead on a worker while a tool that
+    // reads it is active and kept for its exact inputs: the controller's
+    // document (compared by implicit sharing), wobble setting, frame and kind.
+    Document m_toolReferenceSource;
+    bool m_toolReferenceWobble = false;
+    int m_toolReferenceFrame = -1;
+    ToolReference m_toolReferenceKind = ToolReference::None;
+    QImage m_toolReferenceImage;
+    bool m_toolReferenceReady = false;
+    std::shared_ptr<std::atomic_bool> m_toolReferenceCancellation;
+    QFutureWatcher<QImage> m_toolReferenceWatcher;
+    QThreadPool m_toolReferencePool;
     RenderEngine::LayerSplitFrame m_previewSplit;
     QUuid m_previewSplitLayer;
     int m_previewSplitFrame = -1;

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "support/DocumentControllerTestAccess.hpp"
+#include "support/RenderTestHelpers.hpp"
 #include "support/UiTestHelpers.hpp"
 #include "support/UiTestSuites.hpp"
 #include "ui/TabletPressureRow.hpp"
@@ -1098,6 +1099,74 @@ private slots:
         rendered = RenderEngine::render(controller.document(), 0);
         QCOMPARE(rendered.pixelColor(50, 42), canvas.brushColor());
         QCOMPARE(rendered.pixelColor(20, 42), QColor(Qt::white));
+    }
+
+    void fillsFromAReferencePreparedOffTheGuiThread()
+    {
+        Document document = Document::createDefault(QSize(120, 90));
+        document.animationFrames = 4;
+        document.wobbleAmount = 0.0;
+        const QUuid layerId = document.activeLayerId;
+        document.layers.first().strokes.append(makeStroke(StrokeMode::Paint,
+            Qt::black,
+            3.0,
+            0x71ULL,
+            {QPointF(20.0, 20.0),
+                QPointF(100.0, 20.0),
+                QPointF(100.0, 70.0),
+                QPointF(20.0, 70.0),
+                QPointF(20.0, 20.0)}));
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(400, 320);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        canvas.setBrushColor(QColor(220, 30, 40));
+        canvas.setTool(CanvasWidget::Tool::Bucket);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::toolReferenceReady(canvas), 5000);
+        const qint64 prepared = CanvasWidgetTestAccess::toolReferenceKey(canvas);
+
+        const auto click = [&canvas](const QPointF &documentPosition)
+        {
+            QTest::mouseClick(&canvas,
+                Qt::LeftButton,
+                Qt::NoModifier,
+                CanvasWidgetTestAccess::mapFromDocument(
+                    canvas, documentPosition)
+                    .toPoint());
+        };
+        click(QPointF(40.0, 45.0));
+        QCOMPARE(controller.document().layers.first().strokes.size(), 2);
+        QImage rendered = RenderEngine::render(controller.document(), 0);
+        QCOMPARE(rendered.pixelColor(80, 45), canvas.brushColor());
+        QCOMPARE(rendered.pixelColor(10, 45), QColor(Qt::white));
+        // The fill used the image prepared ahead and changed the document, so
+        // a reference for the new document replaces it.
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::toolReferenceReady(canvas)
+                && CanvasWidgetTestAccess::toolReferenceKey(canvas)
+                       != prepared,
+            5000);
+
+        // A wall added right before the click must be in the image the fill
+        // reads, whether or not the worker has finished rendering it.
+        QCOMPARE(controller.addStroke(layerId,
+                     makeStroke(StrokeMode::Paint,
+                         Qt::black,
+                         3.0,
+                         0x72ULL,
+                         {QPointF(60.0, 0.0), QPointF(60.0, 90.0)})),
+            DocumentController::AddStrokeResult::Added);
+        canvas.setBrushColor(QColor(30, 40, 220));
+        click(QPointF(14.0, 45.0));
+        rendered = RenderEngine::render(controller.document(), 0);
+        QCOMPARE(rendered.pixelColor(10, 45), canvas.brushColor());
+        QCOMPARE(rendered.pixelColor(80, 45), QColor(220, 30, 40));
+        QCOMPARE(rendered.pixelColor(110, 45), QColor(Qt::white));
     }
 
     void aHiddenGroupRefusesStrokesOnTheLayersInside()
