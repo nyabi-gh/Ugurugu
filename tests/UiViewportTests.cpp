@@ -1180,6 +1180,126 @@ private slots:
             &canvas, Qt::LeftButton, Qt::NoModifier, center + QPoint(30, 0));
     }
 
+    void preparesThePenDownFrameOffTheGuiThreadDuringPlayback_data()
+    {
+        QTest::addColumn<bool>("useLayerRasterFallback");
+
+        QTest::newRow("layer-split") << false;
+        QTest::newRow("layer-raster-fallback") << true;
+    }
+
+    void preparesThePenDownFrameOffTheGuiThreadDuringPlayback()
+    {
+        QFETCH(bool, useLayerRasterFallback);
+        const std::optional<Document> fixture =
+            animatedFramebufferHistoryDocument();
+        QVERIFY(fixture.has_value());
+        Document document = *fixture;
+        if (useLayerRasterFallback)
+        {
+            document.layers.last().blendMode = LayerBlendMode::Multiply;
+        }
+
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(384, 288);
+        canvas.setAnimateWhileDrawing(false);
+        canvas.setAnimating(true);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        CanvasWidgetTestAccess::stopAnimationTimer(canvas);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+        const qsizetype cachedFrames =
+            CanvasWidgetTestAccess::cachedFrameCount(canvas);
+        QCOMPARE(cachedFrames, controller.document().animationFrames);
+        const quint64 synchronousRenders =
+            CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas);
+
+        const QPoint start =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, QPointF(18.0, 34.0))
+                .toPoint();
+        const QPoint end =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, QPointF(78.0, 44.0))
+                .toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(&canvas, end, 1);
+        QVERIFY(CanvasWidgetTestAccess::drawing(canvas));
+        CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
+
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                canvas, canvas.currentFrame()),
+            5000);
+        const auto actual =
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QVERIFY(
+            CanvasWidgetTestAccess::activeStrokePreviewIncludesStroke(canvas));
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
+        QCOMPARE(CanvasWidgetTestAccess::cachedFrameCount(canvas), cachedFrames);
+
+        Document expectedDocument =
+            CanvasWidgetTestAccess::displayDocument(canvas);
+        expectedDocument.layer(expectedDocument.activeLayerId)
+            ->strokes.append(CanvasWidgetTestAccess::activeStroke(canvas));
+        QCOMPARE(actual.image,
+            RenderEngine::renderScaled(expectedDocument,
+                canvas.currentFrame(),
+                actual.image.size()));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, end);
+    }
+
+    void keepsCachedFramesWhenAStrokeNeedsLayerRasters()
+    {
+        const std::optional<Document> fixture =
+            animatedFramebufferHistoryDocument();
+        QVERIFY(fixture.has_value());
+        Document document = *fixture;
+        document.layers.last().blendMode = LayerBlendMode::Multiply;
+        QVERIFY(!RenderEngine::supportsLayerSplit(
+            document, document.activeLayerId));
+
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(384, 288);
+        canvas.setAnimating(false);
+        // Without wobble animation no worker prepares interaction frames, so
+        // the rasters are rendered on the GUI thread.
+        canvas.setWobbleAnimationEnabled(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        const int frame = canvas.currentFrame();
+        const int frameCount = controller.document().animationFrames;
+        for (int offset = 3; offset >= 0; --offset)
+        {
+            canvas.setCurrentFrame((frame + offset) % frameCount);
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        }
+        QCOMPARE(canvas.currentFrame(), frame);
+        QCOMPARE(CanvasWidgetTestAccess::cachedFrameCount(canvas), 4);
+
+        const QPoint start =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, QPointF(18.0, 34.0))
+                .toPoint();
+        const QPoint end =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, QPointF(78.0, 44.0))
+                .toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(&canvas, end, 1);
+        CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QVERIFY(
+            CanvasWidgetTestAccess::activeStrokePreviewIncludesStroke(canvas));
+        QCOMPARE(CanvasWidgetTestAccess::cachedFrameCount(canvas), 4);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, end);
+    }
+
     void avoidsSynchronousPreviewReplayWhileAnimatingADrawnStroke_data()
     {
         QTest::addColumn<bool>("useLayerRasterFallback");
@@ -1213,7 +1333,10 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         canvas.fitToWindow();
         QTRY_VERIFY_WITH_TIMEOUT(
-            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas)
+                && CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                    canvas, canvas.currentFrame()),
+            5000);
 
         const QPoint start =
             CanvasWidgetTestAccess::mapFromDocument(canvas, QPointF(18.0, 34.0))
@@ -2193,7 +2316,10 @@ private slots:
         }
         canvas.fitToWindow();
         QTRY_VERIFY_WITH_TIMEOUT(
-            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas)
+                && CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                    canvas, canvas.currentFrame()),
+            5000);
 
         canvas.repaint();
         const auto steady =
@@ -2275,6 +2401,10 @@ private slots:
         canvas.setAnimating(false);
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                canvas, canvas.currentFrame()),
+            5000);
 
         const auto widgetPoint = [&](const QPointF &documentPosition)
         {

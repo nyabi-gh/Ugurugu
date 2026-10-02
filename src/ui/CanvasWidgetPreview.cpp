@@ -129,7 +129,7 @@ QImage CanvasWidget::frameImage(int frame)
         image = RenderEngine::composeLayerRasterFrame(
             displayDocument(), m_previewLayerRasters, {}, {});
     }
-    if (image.isNull() && usesPreparedInteractionFrames())
+    if (image.isNull() && defersInteractionFrames())
     {
         requestInteractionFrameWarmup(frame);
         return {};
@@ -365,7 +365,7 @@ QImage CanvasWidget::activeStrokePreview(
     }
     if (preview.isNull())
     {
-        if (usesPreparedInteractionFrames())
+        if (defersInteractionFrames())
         {
             requestInteractionFrameWarmup(m_currentFrame);
             if (!m_frameCacheStaleFrames.contains(m_currentFrame))
@@ -562,7 +562,7 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
     if (displayedFrame.isNull() && !activeStrokePreviewResolved
         && ((m_drawing && !m_activeStroke.points.isEmpty())
             || hasPendingSelectionTransform())
-        && !usesPreparedInteractionFrames())
+        && !defersInteractionFrames())
     {
         displayedFrame = interactionPreview(document, renderSize);
     }
@@ -619,7 +619,7 @@ const RenderEngine::LayerSplitFrame &CanvasWidget::previewSplit(
         m_previewSplit = {};
         m_previewSplitLayer = QUuid();
         m_previewSplitFrame = -1;
-        if (usesPreparedInteractionFrames())
+        if (defersInteractionFrames())
         {
             requestInteractionFrameWarmup(m_currentFrame);
             updateFrameCacheBudget();
@@ -643,13 +643,21 @@ const RenderEngine::LayerRasterFrame &CanvasWidget::previewLayerRasters(
     {
         m_previewLayerRasters = {};
         m_previewLayerRasterFrame = -1;
-        if (usesPreparedInteractionFrames())
+        if (defersInteractionFrames())
         {
             requestInteractionFrameWarmup(m_currentFrame);
             updateFrameCacheBudget();
             return m_previewLayerRasters;
         }
-        resetFrameCacheStorage();
+        // Room for the rasters comes out of the frame cache, but only as much
+        // as they need; discarding every cached frame made the whole
+        // animation re-render once drawing stopped.
+        const qint64 frameBytes = static_cast<qint64>(renderSize.width())
+                                  * renderSize.height() * 4;
+        m_frameCache.setMaxCost(PreviewRenderPolicy::frameCacheCostKiB(
+            previewSurfaceUsage().pinnedBytes()
+                + estimatedLayerRasterBytes(renderSize),
+            frameBytes));
         const qint64 budgetBytes =
             static_cast<qint64>(PreviewRenderPolicy::maximumCacheKiB()) * 1024;
         ++m_synchronousPreviewRenderCount;
@@ -669,6 +677,39 @@ bool CanvasWidget::usesPreparedInteractionFrames() const
     return m_drawing && m_animateWhileDrawing && m_animating
            && m_wobbleAnimationEnabled
            && m_controller->document().animationFrames > 1;
+}
+
+bool CanvasWidget::defersInteractionFrames() const
+{
+    // Whenever the interaction worker can prepare the frame under a stroke,
+    // the GUI thread waits for it instead of rendering the same split itself.
+    return m_drawing && m_wobbleAnimationEnabled
+           && m_controller->document().animationFrames > 1
+           && m_interactionFrameFailedFrame != m_currentFrame;
+}
+
+qint64 CanvasWidget::estimatedLayerRasterBytes(const QSize &renderSize) const
+{
+    int surfaces = 0;
+    bool hasEmptyLayer = false;
+    for (const Layer &layer : m_controller->document().layers)
+    {
+        if (layer.kind != LayerKind::Paint)
+        {
+            continue;
+        }
+        if (layer.strokes.isEmpty())
+        {
+            hasEmptyLayer = true;
+        }
+        else
+        {
+            ++surfaces;
+        }
+    }
+    surfaces += hasEmptyLayer ? 1 : 0;
+    return static_cast<qint64>(surfaces) * renderSize.width()
+           * renderSize.height() * 4;
 }
 
 bool CanvasWidget::hasInteractionFrame(
@@ -914,8 +955,14 @@ void CanvasWidget::finishInteractionFrameWarmup()
         m_interactionFrameDesiredFrame = -1;
         m_interactionFrameDesiredSize = {};
         m_interactionFrameDesiredLayer = QUuid();
-        if (result.matches(frame, renderSize, layerId)
-            && !result.baseFrame.isNull())
+        const bool prepared = result.matches(frame, renderSize, layerId)
+                              && !result.baseFrame.isNull();
+        if (!prepared && frame == m_currentFrame)
+        {
+            m_interactionFrameFailedFrame = frame;
+            requestDisplayUpdate();
+        }
+        if (prepared)
         {
             m_preparedInteractionFrame = std::move(result);
             updateFrameCacheBudget();
@@ -984,6 +1031,7 @@ void CanvasWidget::cancelInteractionFrameWarmup()
         m_interactionFrameCancellation->store(true, std::memory_order_relaxed);
     }
     ++m_interactionFrameGeneration;
+    m_interactionFrameFailedFrame = -1;
     m_interactionFrameDesiredFrame = -1;
     m_interactionFrameDesiredSize = {};
     m_interactionFrameDesiredLayer = QUuid();

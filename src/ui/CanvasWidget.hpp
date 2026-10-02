@@ -321,6 +321,8 @@ private:
     const RenderEngine::LayerRasterFrame &previewLayerRasters(
         const QSize &renderSize);
     bool usesPreparedInteractionFrames() const;
+    bool defersInteractionFrames() const;
+    qint64 estimatedLayerRasterBytes(const QSize &renderSize) const;
     bool hasInteractionFrame(
         int frame, const QSize &renderSize, const QUuid &layerId) const;
     bool adoptPreparedInteractionFrame(
@@ -541,6 +543,9 @@ private:
     quint64 m_interactionFrameWorkerGeneration = 0;
     quint64 m_interactionFrameGeneration = 0;
     bool m_interactionFrameWarmupActive = false;
+    // The frame whose interaction preparation the worker could not produce
+    // within its budget; the GUI thread prepares that frame itself.
+    int m_interactionFrameFailedFrame = -1;
     QFutureWatcher<PreparedInteractionFrame> m_interactionFrameWatcher;
     QThreadPool m_interactionFramePool;
     mutable quint64 m_synchronousPreviewRenderCount = 0;
