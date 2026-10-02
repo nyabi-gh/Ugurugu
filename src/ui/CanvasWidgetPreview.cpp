@@ -1076,6 +1076,16 @@ QSize CanvasWidget::previewRenderSize() const
         m_drawing ? m_activeStrokeLayer : document.activeLayerId;
     const bool reservesPreparedFrame =
         m_wobbleAnimationEnabled && document.animationFrames > 1;
+    PreviewRenderSizeMemo &memo = m_previewRenderSizeMemo;
+    if (memo.valid && memo.layers.isSharedWith(document.layers)
+        && memo.documentSize == document.size
+        && memo.animationFrames == document.animationFrames
+        && memo.displayScale == displayScale
+        && memo.strokeLayerId == strokeLayerId
+        && memo.reservesPreparedFrame == reservesPreparedFrame)
+    {
+        return memo.renderSize;
+    }
     if (RenderEngine::supportsLayerSplit(document, strokeLayerId))
     {
         retainedSurfaces += PreviewRenderPolicy::activeStrokeSurfaceCount;
@@ -1114,8 +1124,16 @@ QSize CanvasWidget::previewRenderSize() const
             retainedSurfaces = std::max(retainedSurfaces, rasterSurfaces) + 1;
         }
     }
-    return PreviewRenderPolicy::renderSize(
+    memo.layers = document.layers;
+    memo.documentSize = document.size;
+    memo.animationFrames = document.animationFrames;
+    memo.displayScale = displayScale;
+    memo.strokeLayerId = strokeLayerId;
+    memo.reservesPreparedFrame = reservesPreparedFrame;
+    memo.renderSize = PreviewRenderPolicy::renderSize(
         document, displayScale, retainedSurfaces);
+    memo.valid = true;
+    return memo.renderSize;
 }
 
 PreviewSurfaceUsage CanvasWidget::previewSurfaceUsage() const

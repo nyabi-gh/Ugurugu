@@ -499,6 +499,22 @@ private:
     bool m_canvasMirrored = false;
     QCache<int, QImage> m_frameCache;
     QSize m_cachedRenderSize;
+    // previewRenderSize() runs on every paint and pointer event, and its
+    // answer needs two composition plans over every layer. It changes only
+    // with the inputs kept here; the layer list is compared by implicit
+    // sharing, which any edit to a layer or its strokes breaks.
+    struct PreviewRenderSizeMemo
+    {
+        QVector<Layer> layers;
+        QSize documentSize;
+        int animationFrames = 0;
+        qreal displayScale = 0.0;
+        QUuid strokeLayerId;
+        bool reservesPreparedFrame = false;
+        QSize renderSize;
+        bool valid = false;
+    };
+    mutable PreviewRenderSizeMemo m_previewRenderSizeMemo;
     // Frames still cached but rendered before the strokes covered by the
     // pending regional refresh; they display stale pixels only inside
     // m_frameCacheRefreshOutputBounds and must be patched before use.
