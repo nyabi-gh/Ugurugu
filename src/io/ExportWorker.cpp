@@ -279,15 +279,14 @@ bool ExportWorker::writeAnimation(const Request &request, QString *error)
                                  : request.document.size;
     const bool nativeSize = outputSize == request.document.size;
 
-    QVector<QImage> frames;
-    frames.reserve(request.document.animationFrames);
-    postProgress(request.kind, 0, request.document.animationFrames);
-    for (int frame = 0; frame < request.document.animationFrames; ++frame)
+    const int frameCount = request.document.animationFrames;
+    postProgress(request.kind, 0, frameCount);
+    // Frames are rendered as the encoder asks for them, so the export holds
+    // at most what the encoder itself keeps rather than every frame at once.
+    const auto renderFrame =
+        [this, &request, &outputSize, nativeSize, frameCount, error](
+            int frame) -> QImage
     {
-        if (canceled())
-        {
-            return false;
-        }
         // Exported pixels must not come from the preview replay path, which
         // trades exactness for speed; NativeExact renders natively and only
         // then scales.
@@ -300,7 +299,7 @@ bool ExportWorker::writeAnimation(const Request &request, QString *error)
         if (image.isNull())
         {
             *error = tr("An animation frame could not be rendered.");
-            return false;
+            return {};
         }
         if (!request.animation.preserveTransparency && image.hasAlphaChannel())
         {
@@ -311,7 +310,7 @@ bool ExportWorker::writeAnimation(const Request &request, QString *error)
             if (opaque.isNull())
             {
                 *error = tr("An animation frame could not be rendered.");
-                return false;
+                return {};
             }
             opaque.fill(Qt::white);
             QPainter painter(&opaque);
@@ -319,9 +318,9 @@ bool ExportWorker::writeAnimation(const Request &request, QString *error)
             painter.end();
             image = std::move(opaque);
         }
-        frames.append(std::move(image));
-        postProgress(request.kind, frame + 1, request.document.animationFrames);
-    }
+        postProgress(request.kind, frame + 1, frameCount);
+        return image;
+    };
     if (canceled())
     {
         return false;
@@ -330,24 +329,30 @@ bool ExportWorker::writeAnimation(const Request &request, QString *error)
     {
         return canceled();
     };
-    if (request.kind == Kind::WebP)
+    // A frame that failed to render reports its own error; the encoder's
+    // generic one must not replace it.
+    QString encoderError;
+    const bool written =
+        request.kind == Kind::WebP
+            ? WebPWriter::write(request.filePath,
+                  frameCount,
+                  renderFrame,
+                  AnimationExportPolicy::frameDurations(
+                      frameCount, request.document.framesPerSecond, 1000),
+                  &encoderError,
+                  isCanceled)
+            : GifWriter::write(request.filePath,
+                  frameCount,
+                  renderFrame,
+                  AnimationExportPolicy::frameDurations(
+                      frameCount, request.document.framesPerSecond, 100),
+                  &encoderError,
+                  isCanceled);
+    if (!written && error->isEmpty())
     {
-        return WebPWriter::write(request.filePath,
-            frames,
-            AnimationExportPolicy::frameDurations(
-                request.document.animationFrames,
-                request.document.framesPerSecond,
-                1000),
-            error,
-            isCanceled);
+        *error = encoderError;
     }
-    return GifWriter::write(request.filePath,
-        frames,
-        AnimationExportPolicy::frameDurations(request.document.animationFrames,
-            request.document.framesPerSecond,
-            100),
-        error,
-        isCanceled);
+    return written;
 }
 
 }

@@ -359,31 +359,27 @@ QVector<quint8> buildColorMap(const QVector<HistogramEntry> &entries,
     return colorMap;
 }
 
-QByteArray frameIndices(
-    const QImage &image, const QVector<quint8> &colorMap, bool hasTransparency)
+// A frame between the histogram pass and encoding: each pixel's 15-bit
+// palette key, with the top bit marking pixels that GIF transparency drops.
+// Two bytes a pixel instead of two ARGB copies of every frame.
+constexpr quint16 transparentKey = 0x8000;
+
+QByteArray frameIndices(const QVector<quint16> &keys,
+    const QVector<quint8> &colorMap,
+    bool hasTransparency)
 {
-    const qsizetype pixelCount = static_cast<qsizetype>(image.width())
-                                 * static_cast<qsizetype>(image.height());
     QByteArray indices;
-    indices.resize(pixelCount);
-    qsizetype destination = 0;
-
-    for (int y = 0; y < image.height(); ++y)
+    indices.resize(keys.size());
+    for (qsizetype index = 0; index < keys.size(); ++index)
     {
-        const auto *row =
-            reinterpret_cast<const QRgb *>(image.constScanLine(y));
-        for (int x = 0; x < image.width(); ++x)
-        {
-            // GIF transparency is all or nothing, so partial alpha has to
-            // collapse to a threshold rather than blend.
-            const QRgb color = row[x];
-            const quint8 paletteIndex = hasTransparency && qAlpha(color) < 128
-                                            ? 0
-                                            : colorMap.at(colorKey(color));
-            indices[destination++] = static_cast<char>(paletteIndex);
-        }
+        const quint16 key = keys[index];
+        // GIF transparency is all or nothing, so partial alpha has to
+        // collapse to a threshold rather than blend.
+        const quint8 paletteIndex = hasTransparency && (key & transparentKey)
+                                        ? 0
+                                        : colorMap.at(key & ~transparentKey);
+        indices[index] = static_cast<char>(paletteIndex);
     }
-
     return indices;
 }
 
@@ -493,6 +489,26 @@ bool GifWriter::write(const QString &path,
     QString *error,
     const std::function<bool()> &isCanceled)
 {
+    return write(
+        path,
+        static_cast<int>(std::min<qsizetype>(
+            frames.size(), std::numeric_limits<int>::max())),
+        [&frames](int index)
+        {
+            return frames.at(index);
+        },
+        delaysCentiseconds,
+        error,
+        isCanceled);
+}
+
+bool GifWriter::write(const QString &path,
+    int frameCount,
+    const FrameSource &frameSource,
+    const QVector<int> &delaysCentiseconds,
+    QString *error,
+    const std::function<bool()> &isCanceled)
+{
     if (error != nullptr)
     {
         error->clear();
@@ -502,11 +518,11 @@ bool GifWriter::write(const QString &path,
     {
         return fail(error, GifWriter::tr("The output path is empty."));
     }
-    if (frames.isEmpty())
+    if (frameCount <= 0)
     {
         return fail(error, GifWriter::tr("At least one frame is required."));
     }
-    if (delaysCentiseconds.size() != frames.size())
+    if (delaysCentiseconds.size() != frameCount)
     {
         return fail(
             error, GifWriter::tr("Each frame must have one delay value."));
@@ -521,91 +537,89 @@ bool GifWriter::write(const QString &path,
         }
     }
 
-    const int width = frames.first().width();
-    const int height = frames.first().height();
-    if (frames.first().isNull() || width <= 0 || height <= 0)
-    {
-        return fail(
-            error, GifWriter::tr("Frames must contain valid image data."));
-    }
-    if (width > 65535 || height > 65535)
-    {
-        return fail(
-            error, GifWriter::tr("GIF dimensions cannot exceed 65535 pixels."));
-    }
+    int width = 0;
+    int height = 0;
+    QVector<QVector<quint16>> frameKeys;
+    frameKeys.reserve(frameCount);
+    QVector<HistogramBucket> histogram(32768);
+    bool hasTransparency = false;
 
-    const qsizetype pixelCount =
-        static_cast<qsizetype>(width) * static_cast<qsizetype>(height);
-    if (pixelCount <= 0 || pixelCount > std::numeric_limits<int>::max())
-    {
-        return fail(
-            error, GifWriter::tr("The frame dimensions are too large."));
-    }
-    if (!AnimationExportPolicy::fitsMemoryBudget(
-            frames.first().size(), frames.size()))
-    {
-        return fail(error,
-            GifWriter::tr("The animation is too large to encode safely."));
-    }
-
-    QVector<QImage> normalizedFrames;
-    normalizedFrames.reserve(frames.size());
-
-    for (const QImage &frame : frames)
+    for (int frameIndex = 0; frameIndex < frameCount; ++frameIndex)
     {
         if (isCanceled && isCanceled())
         {
             return false;
         }
-        if (frame.isNull())
+        const QImage frame = frameSource(frameIndex);
+        if (frame.isNull() || frame.width() <= 0 || frame.height() <= 0)
         {
             return fail(
                 error, GifWriter::tr("Frames must contain valid image data."));
         }
-        if (frame.width() != width || frame.height() != height)
+        if (frameIndex == 0)
+        {
+            width = frame.width();
+            height = frame.height();
+            if (width > 65535 || height > 65535)
+            {
+                return fail(error,
+                    GifWriter::tr(
+                        "GIF dimensions cannot exceed 65535 pixels."));
+            }
+            const qsizetype pixelCount =
+                static_cast<qsizetype>(width) * static_cast<qsizetype>(height);
+            if (pixelCount <= 0 || pixelCount > std::numeric_limits<int>::max())
+            {
+                return fail(error,
+                    GifWriter::tr("The frame dimensions are too large."));
+            }
+            if (!AnimationExportPolicy::fitsMemoryBudget(
+                    frame.size(), frameCount))
+            {
+                return fail(error,
+                    GifWriter::tr(
+                        "The animation is too large to encode safely."));
+            }
+        }
+        else if (frame.width() != width || frame.height() != height)
         {
             return fail(error,
                 GifWriter::tr("All frames must have the same dimensions."));
         }
-        QImage normalized = frame.convertToFormat(QImage::Format_ARGB32);
+        const QImage normalized = frame.convertToFormat(QImage::Format_ARGB32);
         if (normalized.isNull())
         {
             return fail(error,
                 GifWriter::tr(
                     "A frame could not be converted to the GIF pixel format."));
         }
-        normalizedFrames.append(std::move(normalized));
-    }
 
-    QVector<HistogramBucket> histogram(32768);
-    bool hasTransparency = false;
-
-    for (const QImage &frame : std::as_const(normalizedFrames))
-    {
-        if (isCanceled && isCanceled())
-        {
-            return false;
-        }
+        QVector<quint16> keys(static_cast<qsizetype>(width) * height);
+        qsizetype destination = 0;
         for (int y = 0; y < height; ++y)
         {
             const auto *row =
-                reinterpret_cast<const QRgb *>(frame.constScanLine(y));
+                reinterpret_cast<const QRgb *>(normalized.constScanLine(y));
             for (int x = 0; x < width; ++x)
             {
                 const QRgb color = row[x];
+                const int key = colorKey(color);
                 if (qAlpha(color) < 128)
                 {
                     hasTransparency = true;
+                    keys[destination++] =
+                        static_cast<quint16>(key) | transparentKey;
                     continue;
                 }
-
-                HistogramBucket &bucket = histogram[colorKey(color)];
+                keys[destination++] = static_cast<quint16>(key);
+                HistogramBucket &bucket = histogram[key];
                 ++bucket.count;
                 bucket.red += static_cast<quint64>(qRed(color));
                 bucket.green += static_cast<quint64>(qGreen(color));
                 bucket.blue += static_cast<quint64>(qBlue(color));
             }
         }
+        frameKeys.append(std::move(keys));
     }
 
     QVector<HistogramEntry> entries;
@@ -638,7 +652,7 @@ bool GifWriter::write(const QString &path,
     }
 
     QByteArray output;
-    output.reserve(13 + tableSize * 3 + frames.size() * 32);
+    output.reserve(13 + tableSize * 3 + frameCount * 32);
     output.append("GIF89a", 6);
     appendWord(output, width);
     appendWord(output, height);
@@ -668,13 +682,12 @@ bool GifWriter::write(const QString &path,
 
     const int minimumCodeSize = std::max(2, tableBits);
 
-    for (int frameIndex = 0; frameIndex < normalizedFrames.size(); ++frameIndex)
+    for (int frameIndex = 0; frameIndex < frameCount; ++frameIndex)
     {
         if (isCanceled && isCanceled())
         {
             return false;
         }
-        const QImage &frame = normalizedFrames.at(frameIndex);
         appendByte(output, 0x21);
         appendByte(output, 0xf9);
         appendByte(output, 0x04);
@@ -690,7 +703,9 @@ bool GifWriter::write(const QString &path,
         appendByte(output, 0);
 
         const QByteArray indices =
-            frameIndices(frame, colorMap, hasTransparency);
+            frameIndices(frameKeys.at(frameIndex), colorMap, hasTransparency);
+        // The keys are spent once the frame is encoded.
+        frameKeys[frameIndex] = {};
         const QByteArray compressed = compressLzw(indices, minimumCodeSize);
         appendByte(output, minimumCodeSize);
         appendSubBlocks(output, compressed);

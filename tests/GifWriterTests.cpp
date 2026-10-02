@@ -6,6 +6,7 @@
 #include "io/DocumentSerializer.hpp"
 #include "io/GifWriter.hpp"
 #include "io/RenderExportPolicy.hpp"
+#include "io/WebPWriter.hpp"
 #include "render/LayerCompositionPlan.hpp"
 #include "render/RenderEngine.hpp"
 #include "ui/GifExportDialog.hpp"
@@ -13,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QPainter>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -72,6 +74,84 @@ class GifWriterTests final : public QObject
     Q_OBJECT
 
 private slots:
+    void streamsFramesInOrderWithIdenticalOutput()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QVector<QImage> frames;
+        for (int index = 0; index < 4; ++index)
+        {
+            QImage frame(40, 30, QImage::Format_ARGB32);
+            frame.fill(Qt::transparent);
+            QPainter painter(&frame);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setBrush(
+                QColor::fromHsv(index * 80, 200, 220, 160 + index));
+            painter.drawEllipse(QPointF(10.0 + index * 6.0, 15.0), 9.0, 7.0);
+            painter.end();
+            frames.append(frame);
+        }
+        const QVector<int> delays{4, 5, 6, 7};
+        const auto bytes = [](const QString &path)
+        {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? file.readAll()
+                                                  : QByteArray();
+        };
+
+        const QString buffered = directory.filePath(QStringLiteral("a.gif"));
+        QVERIFY(GifWriter::write(buffered, frames, delays));
+        QVector<int> requested;
+        const QString streamed = directory.filePath(QStringLiteral("b.gif"));
+        QString error;
+        QVERIFY2(GifWriter::write(
+                     streamed,
+                     4,
+                     [&frames, &requested](int index)
+                     {
+                         requested.append(index);
+                         return frames.at(index);
+                     },
+                     delays,
+                     &error),
+            qPrintable(error));
+        QCOMPARE(requested, QVector<int>({0, 1, 2, 3}));
+        QVERIFY(!bytes(buffered).isEmpty());
+        QCOMPARE(bytes(streamed), bytes(buffered));
+
+        const QString webpBuffered =
+            directory.filePath(QStringLiteral("a.webp"));
+        QVERIFY(WebPWriter::write(webpBuffered, frames, {40, 50, 60, 70}));
+        requested.clear();
+        const QString webpStreamed =
+            directory.filePath(QStringLiteral("b.webp"));
+        QVERIFY2(WebPWriter::write(
+                     webpStreamed,
+                     4,
+                     [&frames, &requested](int index)
+                     {
+                         requested.append(index);
+                         return frames.at(index);
+                     },
+                     {40, 50, 60, 70},
+                     &error),
+            qPrintable(error));
+        QCOMPARE(requested, QVector<int>({0, 1, 2, 3}));
+        QCOMPARE(bytes(webpStreamed), bytes(webpBuffered));
+
+        // A frame that cannot be produced fails the export without output.
+        const QString failed = directory.filePath(QStringLiteral("c.gif"));
+        QVERIFY(!GifWriter::write(
+            failed,
+            4,
+            [&frames](int index)
+            {
+                return index == 2 ? QImage() : frames.at(index);
+            },
+            delays));
+        QVERIFY(!QFile::exists(failed));
+    }
+
     void enforcesSharedAnimationMemoryBudget()
     {
         QVERIFY(AnimationExportPolicy::fitsMemoryBudget(QSize(4096, 4096), 2));

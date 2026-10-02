@@ -18,6 +18,18 @@ class GifWriter final
     Q_DECLARE_TR_FUNCTIONS(ugurugu::GifWriter)
 
 public:
+    // Produces frame `index`, or a null image when it cannot. Frames are
+    // requested once each, in order, so a caller can render them on demand
+    // instead of holding the whole animation.
+    using FrameSource = std::function<QImage(int index)>;
+
+    static bool write(const QString &path,
+        int frameCount,
+        const FrameSource &frameSource,
+        const QVector<int> &delaysCentiseconds,
+        QString *error = nullptr,
+        const std::function<bool()> &isCanceled = {});
+
     static bool write(const QString &path,
         const QVector<QImage> &frames,
         int delayCentiseconds,

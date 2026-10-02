@@ -8,8 +8,10 @@
 #include <QFileDevice>
 #include <QSaveFile>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <webp/encode.h>
 #include <webp/mux.h>
 
@@ -115,30 +117,57 @@ bool WebPWriter::write(const QString &filePath,
     QString *error,
     const std::function<bool()> &isCanceled)
 {
-    if (frames.isEmpty() || frames.size() != durationsMilliseconds.size())
+    return write(
+        filePath,
+        static_cast<int>(std::min<qsizetype>(
+            frames.size(), std::numeric_limits<int>::max())),
+        [&frames](int index)
+        {
+            return frames.at(index);
+        },
+        durationsMilliseconds,
+        error,
+        isCanceled);
+}
+
+bool WebPWriter::write(const QString &filePath,
+    int frameCount,
+    const FrameSource &frameSource,
+    const QVector<int> &durationsMilliseconds,
+    QString *error,
+    const std::function<bool()> &isCanceled)
+{
+    if (frameCount <= 0 || frameCount != durationsMilliseconds.size())
     {
         return fail(error, tr("The animation frames or timings are invalid."));
     }
-    const QSize frameSize = frames.first().size();
-    if (frameSize.isEmpty()
-        || !AnimationExportPolicy::fitsMemoryBudget(frameSize, frames.size()))
-    {
-        return fail(
-            error, tr("The animation exceeds the export memory budget."));
-    }
-
     int totalDuration = 0;
-    for (qsizetype index = 0; index < frames.size(); ++index)
+    for (const int duration : durationsMilliseconds)
     {
-        const int duration = durationsMilliseconds[index];
-        if (frames[index].isNull() || frames[index].size() != frameSize
-            || duration <= 0
+        if (duration <= 0
             || duration > std::numeric_limits<int>::max() - totalDuration)
         {
             return fail(
                 error, tr("The animation frames or timings are invalid."));
         }
         totalDuration += duration;
+    }
+    if (isCanceled && isCanceled())
+    {
+        return false;
+    }
+    // The encoder needs the canvas size up front, so the first frame is
+    // produced before it exists.
+    QImage pending = frameSource(0);
+    const QSize frameSize = pending.size();
+    if (pending.isNull() || frameSize.isEmpty())
+    {
+        return fail(error, tr("The animation frames or timings are invalid."));
+    }
+    if (!AnimationExportPolicy::fitsMemoryBudget(frameSize, frameCount))
+    {
+        return fail(
+            error, tr("The animation exceeds the export memory budget."));
     }
 
     WebPAnimEncoderOptions options;
@@ -167,14 +196,20 @@ bool WebPWriter::write(const QString &filePath,
     config.alpha_quality = 100;
 
     int timestamp = 0;
-    for (qsizetype index = 0; index < frames.size(); ++index)
+    for (int index = 0; index < frameCount; ++index)
     {
         if (isCanceled && isCanceled())
         {
             return false;
         }
-        const QImage rgba =
-            frames[index].convertToFormat(QImage::Format_RGBA8888);
+        const QImage frame =
+            index == 0 ? std::exchange(pending, {}) : frameSource(index);
+        if (frame.isNull() || frame.size() != frameSize)
+        {
+            return fail(
+                error, tr("The animation frames or timings are invalid."));
+        }
+        const QImage rgba = frame.convertToFormat(QImage::Format_RGBA8888);
         if (rgba.isNull()
             || rgba.bytesPerLine() > std::numeric_limits<int>::max())
         {
