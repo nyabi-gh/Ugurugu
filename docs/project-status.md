@@ -1,6 +1,6 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-09-18 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리
+정리일: 2026-10-03 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리 · 데스크톱 성능: `perf/desktop-render-pipeline` 브랜치(`be2a06d` 기준)
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
@@ -47,6 +47,7 @@
 | 2026-09-08 종합 검토 | macOS Release / Qt 6.11.2, CTest 13/13, 소스 함수·offscreen 집중 재현, 두 크기 UI 캡처 | 배포 Qt 6.11.1 전체 행렬, 실제 펜·GPU·Windows |
 | 2026-09-08 웹 기능 추가 | 브라우저 21시나리오·194체크, WASM 스모크, 관련 네이티브 2스위트, Svelte 검사. 당시 완전 패키지 17파일·11.40MiB | 모든 브라우저·모바일·iframe 권한·배포 의무 검토 |
 | 2026-09-16 Android 계획 작성 | `73004d7`, macOS Qt 6.11.2 재빌드·13/13, Svelte 오류·경고 0 기록 | Android 빌드·APK·S Pen·S8 실측 |
+| 2026-10-03 데스크톱 성능 | Windows 11 x64, VS 18 BuildTools ClangCL(clang-cl 22.1.3), Qt 6.11.2 Release. CTest 13/13. 렌더 A/B는 `ugurugu_render_benchmark`, UI는 offscreen 회귀와 실제 D3D11 창 probe. 세부는 5절 | macOS Metal·Apple Silicon, 실제 펜 입력, 배포 Qt 6.11.1, 사용자 문서 외 실제 작업 문서 |
 | 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6·최종 저장 경로 확인·Windows 패키지 격리 smoke 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest·실제 Windows 패키지 smoke 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
 
 9월 8일 초기 검토의 12파일·0.79MiB 웹 빌드는 **WASM 없는 셸**이었다. 이후 실엔진 패키지 기록과 혼동하지 않는다. 13은 CTest 스위트 수이지 개별 테스트 수가 아니다.
@@ -195,15 +196,42 @@
 
 역사적 `05276c8` 측정은 macOS Cocoa Release / software / 회전 0도 / wobble ON / 재생 정지 / 같은 사용자 문서로 변경 전후 각 24회다. 획당 process CPU p50 258.64→126.05ms, 최장 live-display event p95 12.10→7.40ms였다. 획 전체 wall p95 92.81→91.92ms는 유의미한 개선 근거가 없고 pen-up p50 0.79→0.84ms도 개선으로 보고하지 않는다. 이후 두 변경의 효과와 합산하지 않는다.
 
+### 2026-10-03 데스크톱 렌더·UI 경로 개선 — 구현·Windows 측정
+
+브랜치 `perf/desktop-render-pipeline`, 기준 `be2a06d`. 측정 조건은 위 증거 범위 표와 같다. 렌더 수치는 `ugurugu_render_benchmark`(문서 전체 프레임, 프레임당 시간·SHA-256 digest)로, UI 수치는 임시 probe로 수정 전후 같은 빌드 설정에서 쟀다. 표본 문서는 1024×768·7레이어·252획 사용자 문서(저장소 미포함)와 `ugurugu_stress_document_generator` 2048² 문서다. 모든 렌더 A/B의 digest가 수정 전과 같다.
+
+| 항목 | 구현 (commit) | 측정 |
+|---|---|---|
+| 정적(프레임 불변) 레이어 래스터 캐시, 빈 레이어 표면 생략 | 획 목록·래스터 자산의 implicit sharing으로 재사용을 판정하는 프로세스 공용 캐시, 256MiB 예산. 모든 전체 레이어 렌더 경로가 `renderPaintLayerImage` 하나를 거친다 (`37dd9f1`) | 사용자 문서 768×576: 정지 레이어 0개 60→60ms/프레임(변화 없음), 3개 고정 시 60→15ms. stress 50획/레이어 1024²: 2/4 레이어 고정 시 preview 340→165ms, NativeExact 495→250ms. 빈 레이어 4개 추가 시 표면 할당 270→150 |
+| 무효화 뒤 GUI 동기 렌더와 워커 중복 | 워커가 같은 프레임을 전달할 예정이면 화면은 직전 프레임을 유지하고 전달 시 다시 그린다. 문서 교체 시에는 유지하지 않는다 (`7001a52`) | 정지·재생 모두 편집당 GUI 동기 렌더 1→0회. 사용자 문서 기준 GUI thread에서 약 60ms 렌더 1회가 빠진다 |
+| 재생 중 펜 다운의 GUI split 렌더, 분할 불가 레이어의 프레임 캐시 전체 폐기 | 워커가 준비할 수 있으면 펜 다운도 워커 split을 기다리고, 워커가 예산 안에서 못 만들면 한 번만 GUI가 만든다. GUI 경로는 추정 래스터 크기만큼만 캐시를 줄인다 (`9d83547`) | 펜 다운 GUI 렌더 split 1→0, raster 2→0. 캐시 4프레임 상태에서 펜 다운 뒤 남는 프레임 1→4 |
+| `previewRenderSize()` 합성 계획 2회 빌드 | 입력이 같으면 결과 재사용 (`e0a494d`) | 호출당 약 2.5µs→0.035µs(사용자 문서) |
+| 색 기록 256버튼 stylesheet | 직접 그리는 swatch, 바뀐 항목만 repaint (`5b2a854`) | 색 1개 기록+paint 13–16ms→2.3ms |
+| 팬·회전마다 그림자 재생성 | 윤곽 주변만 덮고 원점 기준 윤곽으로 키를 잡는 pixmap (`43a1da5`) | software 표시 1400×1000 팬+repaint 27–30ms→2.7–3.0ms. 회전·확대 시에는 여전히 다시 만든다 |
+| 포인터 이동마다 GPU frame view 렌더·상태바 relayout | 커서·윤곽 변경은 overlay만 갱신, 좌표 라벨 고정 크기·같은 문자열 생략 (`5001d29`) | D3D11 창 hover 이동 300회: frame view `render()` 305→4회 |
+| 스포이드·마술봉·페인트통의 원본 해상도 GUI 렌더 | 해당 도구가 활성일 때 워커가 참조 이미지를 미리 렌더하고 정확한 입력이 같을 때만 쓴다. 진행 중이면 기다리고, 없을 때만 GUI가 렌더한다 (`58f43ff`) | 사용자 문서: 스포이드 첫 pick 67–76ms→0.1–0.2ms, 페인트통 클릭(활성 레이어 기준) 10ms→7ms |
+| 타임라인 스핀박스 키 입력마다 커밋 | 프레임 수·FPS는 편집 완료 시 커밋 (`b0d55be`) | "24" 입력당 문서 변경 2→1회 |
+| RasterAssetCache 동시 미스 | 키별 in-flight 표시로 첫 스레드만 계산 (`346209e`) | 2048² 자산 1개, 8프레임 동시 cold 렌더: process CPU 2.36s→0.29s, peak working set 369→145MiB, wall 약 300ms 동일 |
+| 내보내기의 전 프레임 버퍼 | 인코더가 프레임을 요청할 때 렌더. WebP는 즉시 인코딩, GIF는 두 패스 사이에 픽셀당 2바이트 키만 보존 (`f57dd94`) | 사용자 문서 30프레임: GIF peak working set 190→65MiB, WebP 131→44MiB. 시간 GIF 2.3s·WebP 6.5–6.7s로 차이 없음. 출력 파일 바이트 동일 |
+
+측정했지만 이번에 바꾸지 않은 것:
+
+- **`.ugu` 저장·열기 (UI 동기)**: 사용자 문서 읽기 11ms·문서 채택 11ms·저장 11ms, stress 2048²(11.9MB) 112·128·157ms. 비동기화는 저장 중 편집·닫기·`maybeSave`의 결과 계약을 바꾸므로 정책 결정 뒤 진행한다.
+- **필압 획의 증분 체크포인트**: 한 타일 안 1,500점 획에서 증분 갱신 합계 상수 필압 91ms·primitive 62,771회, 가변 필압 472ms·240,477회. `drawLineStroke`가 구간 양 끝 반 구간에 두 점 필압 평균을 쓰므로 체크포인트를 켜려면 래스터 결과가 바뀐다. 최종 픽셀 계약 변경이라 별도 결정이 필요하다.
+- **재생 중 텍스처 전체 업로드**: D3D11 1400×1000 창 재생에서 프레임당 약 3MiB, frame view `render()` 평균 0.63ms. GPU 쪽 프레임 텍스처 캐시는 VRAM을 프레임 수만큼 쓰므로 이득이 측정될 조건(큰 미리보기·저사양 GPU)을 먼저 찾는다.
+- **데스크톱 LTO**: ClangCL 툴셋은 CMake IPO 속성을 무시하므로 `-flto=thin`을 직접 줘서 bitcode 빌드를 확인했다. 위 세 렌더 workload 모두 ±1% 이내로 차이가 없어 넣지 않았다. 렌더 시간 대부분이 LTO 대상이 아닌 Qt 래스터 엔진 안에 있다.
+
+남은 검증: macOS Metal·Apple Silicon 측정, 실제 펜 입력에서 펜 다운 지연, 정적 레이어 캐시와 참조 이미지 선렌더의 장시간 메모리 상한(예산 256MiB와 이미지 1장)을 실제 작업 문서로 확인.
+
 ### D08 · P2 · 프레임 warmup의 동시 임시 표면 — 조사·예산 공백
 
 [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)의 최대 8 worker와 [CanvasWidgetPreview.cpp](../src/ui/CanvasWidgetPreview.cpp)의 동시 렌더에 대해 [PreviewRenderPolicy.cpp](../src/render/PreviewRenderPolicy.cpp)의 임시 비용 계산은 동시 작업 전체를 반영하지 않는다. 보존 표면 예산 테스트가 프로세스 peak를 보장하지 않는다.
 
 조치는 worker별 working set, 고정·보존 표면, 취소 중 작업의 잔여 수명을 포함한 동시성 제한이다. 예전의 “추가 1.5–2.5GiB”는 실제 관측값이 아니므로 수용 기준으로 쓰지 않는다. 정확성·재생 재개 시간과 함께 측정한다.
 
-### D14 · P2 · 스포이드의 전체 동기 렌더 — 조사
+### D14 · P2 · 스포이드의 전체 동기 렌더 — 부분 해결
 
-[CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 샘플링은 UI thread에서 전체 해상도 프레임을 렌더할 수 있다. 문서 크기별 첫 pick 지연을 먼저 잰다. 정확한 영역 렌더/동일 revision 캐시를 검토하되 축소 preview 픽셀로 대체하면 색 의미가 달라질 수 있다. “클릭마다 수 초”는 실측 전 확정하지 않는다.
+[CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 참조 이미지는 스포이드·마술봉·페인트통이 활성일 때 워커가 원본 해상도로 미리 렌더한다(`58f43ff`). 축소 preview 픽셀은 쓰지 않는다. 브러시·지우개에서 Alt로 시작한 pick과 떠 있는 선택 변환 중 pick은 여전히 GUI에서 렌더한다. 측정은 5절 표.
 
 ### R11 및 웹 메모리 정책 — 미해결
 
@@ -213,13 +241,13 @@
 - WASM 최대 heap 512MB는 JS·GPU·브라우저 전체 예산이 아니다. CPU 표면과 GPU texture 중복·export·serialize의 동시 peak를 측정한다.
 - **정정:** 공용 `DocumentUndoStack`에는 현재 192MiB resident 기준과 byte 기반 정리가 있다. 다만 가장 최근 항목 하나는 soft exceed가 가능하다. 웹 `ugu_set_undo_limit`은 개수만 설정하므로 웹 프로파일의 MiB 정책을 연결/관측하는 작업이 남는다. “엔진에 byte 예산 없음”은 코드 주석에도 남은 오래된 설명이다.
 
-### D21 · P3 · UI 갱신 비용 — 조사
+### D21 · P3 · UI 갱신 비용 — 부분 해결
 
-색 기록의 256버튼 일괄 stylesheet 갱신, [Theme.cpp](../src/ui/Theme.cpp)의 강조색 변경 시 폰트·스타일 재등록, [TimelineBar.cpp](../src/ui/TimelineBar.cpp)의 숫자 입력 도중 프레임 캐시 무효화가 대상이다. 일회성 초기화 분리, 변경된 항목만 갱신, 숫자 편집 완료 시 적용을 검토한다. 사용자 입력 지연을 측정하기 전에 전체 위젯 재작성으로 범위를 늘리지 않는다.
+색 기록 stylesheet(`5b2a854`)와 타임라인 숫자 입력 도중 커밋(`b0d55be`)은 해결했다. [Theme.cpp](../src/ui/Theme.cpp)의 강조색 변경 시 폰트·스타일 재등록은 남았다. 일회성 초기화 분리, 변경된 항목만 갱신, 숫자 편집 완료 시 적용을 검토한다. 사용자 입력 지연을 측정하기 전에 전체 위젯 재작성으로 범위를 늘리지 않는다.
 
 ### 추가 프로파일 후보와 측정 계약
 
-AA/가변 필압 긴 획의 반복 래스터, 빈 레이어 표면 할당, 선택 clip path 재구성, 커버리지/합성 계획 반복, fill의 전체 캔버스 순회, 획별 임시 할당을 후보로 유지한다. O(n²) 또는 주 병목이라는 판단은 primitive 처리량·시간·할당 프로파일로 확인한다.
+AA/가변 필압 긴 획의 반복 래스터(5절 측정 있음), 선택 clip path 재구성, 커버리지/합성 계획 반복, fill의 전체 캔버스 순회, 획별 임시 할당을 후보로 유지한다. O(n²) 또는 주 병목이라는 판단은 primitive 처리량·시간·할당 프로파일로 확인한다.
 
 저장소 내 native benchmark를 먼저 마련한다. 외부 fixture 경로+SHA와 빌드/기기/OS/표시 조건을 받고 JSON 결과를 남긴다. 개인 문서는 동의 없이 커밋하지 않는다. 조건별 최소 50회·실행 순서 교차, cold/warm·open/undo 직후·immediate/idle·회전 0/5도·software/GPU·wobble ON/OFF·빈/실제 문서를 구분한다. p50/p95/max, UI/process CPU, worker·취소 지연·upload bytes·peak RSS를 기록한다.
 
