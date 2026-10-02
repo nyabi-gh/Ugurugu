@@ -10,6 +10,8 @@
 #include <QCache>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSet>
+#include <QWaitCondition>
 
 #include <algorithm>
 
@@ -67,40 +69,73 @@ int cacheCost(const QImage &image)
         std::max<qsizetype>(1, (image.sizeInBytes() + 1023) / 1024));
 }
 
+QSet<QString> &inFlightKeys()
+{
+    static QSet<QString> keys;
+    return keys;
+}
+
+QWaitCondition &inFlightSettled()
+{
+    static QWaitCondition condition;
+    return condition;
+}
+
+// Every frame worker meets the same image operations at the same moment, so
+// a miss used to decode or transform one asset once per worker. The first
+// thread to miss computes it; the others wait for its result.
+template <typename Compute>
+QImage cachedOrComputed(const QString &key, Compute compute)
+{
+    QMutexLocker locker(&cacheMutex());
+    for (;;)
+    {
+        if (const QImage *cached = imageCache().object(key))
+        {
+            return *cached;
+        }
+        if (!inFlightKeys().contains(key))
+        {
+            break;
+        }
+        inFlightSettled().wait(&cacheMutex());
+    }
+    inFlightKeys().insert(key);
+    locker.unlock();
+
+    const QImage image = compute();
+
+    locker.relock();
+    if (!image.isNull())
+    {
+        imageCache().insert(key, new QImage(image), cacheCost(image));
+    }
+    inFlightKeys().remove(key);
+    inFlightSettled().wakeAll();
+    return image;
+}
+
 }
 
 QImage RasterAssetCache::image(const Document &document, const QString &assetId)
 {
-    {
-        const QMutexLocker locker(&cacheMutex());
-        if (const QImage *cached =
-                imageCache().object(QStringLiteral("source:") + assetId))
+    return cachedOrComputed(QStringLiteral("source:") + assetId,
+        [&document, &assetId]() -> QImage
         {
-            return *cached;
-        }
-    }
-    const auto asset = document.rasterAssets.constFind(assetId);
-    if (asset == document.rasterAssets.cend())
-    {
-        return {};
-    }
-    const std::optional<QImage> canonical =
-        serializer_detail::decodeRasterAsset(*asset);
-    if (!canonical)
-    {
-        return {};
-    }
-    QImage decoded =
-        canonical->convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    if (decoded.isNull())
-    {
-        return {};
-    }
-    const QMutexLocker locker(&cacheMutex());
-    imageCache().insert(QStringLiteral("source:") + assetId,
-        new QImage(decoded),
-        cacheCost(decoded));
-    return decoded;
+            const auto asset = document.rasterAssets.constFind(assetId);
+            if (asset == document.rasterAssets.cend())
+            {
+                return {};
+            }
+            const std::optional<QImage> canonical =
+                serializer_detail::decodeRasterAsset(*asset);
+            if (!canonical)
+            {
+                return {};
+            }
+            return canonical->convertToFormat(
+                QImage::Format_ARGB32_Premultiplied);
+        });
 }
 
 QImage RasterAssetCache::transformedImage(const Document &document,
@@ -114,38 +149,32 @@ QImage RasterAssetCache::transformedImage(const Document &document,
     {
         return {};
     }
-    const QString key =
-        transformedCacheKey(assetId, targetSize, transform, sampling);
-    {
-        const QMutexLocker locker(&cacheMutex());
-        if (const QImage *cached = imageCache().object(key))
+    return cachedOrComputed(
+        transformedCacheKey(assetId, targetSize, transform, sampling),
+        [&]() -> QImage
         {
-            return *cached;
-        }
-    }
-    const QImage source = image(document, assetId);
-    if (source.isNull())
-    {
-        return {};
-    }
-    QImage transformed(targetSize, QImage::Format_ARGB32_Premultiplied);
-    if (transformed.isNull())
-    {
-        return {};
-    }
-    transformed.fill(Qt::transparent);
-    if (!ImageAffineTransformer::compositeSourceOver(transformed,
-            QRect(QPoint(), targetSize),
-            source,
-            QRect(QPoint(), source.size()),
-            transform,
-            sampling))
-    {
-        return {};
-    }
-    const QMutexLocker locker(&cacheMutex());
-    imageCache().insert(key, new QImage(transformed), cacheCost(transformed));
-    return transformed;
+            const QImage source = image(document, assetId);
+            if (source.isNull())
+            {
+                return {};
+            }
+            QImage transformed(targetSize, QImage::Format_ARGB32_Premultiplied);
+            if (transformed.isNull())
+            {
+                return {};
+            }
+            transformed.fill(Qt::transparent);
+            if (!ImageAffineTransformer::compositeSourceOver(transformed,
+                    QRect(QPoint(), targetSize),
+                    source,
+                    QRect(QPoint(), source.size()),
+                    transform,
+                    sampling))
+            {
+                return {};
+            }
+            return transformed;
+        });
 }
 
 void RasterAssetCache::clear()
