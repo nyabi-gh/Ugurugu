@@ -1200,7 +1200,17 @@ void MainWindow::createStatusBar()
     statusBar()->addPermanentWidget(m_recoveryFailureLabel);
 
     m_pointerLabel = new QLabel(this);
-    m_pointerLabel->setMinimumWidth(150);
+    // Fixed so the text changing on every pointer move never invalidates the
+    // status bar layout.
+    m_pointerLabel->setFixedSize(
+        std::max(150,
+            m_pointerLabel->fontMetrics().horizontalAdvance(
+                tr("x %1  y %2").arg(-99999).arg(-99999))
+                + m_pointerLabel->contentsMargins().left()
+                + m_pointerLabel->contentsMargins().right()),
+        m_pointerLabel->fontMetrics().height()
+            + m_pointerLabel->contentsMargins().top()
+            + m_pointerLabel->contentsMargins().bottom());
     statusBar()->addPermanentWidget(m_pointerLabel);
 
     m_zoomSlider = new QSlider(Qt::Horizontal, this);
@@ -1279,10 +1289,14 @@ void MainWindow::createStatusBar()
         this,
         [this](const QPointF &position, bool inside)
         {
-            m_pointerLabel->setText(inside ? tr("x %1  y %2")
-                                                 .arg(qRound(position.x()))
-                                                 .arg(qRound(position.y()))
-                                           : QString());
+            const QString text = inside ? tr("x %1  y %2")
+                                              .arg(qRound(position.x()))
+                                              .arg(qRound(position.y()))
+                                        : QString();
+            if (m_pointerLabel->text() != text)
+            {
+                m_pointerLabel->setText(text);
+            }
         });
     connect(m_zoomSlider,
         &QSlider::valueChanged,

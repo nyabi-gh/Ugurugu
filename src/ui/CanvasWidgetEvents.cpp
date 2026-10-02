@@ -438,7 +438,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         updateCursor();
         if (!pointerRect.isEmpty())
         {
-            requestDisplayUpdate(pointerRect);
+            requestOverlayUpdate(pointerRect);
         }
     }
     updatePointerPosition(event->position());
@@ -549,7 +549,7 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         updateCursor();
         if (!pointerRect.isEmpty())
         {
-            requestDisplayUpdate(pointerRect);
+            requestOverlayUpdate(pointerRect);
         }
     }
     updatePointerPosition(event->position());
@@ -618,7 +618,7 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
         updateCursor();
         if (!pointerRect.isEmpty())
         {
-            requestDisplayUpdate(pointerRect);
+            requestOverlayUpdate(pointerRect);
         }
     }
     updatePointerPosition(event->position());
@@ -744,7 +744,7 @@ void CanvasWidget::tabletEvent(QTabletEvent *event)
     updatePointerPosition(event->position());
     if (!previousPointerRect.isEmpty())
     {
-        requestDisplayUpdate(previousPointerRect);
+        requestOverlayUpdate(previousPointerRect);
     }
     updateCursor();
     if (event->type() == QEvent::TabletPress)
@@ -992,7 +992,7 @@ void CanvasWidget::leaveEvent(QEvent *event)
     emit pointerPositionChanged(QPointF(), false);
     if (!pointerRect.isEmpty())
     {
-        requestDisplayUpdate(pointerRect);
+        requestOverlayUpdate(pointerRect);
     }
     QWidget::leaveEvent(event);
 }

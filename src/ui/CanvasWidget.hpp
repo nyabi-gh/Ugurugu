@@ -295,6 +295,9 @@ private:
     void refreshCanvasShadow(const QPolygonF &canvasPolygon);
     void requestDisplayUpdate();
     void requestDisplayUpdate(const QRect &rect);
+    // For what only the overlay draws: cursor, outlines, handles. The frame
+    // pixels are untouched, so the GPU frame view does not redraw.
+    void requestOverlayUpdate(const QRect &rect);
     bool usingGpuDisplay() const;
     void initializeDisplayViews();
     void discardDisplayViews();

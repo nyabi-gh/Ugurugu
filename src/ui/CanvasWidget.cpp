@@ -844,6 +844,16 @@ void CanvasWidget::requestDisplayUpdate(const QRect &rect)
     update(rect);
 }
 
+void CanvasWidget::requestOverlayUpdate(const QRect &rect)
+{
+    if (usingGpuDisplay())
+    {
+        m_overlayView->update(rect);
+        return;
+    }
+    update(rect);
+}
+
 bool CanvasWidget::usingGpuDisplay() const
 {
     return m_frameView != nullptr;

@@ -410,7 +410,7 @@ void CanvasWidget::endPan()
     const QRect pointerRect = pointerUpdateRect();
     if (!pointerRect.isEmpty())
     {
-        requestDisplayUpdate(pointerRect);
+        requestOverlayUpdate(pointerRect);
     }
 }
 
@@ -489,7 +489,7 @@ void CanvasWidget::endZoomDrag()
     const QRect pointerRect = pointerUpdateRect();
     if (!pointerRect.isEmpty())
     {
-        requestDisplayUpdate(pointerRect);
+        requestOverlayUpdate(pointerRect);
     }
     requestDisplayUpdate();
 }
@@ -583,7 +583,7 @@ void CanvasWidget::endCanvasRotation()
     const QRect pointerRect = pointerUpdateRect();
     if (!pointerRect.isEmpty())
     {
-        requestDisplayUpdate(pointerRect);
+        requestOverlayUpdate(pointerRect);
     }
     requestDisplayUpdate();
 }
@@ -808,7 +808,7 @@ void CanvasWidget::updatePointerPosition(const QPointF &widgetPosition)
     dirtyRect = dirtyRect.united(pointerUpdateRect());
     if (!dirtyRect.isEmpty())
     {
-        requestDisplayUpdate(dirtyRect);
+        requestOverlayUpdate(dirtyRect);
     }
 }
 
