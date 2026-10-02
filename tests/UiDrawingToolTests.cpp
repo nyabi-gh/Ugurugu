@@ -908,6 +908,12 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
 
+        // Panning moves the outline without reshaping it.
+        CanvasWidgetTestAccess::panBy(canvas, QPointF(37.0, -21.0));
+        canvas.repaint();
+        QCoreApplication::processEvents();
+        QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
+
         canvas.rotateCanvasRight();
         canvas.repaint();
         QCoreApplication::processEvents();

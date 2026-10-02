@@ -270,12 +270,21 @@ void CanvasWidget::paintEvent(QPaintEvent *event)
 // equivalent), border, empty-document hint, selection outlines and the tool
 // cursor. Kept free of background and frame drawing so a texture-backed
 // display can run it over a transparent overlay unchanged.
-// Redraws the shadow pixmap when the canvas outline or the device pixel ratio
-// changed, and leaves it alone otherwise.
+// Redraws the shadow pixmap when the canvas outline's shape or the device
+// pixel ratio changed. The pixmap covers only the outline's neighbourhood and
+// is keyed on the outline relative to its own origin, so panning moves it
+// instead of baking a new one.
 void CanvasWidget::refreshCanvasShadow(const QPolygonF &canvasPolygon)
 {
+    // The widest pass is 28 px wide, centered on the edge and shifted 2 px
+    // down, plus a pixel of antialiasing.
+    constexpr qreal margin = 17.0;
     const qreal ratio = devicePixelRatioF();
-    const QSize pixelSize = (QSizeF(size()) * ratio).toSize();
+    const QRectF bounds = canvasPolygon.boundingRect().adjusted(
+        -margin, -margin, margin, margin);
+    const QPolygonF outline = canvasPolygon.translated(-bounds.topLeft());
+    const QSize pixelSize = (bounds.size() * ratio).toSize();
+    m_shadowCacheOrigin = bounds.topLeft();
     if (pixelSize.isEmpty())
     {
         m_shadowCache = QPixmap();
@@ -284,7 +293,7 @@ void CanvasWidget::refreshCanvasShadow(const QPolygonF &canvasPolygon)
     }
     if (!m_shadowCache.isNull() && m_shadowCache.size() == pixelSize
         && qFuzzyCompare(m_shadowCacheRatio, ratio)
-        && m_shadowCacheOutline == canvasPolygon)
+        && m_shadowCacheOutline == outline)
     {
         return;
     }
@@ -292,11 +301,11 @@ void CanvasWidget::refreshCanvasShadow(const QPolygonF &canvasPolygon)
     m_shadowCache = QPixmap(pixelSize);
     m_shadowCache.setDevicePixelRatio(ratio);
     m_shadowCache.fill(Qt::transparent);
-    m_shadowCacheOutline = canvasPolygon;
+    m_shadowCacheOutline = outline;
     m_shadowCacheRatio = ratio;
 
     QPainterPath shadowPath;
-    shadowPath.addPolygon(canvasPolygon);
+    shadowPath.addPolygon(outline);
     shadowPath.closeSubpath();
     shadowPath.translate(0.0, 2.0);
 
@@ -341,7 +350,7 @@ void CanvasWidget::paintOverlay(QPainter &painter, const QRegion &exposedRegion)
         {
             painter.save();
             painter.setClipRegion(shadowRegion);
-            painter.drawPixmap(rect(), m_shadowCache);
+            painter.drawPixmap(m_shadowCacheOrigin, m_shadowCache);
             painter.restore();
         }
     }

@@ -167,6 +167,14 @@ public:
         canvas.advanceFrame();
     }
 
+    static void panBy(CanvasWidget &canvas, const QPointF &delta)
+    {
+        const QPointF start = canvas.rect().center();
+        canvas.beginPan(start);
+        canvas.continuePan(start + delta);
+        canvas.endPan();
+    }
+
     static void stopAnimationTimer(CanvasWidget &canvas)
     {
         canvas.m_animationTimer.stop();

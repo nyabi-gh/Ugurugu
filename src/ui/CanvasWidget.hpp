@@ -585,6 +585,7 @@ private:
     // so redrawing them every repaint made a rotated canvas crawl.
     QPixmap m_shadowCache;
     QPolygonF m_shadowCacheOutline;
+    QPointF m_shadowCacheOrigin;
     qreal m_shadowCacheRatio = 0.0;
     IncrementalStrokeRenderer m_incrementalStrokeRenderer;
     QImage m_composedPreviewFrame;
