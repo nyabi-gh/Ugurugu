@@ -6,6 +6,8 @@
 #include "ui/Theme.hpp"
 
 #include <QGridLayout>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QResizeEvent>
 #include <QSettings>
 #include <QSizePolicy>
@@ -26,6 +28,67 @@ constexpr int swatchSpacing = 2;
 constexpr int gridMargin = 2;
 constexpr QLatin1StringView historyKey("brush/colorHistory");
 constexpr QLatin1StringView legacyRecentColorsKey("brush/recentColors");
+
+// Paints its own swatch. A style sheet per button made every recorded color
+// re-polish all 256 buttons, since a new color shifts every slot.
+class ColorSwatchButton final : public QToolButton
+{
+public:
+    using QToolButton::QToolButton;
+
+    void setSwatch(const QColor &color, bool active)
+    {
+        if (m_color == color && m_active == active)
+        {
+            return;
+        }
+        m_color = color;
+        m_active = active;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        const QRect bounds = rect();
+        if (!m_color.isValid())
+        {
+            painter.fillRect(bounds, QColor(255, 255, 255, 8));
+            painter.setPen(QColor(255, 255, 255, 24));
+            painter.drawRect(bounds.adjusted(0, 0, -1, -1));
+            return;
+        }
+        painter.fillRect(bounds, m_color);
+        const bool highlighted = underMouse() || hasFocus();
+        const int borderWidth = m_active ? 2 : 1;
+        const QColor border = m_active || highlighted
+                                  ? Theme::accent()
+                                  : QColor(255, 255, 255, 60);
+        for (int inset = 0; inset < borderWidth; ++inset)
+        {
+            painter.setPen(border);
+            painter.drawRect(
+                bounds.adjusted(inset, inset, -1 - inset, -1 - inset));
+        }
+    }
+
+    void enterEvent(QEnterEvent *event) override
+    {
+        QToolButton::enterEvent(event);
+        update();
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        QToolButton::leaveEvent(event);
+        update();
+    }
+
+private:
+    QColor m_color;
+    bool m_active = false;
+};
 
 }
 
@@ -48,7 +111,7 @@ ColorHistoryGrid::ColorHistoryGrid(QWidget *parent)
 
     for (int index = 0; index < historyCapacity; ++index)
     {
-        auto *button = new QToolButton(this);
+        auto *button = new ColorSwatchButton(this);
         button->setFixedSize(swatchSize, swatchSize);
         button->setCursor(Qt::PointingHandCursor);
         connect(button,
@@ -163,33 +226,23 @@ void ColorHistoryGrid::refreshButtons()
 {
     for (int index = 0; index < m_buttons.size(); ++index)
     {
-        QToolButton *button = m_buttons[index];
+        auto *button = static_cast<ColorSwatchButton *>(m_buttons[index]);
         const bool hasColor = index < m_colors.size();
-        button->setEnabled(hasColor);
-        if (!hasColor)
+        const QColor color = hasColor ? m_colors[index] : QColor();
+        if (button->isEnabled() != hasColor)
         {
-            button->setToolTip({});
-            button->setAccessibleName(tr("Empty color history slot"));
-            button->setStyleSheet(QStringLiteral(
-                "QToolButton { background: rgba(255, 255, 255, 8); "
-                "border: 1px solid rgba(255, 255, 255, 24); }"));
-            continue;
+            button->setEnabled(hasColor);
         }
-        const QColor color = m_colors[index];
-        const bool active = color == m_activeColor;
-        button->setToolTip(color.name(QColor::HexArgb));
-        button->setAccessibleName(
-            tr("History color %1").arg(color.name(QColor::HexArgb)));
-        button->setStyleSheet(
-            QStringLiteral("QToolButton { background: %1; border: %2; }"
-                           "QToolButton:hover { border-color: %3; }"
-                           "QToolButton:focus { border-color: %3; }")
-                .arg(color.name(QColor::HexArgb),
-                    active
-                        ? QStringLiteral("2px solid %1")
-                              .arg(Theme::accent().name())
-                        : QStringLiteral("1px solid rgba(255, 255, 255, 60)"),
-                    Theme::accent().name()));
+        button->setSwatch(color, hasColor && color == m_activeColor);
+        const QString name =
+            hasColor ? color.name(QColor::HexArgb) : QString();
+        if (button->toolTip() != name)
+        {
+            button->setToolTip(name);
+            button->setAccessibleName(hasColor
+                                          ? tr("History color %1").arg(name)
+                                          : tr("Empty color history slot"));
+        }
     }
 }
 
