@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-#include "ui/CanvasFrameView.hpp"
+#include "ui/CanvasDisplayWindow.hpp"
 
 #include "ui/CanvasViewport.hpp"
 #include "ui/CanvasWidget.hpp"
 #include "ui/Theme.hpp"
 
+#include <QCoreApplication>
+#include <QExposeEvent>
 #include <QFile>
 #include <QPainter>
+#include <QPlatformSurfaceEvent>
 
 #include <spdlog/spdlog.h>
 
@@ -39,19 +42,45 @@ struct FrameUniforms
     float frameValid;
 };
 
-}
-
-CanvasFrameView::CanvasFrameView(CanvasWidget *canvas)
-    : QRhiWidget(canvas)
-    , m_canvas(canvas)
+QSurface::SurfaceType platformSurfaceType()
 {
-    setAttribute(Qt::WA_TransparentForMouseEvents);
-    setFocusPolicy(Qt::NoFocus);
+#if defined(Q_OS_WIN)
+    return QSurface::Direct3DSurface;
+#elif defined(Q_OS_MACOS)
+    return QSurface::MetalSurface;
+#else
+    return QSurface::RasterSurface;
+#endif
 }
 
-CanvasFrameView::~CanvasFrameView() = default;
+QRhi *createRhi()
+{
+#if defined(Q_OS_WIN)
+    QRhiD3D11InitParams params;
+    return QRhi::create(QRhi::D3D11, &params);
+#elif defined(Q_OS_MACOS)
+    QRhiMetalInitParams params;
+    return QRhi::create(QRhi::Metal, &params);
+#else
+    return nullptr;
+#endif
+}
 
-void CanvasFrameView::releasePipeline()
+}
+
+CanvasDisplayWindow::CanvasDisplayWindow(CanvasWidget *canvas)
+    : m_canvas(canvas)
+{
+    setSurfaceType(platformSurfaceType());
+    setFlags(Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus);
+}
+
+CanvasDisplayWindow::~CanvasDisplayWindow()
+{
+    releaseResources();
+}
+
+void CanvasDisplayWindow::releaseResources()
 {
     m_overlayPipeline.reset();
     m_overlayBindings.reset();
@@ -64,10 +93,23 @@ void CanvasFrameView::releasePipeline()
     m_sampler.reset();
     m_uniformBuffer.reset();
     m_vertexBuffer.reset();
-    m_uploadSourceFrame = {};
+    m_renderPass.reset();
+    m_swapChain.reset();
+    m_rhi.reset();
 }
 
-void CanvasFrameView::rebuildShaderResourceBindings()
+void CanvasDisplayWindow::fail()
+{
+    if (m_failed)
+    {
+        return;
+    }
+    m_failed = true;
+    releaseResources();
+    emit renderFailed();
+}
+
+void CanvasDisplayWindow::rebuildShaderResourceBindings()
 {
     m_bindings.reset(m_rhi->newShaderResourceBindings());
     m_bindings->setBindings({
@@ -83,7 +125,7 @@ void CanvasFrameView::rebuildShaderResourceBindings()
     m_bindings->create();
 }
 
-void CanvasFrameView::rebuildOverlayShaderResourceBindings()
+void CanvasDisplayWindow::rebuildOverlayShaderResourceBindings()
 {
     m_overlayBindings.reset(m_rhi->newShaderResourceBindings());
     m_overlayBindings->setBindings({
@@ -97,21 +139,22 @@ void CanvasFrameView::rebuildOverlayShaderResourceBindings()
     m_overlayBindings->create();
 }
 
-void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
+bool CanvasDisplayWindow::initialize()
 {
-    Q_UNUSED(cb);
-    if (m_rhi != rhi())
+    m_rhi.reset(createRhi());
+    if (!m_rhi)
     {
-        releasePipeline();
-        m_rhi = rhi();
-        if (m_rhi)
-        {
-            spdlog::info("Canvas display: GPU ({})", m_rhi->backendName());
-        }
+        return false;
     }
-    if (!m_rhi || m_pipeline)
+    spdlog::info("Canvas display: GPU ({})", m_rhi->backendName());
+
+    m_swapChain.reset(m_rhi->newSwapChain());
+    m_swapChain->setWindow(this);
+    m_renderPass.reset(m_swapChain->newCompatibleRenderPassDescriptor());
+    m_swapChain->setRenderPassDescriptor(m_renderPass.get());
+    if (!m_swapChain->createOrResize())
     {
-        return;
+        return false;
     }
 
     m_vertexBuffer.reset(m_rhi->newBuffer(
@@ -151,11 +194,15 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
     if (!vertexShader.isValid() || !fragmentShader.isValid()
         || !overlayVertexShader.isValid() || !overlayFragmentShader.isValid())
     {
-        releasePipeline();
-        m_rhi = nullptr;
-        emit renderFailed();
-        return;
+        return false;
     }
+
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({{4 * sizeof(float)}});
+    inputLayout.setAttributes({
+        {0, 0, QRhiVertexInputAttribute::Float2, 0},
+        {0, 1, QRhiVertexInputAttribute::Float2, 2 * sizeof(float)},
+    });
 
     m_pipeline.reset(m_rhi->newGraphicsPipeline());
     m_pipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
@@ -163,16 +210,9 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
         {QRhiShaderStage::Vertex, vertexShader},
         {QRhiShaderStage::Fragment, fragmentShader},
     });
-    QRhiVertexInputLayout inputLayout;
-    inputLayout.setBindings({{4 * sizeof(float)}});
-    inputLayout.setAttributes({
-        {0, 0, QRhiVertexInputAttribute::Float2, 0},
-        {0, 1, QRhiVertexInputAttribute::Float2, 2 * sizeof(float)},
-    });
     m_pipeline->setVertexInputLayout(inputLayout);
     m_pipeline->setShaderResourceBindings(m_bindings.get());
-    m_pipeline->setRenderPassDescriptor(renderTarget()->renderPassDescriptor());
-    m_pipeline->setSampleCount(renderTarget()->sampleCount());
+    m_pipeline->setRenderPassDescriptor(m_renderPass.get());
 
     m_overlayPipeline.reset(m_rhi->newGraphicsPipeline());
     m_overlayPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
@@ -182,9 +222,7 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
     });
     m_overlayPipeline->setVertexInputLayout(inputLayout);
     m_overlayPipeline->setShaderResourceBindings(m_overlayBindings.get());
-    m_overlayPipeline->setRenderPassDescriptor(
-        renderTarget()->renderPassDescriptor());
-    m_overlayPipeline->setSampleCount(renderTarget()->sampleCount());
+    m_overlayPipeline->setRenderPassDescriptor(m_renderPass.get());
     // QPainter output is premultiplied.
     QRhiGraphicsPipeline::TargetBlend blend;
     blend.enable = true;
@@ -194,18 +232,62 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
     blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
     m_overlayPipeline->setTargetBlends({blend});
 
-    if (!m_pipeline->create() || !m_overlayPipeline->create())
+    return m_pipeline->create() && m_overlayPipeline->create();
+}
+
+bool CanvasDisplayWindow::event(QEvent *event)
+{
+    switch (event->type())
     {
-        releasePipeline();
-        m_rhi = nullptr;
-        emit renderFailed();
+    case QEvent::UpdateRequest:
+        renderFrame();
+        return true;
+    case QEvent::PlatformSurface:
+        // The swap chain must go before the native window it presents to.
+        if (static_cast<QPlatformSurfaceEvent *>(event)->surfaceEventType()
+            == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+        {
+            releaseResources();
+        }
+        break;
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+    case QEvent::TouchBegin:
+    case QEvent::TouchUpdate:
+    case QEvent::TouchEnd:
+    case QEvent::TouchCancel:
+    case QEvent::NativeGesture:
+    case QEvent::Enter:
+    case QEvent::Leave:
+        // The window covers the canvas widget exactly, so the event's local
+        // positions are already the widget's.
+        QCoreApplication::sendEvent(m_canvas, event);
+        return true;
+    default:
+        break;
+    }
+    return QWindow::event(event);
+}
+
+void CanvasDisplayWindow::exposeEvent(QExposeEvent *event)
+{
+    Q_UNUSED(event);
+    if (isExposed())
+    {
+        renderFrame();
     }
 }
 
-void CanvasFrameView::updateOverlay(QRhiResourceUpdateBatch *batch)
+void CanvasDisplayWindow::updateOverlay(
+    QRhiResourceUpdateBatch *batch, const QSize &pixelSize)
 {
-    const QSize pixelSize = renderTarget()->pixelSize();
-    const qreal ratio = devicePixelRatioF();
+    const qreal ratio = devicePixelRatio();
     QRegion dirty = m_canvas->takeOverlayDirtyRegion();
     if (m_overlayImage.size() != pixelSize
         || m_overlayImage.devicePixelRatio() != ratio)
@@ -216,7 +298,7 @@ void CanvasFrameView::updateOverlay(QRhiResourceUpdateBatch *batch)
         rebuildOverlayShaderResourceBindings();
         m_overlayImage = QImage(pixelSize, QImage::Format_ARGB32_Premultiplied);
         m_overlayImage.setDevicePixelRatio(ratio);
-        dirty = rect();
+        dirty = QRect(QPoint(), size());
     }
     const QRectF dirtyBounds(dirty.boundingRect());
     const QRect pixelBounds =
@@ -254,29 +336,68 @@ void CanvasFrameView::updateOverlay(QRhiResourceUpdateBatch *batch)
         m_overlayTexture.get(), QRhiTextureUploadEntry(0, 0, upload));
 }
 
-void CanvasFrameView::render(QRhiCommandBuffer *cb)
+bool CanvasDisplayWindow::renderFrame(QRhiReadbackResult *readback)
 {
-    if (!m_rhi || !m_pipeline)
+    if (m_failed || !isExposed())
     {
-        return;
+        return false;
+    }
+    if (!m_rhi && !initialize())
+    {
+        fail();
+        return false;
+    }
+    if (m_swapChain->currentPixelSize() != m_swapChain->surfacePixelSize())
+    {
+        if (m_swapChain->surfacePixelSize().isEmpty())
+        {
+            return false;
+        }
+        if (!m_swapChain->createOrResize())
+        {
+            fail();
+            return false;
+        }
+    }
+    QRhi::FrameOpResult begun = m_rhi->beginFrame(m_swapChain.get());
+    if (begun == QRhi::FrameOpSwapChainOutOfDate)
+    {
+        if (!m_swapChain->createOrResize())
+        {
+            fail();
+            return false;
+        }
+        begun = m_rhi->beginFrame(m_swapChain.get());
+    }
+    if (begun != QRhi::FrameOpSuccess)
+    {
+        if (begun == QRhi::FrameOpDeviceLost || begun == QRhi::FrameOpError)
+        {
+            fail();
+        }
+        return false;
     }
 
+    QRhiCommandBuffer *cb = m_swapChain->currentFrameCommandBuffer();
+    QRhiRenderTarget *target = m_swapChain->currentFrameRenderTarget();
+    const QSize outputSize = target->pixelSize();
     const CanvasWidget::DisplayedFrame frame =
         m_canvas->resolveDisplayedFrame();
     QRhiResourceUpdateBatch *batch = m_rhi->nextResourceUpdateBatch();
 
+    // The upload descriptions reference these bytes in place until endFrame
+    // below submits them.
+    QImage source = frame.image;
     bool frameValid = false;
-    if (!frame.image.isNull())
+    if (!source.isNull())
     {
-        QImage source = frame.image;
         if (source.format() != QImage::Format_ARGB32_Premultiplied
             && source.format() != QImage::Format_RGB32)
         {
             source =
                 source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         }
-        const bool recreate =
-            !m_frameTexture || m_frameTexture->pixelSize() != source.size();
+        const bool recreate = m_frameTexture->pixelSize() != source.size();
         if (recreate)
         {
             m_frameTexture.reset(
@@ -290,10 +411,7 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
         if (!uploadBounds.isEmpty())
         {
             // ARGB32 scanlines are BGRA bytes in memory, so the rows can feed
-            // a BGRA8 texture without a per-pixel conversion. The description
-            // references the image bytes in place; m_uploadSourceFrame keeps
-            // them alive until the batch is committed in beginPass below.
-            m_uploadSourceFrame = source;
+            // a BGRA8 texture without a per-pixel conversion.
             const qsizetype stride = source.bytesPerLine();
             const char *base =
                 reinterpret_cast<const char *>(source.constBits())
@@ -362,7 +480,7 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
         0,
         sizeof(overlayVertices),
         overlayVertices);
-    updateOverlay(batch);
+    updateOverlay(batch, outputSize);
 
     QMatrix4x4 mvp = m_rhi->clipSpaceCorrMatrix();
     mvp.ortho(0.0f, float(width()), float(height()), 0.0f, -1.0f, 1.0f);
@@ -377,11 +495,11 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
     batch->updateDynamicBuffer(
         m_uniformBuffer.get(), 0, sizeof(uniforms), &uniforms);
 
-    cb->beginPass(renderTarget(), Theme::canvasBackground(), {1.0f, 0}, batch);
+    const QRhiViewport viewport(
+        0, 0, float(outputSize.width()), float(outputSize.height()));
+    cb->beginPass(target, Theme::canvasBackground(), {1.0f, 0}, batch);
     cb->setGraphicsPipeline(m_pipeline.get());
-    const QSize outputSize = renderTarget()->pixelSize();
-    cb->setViewport(QRhiViewport(
-        0, 0, float(outputSize.width()), float(outputSize.height())));
+    cb->setViewport(viewport);
     // Passed explicitly: recreating the frame texture replaces the bindings
     // object, while the pipeline still holds the one it was created with.
     cb->setShaderResources(m_bindings.get());
@@ -389,18 +507,43 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
     cb->setVertexInput(0, 1, &vertexInput);
     cb->draw(4);
     cb->setGraphicsPipeline(m_overlayPipeline.get());
-    cb->setViewport(QRhiViewport(
-        0, 0, float(outputSize.width()), float(outputSize.height())));
+    cb->setViewport(viewport);
     cb->setShaderResources(m_overlayBindings.get());
     const QRhiCommandBuffer::VertexInput overlayInput(
         m_overlayVertexBuffer.get(), 0);
     cb->setVertexInput(0, 1, &overlayInput);
     cb->draw(4);
-    cb->endPass();
-    // Dropped now that beginPass has committed the batch: holding this
-    // reference across frames would force the canvas to deep-copy the
-    // composed preview on its next in-place patch.
-    m_uploadSourceFrame = {};
+    QRhiResourceUpdateBatch *readbackBatch = nullptr;
+    if (readback)
+    {
+        readbackBatch = m_rhi->nextResourceUpdateBatch();
+        readbackBatch->readBackTexture(QRhiReadbackDescription(), readback);
+    }
+    cb->endPass(readbackBatch);
+    m_rhi->endFrame(m_swapChain.get());
+    return true;
+}
+
+QImage CanvasDisplayWindow::grabFramebuffer()
+{
+    QRhiReadbackResult readback;
+    if (!renderFrame(&readback))
+    {
+        return {};
+    }
+    m_rhi->finish();
+    QImage::Format format = QImage::Format_RGBA8888_Premultiplied;
+    if (readback.format == QRhiTexture::BGRA8)
+    {
+        format = QImage::Format_ARGB32_Premultiplied;
+    }
+    QImage image(reinterpret_cast<const uchar *>(readback.data.constData()),
+        readback.pixelSize.width(),
+        readback.pixelSize.height(),
+        format);
+    image = m_rhi->isYUpInFramebuffer() ? image.flipped() : image.copy();
+    image.setDevicePixelRatio(devicePixelRatio());
+    return image;
 }
 
 }

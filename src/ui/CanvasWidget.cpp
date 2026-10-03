@@ -13,7 +13,7 @@
 #include "io/SelectionClipboardCodec.hpp"
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
-#include "ui/CanvasFrameView.hpp"
+#include "ui/CanvasDisplayWindow.hpp"
 #include "ui/CanvasViewport.hpp"
 #include "ui/SelectionActionBar.hpp"
 #include "ui/Theme.hpp"
@@ -818,6 +818,13 @@ void CanvasWidget::setSelectionActionBar(SelectionActionBar *actionBar)
     if (m_selectionActionBar)
     {
         m_selectionActionBar->setParent(this);
+        // An alien widget would be painted under the display window.
+        if (usingGpuDisplay())
+        {
+            m_selectionActionBar->setAttribute(
+                Qt::WA_DontCreateNativeAncestors);
+            m_selectionActionBar->setAttribute(Qt::WA_NativeWindow);
+        }
         m_selectionActionBar->hide();
     }
     updateSelectionActionBar();
@@ -833,7 +840,7 @@ void CanvasWidget::requestDisplayUpdate()
     if (usingGpuDisplay())
     {
         m_overlayDirtyRegion = rect();
-        m_frameView->update();
+        m_displayWindow->requestUpdate();
         return;
     }
     update();
@@ -844,7 +851,7 @@ void CanvasWidget::requestDisplayUpdate(const QRect &rect)
     if (usingGpuDisplay())
     {
         m_overlayDirtyRegion += rect;
-        m_frameView->update();
+        m_displayWindow->requestUpdate();
         return;
     }
     update(rect);
@@ -854,7 +861,7 @@ void CanvasWidget::requestFrameUpdate()
 {
     if (usingGpuDisplay())
     {
-        m_frameView->update();
+        m_displayWindow->requestUpdate();
         return;
     }
     update();
@@ -864,7 +871,7 @@ void CanvasWidget::requestFrameUpdate(const QRect &rect)
 {
     if (usingGpuDisplay())
     {
-        m_frameView->update();
+        m_displayWindow->requestUpdate();
         return;
     }
     update(rect);
@@ -875,7 +882,7 @@ void CanvasWidget::requestOverlayUpdate(const QRect &rect)
     if (usingGpuDisplay())
     {
         m_overlayDirtyRegion += rect;
-        m_frameView->update();
+        m_displayWindow->requestUpdate();
         return;
     }
     update(rect);
@@ -888,7 +895,7 @@ QRegion CanvasWidget::takeOverlayDirtyRegion()
 
 bool CanvasWidget::usingGpuDisplay() const
 {
-    return m_frameView != nullptr;
+    return m_displayWindow != nullptr;
 }
 
 void CanvasWidget::initializeDisplayViews()
@@ -908,10 +915,13 @@ void CanvasWidget::initializeDisplayViews()
     {
         return;
     }
-    m_frameView = new CanvasFrameView(this);
+    m_displayWindow = new CanvasDisplayWindow(this);
+    m_displayContainer = QWidget::createWindowContainer(m_displayWindow, this);
+    m_displayContainer->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_displayContainer->setFocusPolicy(Qt::NoFocus);
     connect(
-        m_frameView,
-        &QRhiWidget::renderFailed,
+        m_displayWindow,
+        &CanvasDisplayWindow::renderFailed,
         this,
         [this]()
         {
@@ -919,29 +929,30 @@ void CanvasWidget::initializeDisplayViews()
         },
         Qt::QueuedConnection);
     syncDisplayViewGeometry();
-    m_frameView->show();
+    m_displayContainer->show();
 }
 
 void CanvasWidget::discardDisplayViews()
 {
-    if (!m_frameView)
+    if (!m_displayWindow)
     {
         return;
     }
     spdlog::warn("Canvas display: GPU initialization failed, "
                  "falling back to software rendering");
-    m_frameView->hide();
-    m_frameView->deleteLater();
-    m_frameView = nullptr;
+    m_displayContainer->hide();
+    m_displayContainer->deleteLater();
+    m_displayContainer = nullptr;
+    m_displayWindow = nullptr;
     m_overlayDirtyRegion = {};
     update();
 }
 
 void CanvasWidget::syncDisplayViewGeometry()
 {
-    if (m_frameView)
+    if (m_displayContainer)
     {
-        m_frameView->setGeometry(rect());
+        m_displayContainer->setGeometry(rect());
     }
 }
 

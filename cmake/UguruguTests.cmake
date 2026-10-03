@@ -16,6 +16,8 @@ target_link_libraries(
     ugurugu_ui
     Qt6::Test
     webpdemux
+    # CanvasWidgetTestAccess reads the GPU display through its QRhi window.
+    Qt6::GuiPrivate
 )
 target_compile_definitions(
     ugurugu_tests

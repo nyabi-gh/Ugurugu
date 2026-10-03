@@ -899,31 +899,26 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         canvas.fitToWindow();
-        canvas.repaint();
-        QCoreApplication::processEvents();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
 
         const qint64 baked = CanvasWidgetTestAccess::shadowCacheKey(canvas);
         QVERIFY(baked != 0);
 
-        canvas.repaint();
-        QCoreApplication::processEvents();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
         QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
 
         // Panning moves the outline without reshaping it.
         CanvasWidgetTestAccess::panBy(canvas, QPointF(37.0, -21.0));
-        canvas.repaint();
-        QCoreApplication::processEvents();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
         QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
 
         canvas.rotateCanvasRight();
-        canvas.repaint();
-        QCoreApplication::processEvents();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
         const qint64 rotated = CanvasWidgetTestAccess::shadowCacheKey(canvas);
         QVERIFY(rotated != 0);
         QVERIFY(rotated != baked);
 
-        canvas.repaint();
-        QCoreApplication::processEvents();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
         QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), rotated);
     }
 

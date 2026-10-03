@@ -4,6 +4,7 @@
 #include "document/SelectionOperation.hpp"
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
+#include "ui/CanvasDisplayWindow.hpp"
 #include "ui/CanvasViewport.hpp"
 #include "ui/CanvasWidget.hpp"
 #include "ui/SelectionActionBar.hpp"
@@ -217,6 +218,15 @@ bool CanvasWidget::event(QEvent *event)
     case QEvent::WindowDeactivate:
         cancelActiveInteraction();
         break;
+    case QEvent::CursorChange:
+        // The display window covers the widget, so the platform shows its
+        // cursor rather than this one.
+        if (m_displayWindow
+            && m_displayWindow->cursor().shape() != cursor().shape())
+        {
+            m_displayWindow->setCursor(cursor());
+        }
+        break;
     default:
         break;
     }
@@ -229,8 +239,8 @@ void CanvasWidget::paintEvent(QPaintEvent *event)
     painter.fillRect(rect(), Theme::canvasBackground());
     if (usingGpuDisplay())
     {
-        // The frame view covers the whole widget; the fill above only keeps
-        // the opaque-paint-event contract for exposed edges.
+        // The display window covers the whole widget; the fill above only
+        // keeps the opaque-paint-event contract for exposed edges.
         return;
     }
     painter.setRenderHint(QPainter::Antialiasing, true);

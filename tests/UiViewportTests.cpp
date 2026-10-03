@@ -8,6 +8,7 @@
 #include <QMouseEvent>
 #include <QPolygonF>
 #include <QTouchEvent>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QtTest/qtesttouch.h>
 
@@ -1557,7 +1558,7 @@ private slots:
 
         canvas.setZoomPercent(25);
         QTRY_VERIFY(!CanvasWidgetTestAccess::zoomRenderPending(canvas));
-        canvas.grab();
+        CanvasWidgetTestAccess::grabDisplay(canvas);
         const QSize initialRenderSize =
             CanvasWidgetTestAccess::cachedRenderSize(canvas);
         QVERIFY(initialRenderSize.isValid());
@@ -1610,7 +1611,7 @@ private slots:
         for (const int zoomPercent : {87, 93, 101, 113})
         {
             canvas.setZoomPercent(zoomPercent);
-            const QImage frame = canvas.grab().toImage();
+            const QImage frame = CanvasWidgetTestAccess::grabDisplay(canvas);
 
             QRect paintedBounds;
             for (int y = 0; y < frame.height(); ++y)
@@ -1629,11 +1630,15 @@ private slots:
             QVERIFY(paintedBounds.height() > 100);
 
             const QRect interior = paintedBounds.adjusted(4, 4, -4, -4);
+            const qreal ratio = frame.devicePixelRatio();
+            const QPoint pointerPixel =
+                (QPointF(pointerPosition) * ratio).toPoint();
             for (int y = interior.top(); y <= interior.bottom(); ++y)
             {
                 for (int x = interior.left(); x <= interior.right(); ++x)
                 {
-                    if ((QPoint(x, y) - pointerPosition).manhattanLength() < 40)
+                    if ((QPoint(x, y) - pointerPixel).manhattanLength()
+                        < 40 * ratio)
                     {
                         continue;
                     }
@@ -2241,38 +2246,49 @@ private slots:
         QVERIFY(!CanvasWidgetTestAccess::usingGpuDisplay(canvas));
     }
 
-    void drawsWithoutRepaintingRasterWidgetsOverTheGpuDisplay()
+    void drawsWithoutRepaintingTheCanvasWhileOtherWidgetsRepaint()
     {
         DocumentController controller;
         QVERIFY(controller.newDocument(QSize(800, 600)));
-        CanvasWidget canvas(&controller);
-        canvas.resize(800, 600);
-        canvas.setAnimating(false);
-        canvas.show();
-        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
-        if (!CanvasWidgetTestAccess::usingGpuDisplay(canvas))
+        QWidget window;
+        auto *layout = new QVBoxLayout(&window);
+        auto *canvas = new CanvasWidget(&controller);
+        auto *label = new QLabel(&window);
+        label->setFixedSize(120, 20);
+        layout->addWidget(canvas, 1);
+        layout->addWidget(label);
+        window.resize(800, 640);
+        canvas->setAnimating(false);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        if (!CanvasWidgetTestAccess::usingGpuDisplay(*canvas))
         {
-            QSKIP("Only the GPU display draws the overlay in its own pass.");
+            QSKIP("Only the GPU display presents apart from other widgets.");
         }
-        canvas.fitToWindow();
-        QTRY_VERIFY(!CanvasWidgetTestAccess::frameCacheWarmupActive(canvas));
+        canvas->fitToWindow();
+        QTRY_VERIFY(!CanvasWidgetTestAccess::frameCacheWarmupActive(*canvas));
 
-        const QPoint start = canvas.rect().center();
-        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, start);
-        QApplication::processEvents();
-        // A raster widget stacked over the frame view made Qt repaint it, and
-        // the canvas under it, across the whole view on every frame update.
+        const QPoint start = canvas->rect().center();
+        QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(canvas, start + QPoint(3, 1));
+        label->setText(QStringLiteral("0"));
+        QTest::qWait(50);
+        // While any other widget had something to repaint, Qt repainted the
+        // whole canvas under a texture-backed display with it, so a label
+        // updated per pointer report made every canvas frame a full raster
+        // pass.
         PaintRegionTracker tracker;
-        canvas.installEventFilter(&tracker);
+        canvas->installEventFilter(&tracker);
         for (int step = 1; step <= 20; ++step)
         {
-            QTest::mouseMove(&canvas, start + QPoint(step * 6, step * 3));
-            QApplication::processEvents();
+            QTest::mouseMove(canvas, start + QPoint(step * 6, step * 3));
+            label->setText(QString::number(step));
+            QTest::qWait(10);
         }
         QTest::mouseRelease(
-            &canvas, Qt::LeftButton, Qt::NoModifier, start + QPoint(120, 60));
+            canvas, Qt::LeftButton, Qt::NoModifier, start + QPoint(120, 60));
         QApplication::processEvents();
-        canvas.removeEventFilter(&tracker);
+        canvas->removeEventFilter(&tracker);
         QCOMPARE(tracker.eventCount(), 0);
         QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
     }
@@ -2338,7 +2354,7 @@ private slots:
                 Qt::NoButton,
                 Qt::NoModifier);
             QApplication::sendEvent(&canvas, &move);
-            return canvas.grab().toImage().convertToFormat(
+            return CanvasWidgetTestAccess::grabDisplay(canvas).convertToFormat(
                 QImage::Format_RGB32);
         };
         const QImage gpu = grabWithPointer(gpuCanvas);

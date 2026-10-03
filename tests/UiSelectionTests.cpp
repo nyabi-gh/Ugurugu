@@ -2313,10 +2313,9 @@ private slots:
                 center + (documentPoint - QPointF(50.0, 50.0)) * canvas.zoom())
                 .toPoint();
         };
-        const auto sample = [&canvas, &widgetPoint](const QPixmap &pixmap,
+        const auto sample = [&canvas, &widgetPoint](const QImage &image,
                                 const QPointF &documentPoint)
         {
-            const QImage image = pixmap.toImage();
             const QPoint widgetPosition = widgetPoint(documentPoint);
             const qreal xScale =
                 static_cast<qreal>(image.width()) / canvas.width();
@@ -2360,10 +2359,12 @@ private slots:
         QVERIFY(canvas.pendingSelectionTransform().dx() < -19.0);
         QCOMPARE(
             DocumentSerializer::toJson(controller.document()), beforeTransform);
-        const QPixmap partialPreview = canvas.grab();
+        const QImage partialPreview =
+            CanvasWidgetTestAccess::grabDisplay(canvas);
         QVERIFY(canvas.applySelectionTransform());
         QApplication::processEvents();
-        const QPixmap partialCommitted = canvas.grab();
+        const QImage partialCommitted =
+            CanvasWidgetTestAccess::grabDisplay(canvas);
         QCOMPARE(sample(partialPreview, QPointF(3.0, 50.0)),
             sample(partialCommitted, QPointF(3.0, 50.0)));
         QCOMPARE(controller.undoStack()->count(), undoCount + 1);
@@ -3540,9 +3541,8 @@ private slots:
                 &canvas, Qt::LeftButton, Qt::NoModifier, topLeft);
         };
         const auto sample =
-            [&canvas](const QPixmap &pixmap, const QPoint &widgetPosition)
+            [&canvas](const QImage &image, const QPoint &widgetPosition)
         {
-            const QImage image = pixmap.toImage();
             const qreal xScale =
                 static_cast<qreal>(image.width()) / canvas.width();
             const qreal yScale =
@@ -3567,7 +3567,7 @@ private slots:
         QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, dragStart);
         QTest::mouseMove(&canvas, dragEnd, 5);
         QApplication::processEvents();
-        const QPixmap preview = canvas.grab();
+        const QImage preview = CanvasWidgetTestAccess::grabDisplay(canvas);
 
         QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, dragEnd);
         QApplication::processEvents();
@@ -3577,7 +3577,7 @@ private slots:
         QCOMPARE(controller.undoStack()->index(), undoIndexBeforeTransform);
         QVERIFY(canvas.applySelectionTransform());
         QApplication::processEvents();
-        const QPixmap committed = canvas.grab();
+        const QImage committed = CanvasWidgetTestAccess::grabDisplay(canvas);
         QCOMPARE(controller.undoStack()->index(), undoIndexBeforeTransform + 1);
 
         const QPoint blueSample = widgetPoint(QPointF(65.0, 50.0));

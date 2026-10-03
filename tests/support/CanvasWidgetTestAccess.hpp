@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ui/CanvasDisplayWindow.hpp"
 #include "ui/CanvasWidget.hpp"
 
 #include <QSize>
@@ -30,6 +31,17 @@ public:
     static bool usingGpuDisplay(const CanvasWidget &canvas)
     {
         return canvas.usingGpuDisplay();
+    }
+
+    // What the canvas shows. The GPU display is a native child window, which
+    // QWidget::grab does not capture.
+    static QImage grabDisplay(CanvasWidget &canvas)
+    {
+        if (canvas.m_displayWindow)
+        {
+            return canvas.m_displayWindow->grabFramebuffer();
+        }
+        return canvas.grab().toImage();
     }
 
     // Identifies the baked canvas shadow. A repaint that reuses it keeps the

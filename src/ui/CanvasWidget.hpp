@@ -40,7 +40,7 @@ namespace ugurugu
 
 class SelectionActionBar;
 class CanvasWidgetTestAccess;
-class CanvasFrameView;
+class CanvasDisplayWindow;
 
 class CanvasWidget final : public QWidget
 {
@@ -227,7 +227,7 @@ protected:
 
 private:
     friend class CanvasWidgetTestAccess;
-    friend class CanvasFrameView;
+    friend class CanvasDisplayWindow;
 
     struct SelectionState
     {
@@ -710,7 +710,8 @@ private:
     FloatingTransformSession m_selectionTransformSession;
     QPointer<SelectionActionBar> m_selectionActionBar;
     bool m_selectionMoveMode = false;
-    CanvasFrameView *m_frameView = nullptr;
+    CanvasDisplayWindow *m_displayWindow = nullptr;
+    QWidget *m_displayContainer = nullptr;
     QRegion m_overlayDirtyRegion;
 };
 
