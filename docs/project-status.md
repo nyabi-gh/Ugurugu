@@ -224,23 +224,29 @@
 
 남은 검증: macOS Metal·Apple Silicon 측정, 실제 펜 입력에서 펜 다운 지연, 정적 레이어 캐시와 참조 이미지 선렌더의 장시간 메모리 상한(예산 256MiB와 이미지 1장)을 실제 작업 문서로 확인.
 
-### 그리는 중 입력 지연 — 미해결, 다음 작업
+### 그리는 중 입력 지연 — 원인 2건 수정, 실기기 확인 대기
 
-위 변경은 그리는 동안의 지연을 줄이지 못했다. 사용자 문서를 실제 D3D11 창(1400×1000)에 띄우고 필압이 변하는 태블릿 이동 400개를 4ms 간격(240Hz)으로 보낸 임시 probe에서, `be2a06d`와 현재 브랜치의 결과가 같았다(시나리오별 3회 교차).
+**정정:** 이전 기록의 "이동당 6.5ms, 400점 획 약 2.6s"는 probe가 이벤트마다 `processEvents`로 화면 갱신을 강제해 생긴 값이다. 실제 입력처럼 별도 스레드가 `QWindowSystemInterface`로 태블릿 이동을 4ms 간격(240Hz)에 넣고 이벤트 루프를 그대로 돌리면, 수정 전에도 GPU·software 모두 획이 약 1.6s에 끝났다. 지연은 처리량이 아니라 **프레임당 비용이 창 넓이에 비례한 것**에서 나왔다.
 
-| 조건 | 이동 1개 GUI 처리 p50 / p95 | 400점 획 소요 (이상 1.6s) |
-|---|---|---|
-| 정지 | 6.5 / 7.5ms | 약 2.6s |
-| 재생 | 6.6 / 7.6ms | 약 2.6s |
-| 재생 + 그리는 중 애니메이션 | 6.4 / 9.3ms | 약 2.6s |
+측정 조건: Windows 11, 160Hz 모니터·배율 150%, 사용자 문서, 필압 변화 400점, 실제 D3D11 창(작은 창 1400×1000 / 큰 창 2400×1300 논리 픽셀), 정지·재생·재생+그리는 중 애니메이션 각각. 같은 probe로 수정 전(`bbb097b`)과 후를 쟀다. "입력→프레임"은 이동 주입부터 그 점을 포함한 프레임의 Qt flush 반환까지이며, 화면에 실제로 보이기까지의 시간은 아니다.
 
-GPU 표시에서 이벤트 처리 자체는 평균 1.05ms이고, 나머지 약 5.5ms는 이벤트마다 frame view(QRhiWidget)를 갱신·표시하는 단계다. `UGURUGU_CANVAS_DISPLAY=software`에서는 이동당 p50 1.7ms(이벤트 처리 1.01ms)로 획이 1.6s에 끝나 입력을 따라간다. GPU 경로는 240Hz 입력을 처리하지 못해 이벤트가 밀리며, 이것이 체감 지연의 유력한 원인이다.
+| 조건 (정지) | 프레임당 GUI 처리 | 프레임당 래스터 repaint | 입력 대기 p50 | 입력→프레임 p50 / p95 |
+|---|---|---|---|---|
+| GPU 작은 창 | 5.40 → 5.15ms | 1.41 → 0 Mpx | 2.5 → 2.1ms | 8.6 / 12.4 → 8.3 / 11.1ms |
+| GPU 큰 창 | 13.0 → 5.1ms (1.6s 동안 113 → 258프레임) | 3.15 → 0 Mpx | 7.2 → 2.2ms | 20.1 / 27.7 → 8.3 / 11.2ms |
+| software 큰 창 | 13.3 → 1.3ms | 3.14 → 0.24 Mpx | 7.0 → 0.0ms | — |
 
-다음 작업:
+재생·재생+그리는 중 애니메이션도 GPU는 같은 값(프레임 5.1–5.2ms, 입력→프레임 p50 8.3–8.4ms)이다. GPU 팬(가운데 버튼 250Hz 드래그 1.2s)은 큰 창에서 프레임당 12.1 → 6.1ms(99 → 194프레임), 작은 창은 6.1ms로 변화 없다.
 
-1. GPU 경로의 5.5ms를 분해한다: vsync에 묶인 present 대기, 창 backing store 합성, dirty 영역 텍스처 업로드, overlay 갱신을 각각 잰다.
-2. 원인에 맞춰 고친다. 후보는 표시 갱신을 입력 이벤트마다가 아니라 디스플레이 갱신 주기에 한 번으로 묶는 것이다. 수정 전후는 같은 probe로 비교한다.
-3. 실제 펜에서 OS·Qt의 이동 이벤트 병합 여부와 체감 지연을 확인한다. 합성 이벤트 probe만으로는 실제 펜의 이벤트 빈도를 대신하지 못한다.
+- **원인 1 · GPU (`72087a6`):** 투명 overlay 위젯이 QRhiWidget frame view 위에 겹쳐 있어, frame view를 갱신할 때마다 Qt가 overlay와 그 아래 캔버스를 화면 전체 넓이로 다시 그리고 backing store를 다시 올렸다. overlay 위젯을 숨기면 이 비용이 사라지고 프레임이 창 크기와 무관해지는 것을 먼저 확인했다. 수정 후 overlay는 frame view가 자체 이미지에 그려 dirty 영역만 다시 그리고 올리며, 같은 pass에서 premultiplied blend로 합성한다. 획 미리보기·재생·워커 프레임 전달처럼 프레임 픽셀만 바뀌는 갱신은 overlay를 무효화하지 않는다.
+- **원인 2 · software (`77a9c7c`):** paint 사이에 들어온 두 번째 이후 이동은 변경 영역을 모른다는 이유로 viewport 전체를 다시 칠했다. 창이 클수록 paint가 느려져 paint 사이 이동이 늘고, 그래서 거의 모든 paint가 전체 paint가 됐다. 이제 그 이동들은 한 번의 큐된 resolve로 바뀐 타일만 다시 칠한다. paint 뒤 첫 이동의 즉시 resolve는 유지했다.
+- **회귀:** [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `drawsWithoutRepaintingRasterWidgetsOverTheGpuDisplay`(수정 전 이동마다 캔버스 paint 21회 → 0), `gpuDisplayMatchesTheSoftwareDisplay`(GPU와 software 출력의 채널 차이 8 이하, 수정 전후 모두 통과), `repaintsOnlyTheStrokeTailForReportsBetweenPaints`(수정 전 실패). GPU 테스트는 headless에서 건너뛰므로 `QT_QPA_PLATFORM=windows`로 확인했다. offscreen CTest 13/13. windows 플랫폼에서 실패하는 기존 UI 테스트 6개는 수정 전에도 같게 실패한다.
+- **표시 차이:** overlay를 별도 레이어로 합성하므로 테두리·커서 링의 안티앨리어싱 가장자리가 software와 최대 5단계 다르다. 빈 문서 안내 문구는 GPU에서 회색조, software에서 ClearType으로 그려진다.
+
+남은 것:
+
+1. GPU 경로에서 GUI 스레드는 프레임마다 약 4.8ms를 Qt flush(D3D11 flip 모델, max frame latency 2, 160Hz vsync) 안에서 기다린다. 우리 코드의 프레임당 비용은 0.3–0.6ms다. `QT_D3D_MAX_FRAME_LATENCY` 1·3은 GUI 쪽 수치를 바꾸지 않았고 `QT_D3D_NO_FLIP`은 프레임당 30ms로 나빠졌다. Qt Widgets 합성 구조에서 생기는 대기이므로, 줄이려면 캔버스 표시를 GUI 스레드 밖의 자체 swapchain으로 옮겨야 한다. 그 전에 입력→화면 표시 지연(PresentMon 등)과 실제 펜 체감을 잰다.
+2. 실제 펜에서 OS·Qt의 이동 이벤트 병합과 체감 지연을 확인한다. macOS Metal은 측정하지 않았다.
 
 probe는 커밋하지 않았다. 재현에는 `kimcozo_service.ugu`(저장소 미포함, 루트에 둠)와 위 조건이 필요하다.
 
