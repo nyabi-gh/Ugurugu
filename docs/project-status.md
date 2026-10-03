@@ -143,11 +143,12 @@
 - 회귀: [StrokeCommandTests.cpp](../tests/StrokeCommandTests.cpp)는 비균일 축소·중앙 배치 이미지의 복제와 이동→회전→뒤집기를 독립적인 점 매핑 oracle, 렌더 픽셀, undo/redo와 비교한다. [UiSelectionTests.cpp](../tests/UiSelectionTests.cpp)는 떠 있는 선택 영역에서 같은 연속 동작의 누적 행렬, 미리보기·커밋 픽셀, undo/redo를 비교한다.
 - 남음: Qt 6.10 이상이 있는 Windows/macOS에서 document·UI selection suite를 실행해 통과를 확인한다. 이 PC에는 Qt SDK가 없어 실제 native suite는 실행하지 못했으므로 그전에는 해결로 닫지 않는다.
 
-### D02 · P1 · 우글거림 OFF에서 pen-up 프리뷰 승격 — 미해결
+### D02 · P1 · 우글거림 OFF에서 pen-up 프리뷰 승격 — 해결 (`bc36217`)
 
-근거: [CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 `endStroke`는 `activeStrokePreview`에 원본 controller 문서를 넘긴다. 다른 표시 경로는 문서·레이어 wobble을 제거한 `displayDocument()`를 사용한다. 결과가 정확한 프레임으로 캐시에 승격되는 소스 경로를 확인했다. 이번에 실제 화면 재현은 하지 않았다.
+근거: [CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 `endStroke`는 `activeStrokePreview`에 원본 controller 문서를 넘겼고, 다른 표시 경로는 문서·레이어 wobble을 제거한 `displayDocument()`를 넘겼다. 우글거림을 끈 상태에서 승격된 프레임은 우글거린 획으로 그려진 채 정확한 프레임으로 캐시에 들어갔다.
 
-- 완료: 문서·레이어 wobble ON/OFF 각각에서 pen-up 결과가 `renderScaled(displayDocument(), …)`와 같고, 캐시 재사용·재생 전환 후에도 동일하다. 수정은 표시 문서 계약을 따르게 한다.
+- 수정: `activeStrokePreview`가 문서를 인자로 받지 않고 항상 `displayDocument()`로 합성한다. 호출자가 다른 문서를 넘길 경로가 없다.
+- 회귀: [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `promotesThePenUpFrameOfTheDisplayedDocument` — 문서·레이어 wobble × ON/OFF에서 승격 캐시 프레임과 표시 프레임이 `renderScaled(displayDocument(), …)`와 같고, 재생을 켰다 끈 뒤에도 같다. 수정 전에는 OFF 두 행이 실패하고 ON 두 행은 통과했다. offscreen CTest 13/13, windows 플랫폼에서도 통과.
 
 ### D03 · P1 · 포커스·근접 이탈 시 획 처리 — 미해결 / 정책 필요
 
