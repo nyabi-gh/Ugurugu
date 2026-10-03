@@ -95,6 +95,18 @@ void paintPrimitives(QPainter &painter,
     const Stroke &stroke,
     const PreparedStroke &prepared,
     const QVector<int> &primitiveIndexes);
+// True when the stroke is a variable-pressure line drawn as one composite
+// per point. Such a line splits exactly between pieces, so a caller may
+// flatten any settled prefix of pieces and paint the rest over it.
+bool paintsLineInPieces(const Stroke &stroke, const PreparedStroke &prepared);
+// Paints the pieces in [firstPiece, pieceEnd) that draw on the given segment
+// primitives, each exactly as the whole stroke draws it.
+void paintLinePieces(QPainter &painter,
+    const Stroke &stroke,
+    const PreparedStroke &prepared,
+    const QVector<int> &primitiveIndexes,
+    int firstPiece,
+    int pieceEnd);
 QRectF primitiveBounds(
     const Stroke &stroke, const PreparedStroke &prepared, int primitiveIndex);
 int primitiveCount(const Stroke &stroke, const PreparedStroke &prepared);

@@ -7,6 +7,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace ugurugu
@@ -60,6 +61,7 @@ IncrementalStrokeRenderer::Update IncrementalStrokeRenderer::update(
     const QSize &outputSize)
 {
     Update result;
+    ++m_updateSerial;
     if (document.size.isEmpty() || outputSize.isEmpty() || baseLayer.isNull()
         || baseLayer.size() != outputSize
         || baseLayer.format() != QImage::Format_ARGB32_Premultiplied
@@ -187,6 +189,43 @@ IncrementalStrokeRenderer::Update IncrementalStrokeRenderer::update(
             static_cast<quint64>(bounds.width()) * bounds.height();
         m_layerTiles.insert(tile, image);
         result.patches.append({bounds, std::move(image)});
+    }
+    // A checkpoint only pays off while the stroke keeps drawing into its
+    // tile. Kept for every tile the stroke ever crossed, checkpoints doubled
+    // the cache of a long stroke, so only the most recently drawn idle tiles
+    // keep theirs; any other tile the stroke returns to rebuilds from the
+    // base layer once.
+    for (const QPoint &tile : std::as_const(orderedTiles))
+    {
+        if (const auto checkpoint = m_tileCheckpoints.find(tile);
+            checkpoint != m_tileCheckpoints.end())
+        {
+            checkpoint->lastUpdate = m_updateSerial;
+        }
+    }
+    QVector<std::pair<quint64, QPoint>> idle;
+    for (auto checkpoint = m_tileCheckpoints.cbegin();
+        checkpoint != m_tileCheckpoints.cend();
+        ++checkpoint)
+    {
+        if (checkpoint->lastUpdate != m_updateSerial)
+        {
+            idle.append({checkpoint->lastUpdate, checkpoint.key()});
+        }
+    }
+    if (idle.size() > idleCheckpointLimit)
+    {
+        std::sort(idle.begin(),
+            idle.end(),
+            [](const auto &left, const auto &right)
+            {
+                return left.first < right.first;
+            });
+        for (qsizetype index = 0; index < idle.size() - idleCheckpointLimit;
+            ++index)
+        {
+            m_tileCheckpoints.remove(idle[index].second);
+        }
     }
     result.cachedTileBytes = cachedTileBytes();
     result.valid = true;
@@ -354,6 +393,41 @@ void IncrementalStrokeRenderer::advanceTileCheckpoint(const QImage &baseLayer,
     auto last = std::lower_bound(primitives->cbegin(),
         primitives->cend(),
         static_cast<int>(stablePrimitiveExclusive));
+    if (StrokeRenderer::paintsLineInPieces(stroke, prepared))
+    {
+        // Pieces up to the stable segment boundary depend only on settled
+        // points, and the remainder continues the same sequence of
+        // composites, so the cut needs no redraw on either side.
+        if (last - first < checkpointPrimitiveInterval)
+        {
+            return;
+        }
+        const int cut = static_cast<int>(stablePrimitiveExclusive);
+        const QRect bounds = tileBounds(tile);
+        QImage image = checkpoint == m_tileCheckpoints.end()
+                           ? baseLayer.copy(bounds)
+                           : checkpoint->image;
+        // The segment before the previous cut still owns the piece at it.
+        const auto from = std::lower_bound(
+            primitives->cbegin(), primitives->cend(), checkpointExclusive - 1);
+        const QVector<int> segments(from, last);
+        if (image.isNull()
+            || !paintTilePrimitives(image,
+                bounds,
+                document,
+                stroke,
+                prepared,
+                segments,
+                checkpointExclusive,
+                cut))
+        {
+            m_tileCheckpoints.remove(tile);
+            return;
+        }
+        primitiveInstancesRendered += segments.size();
+        m_tileCheckpoints.insert(tile, {std::move(image), cut, m_updateSerial});
+        return;
+    }
     if (stroke.brush.engine == BrushEngine::Line)
     {
         // renderTile draws such a stroke as one path spanning the tile's whole
@@ -387,14 +461,21 @@ void IncrementalStrokeRenderer::advanceTileCheckpoint(const QImage &baseLayer,
                        : checkpoint->image;
     const QVector<int> stablePrimitives(first, last);
     if (image.isNull()
-        || !paintTilePrimitives(
-            image, bounds, document, stroke, prepared, stablePrimitives))
+        || !paintTilePrimitives(image,
+            bounds,
+            document,
+            stroke,
+            prepared,
+            stablePrimitives,
+            0,
+            std::numeric_limits<int>::max()))
     {
         m_tileCheckpoints.remove(tile);
         return;
     }
     primitiveInstancesRendered += stablePrimitives.size();
-    m_tileCheckpoints.insert(tile, {std::move(image), flattenedExclusive});
+    m_tileCheckpoints.insert(
+        tile, {std::move(image), flattenedExclusive, m_updateSerial});
 }
 
 bool IncrementalStrokeRenderer::paintTilePrimitives(QImage &image,
@@ -402,7 +483,9 @@ bool IncrementalStrokeRenderer::paintTilePrimitives(QImage &image,
     const Document &document,
     const Stroke &stroke,
     const StrokeRenderer::PreparedStroke &prepared,
-    const QVector<int> &primitiveIndexes)
+    const QVector<int> &primitiveIndexes,
+    int firstPiece,
+    int pieceEnd)
 {
     if (image.isNull() || bounds.isEmpty())
     {
@@ -430,8 +513,16 @@ bool IncrementalStrokeRenderer::paintTilePrimitives(QImage &image,
                                    ? QPainter::CompositionMode_DestinationOut
                                    : QPainter::CompositionMode_SourceOver);
     painter.setBrush(Qt::NoBrush);
-    StrokeRenderer::paintPrimitives(
-        painter, stroke, prepared, primitiveIndexes);
+    if (StrokeRenderer::paintsLineInPieces(stroke, prepared))
+    {
+        StrokeRenderer::paintLinePieces(
+            painter, stroke, prepared, primitiveIndexes, firstPiece, pieceEnd);
+    }
+    else
+    {
+        StrokeRenderer::paintPrimitives(
+            painter, stroke, prepared, primitiveIndexes);
+    }
     return true;
 }
 
@@ -459,11 +550,21 @@ QImage IncrementalStrokeRenderer::renderTile(const QImage &baseLayer,
     QImage image = checkpoint == m_tileCheckpoints.cend()
                        ? baseLayer.copy(bounds)
                        : checkpoint->image;
-    const auto first = std::lower_bound(
-        primitives->cbegin(), primitives->cend(), checkpointExclusive);
+    // A piece-wise line's first remaining piece belongs to the segment
+    // just before the checkpoint as well.
+    const bool pieces = StrokeRenderer::paintsLineInPieces(stroke, prepared);
+    const auto first = std::lower_bound(primitives->cbegin(),
+        primitives->cend(),
+        pieces ? checkpointExclusive - 1 : checkpointExclusive);
     const QVector<int> remainingPrimitives(first, primitives->cend());
-    if (!paintTilePrimitives(
-            image, bounds, document, stroke, prepared, remainingPrimitives))
+    if (!paintTilePrimitives(image,
+            bounds,
+            document,
+            stroke,
+            prepared,
+            remainingPrimitives,
+            checkpointExclusive,
+            std::numeric_limits<int>::max()))
     {
         return {};
     }

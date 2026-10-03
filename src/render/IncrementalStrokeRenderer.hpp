@@ -51,14 +51,19 @@ public:
     quint64 cachedTileBytes() const;
     void clear();
 
-private:
     static constexpr int tileEdge = 256;
+    // Checkpoints kept for tiles the latest update did not draw into, so a
+    // stroke circling back over recent tiles resumes from them.
+    static constexpr qsizetype idleCheckpointLimit = 16;
+
+private:
     static constexpr qsizetype checkpointPrimitiveInterval = 64;
 
     struct TileCheckpoint
     {
         QImage image;
         int throughPrimitiveExclusive = 0;
+        quint64 lastUpdate = 0;
     };
 
     QVector<QPoint> tilesForBounds(
@@ -82,7 +87,9 @@ private:
         const Document &document,
         const Stroke &stroke,
         const StrokeRenderer::PreparedStroke &prepared,
-        const QVector<int> &primitiveIndexes);
+        const QVector<int> &primitiveIndexes,
+        int firstPiece,
+        int pieceEnd);
     QImage renderTile(const QImage &baseLayer,
         const Document &document,
         const Stroke &stroke,
@@ -95,6 +102,7 @@ private:
     QVector<QVector<QPoint>> m_tilesByPrimitive;
     QHash<QPoint, QImage> m_layerTiles;
     QHash<QPoint, TileCheckpoint> m_tileCheckpoints;
+    quint64 m_updateSerial = 0;
     QPainterPath m_clipPath;
     qint64 m_clipMaskKey = 0;
     qint64 m_baseLayerKey = 0;

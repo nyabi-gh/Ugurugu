@@ -703,6 +703,64 @@ private slots:
             << " primitive instances with stable-prefix checkpoints";
     }
 
+    void checkpointsVariablePressureStrokesExactly_data()
+    {
+        QTest::addColumn<bool>("antialiasing");
+        QTest::addColumn<qreal>("opacity");
+        QTest::addColumn<bool>("erase");
+        QTest::newRow("aliased-opaque") << false << 1.0 << false;
+        QTest::newRow("antialiased") << true << 1.0 << false;
+        QTest::newRow("translucent") << true << 0.45 << false;
+        QTest::newRow("erase") << true << 0.7 << true;
+    }
+
+    void checkpointsVariablePressureStrokesExactly()
+    {
+        QFETCH(bool, antialiasing);
+        QFETCH(qreal, opacity);
+        QFETCH(bool, erase);
+        const QSize canvasSize(320, 240);
+        Document document = Document::createDefault(canvasSize);
+        document.wobbleAmount = 0.0;
+        QImage base(canvasSize, QImage::Format_ARGB32_Premultiplied);
+        base.fill(QColor(40, 120, 200, 220));
+
+        Stroke stroke;
+        stroke.seed = 0x5a5aULL;
+        stroke.width = 10.0;
+        stroke.mode = erase ? StrokeMode::Erase : StrokeMode::Paint;
+        stroke.color = QColor(230, 60, 40);
+        stroke.brush.antialiasing = antialiasing;
+        stroke.brush.opacity = opacity;
+        stroke.brush.opacityDynamics = 0.5;
+        IncrementalStrokeRenderer renderer;
+        quint64 primitives = 0;
+        // A tight spiral keeps hundreds of segments inside a few tiles, which
+        // is where checkpoints form, and crosses itself so overlapping
+        // translucent pieces must blend exactly as often as a full render.
+        for (int index = 0; index < 900; ++index)
+        {
+            const qreal angle = index * 0.05;
+            const qreal radius = 20.0 + index * 0.12;
+            stroke.points.append({QPointF(160.0 + radius * std::cos(angle),
+                                      120.0 + radius * std::sin(angle)),
+                0.25 + 0.75 * std::abs(std::sin(index * 0.13))});
+            const IncrementalStrokeRenderer::Update update =
+                renderer.update(base, document, stroke, 0, canvasSize);
+            QVERIFY(update.valid);
+            primitives += update.primitiveInstancesRendered;
+        }
+        QImage actual = base;
+        QVERIFY(renderer.applyTo(actual));
+        QImage expected = base;
+        QVERIFY(RenderEngine::renderStrokesOnLayer(
+            expected, document, {stroke}, 0, canvasSize));
+        QCOMPARE(actual, expected);
+        // Without checkpoints every update repaints every segment in its
+        // tiles, which for this spiral is well over 100,000 repaints.
+        QVERIFY2(primitives < 60000, qPrintable(QString::number(primitives)));
+    }
+
     void boundsLongPrefixReplayWorkAtFourK()
     {
         const QSize canvasSize(4096, 4096);
@@ -766,6 +824,7 @@ private slots:
             quint64 processedPoints = 0;
             quint64 renderedPixels = 0;
             quint64 cachedTileBytes = 0;
+            quint64 lastTilesRendered = 0;
             QVector<qint64> updateNanoseconds;
             updateNanoseconds.reserve(pointCount);
             QElapsedTimer timer;
@@ -787,6 +846,7 @@ private slots:
                 processedPoints += update.sourcePointsProcessed;
                 renderedPixels += update.pixelsRendered;
                 cachedTileBytes = update.cachedTileBytes;
+                lastTilesRendered = update.tilesRendered;
             }
             const qint64 elapsed = timer.elapsed();
             QImage actual = base;
@@ -798,9 +858,18 @@ private slots:
             QCOMPARE(processedPoints, static_cast<quint64>(pointCount));
             QVERIFY(renderedPixels <= static_cast<quint64>(pointCount) * 4ULL
                                           * 256ULL * 256ULL);
-            QVERIFY(cachedTileBytes <= static_cast<quint64>(canvasSize.width())
-                                           * canvasSize.height()
-                                           * sizeof(QRgb));
+            // One layer of tiles, plus checkpoints for the tiles the last
+            // update drew into and the few idle ones kept for a return.
+            constexpr quint64 tileBytes =
+                static_cast<quint64>(IncrementalStrokeRenderer::tileEdge)
+                * IncrementalStrokeRenderer::tileEdge * sizeof(QRgb);
+            QVERIFY(
+                cachedTileBytes
+                <= static_cast<quint64>(canvasSize.width())
+                           * canvasSize.height() * sizeof(QRgb)
+                       + (lastTilesRendered
+                             + IncrementalStrokeRenderer::idleCheckpointLimit)
+                             * tileBytes);
             std::sort(updateNanoseconds.begin(), updateNanoseconds.end());
             const qreal p50Milliseconds =
                 static_cast<qreal>(

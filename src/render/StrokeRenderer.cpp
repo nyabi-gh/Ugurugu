@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 namespace ugurugu::StrokeRenderer
@@ -144,6 +145,52 @@ void drawLineStrokeRuns(QPainter &painter,
     const BrushSettings &brush,
     bool variablePressure);
 
+// A variable-pressure line is drawn as independent pieces, one per point:
+// piece 0 is the half segment out of the first point, the last piece the
+// half segment into the last point, and every piece between them the curve
+// through its point from one segment midpoint to the next. Each is its own
+// composite, so painting any run of them in order continues exactly where
+// the previous run stopped.
+void drawLineStrokePiece(QPainter &painter,
+    const QVector<StrokePoint> &points,
+    int piece,
+    const QColor &color,
+    qreal baseWidth,
+    const BrushSettings &brush)
+{
+    const int lastIndex = static_cast<int>(points.size()) - 1;
+    QPainterPath path;
+    qreal pressure = points[piece].pressure;
+    if (piece == 0)
+    {
+        path.moveTo(points[0].position);
+        path.lineTo((points[0].position + points[1].position) * 0.5);
+        pressure = (points[0].pressure + points[1].pressure) * 0.5;
+    }
+    else if (piece == lastIndex)
+    {
+        path.moveTo(
+            (points[lastIndex - 1].position + points[lastIndex].position)
+            * 0.5);
+        path.lineTo(points[lastIndex].position);
+        pressure =
+            (points[lastIndex - 1].pressure + points[lastIndex].pressure) * 0.5;
+    }
+    else
+    {
+        path.moveTo(
+            (points[piece - 1].position + points[piece].position) * 0.5);
+        path.quadTo(points[piece].position,
+            (points[piece].position + points[piece + 1].position) * 0.5);
+    }
+    drawPath(painter,
+        path,
+        colorWithOpacity(color,
+            brush.opacity * pressureScale(brush.opacityDynamics, pressure)),
+        pressureWidth(baseWidth, pressure, brush.sizeDynamics),
+        brush.tipShape);
+}
+
 void drawLineStroke(QPainter &painter,
     const QVector<StrokePoint> &points,
     const QColor &color,
@@ -161,61 +208,10 @@ void drawLineStroke(QPainter &painter,
             painter, {points}, color, baseWidth, brush, variablePressure);
         return;
     }
-
-    const QPointF firstMidpoint =
-        (points[0].position + points[1].position) * 0.5;
-    QPainterPath firstSegment;
-    firstSegment.moveTo(points[0].position);
-    firstSegment.lineTo(firstMidpoint);
-    drawPath(painter,
-        firstSegment,
-        colorWithOpacity(color,
-            brush.opacity
-                * pressureScale(brush.opacityDynamics,
-                    (points[0].pressure + points[1].pressure) * 0.5)),
-        pressureWidth(baseWidth,
-            (points[0].pressure + points[1].pressure) * 0.5,
-            brush.sizeDynamics),
-        brush.tipShape);
-
-    for (int index = 1; index < points.size() - 1; ++index)
+    for (int piece = 0; piece < points.size(); ++piece)
     {
-        const QPointF start =
-            (points[index - 1].position + points[index].position) * 0.5;
-        const QPointF end =
-            (points[index].position + points[index + 1].position) * 0.5;
-        QPainterPath segment;
-        segment.moveTo(start);
-        segment.quadTo(points[index].position, end);
-        drawPath(painter,
-            segment,
-            colorWithOpacity(color,
-                brush.opacity
-                    * pressureScale(
-                        brush.opacityDynamics, points[index].pressure)),
-            pressureWidth(
-                baseWidth, points[index].pressure, brush.sizeDynamics),
-            brush.tipShape);
+        drawLineStrokePiece(painter, points, piece, color, baseWidth, brush);
     }
-
-    const int lastIndex = static_cast<int>(points.size()) - 1;
-    const QPointF lastMidpoint =
-        (points[lastIndex - 1].position + points[lastIndex].position) * 0.5;
-    QPainterPath lastSegment;
-    lastSegment.moveTo(lastMidpoint);
-    lastSegment.lineTo(points[lastIndex].position);
-    drawPath(painter,
-        lastSegment,
-        colorWithOpacity(color,
-            brush.opacity
-                * pressureScale(brush.opacityDynamics,
-                    (points[lastIndex - 1].pressure
-                        + points[lastIndex].pressure)
-                        * 0.5)),
-        pressureWidth(baseWidth,
-            (points[lastIndex - 1].pressure + points[lastIndex].pressure) * 0.5,
-            brush.sizeDynamics),
-        brush.tipShape);
 }
 
 void drawLineStrokeRuns(QPainter &painter,
@@ -921,6 +917,58 @@ void paint(
     }
 }
 
+bool paintsLineInPieces(const Stroke &stroke, const PreparedStroke &prepared)
+{
+    return prepared.valid && stroke.brush.engine == BrushEngine::Line
+           && prepared.variablePressure && prepared.visibleSegments.isEmpty()
+           && prepared.points.size() >= 2;
+}
+
+void paintLinePieces(QPainter &painter,
+    const Stroke &stroke,
+    const PreparedStroke &prepared,
+    const QVector<int> &primitiveIndexes,
+    int firstPiece,
+    int pieceEnd)
+{
+    if (!paintsLineInPieces(stroke, prepared))
+    {
+        return;
+    }
+    // Segment i runs between points i and i + 1, so pieces i and i + 1 are
+    // the only ones that draw on it.
+    const int pieceCount = static_cast<int>(prepared.points.size());
+    QVector<int> pieces;
+    pieces.reserve(primitiveIndexes.size() * 2);
+    for (const int segment : primitiveIndexes)
+    {
+        if (segment < 0 || segment >= pieceCount - 1)
+        {
+            continue;
+        }
+        for (const int piece : {segment, segment + 1})
+        {
+            if (piece >= firstPiece && piece < pieceEnd)
+            {
+                pieces.append(piece);
+            }
+        }
+    }
+    std::sort(pieces.begin(), pieces.end());
+    pieces.erase(std::unique(pieces.begin(), pieces.end()), pieces.end());
+    const QColor color =
+        stroke.mode == StrokeMode::Erase ? Qt::black : stroke.color;
+    for (const int piece : std::as_const(pieces))
+    {
+        drawLineStrokePiece(painter,
+            prepared.points,
+            piece,
+            color,
+            prepared.width,
+            stroke.brush);
+    }
+}
+
 void paintPrimitives(QPainter &painter,
     const Stroke &stroke,
     const PreparedStroke &prepared,
@@ -928,6 +976,16 @@ void paintPrimitives(QPainter &painter,
 {
     if (!prepared.valid || primitiveIndexes.isEmpty())
     {
+        return;
+    }
+    if (paintsLineInPieces(stroke, prepared))
+    {
+        paintLinePieces(painter,
+            stroke,
+            prepared,
+            primitiveIndexes,
+            0,
+            std::numeric_limits<int>::max());
         return;
     }
     QVector<int> normalizedIndexes;
