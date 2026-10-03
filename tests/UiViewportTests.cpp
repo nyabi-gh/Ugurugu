@@ -2610,6 +2610,74 @@ private slots:
             Qt::NoModifier,
             widgetPoint(QPointF(120.0, 45.0)).toPoint());
     }
+
+    void repaintsOnlyTheStrokeTailForReportsBetweenPaints()
+    {
+        DocumentController controller;
+        controller.newDocument(QSize(640, 480));
+        CanvasWidget canvas(&controller);
+        canvas.resize(800, 600);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        if (CanvasWidgetTestAccess::usingGpuDisplay(canvas))
+        {
+            QSKIP("The GPU display repaints no widget region for a stroke.");
+        }
+        canvas.fitToWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                canvas, canvas.currentFrame()),
+            5000);
+
+        const auto report = [&](const QPointF &documentPosition)
+        {
+            const QPointF position = CanvasWidgetTestAccess::mapFromDocument(
+                canvas, documentPosition);
+            QMouseEvent event(QEvent::MouseMove,
+                position,
+                canvas.mapToGlobal(position),
+                Qt::NoButton,
+                Qt::LeftButton,
+                Qt::NoModifier);
+            QApplication::sendEvent(&canvas, &event);
+        };
+        QTest::mousePress(&canvas,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            CanvasWidgetTestAccess::mapFromDocument(
+                canvas, QPointF(300.0, 200.0))
+                .toPoint());
+        // The stroke's first resolve rebuilds the composed frame whole. The
+        // points stay inside one tile of the incremental renderer, which
+        // patches whole tiles.
+        report(QPointF(308.0, 204.0));
+        QApplication::processEvents();
+
+        PaintRegionTracker tracker;
+        canvas.installEventFilter(&tracker);
+        for (int step = 2; step <= 4; ++step)
+        {
+            report(QPointF(300.0 + step * 8.0, 200.0 + step * 4.0));
+        }
+        QApplication::processEvents();
+        canvas.removeEventFilter(&tracker);
+
+        QVERIFY(tracker.eventCount() > 0);
+        QVERIFY(tracker.largestArea()
+                < static_cast<qint64>(canvas.width()) * canvas.height() / 4);
+        const auto displayed =
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QVERIFY(displayed.dirtyBounds.isEmpty());
+        QCOMPARE(CanvasWidgetTestAccess::activeStroke(canvas).points.size(), 5);
+
+        QTest::mouseRelease(&canvas,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            CanvasWidgetTestAccess::mapFromDocument(
+                canvas, QPointF(332.0, 216.0))
+                .toPoint());
+    }
 };
 
 int runUiViewportTests(int argc, char **argv)

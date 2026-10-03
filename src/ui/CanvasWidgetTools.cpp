@@ -140,49 +140,27 @@ void CanvasWidget::continueStroke(
     invalidateActiveStrokePreview();
     // A pointer reports several times per display refresh, and a resolve
     // re-renders every tile the stroke tail covers — a cost that grows with
-    // the stroke, so the reports piled up faster than they could be served
-    // and drawing fell behind the hand. Only the first report after a paint
-    // resolves; the rest just widen the pending repaint and let that paint
-    // resolve once for all of them. The repaint is the whole viewport rather
-    // than the tail, because the exact changed region is a product of the
-    // resolve we are skipping; the GPU display redraws the frame view whole
-    // either way, and the software path trades one full blit per frame for
-    // the resolves it no longer runs per report.
-    if (m_strokePreviewResolvedSincePaint)
+    // the stroke. Only the first report after a paint resolves; the rest
+    // leave it to the paint, or on the software display to the queued repaint
+    // request, to resolve once for all of them. Repainting the whole viewport
+    // for them instead made each paint slower the larger the window, so more
+    // reports fell between paints.
+    if (!m_strokePreviewResolvedSincePaint)
+    {
+        m_strokePreviewResolvedSincePaint = true;
+        const QSize renderSize = previewRenderSize();
+        if (!renderSize.isEmpty())
+        {
+            bool previewResolved = false;
+            activeStrokePreview(displayDocument(), renderSize, previewResolved);
+        }
+    }
+    if (usingGpuDisplay())
     {
         requestFrameUpdate();
         return;
     }
-    m_strokePreviewResolvedSincePaint = true;
-    const QSize renderSize = previewRenderSize();
-    bool previewResolved = false;
-    if (!renderSize.isEmpty())
-    {
-        activeStrokePreview(displayDocument(), renderSize, previewResolved);
-    }
-    if (previewResolved && m_activeStrokePreviewPatchBoundsValid)
-    {
-        if (m_activeStrokePreviewPatchBounds.isEmpty())
-        {
-            return;
-        }
-        const Document &document = m_controller->document();
-        const QRectF documentRect(m_activeStrokePreviewPatchBounds.x()
-                                      * document.size.width()
-                                      / static_cast<qreal>(renderSize.width()),
-            m_activeStrokePreviewPatchBounds.y() * document.size.height()
-                / static_cast<qreal>(renderSize.height()),
-            m_activeStrokePreviewPatchBounds.width() * document.size.width()
-                / static_cast<qreal>(renderSize.width()),
-            m_activeStrokePreviewPatchBounds.height() * document.size.height()
-                / static_cast<qreal>(renderSize.height()));
-        requestFrameUpdate(documentTransform()
-                .mapRect(documentRect)
-                .toAlignedRect()
-                .adjusted(-2, -2, 2, 2));
-        return;
-    }
-    requestFrameUpdate();
+    queueStrokePreviewDisplay();
 }
 
 void CanvasWidget::endStroke(const QPointF &widgetPosition, quint64 timestamp)

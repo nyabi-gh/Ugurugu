@@ -320,6 +320,8 @@ private:
     QImage activeStrokePreview(
         const Document &document, const QSize &renderSize, bool &resolved);
     void invalidateActiveStrokePreview();
+    void queueStrokePreviewDisplay();
+    void displayStrokePreview();
     QImage interactionPreview(Document document, const QSize &renderSize) const;
     const RenderEngine::LayerSplitFrame &previewSplit(
         const QUuid &layerId, const QSize &renderSize);
@@ -601,14 +603,18 @@ private:
     bool m_activeStrokePreviewIncludesStroke = false;
     // Union of the preview pixels that changed in the last resolve, in output
     // coordinates. Only meaningful while the valid flag is set; an empty rect
-    // then means nothing changed. Lets continueStroke repaint just the stroke
-    // tail instead of the whole widget.
+    // then means nothing changed.
     QRect m_activeStrokePreviewPatchBounds;
     bool m_activeStrokePreviewPatchBoundsValid = false;
     // Cleared by every resolveDisplayedFrame, so it marks whether the pointer
     // reports that arrived since the last paint have already paid for a
     // preview resolve. See continueStroke.
     bool m_strokePreviewResolvedSincePaint = false;
+    // Software display only: preview pixels resolved but not yet requested
+    // for repaint, in output coordinates. See displayStrokePreview.
+    QRect m_strokePreviewUndisplayedBounds;
+    bool m_strokePreviewUndisplayedWhole = false;
+    bool m_strokePreviewDisplayQueued = false;
     // The canvas drop shadow, baked once per geometry. Its fourteen
     // antialiased passes are cheap along the axes and expensive at an angle,
     // so redrawing them every repaint made a rotated canvas crawl.

@@ -400,9 +400,72 @@ QImage CanvasWidget::activeStrokePreview(
         m_displayedFrameDirtyAccum |= patchBounds;
         m_displayedFramePatchedKey = preview.cacheKey();
     }
+    if (!usingGpuDisplay())
+    {
+        if (m_activeStrokePreviewPatchBoundsValid)
+        {
+            m_strokePreviewUndisplayedBounds |= patchBounds;
+        }
+        else
+        {
+            m_strokePreviewUndisplayedWhole = true;
+        }
+        queueStrokePreviewDisplay();
+    }
     resolved = m_activeStrokePreviewIncludesStroke;
     updateFrameCacheBudget();
     return preview;
+}
+
+void CanvasWidget::queueStrokePreviewDisplay()
+{
+    if (m_strokePreviewDisplayQueued)
+    {
+        return;
+    }
+    m_strokePreviewDisplayQueued = true;
+    QMetaObject::invokeMethod(
+        this, &CanvasWidget::displayStrokePreview, Qt::QueuedConnection);
+}
+
+// The software display must name the region to repaint before it paints, and
+// only a resolve knows which pixels the new points changed. Queued, the
+// resolve runs once for every pointer report already waiting, and a resolve
+// that a paint ran still gets its region repainted.
+void CanvasWidget::displayStrokePreview()
+{
+    const QSize renderSize = previewRenderSize();
+    if (m_drawing && !renderSize.isEmpty())
+    {
+        bool resolved = false;
+        activeStrokePreview(displayDocument(), renderSize, resolved);
+        if (!resolved)
+        {
+            m_strokePreviewUndisplayedWhole = true;
+        }
+    }
+    m_strokePreviewDisplayQueued = false;
+    const QRect bounds = std::exchange(m_strokePreviewUndisplayedBounds, {});
+    if (std::exchange(m_strokePreviewUndisplayedWhole, false))
+    {
+        requestFrameUpdate();
+        return;
+    }
+    if (bounds.isEmpty() || renderSize.isEmpty())
+    {
+        return;
+    }
+    const QSizeF documentSize(m_controller->document().size);
+    const qreal scaleX = documentSize.width() / renderSize.width();
+    const qreal scaleY = documentSize.height() / renderSize.height();
+    const QRectF documentRect(bounds.x() * scaleX,
+        bounds.y() * scaleY,
+        bounds.width() * scaleX,
+        bounds.height() * scaleY);
+    requestFrameUpdate(documentTransform()
+            .mapRect(documentRect)
+            .toAlignedRect()
+            .adjusted(-2, -2, 2, 2));
 }
 
 void CanvasWidget::invalidateActiveStrokePreview()
