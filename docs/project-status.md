@@ -224,6 +224,26 @@
 
 남은 검증: macOS Metal·Apple Silicon 측정, 실제 펜 입력에서 펜 다운 지연, 정적 레이어 캐시와 참조 이미지 선렌더의 장시간 메모리 상한(예산 256MiB와 이미지 1장)을 실제 작업 문서로 확인.
 
+### 그리는 중 입력 지연 — 미해결, 다음 작업
+
+위 변경은 그리는 동안의 지연을 줄이지 못했다. 사용자 문서를 실제 D3D11 창(1400×1000)에 띄우고 필압이 변하는 태블릿 이동 400개를 4ms 간격(240Hz)으로 보낸 임시 probe에서, `be2a06d`와 현재 브랜치의 결과가 같았다(시나리오별 3회 교차).
+
+| 조건 | 이동 1개 GUI 처리 p50 / p95 | 400점 획 소요 (이상 1.6s) |
+|---|---|---|
+| 정지 | 6.5 / 7.5ms | 약 2.6s |
+| 재생 | 6.6 / 7.6ms | 약 2.6s |
+| 재생 + 그리는 중 애니메이션 | 6.4 / 9.3ms | 약 2.6s |
+
+GPU 표시에서 이벤트 처리 자체는 평균 1.05ms이고, 나머지 약 5.5ms는 이벤트마다 frame view(QRhiWidget)를 갱신·표시하는 단계다. `UGURUGU_CANVAS_DISPLAY=software`에서는 이동당 p50 1.7ms(이벤트 처리 1.01ms)로 획이 1.6s에 끝나 입력을 따라간다. GPU 경로는 240Hz 입력을 처리하지 못해 이벤트가 밀리며, 이것이 체감 지연의 유력한 원인이다.
+
+다음 작업:
+
+1. GPU 경로의 5.5ms를 분해한다: vsync에 묶인 present 대기, 창 backing store 합성, dirty 영역 텍스처 업로드, overlay 갱신을 각각 잰다.
+2. 원인에 맞춰 고친다. 후보는 표시 갱신을 입력 이벤트마다가 아니라 디스플레이 갱신 주기에 한 번으로 묶는 것이다. 수정 전후는 같은 probe로 비교한다.
+3. 실제 펜에서 OS·Qt의 이동 이벤트 병합 여부와 체감 지연을 확인한다. 합성 이벤트 probe만으로는 실제 펜의 이벤트 빈도를 대신하지 못한다.
+
+probe는 커밋하지 않았다. 재현에는 `kimcozo_service.ugu`(저장소 미포함, 루트에 둠)와 위 조건이 필요하다.
+
 ### D08 · P2 · 프레임 warmup의 동시 임시 표면 — 조사·예산 공백
 
 [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)의 최대 8 worker와 [CanvasWidgetPreview.cpp](../src/ui/CanvasWidgetPreview.cpp)의 동시 렌더에 대해 [PreviewRenderPolicy.cpp](../src/render/PreviewRenderPolicy.cpp)의 임시 비용 계산은 동시 작업 전체를 반영하지 않는다. 보존 표면 예산 테스트가 프로세스 peak를 보장하지 않는다.
