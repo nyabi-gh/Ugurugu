@@ -4,7 +4,7 @@
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
-문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인, D06의 격리된 Windows 패키지 smoke, D01/R02의 변환 합성 수정은 현재 작업 트리에 반영했지만, 네이티브·WASM·실제 설치 수용 검증은 아직 끝나지 않았다. 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
+문서 통합 뒤 P1 개선을 시작했다. D04/R01의 bounded decode와 중복 검증 축소, D16의 Sparkle 수정 버전 고정, D05의 최종 저장 경로 확인, D06의 격리된 Windows 패키지 smoke, D01/R02의 변환 합성 수정은 현재 작업 트리에 반영했지만, WASM·macOS·실제 설치 수용 검증은 아직 끝나지 않았다. 2026-10-03에 Windows native 회귀는 실행해 통과했다(아래 각 항목). 역사적 측정과 테스트는 실행 당시의 조건에만 유효하다.
 
 ## 1. 핵심 판단
 
@@ -68,7 +68,8 @@
 
 - 구현됨: oversized·truncated·trailing stream과 래스터·현행/구형 clip mask·binary mask, 자산 개수 상한 회귀를 추가했다.
 - 추가 조사: Wawa PNG는 전체 decode 전에 크기·비용을 검사할 수 있는지 확인한다. `QImageReader` 64MiB 한도는 고비트 심도 입력과 배포/테스트 환경 차이를 별도 검증한다.
-- 남음: Qt가 있는 환경에서 native suite와 WASM build/parity를 통과시키고, 퍼저 corpus·peak memory·decode 횟수 비교를 기록한다. 이 검증 전에는 해결로 닫지 않는다.
+- 확인 (2026-10-03, Windows 11 x64, Qt 6.11.2 Release(ClangCL)): `rejectsCompressedStreamsLargerThanTheirDeclaredOutput`·`boundsDecodedOutputAndRequiresTheWholeStream`·`rejectsTooManyRasterAssetsBeforeDecodingThem` 통과, `document` 스위트 전체 204건 통과, offscreen CTest 13/13. 수정 전 코드에서 실패하는지는 다시 확인하지 않았다.
+- 남음: WASM build/parity, 퍼저 corpus·peak memory·decode 횟수 비교 기록. 이 검증 전에는 해결로 닫지 않는다.
 
 ### D16 · P1 · Sparkle 보안 후속 — 검증 대기
 
@@ -85,7 +86,8 @@
 
 - 구현됨: 공용 저장 대화상자가 형식별 기본 접미사를 선택 전에 설정한다. 알려진 이미지 접미사는 선택 필터보다 우선해 PNG/JPEG 명시를 보존하고, 알 수 없는 접미사는 선택 형식의 접미사를 덧붙인다. 정규화로 경로가 바뀌고 그 최종 대상이 이미 있으면 별도 확인한다. 프로젝트·PNG/JPEG·GIF/WebP·WWP 프리셋이 같은 경로를 사용하며 기존 `QSaveFile` 저장은 유지한다. [Qt `defaultSuffix`](https://doc.qt.io/qt-6/qfiledialog.html#defaultSuffix-prop), [Qt overwrite 확인 기본값](https://doc.qt.io/qt-6/qfiledialog.html#Option-enum).
 - 회귀 추가: 기본 접미사, 확장자 없음·다른 접미사·대소문자가 다른 같은 접미사, 정규화 뒤 확인 취소 시 기존 파일 보존, 이미 확인된 같은 이름 경로를 검사한다.
-- 남음: Qt가 있는 환경에서 offscreen/non-native 회귀를 실행하고 Windows·macOS native 대화상자에서 접미사 없음·다른 접미사·취소를 수용 검증한다. 이 검증 전에는 해결로 닫지 않는다.
+- 확인 (2026-10-03, Windows 11 x64, Qt 6.11.2 Release(ClangCL)): offscreen(Qt 위젯 대화상자)에서 `configuresTheSaveDialogDefaultSuffix`·`normalizesSaveExtensions`·`cancelingFinalOverwritePreservesTheExistingFile`(2행)·`acceptsAnAlreadyConfirmedFinalSavePath` 통과. windows 플랫폼(Windows 기본 대화상자)에서는 나머지는 통과하지만 `configuresTheSaveDialogDefaultSuffix`가 간헐적으로 실패한다(이날 9회 중 5회, `reject()` 뒤에도 경로가 반환됨). 같은 날의 다른 변경(D02) 전후 모두에서 나타났다. 테스트가 기본 대화상자가 뜨기 전에 `reject()`를 부르는 시점 문제인지 제품 동작인지는 확인하지 않았다.
+- 남음: Windows·macOS 기본 대화상자에서 접미사 없음·다른 접미사·취소를 사람이 수용 검증하고, 위 windows 플랫폼 실패의 원인을 확인한다. 이 검증 전에는 해결로 닫지 않는다.
 
 ### R03 · P1 · 웹 저장 순서 — 부분 해결
 
@@ -141,7 +143,8 @@
 근거: Qt는 `QTransform` 곱의 왼쪽 변환을 먼저 적용한다. [Qt 변환 합성](https://doc.qt.io/qt-6/qtransform.html#combining-transforms). [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 마스크 없는 `duplicateStrokes`·`transformStrokes`는 자산→문서 배치 뒤에 문서 좌표 delta를 적용하도록 `existing * delta`로 결합한다. [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)와 [CanvasWidgetSelection.cpp](../src/ui/CanvasWidgetSelection.cpp)의 떠 있는 선택 세션도 기존 누적 변환 뒤에 새 이동·회전·크기·뒤집기 delta를 붙인다. 마스크 분기의 직렬화된 `PixelSelectionOp` 계약은 바꾸지 않았다.
 
 - 회귀: [StrokeCommandTests.cpp](../tests/StrokeCommandTests.cpp)는 비균일 축소·중앙 배치 이미지의 복제와 이동→회전→뒤집기를 독립적인 점 매핑 oracle, 렌더 픽셀, undo/redo와 비교한다. [UiSelectionTests.cpp](../tests/UiSelectionTests.cpp)는 떠 있는 선택 영역에서 같은 연속 동작의 누적 행렬, 미리보기·커밋 픽셀, undo/redo를 비교한다.
-- 남음: Qt 6.10 이상이 있는 Windows/macOS에서 document·UI selection suite를 실행해 통과를 확인한다. 이 PC에는 Qt SDK가 없어 실제 native suite는 실행하지 못했으므로 그전에는 해결로 닫지 않는다.
+- 확인 (2026-10-03, Windows 11 x64, Qt 6.11.2 Release(ClangCL)): `composesPlacedImageTransformsInDocumentCoordinates`(document 스위트)와 `composesFloatingSelectionActionsInDocumentOrder`(ui_selection, offscreen·windows 플랫폼 모두) 통과. 수정 전 코드에서 실패하는지는 다시 확인하지 않았다.
+- 남음: macOS에서 같은 suite를 실행해 통과를 확인한다. 그전에는 해결로 닫지 않는다.
 
 ### D02 · P1 · 우글거림 OFF에서 pen-up 프리뷰 승격 — 해결 (`bc36217`)
 
