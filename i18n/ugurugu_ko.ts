@@ -2009,8 +2009,8 @@
     </message>
     <message>
         <location filename="../src/ui/LayerDock.cpp" line="821"/>
-        <source>Both layers must use matching safe properties</source>
-        <translation>두 레이어가 동일한 안전 속성을 사용해야 합니다</translation>
+        <source>Both layers must use matching safe properties, and no clipping layer may rest on this one</source>
+        <translation>두 레이어가 동일한 안전 속성을 사용해야 하며, 이 레이어 위에 클리핑 레이어가 없어야 합니다</translation>
     </message>
     <message>
         <location filename="../src/ui/LayerDock.cpp" line="825"/>

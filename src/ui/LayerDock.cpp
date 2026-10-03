@@ -818,7 +818,8 @@ void LayerDock::updateControls()
         mergeToolTip = tr("No paint layer is directly below");
         break;
     case DocumentController::MergeLayerDownStatus::UnsupportedProperties:
-        mergeToolTip = tr("Both layers must use matching safe properties");
+        mergeToolTip = tr("Both layers must use matching safe properties, "
+                          "and no clipping layer may rest on this one");
         break;
     case DocumentController::MergeLayerDownStatus::UnsupportedStrokes:
         mergeToolTip =
