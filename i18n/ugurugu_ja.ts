@@ -3180,6 +3180,11 @@ The recovery file was not deleted. You can find it at:
         <translation>%1 を保存しました</translation>
     </message>
     <message>
+        <location filename="../src/ui/MainWindow.cpp" line="998"/>
+        <source>Saving %1…</source>
+        <translation>%1 を保存中…</translation>
+    </message>
+    <message>
         <location filename="../src/ui/MainWindow.cpp" line="984"/>
         <source>New document</source>
         <translation>新規ドキュメント</translation>
