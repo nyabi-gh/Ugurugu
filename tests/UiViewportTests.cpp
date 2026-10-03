@@ -1197,10 +1197,23 @@ private slots:
             promoted.size());
         QCOMPARE(promoted.convertToFormat(QImage::Format_ARGB32_Premultiplied),
             expected.convertToFormat(QImage::Format_ARGB32_Premultiplied));
-        const QImage displayed =
-            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas).image;
-        QCOMPARE(displayed.convertToFormat(QImage::Format_ARGB32_Premultiplied),
-            expected.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+        const auto displayedMatches = [&]()
+        {
+            const QImage displayed =
+                CanvasWidgetTestAccess::resolveDisplayedFrame(canvas).image;
+            return displayed.convertToFormat(
+                       QImage::Format_ARGB32_Premultiplied)
+                   == expected.convertToFormat(
+                       QImage::Format_ARGB32_Premultiplied);
+        };
+        QVERIFY(displayedMatches());
+        canvas.setAnimating(true);
+        CanvasWidgetTestAccess::advanceFrame(canvas);
+        canvas.setAnimating(false);
+        canvas.setCurrentFrame(frame);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+        QVERIFY(displayedMatches());
     }
 
     void disablesLayerWobbleInPendingTransformSnapshots()
