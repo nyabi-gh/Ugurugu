@@ -112,7 +112,13 @@ void MainWindow::createActions()
         this,
         [this]()
         {
-            save();
+            const QString filePath = m_currentFilePath.isEmpty()
+                                         ? chooseSavePath()
+                                         : m_currentFilePath;
+            if (!filePath.isEmpty())
+            {
+                saveInBackground(filePath);
+            }
         });
 
     auto *saveAsAction = new QAction(tr("Save &As…"), this);
@@ -123,7 +129,11 @@ void MainWindow::createActions()
         this,
         [this]()
         {
-            saveAs();
+            const QString filePath = chooseSavePath();
+            if (!filePath.isEmpty())
+            {
+                saveInBackground(filePath);
+            }
         });
 
     auto *exportGifAction = new QAction(tr("Export animated &GIF…"), this);

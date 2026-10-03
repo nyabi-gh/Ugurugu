@@ -165,6 +165,58 @@ private slots:
         QCOMPARE(afterAutosave.readAll(), recoveryBytes);
     }
 
+    void savesInTheBackgroundWhileEditingContinues()
+    {
+        EnvironmentVariableGuard environmentGuard(
+            QByteArrayLiteral("UGURUGU_RECOVERY_PATH"));
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        qputenv("UGURUGU_RECOVERY_PATH",
+            directory.filePath(QStringLiteral("recovery.ugu")).toUtf8());
+        const QString projectPath =
+            directory.filePath(QStringLiteral("project.ugu"));
+
+        MainWindow window;
+        DocumentController &controller =
+            MainWindowTestAccess::controller(window);
+        controller.addLayer();
+        const qsizetype layersAtSave = controller.document().layers.size();
+
+        // Saved while the window keeps taking edits: the file holds the
+        // document as it was when saving began, and the later edit leaves
+        // the document modified.
+        const auto gate = MainWindowTestAccess::holdSaveThread(window);
+        MainWindowTestAccess::saveInBackground(window, projectPath);
+        QVERIFY(MainWindowTestAccess::savePending(window));
+        controller.addLayer();
+        gate->release();
+        QTRY_VERIFY(!MainWindowTestAccess::savePending(window));
+        QVERIFY(controller.isModified());
+        QString error;
+        std::optional<Document> saved =
+            DocumentSerializer::load(projectPath, &error);
+        QVERIFY2(saved.has_value(), qPrintable(error));
+        QCOMPARE(saved->layers.size(), layersAtSave);
+
+        // Without an edit in between the save leaves the document clean.
+        MainWindowTestAccess::saveInBackground(window, projectPath);
+        QTRY_VERIFY(!MainWindowTestAccess::savePending(window));
+        QVERIFY(!controller.isModified());
+        saved = DocumentSerializer::load(projectPath, &error);
+        QVERIFY2(saved.has_value(), qPrintable(error));
+        QCOMPARE(saved->layers.size(), layersAtSave + 1);
+
+        // A synchronous save started while another is in flight waits for it
+        // and reports its own result.
+        controller.addLayer();
+        const auto secondGate = MainWindowTestAccess::holdSaveThread(window);
+        MainWindowTestAccess::saveInBackground(window, projectPath);
+        secondGate->release();
+        QVERIFY(MainWindowTestAccess::saveToFile(window, projectPath));
+        QVERIFY(!MainWindowTestAccess::savePending(window));
+        QVERIFY(!controller.isModified());
+    }
+
     void capturesAutosaveSnapshotWhileEditingContinues()
     {
         EnvironmentVariableGuard environmentGuard(

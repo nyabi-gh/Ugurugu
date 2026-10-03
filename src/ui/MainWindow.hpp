@@ -8,8 +8,10 @@
 #include "io/ExportWorker.hpp"
 #include "io/WawaV10Importer.hpp"
 
+#include <QFutureWatcher>
 #include <QList>
 #include <QMainWindow>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUuid>
 
@@ -77,7 +79,12 @@ private:
     bool maybeSave();
     bool save();
     bool saveAs();
+    QString chooseSavePath();
     bool saveToFile(const QString &filePath);
+    void saveInBackground(const QString &filePath);
+    bool beginSave(const QString &filePath);
+    bool waitForSave();
+    bool finishSave();
     bool rejectReservedRecoveryPath(
         const QString &filePath, const QString &title);
     std::optional<Document> readProject(const QString &filePath);
@@ -190,6 +197,24 @@ private:
     RecoveryWriter m_recoveryWriter;
     ExportWorker m_exportWorker;
     QProgressDialog *m_exportProgress = nullptr;
+    // A project save writes a snapshot of the document on its own thread
+    // while editing goes on. The cache is only touched by that thread, and
+    // the pool is declared after it so its destructor waits for a write in
+    // progress before the cache goes away.
+    struct PendingSave
+    {
+        QString filePath;
+        quint64 contentRevision = 0;
+    };
+    struct SaveResult
+    {
+        bool success = false;
+        QString error;
+    };
+    DocumentSerializer::SerializationCache m_saveCache;
+    QThreadPool m_savePool;
+    QFutureWatcher<SaveResult> m_saveWatcher;
+    std::optional<PendingSave> m_pendingSave;
 
     friend class MainWindowTestAccess;
 };

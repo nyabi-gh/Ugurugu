@@ -80,6 +80,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QVariant>
+#include <QtConcurrentRun>
 
 #include <spdlog/spdlog.h>
 
@@ -169,6 +170,14 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setObjectName(QStringLiteral("MainWindow"));
     setAcceptDrops(false);
+    m_savePool.setMaxThreadCount(1);
+    connect(&m_saveWatcher,
+        &QFutureWatcher<SaveResult>::finished,
+        this,
+        [this]()
+        {
+            finishSave();
+        });
     setMinimumSize(900, 640);
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks
                    | QMainWindow::AllowTabbedDocks
@@ -834,6 +843,9 @@ void MainWindow::refreshUnsavedState()
 
 bool MainWindow::maybeSave()
 {
+    // A save still in flight decides what is unsaved, and the document must
+    // not be replaced or closed under it.
+    waitForSave();
     if (!hasUnsavedWork())
     {
         return true;
@@ -913,20 +925,43 @@ bool MainWindow::save()
 
 bool MainWindow::saveAs()
 {
-    const QString filePath = SavePathDialog::getSaveFileName(this,
+    const QString filePath = chooseSavePath();
+    return !filePath.isEmpty() && saveToFile(filePath);
+}
+
+QString MainWindow::chooseSavePath()
+{
+    return SavePathDialog::getSaveFileName(this,
         tr("Save project"),
         saveDialogStartPath(projectExtension()),
         {{tr("Ugurugu projects (*.%1)").arg(projectExtension()),
             projectExtension(),
             {}}});
-    if (filePath.isEmpty())
-    {
-        return false;
-    }
-    return saveToFile(filePath);
 }
 
 bool MainWindow::saveToFile(const QString &filePath)
+{
+    waitForSave();
+    return beginSave(filePath) && waitForSave();
+}
+
+void MainWindow::saveInBackground(const QString &filePath)
+{
+    waitForSave();
+    beginSave(filePath);
+}
+
+bool MainWindow::waitForSave()
+{
+    if (!m_pendingSave)
+    {
+        return true;
+    }
+    m_saveWatcher.waitForFinished();
+    return finishSave();
+}
+
+bool MainWindow::beginSave(const QString &filePath)
 {
     if (rejectReservedRecoveryPath(filePath, tr("Save failed")))
     {
@@ -946,7 +981,9 @@ bool MainWindow::saveToFile(const QString &filePath)
         return false;
     }
     QString error;
-    if (!m_controller.saveDocument(filePath, &error))
+    std::optional<DocumentSerializer::PreparedDocument> snapshot =
+        m_controller.serializationSnapshot(&error);
+    if (!snapshot)
     {
         spdlog::error("Failed to save project {}: {}",
             filePath.toUtf8().constData(),
@@ -956,10 +993,61 @@ bool MainWindow::saveToFile(const QString &filePath)
             tr("Could not save the project.\n\n%1").arg(error));
         return false;
     }
-    m_currentFilePath = QFileInfo(filePath).absoluteFilePath();
+    m_pendingSave = PendingSave{filePath, m_controller.contentRevision()};
+    statusBar()->showMessage(
+        tr("Saving %1…").arg(QFileInfo(filePath).fileName()));
+    m_saveWatcher.setFuture(QtConcurrent::run(&m_savePool,
+        [this, filePath, snapshot = std::move(*snapshot)]()
+        {
+            SaveResult result;
+            try
+            {
+                result.success = DocumentSerializer::save(
+                    filePath, snapshot, m_saveCache, &result.error);
+            }
+            catch (const std::exception &exception)
+            {
+                result.success = false;
+                result.error = QString::fromLocal8Bit(exception.what());
+            }
+            return result;
+        }));
+    return true;
+}
+
+bool MainWindow::finishSave()
+{
+    if (!m_pendingSave)
+    {
+        return true;
+    }
+    const PendingSave pending = *std::exchange(m_pendingSave, std::nullopt);
+    const QFuture<SaveResult> future = m_saveWatcher.future();
+    const SaveResult result =
+        future.resultCount() > 0 ? future.result() : SaveResult{};
+    if (!result.success)
+    {
+        statusBar()->clearMessage();
+        spdlog::error("Failed to save project {}: {}",
+            pending.filePath.toUtf8().constData(),
+            result.error.toUtf8().constData());
+        QMessageBox::critical(this,
+            tr("Save failed"),
+            tr("Could not save the project.\n\n%1").arg(result.error));
+        return false;
+    }
+    m_currentFilePath = QFileInfo(pending.filePath).absoluteFilePath();
     m_suggestedSavePath.clear();
-    m_controller.markSaved();
-    clearAutosave();
+    // Edits made while the snapshot was written are not in the file, so the
+    // document stays modified and its recovery copy stays.
+    if (m_controller.contentRevision() == pending.contentRevision)
+    {
+        m_controller.markSaved();
+        if (!m_canvas->hasPendingSelectionTransform())
+        {
+            clearAutosave();
+        }
+    }
     updateWindowTitle();
     statusBar()->showMessage(tr("Saved %1").arg(m_currentFilePath), 4000);
     spdlog::info("Saved project {}", m_currentFilePath.toUtf8().constData());

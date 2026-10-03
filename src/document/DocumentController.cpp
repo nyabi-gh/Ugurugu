@@ -708,6 +708,11 @@ void DocumentController::markSaved()
     }
 }
 
+quint64 DocumentController::contentRevision() const
+{
+    return m_currentContentRevision;
+}
+
 bool DocumentController::resizeImage(const QSize &size)
 {
     const Document &current = document();

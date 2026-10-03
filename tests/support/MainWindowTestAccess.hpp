@@ -9,8 +9,10 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QSemaphore>
 #include <QString>
 
+#include <memory>
 #include <utility>
 
 namespace ugurugu
@@ -33,6 +35,29 @@ public:
     static bool saveToFile(MainWindow &window, const QString &filePath)
     {
         return window.saveToFile(filePath);
+    }
+
+    static void saveInBackground(MainWindow &window, const QString &filePath)
+    {
+        window.saveInBackground(filePath);
+    }
+
+    static bool savePending(const MainWindow &window)
+    {
+        return window.m_pendingSave.has_value();
+    }
+
+    // Occupies the save thread until the returned gate is released, so a save
+    // started meanwhile is reliably still in flight.
+    static std::shared_ptr<QSemaphore> holdSaveThread(MainWindow &window)
+    {
+        auto gate = std::make_shared<QSemaphore>(0);
+        window.m_savePool.start(
+            [gate]()
+            {
+                gate->acquire();
+            });
+        return gate;
     }
 
     static void setCurrentFilePath(MainWindow &window, const QString &filePath)

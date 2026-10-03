@@ -177,6 +177,9 @@ public:
     std::optional<DocumentSerializer::PreparedDocument> serializationSnapshot(
         QString *error = nullptr) const;
     void markSaved();
+    // Changes with every edit, undo and redo; equal values mean the same
+    // document content.
+    quint64 contentRevision() const;
     bool resizeImage(const QSize &size);
     bool resizeCanvas(const QSize &size, const QPoint &contentOffset);
 
