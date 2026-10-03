@@ -320,6 +320,7 @@ private:
     QImage activeStrokePreview(
         const Document &document, const QSize &renderSize, bool &resolved);
     void invalidateActiveStrokePreview();
+    void releaseComposedPreviewFrame();
     void queueStrokePreviewDisplay();
     void displayStrokePreview();
     QImage interactionPreview(Document document, const QSize &renderSize) const;
@@ -638,7 +639,10 @@ private:
     QSize m_displayedFrameSize;
     // The frame on screen, kept so a display waiting on a background render
     // goes on showing it instead of rendering that frame on the GUI thread.
+    // When that frame is the composed preview, only the flag is set: a second
+    // reference would make each patch of the preview copy the whole frame.
     QImage m_lastDisplayedFrame;
+    bool m_lastDisplayedFrameIsComposedPreview = false;
     bool m_displayAwaitsBackgroundFrame = false;
     QTimer m_animationTimer;
     QTimer m_selectionAnimationTimer;

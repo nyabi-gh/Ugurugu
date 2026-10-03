@@ -468,6 +468,17 @@ void CanvasWidget::displayStrokePreview()
             .adjusted(-2, -2, 2, 2));
 }
 
+void CanvasWidget::releaseComposedPreviewFrame()
+{
+    if (std::exchange(m_lastDisplayedFrameIsComposedPreview, false))
+    {
+        m_lastDisplayedFrame = std::move(m_composedPreviewFrame);
+    }
+    m_composedPreviewFrame = {};
+    m_composedSelectionPreviewRegion = {};
+    m_composedPreviewBaseKey = 0;
+}
+
 void CanvasWidget::invalidateActiveStrokePreview()
 {
     m_activeStrokePreview = {};
@@ -636,10 +647,13 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
         // screen stays up instead, and delivery repaints.
         const bool cached = !m_frameCacheStaleFrames.contains(m_currentFrame)
                             && m_frameCache.object(m_currentFrame);
-        if (!cached && m_lastDisplayedFrame.size() == renderSize
+        const QImage &lastDisplayedFrame = m_lastDisplayedFrameIsComposedPreview
+                                               ? m_composedPreviewFrame
+                                               : m_lastDisplayedFrame;
+        if (!cached && lastDisplayedFrame.size() == renderSize
             && backgroundRenderWillDeliver(m_currentFrame, renderSize))
         {
-            displayedFrame = m_lastDisplayedFrame;
+            displayedFrame = lastDisplayedFrame;
             m_displayAwaitsBackgroundFrame = true;
         }
         else
@@ -649,7 +663,10 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
     }
     if (!displayedFrame.isNull())
     {
-        m_lastDisplayedFrame = displayedFrame;
+        m_lastDisplayedFrameIsComposedPreview =
+            displayedFrame.cacheKey() == m_composedPreviewFrame.cacheKey();
+        m_lastDisplayedFrame =
+            m_lastDisplayedFrameIsComposedPreview ? QImage() : displayedFrame;
     }
 
     DisplayedFrame result;
@@ -832,9 +849,7 @@ bool CanvasWidget::adoptPreparedInteractionFrame(
     clearCompletedFrameCacheRefresh();
     invalidateActiveStrokePreview();
     m_incrementalStrokeRenderer.clear();
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     updateFrameCacheBudget();
     return true;
 }
@@ -1316,9 +1331,7 @@ bool CanvasWidget::tryRegionalStrokeInvalidation(
     m_previewSplitFrame = -1;
     m_previewLayerRasters = {};
     m_previewLayerRasterFrame = -1;
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     invalidateActiveStrokePreview();
     m_incrementalStrokeRenderer.clear();
     m_editableStrokeIds.clear();
@@ -1358,9 +1371,7 @@ void CanvasWidget::invalidateFrames()
     m_previewSplitFrame = -1;
     m_previewLayerRasters = {};
     m_previewLayerRasterFrame = -1;
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     invalidateActiveStrokePreview();
     m_incrementalStrokeRenderer.clear();
     m_editableStrokeIds.clear();

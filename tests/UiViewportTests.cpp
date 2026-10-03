@@ -2694,6 +2694,52 @@ private slots:
                 canvas, QPointF(332.0, 216.0))
                 .toPoint());
     }
+
+    void patchesTheStrokePreviewFrameInPlace()
+    {
+        DocumentController controller;
+        controller.newDocument(QSize(640, 480));
+        CanvasWidget canvas(&controller);
+        canvas.resize(800, 600);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                canvas, canvas.currentFrame()),
+            5000);
+
+        const auto at = [&](const QPointF &documentPosition)
+        {
+            return CanvasWidgetTestAccess::mapFromDocument(
+                canvas, documentPosition);
+        };
+        const auto paintedFrameBits = [&]()
+        {
+            return CanvasWidgetTestAccess::resolveDisplayedFrame(canvas)
+                .image.constBits();
+        };
+        CanvasWidgetTestAccess::beginStroke(
+            canvas, at(QPointF(300.0, 200.0)), 0);
+        CanvasWidgetTestAccess::continueStroke(
+            canvas, at(QPointF(308.0, 204.0)), 4);
+        const uchar *bits = paintedFrameBits();
+        QVERIFY(bits);
+        // Each report patches the stroke tail into the frame on screen. A
+        // reference to that frame kept past the paint made every patch
+        // detach it, copying the whole frame per pointer report.
+        for (int step = 2; step <= 6; ++step)
+        {
+            CanvasWidgetTestAccess::continueStroke(canvas,
+                at(QPointF(300.0 + step * 8.0, 200.0 + step * 4.0)),
+                quint64(step) * 4);
+            QCOMPARE(paintedFrameBits(), bits);
+        }
+        CanvasWidgetTestAccess::endStroke(
+            canvas, at(QPointF(348.0, 224.0)), 28);
+        QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
+    }
 };
 
 int runUiViewportTests(int argc, char **argv)

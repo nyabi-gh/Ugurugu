@@ -105,6 +105,7 @@ CanvasWidget::CanvasWidget(DocumentController *controller, QWidget *parent)
             clearSelection();
             // The outgoing document's pixels must not stand in for the new
             // one while its first frame renders.
+            releaseComposedPreviewFrame();
             m_lastDisplayedFrame = {};
         });
     connect(m_controller,

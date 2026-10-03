@@ -97,9 +97,7 @@ void CanvasWidget::beginStroke(const QPointF &widgetPosition,
     m_drawing = true;
     invalidateActiveStrokePreview();
     m_incrementalStrokeRenderer.clear();
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     if (usesPreparedInteractionFrames())
     {
         const QSize renderSize = previewRenderSize();
@@ -222,9 +220,7 @@ void CanvasWidget::endStroke(const QPointF &widgetPosition, quint64 timestamp)
     // Only written to while a stroke is live, and its pixels survive as the
     // promoted frame below. Releasing it here is what frees the budget the
     // promotion needs.
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     m_strokeStabilizer.reset();
     m_strokeCommitDefersInteractionWarmup = true;
     const DocumentController::AddStrokeResult result =
@@ -337,9 +333,7 @@ void CanvasWidget::cancelStroke()
     m_activeStrokeLayer = QUuid();
     invalidateActiveStrokePreview();
     m_incrementalStrokeRenderer.clear();
-    m_composedPreviewFrame = {};
-    m_composedSelectionPreviewRegion = {};
-    m_composedPreviewBaseKey = 0;
+    releaseComposedPreviewFrame();
     m_strokeStabilizer.reset();
     scheduleFrameCacheWarmup();
     if (!m_animating)
