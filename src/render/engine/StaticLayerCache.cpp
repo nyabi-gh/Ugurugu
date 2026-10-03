@@ -99,6 +99,61 @@ void evictToBudget(State &cache)
     }
 }
 
+// Owns a pending entry for the duration of its render and settles it on every
+// exit, so neither a throwing render nor an abandoned one leaves its waiters
+// blocked on an entry that never becomes ready.
+class PendingRender final
+{
+public:
+    PendingRender(State &cache, const StaticLayerCache::Key &key, quint64 owner)
+        : m_cache(cache)
+        , m_key(key)
+        , m_owner(owner)
+    {
+    }
+
+    ~PendingRender()
+    {
+        settle({});
+    }
+
+    PendingRender(const PendingRender &) = delete;
+    PendingRender &operator=(const PendingRender &) = delete;
+
+    void settle(const QImage &image)
+    {
+        if (m_settled)
+        {
+            return;
+        }
+        m_settled = true;
+        const QMutexLocker locker(&m_cache.mutex);
+        const auto entry = m_cache.entries.find(m_key);
+        if (entry != m_cache.entries.end() && entry->owner == m_owner)
+        {
+            if (image.isNull() || image.sizeInBytes() > m_cache.budget)
+            {
+                erase(m_cache, entry);
+            }
+            else
+            {
+                entry->image = image;
+                entry->ready = true;
+                entry->lastUse = ++m_cache.clock;
+                m_cache.resident += image.sizeInBytes();
+                evictToBudget(m_cache);
+            }
+        }
+        m_cache.settled.wakeAll();
+    }
+
+private:
+    State &m_cache;
+    const StaticLayerCache::Key &m_key;
+    quint64 m_owner;
+    bool m_settled = false;
+};
+
 }
 
 bool isLayerFrameInvariant(const Document &document, const Layer &layer)
@@ -174,26 +229,9 @@ QImage StaticLayerCache::raster(const Document &document,
     cache.entries.insert(key, std::move(pending));
     locker.unlock();
 
+    PendingRender slot(cache, key, owner);
     QImage image = render();
-
-    locker.relock();
-    entry = cache.entries.find(key);
-    if (entry != cache.entries.end() && entry->owner == owner)
-    {
-        if (image.isNull() || image.sizeInBytes() > cache.budget)
-        {
-            erase(cache, entry);
-        }
-        else
-        {
-            entry->image = image;
-            entry->ready = true;
-            entry->lastUse = ++cache.clock;
-            cache.resident += image.sizeInBytes();
-            evictToBudget(cache);
-        }
-    }
-    cache.settled.wakeAll();
+    slot.settle(image);
     return image;
 }
 

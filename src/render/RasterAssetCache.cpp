@@ -6,14 +6,7 @@
 #include "app/MemoryBudget.hpp"
 #include "io/serializer/RasterAssetTable.hpp"
 #include "render/ImageAffineTransformer.hpp"
-
-#include <QCache>
-#include <QMutex>
-#include <QMutexLocker>
-#include <QSet>
-#include <QWaitCondition>
-
-#include <algorithm>
+#include "render/engine/ComputedImageCache.hpp"
 
 namespace ugurugu
 {
@@ -21,22 +14,12 @@ namespace ugurugu
 namespace
 {
 
-QMutex &cacheMutex()
+// Every frame worker meets the same image operations at the same moment, so
+// one shared cache keeps a miss from decoding or transforming once per worker.
+render_detail::ComputedImageCache &imageCache()
 {
-    static QMutex mutex;
-    return mutex;
-}
-
-QCache<QString, QImage> &imageCache()
-{
-    static QCache<QString, QImage> cache;
-    static const bool configured = []()
-    {
-        cache.setMaxCost(
-            static_cast<int>(MemoryBudget::rasterDecodeCacheBytes / 1024));
-        return true;
-    }();
-    static_cast<void>(configured);
+    static render_detail::ComputedImageCache cache(
+        MemoryBudget::rasterDecodeCacheBytes);
     return cache;
 }
 
@@ -63,63 +46,11 @@ QString transformedCacheKey(const QString &assetId,
     return key;
 }
 
-int cacheCost(const QImage &image)
-{
-    return static_cast<int>(
-        std::max<qsizetype>(1, (image.sizeInBytes() + 1023) / 1024));
-}
-
-QSet<QString> &inFlightKeys()
-{
-    static QSet<QString> keys;
-    return keys;
-}
-
-QWaitCondition &inFlightSettled()
-{
-    static QWaitCondition condition;
-    return condition;
-}
-
-// Every frame worker meets the same image operations at the same moment, so
-// a miss used to decode or transform one asset once per worker. The first
-// thread to miss computes it; the others wait for its result.
-template <typename Compute>
-QImage cachedOrComputed(const QString &key, Compute compute)
-{
-    QMutexLocker locker(&cacheMutex());
-    for (;;)
-    {
-        if (const QImage *cached = imageCache().object(key))
-        {
-            return *cached;
-        }
-        if (!inFlightKeys().contains(key))
-        {
-            break;
-        }
-        inFlightSettled().wait(&cacheMutex());
-    }
-    inFlightKeys().insert(key);
-    locker.unlock();
-
-    const QImage image = compute();
-
-    locker.relock();
-    if (!image.isNull())
-    {
-        imageCache().insert(key, new QImage(image), cacheCost(image));
-    }
-    inFlightKeys().remove(key);
-    inFlightSettled().wakeAll();
-    return image;
-}
-
 }
 
 QImage RasterAssetCache::image(const Document &document, const QString &assetId)
 {
-    return cachedOrComputed(QStringLiteral("source:") + assetId,
+    return imageCache().imageOrCompute(QStringLiteral("source:") + assetId,
         [&document, &assetId]() -> QImage
         {
             const auto asset = document.rasterAssets.constFind(assetId);
@@ -149,7 +80,7 @@ QImage RasterAssetCache::transformedImage(const Document &document,
     {
         return {};
     }
-    return cachedOrComputed(
+    return imageCache().imageOrCompute(
         transformedCacheKey(assetId, targetSize, transform, sampling),
         [&]() -> QImage
         {
@@ -179,7 +110,6 @@ QImage RasterAssetCache::transformedImage(const Document &document,
 
 void RasterAssetCache::clear()
 {
-    const QMutexLocker locker(&cacheMutex());
     imageCache().clear();
 }
 

@@ -2009,8 +2009,8 @@
     </message>
     <message>
         <location filename="../src/ui/LayerDock.cpp" line="821"/>
-        <source>Both layers must use matching safe properties</source>
-        <translation>両方のレイヤーで一致する安全なプロパティが必要です</translation>
+        <source>Both layers must use matching safe properties, and no clipping layer may rest on this one</source>
+        <translation>両方のレイヤーで一致する安全なプロパティが必要で、このレイヤーの上にクリッピングレイヤーがあってはいけません</translation>
     </message>
     <message>
         <location filename="../src/ui/LayerDock.cpp" line="825"/>

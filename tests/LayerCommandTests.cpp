@@ -715,6 +715,61 @@ private slots:
         QCOMPARE(RenderEngine::render(controller.document(), 11), laterBefore);
     }
 
+    void refusesToMergeALayerThatAClippingLayerRestsOn()
+    {
+        DocumentController controller;
+        controller.newDocument(QSize(64, 64));
+        const QUuid lowerId = controller.document().activeLayerId;
+        Stroke lowerStroke;
+        lowerStroke.color = QColor(220, 40, 30);
+        lowerStroke.width = 10.0;
+        lowerStroke.points = {
+            {QPointF(4.0, 16.0), 1.0}, {QPointF(60.0, 16.0), 1.0}};
+        controller.addStroke(lowerId, lowerStroke);
+        controller.addLayer();
+        const QUuid upperId = controller.document().activeLayerId;
+        Stroke upperStroke;
+        upperStroke.color = QColor(30, 80, 220);
+        upperStroke.width = 10.0;
+        upperStroke.points = {
+            {QPointF(4.0, 46.0), 1.0}, {QPointF(60.0, 46.0), 1.0}};
+        controller.addStroke(upperId, upperStroke);
+        controller.addLayer();
+        const QUuid clipId = controller.document().activeLayerId;
+        Stroke clipStroke;
+        clipStroke.color = QColor(20, 160, 60);
+        clipStroke.width = 14.0;
+        clipStroke.points = {
+            {QPointF(32.0, 2.0), 1.0}, {QPointF(32.0, 62.0), 1.0}};
+        controller.addStroke(clipId, clipStroke);
+        controller.setLayerClipToBelow(clipId, true);
+        controller.undoStack()->setClean();
+        const QImage before = RenderEngine::render(controller.document(), 0);
+
+        QCOMPARE(controller.mergeLayerDownStatus(upperId),
+            DocumentController::MergeLayerDownStatus::UnsupportedProperties);
+        QVERIFY(!controller.mergeLayerDown(upperId));
+        QCOMPARE(controller.document().layers.size(), 3);
+        QCOMPARE(RenderEngine::render(controller.document(), 0), before);
+        QVERIFY(controller.undoStack()->isClean());
+
+        // A plain layer between them gives the clipping layer its own base.
+        controller.setActiveLayer(upperId);
+        controller.addLayer();
+        const QUuid baseId = controller.document().activeLayerId;
+        Stroke baseStroke;
+        baseStroke.color = QColor(240, 200, 20);
+        baseStroke.width = 10.0;
+        baseStroke.points = {
+            {QPointF(4.0, 32.0), 1.0}, {QPointF(60.0, 32.0), 1.0}};
+        controller.addStroke(baseId, baseStroke);
+        const QImage separated = RenderEngine::render(controller.document(), 0);
+        QCOMPARE(controller.mergeLayerDownStatus(upperId),
+            DocumentController::MergeLayerDownStatus::Available);
+        QVERIFY(controller.mergeLayerDown(upperId));
+        QCOMPARE(RenderEngine::render(controller.document(), 0), separated);
+    }
+
     void overridesWobblePerLayerUndoablyAndAcrossASaveCycle()
     {
         DocumentController controller;

@@ -93,6 +93,8 @@ set(UGURUGU_ENGINE_SOURCES
     src/render/LayerThumbnailRenderer.hpp
     src/render/MotionTimeModel.cpp
     src/render/MotionTimeModel.hpp
+    src/render/engine/ComputedImageCache.cpp
+    src/render/engine/ComputedImageCache.hpp
     src/render/engine/DisplayScaleReplay.cpp
     src/render/engine/DisplayScaleReplay.hpp
     src/render/engine/LayerHierarchyCompositor.cpp
@@ -276,6 +278,7 @@ set(UGURUGU_TEST_SOURCES
     tests/BrushRenderingTests.cpp
     tests/BrokenLineModelTests.cpp
     tests/ClassicStrokeMotionTests.cpp
+    tests/ComputedImageCacheTests.cpp
     tests/DocumentHistoryTests.cpp
     tests/DocumentLifecycleTests.cpp
     tests/DocumentResizeTests.cpp

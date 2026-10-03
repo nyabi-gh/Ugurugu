@@ -459,12 +459,24 @@ DocumentController::mergeLayerDownStatus(const QUuid &id) const
         return MergeLayerDownStatus::NoPaintLayerBelow;
     }
     const Layer &target = current.layers[targetIndex];
+    // Clipping layers resting on the source would clip to the merged layer,
+    // which also holds the target's artwork.
+    const auto layerAbove =
+        std::find_if(current.layers.cbegin() + sourceIndex + 1,
+            current.layers.cend(),
+            [source](const Layer &layer)
+            {
+                return layer.parentGroupId == source->parentGroupId;
+            });
+    const bool clippedFromAbove =
+        layerAbove != current.layers.cend() && layerAbove->clipToLayerBelow;
     const bool supportedProperties =
         source->blendMode == LayerBlendMode::Normal
         && target.blendMode == LayerBlendMode::Normal
         && qFuzzyCompare(source->opacity, 1.0)
         && qFuzzyCompare(target.opacity, 1.0) && !source->clipToLayerBelow
-        && !target.clipToLayerBelow && source->reference == target.reference
+        && !target.clipToLayerBelow && !clippedFromAbove
+        && source->reference == target.reference
         && source->visible == target.visible
         && qFuzzyCompare(effectiveWobbleAmount(current, *source),
             effectiveWobbleAmount(current, target))
