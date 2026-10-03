@@ -150,7 +150,7 @@ void CanvasWidget::continueStroke(
         if (!renderSize.isEmpty())
         {
             bool previewResolved = false;
-            activeStrokePreview(displayDocument(), renderSize, previewResolved);
+            activeStrokePreview(renderSize, previewResolved);
         }
     }
     if (usingGpuDisplay())
@@ -190,8 +190,8 @@ void CanvasWidget::endStroke(const QPointF &widgetPosition, quint64 timestamp)
     invalidateActiveStrokePreview();
     const QSize promotedRenderSize = previewRenderSize();
     bool promotedPreviewResolved = false;
-    const QImage promotedFrame = activeStrokePreview(
-        m_controller->document(), promotedRenderSize, promotedPreviewResolved);
+    const QImage promotedFrame =
+        activeStrokePreview(promotedRenderSize, promotedPreviewResolved);
     RenderEngine::LayerSplitFrame promotedSplit = m_previewSplit;
     if (!promotedSplit.valid || m_previewSplitLayer != m_activeStrokeLayer
         || m_previewSplitFrame != m_currentFrame

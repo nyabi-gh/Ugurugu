@@ -220,7 +220,7 @@ void CanvasWidget::resumeDeferredDisplay()
 }
 
 QImage CanvasWidget::activeStrokePreview(
-    const Document &document, const QSize &renderSize, bool &resolved)
+    const QSize &renderSize, bool &resolved)
 {
     if (m_activeStrokePreviewResolved
         && m_activeStrokePreviewRenderSize == renderSize
@@ -230,6 +230,7 @@ QImage CanvasWidget::activeStrokePreview(
         return m_activeStrokePreview;
     }
 
+    const Document document = displayDocument();
     QImage preview;
     QRect patchBounds;
     bool patchBoundsValid = false;
@@ -438,7 +439,7 @@ void CanvasWidget::displayStrokePreview()
     if (m_drawing && !renderSize.isEmpty())
     {
         bool resolved = false;
-        activeStrokePreview(displayDocument(), renderSize, resolved);
+        activeStrokePreview(renderSize, resolved);
         if (!resolved)
         {
             m_strokePreviewUndisplayedWhole = true;
@@ -531,8 +532,8 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
     bool activeStrokePreviewResolved = false;
     if (m_drawing && !m_activeStroke.points.isEmpty())
     {
-        displayedFrame = activeStrokePreview(
-            document, renderSize, activeStrokePreviewResolved);
+        displayedFrame =
+            activeStrokePreview(renderSize, activeStrokePreviewResolved);
     }
     else if (hasPendingSelectionTransform())
     {

@@ -1122,6 +1122,87 @@ private slots:
         QCOMPARE(effectiveWobbleAmount(display, *displayLayer), 0.0);
     }
 
+    void promotesThePenUpFrameOfTheDisplayedDocument_data()
+    {
+        QTest::addColumn<bool>("layerOverride");
+        QTest::addColumn<bool>("wobbleEnabled");
+
+        QTest::newRow("document wobble on") << false << true;
+        QTest::newRow("document wobble off") << false << false;
+        QTest::newRow("layer wobble on") << true << true;
+        QTest::newRow("layer wobble off") << true << false;
+    }
+
+    void promotesThePenUpFrameOfTheDisplayedDocument()
+    {
+        QFETCH(bool, layerOverride);
+        QFETCH(bool, wobbleEnabled);
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(160, 120)));
+        const QUuid layerId = controller.document().activeLayerId;
+        if (layerOverride)
+        {
+            controller.setLayerWobbleOverride(
+                layerId, 12.0, controller.document().motion);
+        }
+        else
+        {
+            controller.setWobbleAmount(12.0);
+        }
+        CanvasWidget canvas(&controller);
+        canvas.resize(400, 320);
+        canvas.setAnimating(false);
+        canvas.setWobbleAnimationEnabled(wobbleEnabled);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+
+        const auto at = [&](const QPointF &documentPosition)
+        {
+            return CanvasWidgetTestAccess::mapFromDocument(
+                canvas, documentPosition);
+        };
+        CanvasWidgetTestAccess::beginStroke(canvas, at(QPointF(20.0, 30.0)), 0);
+        CanvasWidgetTestAccess::continueStroke(
+            canvas, at(QPointF(25.0, 32.0)), 2);
+        CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        // With wobble on, a worker prepares the frame under the stroke; only
+        // a stroke drawn over it is promoted at pen-up.
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::hasCurrentInteractionBase(
+                canvas, canvas.currentFrame()),
+            5000);
+        for (int step = 1; step <= 12; ++step)
+        {
+            CanvasWidgetTestAccess::continueStroke(canvas,
+                at(QPointF(20.0 + step * 10.0, 30.0 + step * 5.0)),
+                quint64(step) * 4);
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        }
+        CanvasWidgetTestAccess::endStroke(canvas, at(QPointF(140.0, 96.0)), 52);
+        QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
+
+        // The pen-up frame goes into the cache as the exact frame, so it has
+        // to be the frame the display renders, with wobble disabled for the
+        // view when it is off, layer overrides included.
+        const int frame = canvas.currentFrame();
+        const QImage promoted =
+            CanvasWidgetTestAccess::cachedFrame(canvas, frame);
+        QVERIFY(!promoted.isNull());
+        const QImage expected = RenderEngine::renderScaled(
+            CanvasWidgetTestAccess::displayDocument(canvas),
+            frame,
+            promoted.size());
+        QCOMPARE(promoted.convertToFormat(QImage::Format_ARGB32_Premultiplied),
+            expected.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+        const QImage displayed =
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas).image;
+        QCOMPARE(displayed.convertToFormat(QImage::Format_ARGB32_Premultiplied),
+            expected.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+    }
+
     void disablesLayerWobbleInPendingTransformSnapshots()
     {
         DocumentController controller;

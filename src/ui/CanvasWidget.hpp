@@ -317,8 +317,9 @@ private:
     bool tryRegionalStrokeInvalidation(
         const QUuid &layerId, const QUuid &strokeId);
     void clearCompletedFrameCacheRefresh();
-    QImage activeStrokePreview(
-        const Document &document, const QSize &renderSize, bool &resolved);
+    // Composed from displayDocument(), the document every display path
+    // renders, so a pen-up promotion can stand in for the exact frame.
+    QImage activeStrokePreview(const QSize &renderSize, bool &resolved);
     void invalidateActiveStrokePreview();
     void releaseComposedPreviewFrame();
     void queueStrokePreviewDisplay();
