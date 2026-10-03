@@ -23,6 +23,7 @@ int runRenderEngineTests(int argc, char **argv)
     result |= runStrokeRenderingTests(argc, argv);
     result |= runSelectionPreviewTests(argc, argv);
     result |= runBrushRenderingTests(argc, argv);
+    result |= runComputedImageCacheTests(argc, argv);
     return result;
 }
 

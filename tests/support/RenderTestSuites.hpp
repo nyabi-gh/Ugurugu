@@ -19,5 +19,6 @@ int runMotionTimeModelTests(int argc, char **argv);
 int runStrokeRenderingTests(int argc, char **argv);
 int runSelectionPreviewTests(int argc, char **argv);
 int runBrushRenderingTests(int argc, char **argv);
+int runComputedImageCacheTests(int argc, char **argv);
 
 }

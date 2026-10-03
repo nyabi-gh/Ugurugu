@@ -6,8 +6,12 @@
 #include "support/RenderTestHelpers.hpp"
 #include "support/RenderTestSuites.hpp"
 
+#include <QScopeGuard>
 #include <QtConcurrentMap>
+#include <QtConcurrentRun>
 
+#include <atomic>
+#include <new>
 #include <numeric>
 
 namespace ugurugu
@@ -193,6 +197,54 @@ private slots:
                 return RenderEngine::renderScaled(document, frame, preview);
             });
         QCOMPARE(QVector<QImage>(rendered.cbegin(), rendered.cend()), expected);
+    }
+
+    void releasesAStaticLayerSlotWhoseRenderThrew()
+    {
+        const StaticLayerCacheBudget cached(
+            MemoryBudget::staticLayerCacheBytes);
+        const Document document = mixedStillDocument();
+        const Layer &layer = document.layers.first();
+        render_detail::StaticLayerCache::Key key;
+        key.layerId = layer.id;
+        key.outputSize = QSize(9, 7);
+        key.documentSize = document.size;
+        key.initialCanvasSize = layer.initialCanvasSize;
+        QVERIFY_THROWS_EXCEPTION(std::bad_alloc,
+            render_detail::StaticLayerCache::raster(
+                document,
+                layer,
+                key,
+                []() -> QImage
+                {
+                    throw std::bad_alloc();
+                },
+                nullptr));
+
+        QImage expected(key.outputSize, QImage::Format_ARGB32_Premultiplied);
+        expected.fill(Qt::red);
+        std::atomic_bool abandoned = false;
+        QFuture<QImage> retry = QtConcurrent::run(
+            [&]()
+            {
+                return render_detail::StaticLayerCache::raster(
+                    document,
+                    layer,
+                    key,
+                    [&expected]()
+                    {
+                        return expected;
+                    },
+                    &abandoned);
+            });
+        [[maybe_unused]] const auto stopRetry = qScopeGuard(
+            [&]()
+            {
+                abandoned = true;
+                retry.waitForFinished();
+            });
+        QTRY_VERIFY_WITH_TIMEOUT(retry.isFinished(), 5000);
+        QCOMPARE(retry.result(), expected);
     }
 
     void loopsAtFrameCount()
