@@ -1021,7 +1021,8 @@ bool MainWindow::finishSave()
     {
         return true;
     }
-    const PendingSave pending = *std::exchange(m_pendingSave, std::nullopt);
+    const PendingSave pending = *m_pendingSave;
+    m_pendingSave.reset();
     const QFuture<SaveResult> future = m_saveWatcher.future();
     const SaveResult result =
         future.resultCount() > 0 ? future.result() : SaveResult{};

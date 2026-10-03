@@ -18,6 +18,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -47,7 +48,7 @@ double percentile(std::vector<double> values, double fraction)
     }
     std::sort(values.begin(), values.end());
     const auto index = static_cast<std::size_t>(
-        fraction * static_cast<double>(values.size() - 1) + 0.5);
+        std::lround(fraction * static_cast<double>(values.size() - 1)));
     return values[std::min(index, values.size() - 1)];
 }
 
@@ -110,9 +111,7 @@ bool parse(int argc, char **argv, Options &options)
     return !options.path.isEmpty();
 }
 
-}
-
-int main(int argc, char **argv)
+int run(int argc, char **argv)
 {
     Options options;
     if (!parse(argc, argv, options))
@@ -150,8 +149,8 @@ int main(int argc, char **argv)
             }
         }
     }
-    for (int index = 0;
-        index < std::min<int>(options.staticLayers, document.layers.size());
+    for (qsizetype index = 0; index < std::min<qsizetype>(
+                                  options.staticLayers, document.layers.size());
         ++index)
     {
         document.layers[index].wobbleAmount = 0.0;
@@ -224,19 +223,20 @@ int main(int argc, char **argv)
             timer.start();
             const QImage image = ugurugu::RenderEngine::renderScaled(
                 document, frame, outputSize, mode, &stats);
-            frameMs.push_back(timer.nsecsElapsed() / 1.0e6);
+            frameMs.push_back(
+                static_cast<double>(timer.nsecsElapsed()) / 1.0e6);
             allocations += stats.hierarchySurfaceAllocations;
             for (int row = 0; row < image.height(); ++row)
             {
                 digest.addData(QByteArrayView(
                     reinterpret_cast<const char *>(image.constScanLine(row)),
-                    image.width() * 4));
+                    qsizetype(image.width()) * 4));
             }
         }
         std::printf("round %d total_ms=%.1f frame_p50=%.2f frame_p95=%.2f "
                     "frame_max=%.2f surface_allocs=%llu digest=%s\n",
             round,
-            total.nsecsElapsed() / 1.0e6,
+            static_cast<double>(total.nsecsElapsed()) / 1.0e6,
             percentile(frameMs, 0.5),
             percentile(frameMs, 0.95),
             *std::max_element(frameMs.begin(), frameMs.end()),
@@ -244,4 +244,23 @@ int main(int argc, char **argv)
             digest.result().toHex().left(16).constData());
     }
     return 0;
+}
+
+}
+
+int main(int argc, char **argv)
+{
+    try
+    {
+        return run(argc, argv);
+    }
+    catch (const std::exception &exception)
+    {
+        std::fprintf(stderr, "error: %s\n", exception.what());
+    }
+    catch (...)
+    {
+        std::fprintf(stderr, "error: unknown exception\n");
+    }
+    return 1;
 }
