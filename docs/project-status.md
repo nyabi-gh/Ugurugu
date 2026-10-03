@@ -1,6 +1,6 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-10-03 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리 · 데스크톱 성능: `perf/desktop-render-pipeline` 브랜치(`be2a06d` 기준)
+정리일: 2026-10-03 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리 · 데스크톱 성능: `perf/desktop-render-pipeline` 브랜치(`be2a06d` 기준, 그리기 지연 작업 `23bd7a5`까지)
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
@@ -224,7 +224,7 @@
 
 남은 검증: macOS Metal·Apple Silicon 측정, 실제 펜 입력에서 펜 다운 지연, 정적 레이어 캐시와 참조 이미지 선렌더의 장시간 메모리 상한(예산 256MiB와 이미지 1장)을 실제 작업 문서로 확인.
 
-### 그리는 중 입력 지연 — 원인 2건 수정, 실기기 확인 대기
+### 그리는 중 입력 지연 — 원인 3건 수정, 실제 펜 확인 대기
 
 **정정:** 이전 기록의 "이동당 6.5ms, 400점 획 약 2.6s"는 probe가 이벤트마다 `processEvents`로 화면 갱신을 강제해 생긴 값이다. 실제 입력처럼 별도 스레드가 `QWindowSystemInterface`로 태블릿 이동을 4ms 간격(240Hz)에 넣고 이벤트 루프를 그대로 돌리면, 수정 전에도 GPU·software 모두 획이 약 1.6s에 끝났다. 지연은 처리량이 아니라 **프레임당 비용이 창 넓이에 비례한 것**에서 나왔다.
 
@@ -240,13 +240,36 @@
 
 - **원인 1 · GPU (`72087a6`):** 투명 overlay 위젯이 QRhiWidget frame view 위에 겹쳐 있어, frame view를 갱신할 때마다 Qt가 overlay와 그 아래 캔버스를 화면 전체 넓이로 다시 그리고 backing store를 다시 올렸다. overlay 위젯을 숨기면 이 비용이 사라지고 프레임이 창 크기와 무관해지는 것을 먼저 확인했다. 수정 후 overlay는 frame view가 자체 이미지에 그려 dirty 영역만 다시 그리고 올리며, 같은 pass에서 premultiplied blend로 합성한다. 획 미리보기·재생·워커 프레임 전달처럼 프레임 픽셀만 바뀌는 갱신은 overlay를 무효화하지 않는다.
 - **원인 2 · software (`77a9c7c`):** paint 사이에 들어온 두 번째 이후 이동은 변경 영역을 모른다는 이유로 viewport 전체를 다시 칠했다. 창이 클수록 paint가 느려져 paint 사이 이동이 늘고, 그래서 거의 모든 paint가 전체 paint가 됐다. 이제 그 이동들은 한 번의 큐된 resolve로 바뀐 타일만 다시 칠한다. paint 뒤 첫 이동의 즉시 resolve는 유지했다.
-- **회귀:** [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `drawsWithoutRepaintingRasterWidgetsOverTheGpuDisplay`(수정 전 이동마다 캔버스 paint 21회 → 0), `gpuDisplayMatchesTheSoftwareDisplay`(GPU와 software 출력의 채널 차이 8 이하, 수정 전후 모두 통과), `repaintsOnlyTheStrokeTailForReportsBetweenPaints`(수정 전 실패). GPU 테스트는 headless에서 건너뛰므로 `QT_QPA_PLATFORM=windows`로 확인했다. offscreen CTest 13/13. windows 플랫폼에서 실패하는 기존 UI 테스트 6개는 수정 전에도 같게 실패한다.
+- **회귀:** [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `drawsWithoutRepaintingRasterWidgetsOverTheGpuDisplay`(수정 전 이동마다 캔버스 paint 21회 → 0, 원인 3에서 아래 테스트로 대체), `gpuDisplayMatchesTheSoftwareDisplay`(GPU와 software 출력의 채널 차이 8 이하, 수정 전후 모두 통과), `repaintsOnlyTheStrokeTailForReportsBetweenPaints`(수정 전 실패). GPU 테스트는 headless에서 건너뛰므로 `QT_QPA_PLATFORM=windows`로 확인했다. offscreen CTest 13/13. windows 플랫폼에서 실패하는 기존 UI 테스트 6개는 수정 전에도 같게 실패한다.
 - **표시 차이:** overlay를 별도 레이어로 합성하므로 테두리·커서 링의 안티앨리어싱 가장자리가 software와 최대 5단계 다르다. 빈 문서 안내 문구는 GPU에서 회색조, software에서 ClearType으로 그려진다.
 
-남은 것:
+#### 원인 3 · 실제 앱에서의 QRhiWidget 합성 (`23bd7a5`)
 
-1. GPU 경로에서 GUI 스레드는 프레임마다 약 4.8ms를 Qt flush(D3D11 flip 모델, max frame latency 2, 160Hz vsync) 안에서 기다린다. 우리 코드의 프레임당 비용은 0.3–0.6ms다. `QT_D3D_MAX_FRAME_LATENCY` 1·3은 GUI 쪽 수치를 바꾸지 않았고 `QT_D3D_NO_FLIP`은 프레임당 30ms로 나빠졌다. Qt Widgets 합성 구조에서 생기는 대기이므로, 줄이려면 캔버스 표시를 GUI 스레드 밖의 자체 swapchain으로 옮겨야 한다. 그 전에 입력→화면 표시 지연(PresentMon 등)과 실제 펜 체감을 잰다.
-2. 실제 펜에서 OS·Qt의 이동 이벤트 병합과 체감 지연을 확인한다. macOS Metal은 측정하지 않았다.
+위 측정은 캔버스 위젯만 띄운 것이었다. MainWindow 전체를 띄우고 같은 방식으로 8초(2,000점) 획을 넣자 프레임이 vsync 두 번(약 11.4ms)으로 늘고 초당 약 80프레임이 됐다. 그리는 동안 상태바 좌표 라벨(이동마다), 브러시 프리셋 미리보기 애니메이션(약 40Hz), 프리셋 패널(약 8Hz), 재생 중 타임라인이 다시 칠해졌고, 그때마다 캔버스 위젯 전체(1956×1148)가 함께 다시 칠해졌다. 상태바와 프리셋 패널을 숨기면 프레임이 160Hz(1,280프레임, p95 5.3ms)로 돌아왔다.
+
+Qt 6.11.2 `QWidgetRepaintManager::paintAndFlush`는 래스터로 칠할 영역이 하나라도 있으면 갱신된 render-to-texture 위젯의 사각형 전체를 래스터 dirty 영역에 더한다. 즉 QRhiWidget은 창 안 다른 위젯이 칠해지는 프레임마다 아래 영역 전체를 다시 칠하고 업로드한다. QRhiWidget을 네이티브 창으로 만드는 실험은 더 나빴다(1.6초 동안 396프레임).
+
+- **수정:** 캔버스 표시를 `CanvasDisplayWindow`(자체 QRhi swap chain을 가진 `QWindow`, `createWindowContainer`로 삽입)로 바꿨다. 다른 위젯과 캔버스가 서로의 합성에 끼어들지 않는다. 창은 마우스 입력에 투명하고(`WindowTransparentForInput`, 포커스 없음), 플랫폼이 그래도 창에 보내는 펜·터치·제스처·Enter/Leave는 캔버스 위젯으로 전달한다. 커서 모양은 창에 복사한다. 선택 액션바는 캔버스 위에 보이도록 네이티브 자식으로 만든다.
+- **측정 (실제 앱 전체, 2400×1300, 같은 probe, 화면 잠금 상태로 전후 동일 조건):**
+
+| 8초 획 | 수정 전 (`6576695`) | 수정 후 |
+|---|---|---|
+| 입력→캔버스 프레임 p50 / p95 / max (정지) | 18.7 / 25.2 / 43.1ms | 6.2 / 10.6 / 15.6ms |
+| 같은 지표 (재생) | 18.6 / 25.1 / 40.2ms | 6.1 / 10.7 / 14.2ms |
+| 입력 대기 p50 / p95 | 6.7 / 11.6ms | 0.4 / 4.0ms |
+| 16ms 넘는 프레임 | 6 | 0 |
+
+  "입력→캔버스 프레임"은 이동 주입부터 그 점을 포함한 프레임의 present 반환까지다(수정 전은 창 flush 반환). 화면에 실제로 보이기까지는 아니다.
+- **실제 OS 입력 (Windows):** `SendInput` 마우스는 입력 투명 창을 지나 캔버스 위젯에 바로 도착해 획이 그려졌다. `InjectSyntheticPointerInput` 펜(WM_POINTER)은 `CanvasDisplayWindow`가 받아 캔버스로 전달했고 필압 0.30–0.90의 획 2개가 그려졌다. 펜에서 합성 마우스 이벤트는 생기지 않았다. 듀얼 모니터에서는 합성 펜 좌표가 다른 모니터로 매핑되므로 창을 주 모니터에 두고 시험해야 한다.
+- **회귀:** `drawsWithoutRepaintingTheCanvasWhileOtherWidgetsRepaint`(캔버스+매번 바뀌는 라벨: 수정 전 이동 20번에 캔버스 paint 20회 → 0), `gpuDisplayMatchesTheSoftwareDisplay`(디스플레이 framebuffer 직접 읽기). `QWidget::grab`은 네이티브 자식 창을 담지 않으므로 화면 픽셀을 읽는 테스트 4개를 `CanvasWidgetTestAccess::grabDisplay`로 바꿨고, 그중 `keepsRegionalStrokePreviewFreeOfSeams`의 배율 1 가정도 고쳤다. offscreen CTest 13/13, windows 플랫폼 UI 스위트는 수정 전과 같은 기존 실패 6개만 남는다.
+
+#### 인수인계 — 다음 작업
+
+1. **실제 펜 확인(최우선).** 앱은 시작 시 Wacom WinTab을 켜는데, WinTab 패킷은 `QWindowsScreen::windowAt`으로 대상 창을 찾으므로 `CanvasDisplayWindow`로 가서 전달될 것으로 예상하지만 합성 입력으로 재현할 수 없어 확인하지 못했다. 사용자의 펜으로 그리기·필압·지우개 끝·호버 커서 링·근접 이탈을 확인하고, 체감 끊김이 사라졌는지 묻는다. 계측이 필요하면 `QApplication::notify`를 감싸 2ms 이상 이벤트와 태블릿 이벤트를 CSV로 남기는 임시 계측을 다시 만든다(이번 세션의 것은 커밋하지 않았다).
+2. **눈으로 확인할 UI.** 선택 액션바가 캔버스 위에 보이는지, 도크를 끌 때 위치 표시가 캔버스에 가려지지 않는지, 창 크기 변경·최소화 복귀·모니터 간 이동(배율 변경)·전체 화면에서 캔버스가 맞게 그려지는지.
+3. **미해결 관찰.** windows 플랫폼 테스트에서 획의 첫 이동 직후 캔버스 위젯 전체 paint가 한 번에 2회 생긴다(이후 이동에는 0회). GPU 표시는 유지되고, 활성화·노출·배율 변화 이벤트는 없었다. 원인 미확인이며 회귀 테스트는 첫 이동 뒤부터 센다.
+4. **macOS.** Metal 경로(`QRhiMetalInitParams`, `MetalSurface`)는 컴파일·실행 모두 확인하지 못했다. 입력 투명 자식 창의 이벤트 전달, Retina 배율, 트랙패드 제스처 전달을 확인한다.
+5. **남은 지연.** 캔버스 창도 GUI 스레드에서 present하며 프레임당 평균 2.5–2.7ms를 쓴다. 펜 입력에서 화면까지의 지연을 더 줄이려면 이 구조 위에서 렌더 스레드로 옮기고 present 직전에 최신 획을 반영하는 방법을 검토한다. 먼저 PresentMon 등으로 실제 표시 지연을 잰다.
 
 probe는 커밋하지 않았다. 재현에는 `kimcozo_service.ugu`(저장소 미포함, 루트에 둠)와 위 조건이 필요하다.
 
