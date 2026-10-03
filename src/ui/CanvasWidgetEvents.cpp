@@ -229,8 +229,8 @@ void CanvasWidget::paintEvent(QPaintEvent *event)
     painter.fillRect(rect(), Theme::canvasBackground());
     if (usingGpuDisplay())
     {
-        // The frame and overlay views cover the whole widget; the fill above
-        // only keeps the opaque-paint-event contract for exposed edges.
+        // The frame view covers the whole widget; the fill above only keeps
+        // the opaque-paint-event contract for exposed edges.
         return;
     }
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -269,7 +269,7 @@ void CanvasWidget::paintEvent(QPaintEvent *event)
 // (clipped to outside the canvas, so drawing it after the frame is
 // equivalent), border, empty-document hint, selection outlines and the tool
 // cursor. Kept free of background and frame drawing so a texture-backed
-// display can run it over a transparent overlay unchanged.
+// display can paint it into a transparent layer of its own unchanged.
 // Redraws the shadow pixmap when the canvas outline's shape or the device
 // pixel ratio changed. The pixmap covers only the outline's neighbourhood and
 // is keyed on the outline relative to its own origin, so panning moves it

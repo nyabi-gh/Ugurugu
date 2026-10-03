@@ -41,7 +41,6 @@ namespace ugurugu
 class SelectionActionBar;
 class CanvasWidgetTestAccess;
 class CanvasFrameView;
-class CanvasOverlayView;
 
 class CanvasWidget final : public QWidget
 {
@@ -229,7 +228,6 @@ protected:
 private:
     friend class CanvasWidgetTestAccess;
     friend class CanvasFrameView;
-    friend class CanvasOverlayView;
 
     struct SelectionState
     {
@@ -296,9 +294,12 @@ private:
     void refreshCanvasShadow(const QPolygonF &canvasPolygon);
     void requestDisplayUpdate();
     void requestDisplayUpdate(const QRect &rect);
-    // For what only the overlay draws: cursor, outlines, handles. The frame
-    // pixels are untouched, so the GPU frame view does not redraw.
+    // For changes to the frame pixels alone: the overlay stays as painted.
+    void requestFrameUpdate();
+    void requestFrameUpdate(const QRect &rect);
+    // For what only the overlay draws: cursor, outlines, handles.
     void requestOverlayUpdate(const QRect &rect);
+    QRegion takeOverlayDirtyRegion();
     bool usingGpuDisplay() const;
     void initializeDisplayViews();
     void discardDisplayViews();
@@ -704,7 +705,7 @@ private:
     QPointer<SelectionActionBar> m_selectionActionBar;
     bool m_selectionMoveMode = false;
     CanvasFrameView *m_frameView = nullptr;
-    CanvasOverlayView *m_overlayView = nullptr;
+    QRegion m_overlayDirtyRegion;
 };
 
 }

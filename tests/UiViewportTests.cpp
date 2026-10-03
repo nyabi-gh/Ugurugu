@@ -2241,6 +2241,143 @@ private slots:
         QVERIFY(!CanvasWidgetTestAccess::usingGpuDisplay(canvas));
     }
 
+    void drawsWithoutRepaintingRasterWidgetsOverTheGpuDisplay()
+    {
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(800, 600)));
+        CanvasWidget canvas(&controller);
+        canvas.resize(800, 600);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        if (!CanvasWidgetTestAccess::usingGpuDisplay(canvas))
+        {
+            QSKIP("Only the GPU display draws the overlay in its own pass.");
+        }
+        canvas.fitToWindow();
+        QTRY_VERIFY(!CanvasWidgetTestAccess::frameCacheWarmupActive(canvas));
+
+        const QPoint start = canvas.rect().center();
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, start);
+        QApplication::processEvents();
+        // A raster widget stacked over the frame view made Qt repaint it, and
+        // the canvas under it, across the whole view on every frame update.
+        PaintRegionTracker tracker;
+        canvas.installEventFilter(&tracker);
+        for (int step = 1; step <= 20; ++step)
+        {
+            QTest::mouseMove(&canvas, start + QPoint(step * 6, step * 3));
+            QApplication::processEvents();
+        }
+        QTest::mouseRelease(
+            &canvas, Qt::LeftButton, Qt::NoModifier, start + QPoint(120, 60));
+        QApplication::processEvents();
+        canvas.removeEventFilter(&tracker);
+        QCOMPARE(tracker.eventCount(), 0);
+        QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
+    }
+
+    void gpuDisplayMatchesTheSoftwareDisplay()
+    {
+        Document document = Document::createDefault(QSize(320, 240));
+        // An invisible stroke keeps out the empty-canvas hint, whose text the
+        // two displays antialias differently.
+        document.layers.first().strokes.append(makeStroke(StrokeMode::Paint,
+            document.background,
+            4.0,
+            1,
+            {QPointF(20.0, 20.0), QPointF(40.0, 30.0)}));
+        const QPoint pointer(200, 150);
+        const auto show = [](CanvasWidget &canvas)
+        {
+            canvas.resize(400, 300);
+            canvas.setAnimating(false);
+            canvas.setTool(CanvasWidget::Tool::Brush);
+            canvas.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+            canvas.setZoomPercent(100);
+            canvas.setCanvasRotation(30.0);
+            QTRY_VERIFY(
+                !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas));
+            QTRY_VERIFY(!CanvasWidgetTestAccess::zoomRenderPending(canvas));
+        };
+
+        DocumentController gpuController;
+        QVERIFY(gpuController.loadDocument(document));
+        CanvasWidget gpuCanvas(&gpuController);
+        show(gpuCanvas);
+        if (!CanvasWidgetTestAccess::usingGpuDisplay(gpuCanvas))
+        {
+            QSKIP("Needs a platform with a GPU display.");
+        }
+
+        const QByteArray previousMode = qgetenv("UGURUGU_CANVAS_DISPLAY");
+        qputenv("UGURUGU_CANVAS_DISPLAY", "software");
+        DocumentController softwareController;
+        QVERIFY(softwareController.loadDocument(document));
+        CanvasWidget softwareCanvas(&softwareController);
+        if (previousMode.isEmpty())
+        {
+            qunsetenv("UGURUGU_CANVAS_DISPLAY");
+        }
+        else
+        {
+            qputenv("UGURUGU_CANVAS_DISPLAY", previousMode);
+        }
+        show(softwareCanvas);
+        QVERIFY(!CanvasWidgetTestAccess::usingGpuDisplay(softwareCanvas));
+
+        // Sent directly and grabbed at once: the real cursor is elsewhere, so
+        // the window system would follow a synthesized move with a leave.
+        const auto grabWithPointer = [&pointer](CanvasWidget &canvas)
+        {
+            QMouseEvent move(QEvent::MouseMove,
+                QPointF(pointer),
+                canvas.mapToGlobal(QPointF(pointer)),
+                Qt::NoButton,
+                Qt::NoButton,
+                Qt::NoModifier);
+            QApplication::sendEvent(&canvas, &move);
+            return canvas.grab().toImage().convertToFormat(
+                QImage::Format_RGB32);
+        };
+        const QImage gpu = grabWithPointer(gpuCanvas);
+        const QImage software = grabWithPointer(softwareCanvas);
+        QCOMPARE(gpu.size(), software.size());
+        const QRect ringArea(
+            (QPointF(pointer - QPoint(40, 40)) * gpu.devicePixelRatio())
+                .toPoint(),
+            (QSizeF(80, 80) * gpu.devicePixelRatio()).toSize());
+        bool ringDrawn = false;
+        for (int y = ringArea.top(); y <= ringArea.bottom(); ++y)
+        {
+            for (int x = ringArea.left(); x <= ringArea.right(); ++x)
+            {
+                ringDrawn = ringDrawn || qGray(gpu.pixel(x, y)) < 80;
+            }
+        }
+        QVERIFY(ringDrawn);
+        // The GPU display blends the overlay as a premultiplied layer, so
+        // antialiased edges round differently; anything missing or misplaced
+        // differs by far more.
+        int worstDifference = 0;
+        for (int y = 0; y < gpu.height(); ++y)
+        {
+            for (int x = 0; x < gpu.width(); ++x)
+            {
+                const QRgb a = gpu.pixel(x, y);
+                const QRgb b = software.pixel(x, y);
+                worstDifference = std::max({worstDifference,
+                    std::abs(qRed(a) - qRed(b)),
+                    std::abs(qGreen(a) - qGreen(b)),
+                    std::abs(qBlue(a) - qBlue(b))});
+            }
+        }
+        QVERIFY2(worstDifference <= 8,
+            qPrintable(QStringLiteral("worst channel difference %1")
+                    .arg(worstDifference)));
+    }
+
     void rendersAnInvalidatedFrameOnceAndOffTheGuiThread_data()
     {
         QTest::addColumn<bool>("playing");

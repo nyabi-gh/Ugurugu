@@ -215,7 +215,7 @@ void CanvasWidget::resumeDeferredDisplay()
     if (m_displayAwaitsBackgroundFrame)
     {
         m_displayAwaitsBackgroundFrame = false;
-        requestDisplayUpdate();
+        requestFrameUpdate();
     }
 }
 
@@ -960,7 +960,7 @@ void CanvasWidget::finishInteractionFrameWarmup()
         if (!prepared && frame == m_currentFrame)
         {
             m_interactionFrameFailedFrame = frame;
-            requestDisplayUpdate();
+            requestFrameUpdate();
         }
         if (prepared)
         {
@@ -971,7 +971,7 @@ void CanvasWidget::finishInteractionFrameWarmup()
             {
                 if (m_drawing)
                 {
-                    requestDisplayUpdate();
+                    requestFrameUpdate();
                 }
                 if (usesPreparedInteractionFrames())
                 {
@@ -1449,7 +1449,7 @@ void CanvasWidget::renderNextFrameCacheWarmup()
         m_frameCacheWarmupRenderSize = {};
         m_frameCacheWarmupPatchBounds = {};
         m_frameCacheWarmupCursor = 0;
-        requestDisplayUpdate();
+        requestFrameUpdate();
         if (finishedRun)
         {
             // A patch run may leave whole frames still missing (or vice

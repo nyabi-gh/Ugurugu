@@ -14,7 +14,6 @@
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
 #include "ui/CanvasFrameView.hpp"
-#include "ui/CanvasOverlayView.hpp"
 #include "ui/CanvasViewport.hpp"
 #include "ui/SelectionActionBar.hpp"
 #include "ui/Theme.hpp"
@@ -833,8 +832,8 @@ void CanvasWidget::requestDisplayUpdate()
 {
     if (usingGpuDisplay())
     {
+        m_overlayDirtyRegion = rect();
         m_frameView->update();
-        m_overlayView->update();
         return;
     }
     update();
@@ -844,8 +843,28 @@ void CanvasWidget::requestDisplayUpdate(const QRect &rect)
 {
     if (usingGpuDisplay())
     {
+        m_overlayDirtyRegion += rect;
         m_frameView->update();
-        m_overlayView->update(rect);
+        return;
+    }
+    update(rect);
+}
+
+void CanvasWidget::requestFrameUpdate()
+{
+    if (usingGpuDisplay())
+    {
+        m_frameView->update();
+        return;
+    }
+    update();
+}
+
+void CanvasWidget::requestFrameUpdate(const QRect &rect)
+{
+    if (usingGpuDisplay())
+    {
+        m_frameView->update();
         return;
     }
     update(rect);
@@ -855,10 +874,16 @@ void CanvasWidget::requestOverlayUpdate(const QRect &rect)
 {
     if (usingGpuDisplay())
     {
-        m_overlayView->update(rect);
+        m_overlayDirtyRegion += rect;
+        m_frameView->update();
         return;
     }
     update(rect);
+}
+
+QRegion CanvasWidget::takeOverlayDirtyRegion()
+{
+    return std::exchange(m_overlayDirtyRegion, QRegion());
 }
 
 bool CanvasWidget::usingGpuDisplay() const
@@ -884,7 +909,6 @@ void CanvasWidget::initializeDisplayViews()
         return;
     }
     m_frameView = new CanvasFrameView(this);
-    m_overlayView = new CanvasOverlayView(this);
     connect(
         m_frameView,
         &QRhiWidget::renderFailed,
@@ -896,29 +920,20 @@ void CanvasWidget::initializeDisplayViews()
         Qt::QueuedConnection);
     syncDisplayViewGeometry();
     m_frameView->show();
-    m_overlayView->show();
 }
 
 void CanvasWidget::discardDisplayViews()
 {
-    if (!m_frameView && !m_overlayView)
+    if (!m_frameView)
     {
         return;
     }
     spdlog::warn("Canvas display: GPU initialization failed, "
                  "falling back to software rendering");
-    if (m_frameView)
-    {
-        m_frameView->hide();
-        m_frameView->deleteLater();
-        m_frameView = nullptr;
-    }
-    if (m_overlayView)
-    {
-        m_overlayView->hide();
-        m_overlayView->deleteLater();
-        m_overlayView = nullptr;
-    }
+    m_frameView->hide();
+    m_frameView->deleteLater();
+    m_frameView = nullptr;
+    m_overlayDirtyRegion = {};
     update();
 }
 
@@ -927,10 +942,6 @@ void CanvasWidget::syncDisplayViewGeometry()
     if (m_frameView)
     {
         m_frameView->setGeometry(rect());
-    }
-    if (m_overlayView)
-    {
-        m_overlayView->setGeometry(rect());
     }
 }
 
@@ -1619,7 +1630,7 @@ void CanvasWidget::setCurrentFrame(int frame)
     {
         notifySelectionTransformAvailability();
     }
-    requestDisplayUpdate();
+    requestFrameUpdate();
 }
 
 void CanvasWidget::setPanModifierActive(bool active)

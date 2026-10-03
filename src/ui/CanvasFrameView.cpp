@@ -8,6 +8,7 @@
 #include "ui/Theme.hpp"
 
 #include <QFile>
+#include <QPainter>
 
 #include <spdlog/spdlog.h>
 
@@ -52,6 +53,11 @@ CanvasFrameView::~CanvasFrameView() = default;
 
 void CanvasFrameView::releasePipeline()
 {
+    m_overlayPipeline.reset();
+    m_overlayBindings.reset();
+    m_overlayTexture.reset();
+    m_overlayVertexBuffer.reset();
+    m_overlayImage = {};
     m_pipeline.reset();
     m_bindings.reset();
     m_frameTexture.reset();
@@ -75,6 +81,20 @@ void CanvasFrameView::rebuildShaderResourceBindings()
             m_sampler.get()),
     });
     m_bindings->create();
+}
+
+void CanvasFrameView::rebuildOverlayShaderResourceBindings()
+{
+    m_overlayBindings.reset(m_rhi->newShaderResourceBindings());
+    m_overlayBindings->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(
+            0, QRhiShaderResourceBinding::VertexStage, m_uniformBuffer.get()),
+        QRhiShaderResourceBinding::sampledTexture(1,
+            QRhiShaderResourceBinding::FragmentStage,
+            m_overlayTexture.get(),
+            m_sampler.get()),
+    });
+    m_overlayBindings->create();
 }
 
 void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
@@ -113,12 +133,23 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
     m_frameTexture.reset(m_rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1)));
     m_frameTexture->create();
     rebuildShaderResourceBindings();
+    m_overlayVertexBuffer.reset(m_rhi->newBuffer(
+        QRhiBuffer::Dynamic, QRhiBuffer::VertexBuffer, sizeof(float) * 4 * 4));
+    m_overlayVertexBuffer->create();
+    m_overlayTexture.reset(m_rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1)));
+    m_overlayTexture->create();
+    rebuildOverlayShaderResourceBindings();
 
     const QShader vertexShader =
         loadShader(QStringLiteral(":/shaders/canvas_frame.vert.qsb"));
     const QShader fragmentShader =
         loadShader(QStringLiteral(":/shaders/canvas_frame.frag.qsb"));
-    if (!vertexShader.isValid() || !fragmentShader.isValid())
+    const QShader overlayVertexShader =
+        loadShader(QStringLiteral(":/shaders/canvas_overlay.vert.qsb"));
+    const QShader overlayFragmentShader =
+        loadShader(QStringLiteral(":/shaders/canvas_overlay.frag.qsb"));
+    if (!vertexShader.isValid() || !fragmentShader.isValid()
+        || !overlayVertexShader.isValid() || !overlayFragmentShader.isValid())
     {
         releasePipeline();
         m_rhi = nullptr;
@@ -142,12 +173,85 @@ void CanvasFrameView::initialize(QRhiCommandBuffer *cb)
     m_pipeline->setShaderResourceBindings(m_bindings.get());
     m_pipeline->setRenderPassDescriptor(renderTarget()->renderPassDescriptor());
     m_pipeline->setSampleCount(renderTarget()->sampleCount());
-    if (!m_pipeline->create())
+
+    m_overlayPipeline.reset(m_rhi->newGraphicsPipeline());
+    m_overlayPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
+    m_overlayPipeline->setShaderStages({
+        {QRhiShaderStage::Vertex, overlayVertexShader},
+        {QRhiShaderStage::Fragment, overlayFragmentShader},
+    });
+    m_overlayPipeline->setVertexInputLayout(inputLayout);
+    m_overlayPipeline->setShaderResourceBindings(m_overlayBindings.get());
+    m_overlayPipeline->setRenderPassDescriptor(
+        renderTarget()->renderPassDescriptor());
+    m_overlayPipeline->setSampleCount(renderTarget()->sampleCount());
+    // QPainter output is premultiplied.
+    QRhiGraphicsPipeline::TargetBlend blend;
+    blend.enable = true;
+    blend.srcColor = QRhiGraphicsPipeline::One;
+    blend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+    blend.srcAlpha = QRhiGraphicsPipeline::One;
+    blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+    m_overlayPipeline->setTargetBlends({blend});
+
+    if (!m_pipeline->create() || !m_overlayPipeline->create())
     {
         releasePipeline();
         m_rhi = nullptr;
         emit renderFailed();
     }
+}
+
+void CanvasFrameView::updateOverlay(QRhiResourceUpdateBatch *batch)
+{
+    const QSize pixelSize = renderTarget()->pixelSize();
+    const qreal ratio = devicePixelRatioF();
+    QRegion dirty = m_canvas->takeOverlayDirtyRegion();
+    if (m_overlayImage.size() != pixelSize
+        || m_overlayImage.devicePixelRatio() != ratio)
+    {
+        m_overlayTexture.reset(
+            m_rhi->newTexture(QRhiTexture::BGRA8, pixelSize));
+        m_overlayTexture->create();
+        rebuildOverlayShaderResourceBindings();
+        m_overlayImage = QImage(pixelSize, QImage::Format_ARGB32_Premultiplied);
+        m_overlayImage.setDevicePixelRatio(ratio);
+        dirty = rect();
+    }
+    const QRectF dirtyBounds(dirty.boundingRect());
+    const QRect pixelBounds =
+        QRectF(dirtyBounds.topLeft() * ratio, dirtyBounds.size() * ratio)
+            .toAlignedRect()
+            .intersected(m_overlayImage.rect());
+    if (pixelBounds.isEmpty())
+    {
+        return;
+    }
+    // Whole device pixels, so the clear and the clip cover the same pixels
+    // the upload sends.
+    const QRectF bounds(QPointF(pixelBounds.topLeft()) / ratio,
+        QSizeF(pixelBounds.size()) / ratio);
+    QPainter painter(&m_overlayImage);
+    painter.setClipRect(bounds);
+    painter.setCompositionMode(QPainter::CompositionMode_Source);
+    painter.fillRect(bounds, Qt::transparent);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    m_canvas->paintOverlay(painter, QRegion(bounds.toAlignedRect()));
+    painter.end();
+
+    const qsizetype stride = m_overlayImage.bytesPerLine();
+    const char *base =
+        reinterpret_cast<const char *>(m_overlayImage.constBits())
+        + qsizetype(pixelBounds.y()) * stride + qsizetype(pixelBounds.x()) * 4;
+    const qsizetype length = stride * (pixelBounds.height() - 1)
+                             + qsizetype(pixelBounds.width()) * 4;
+    QRhiTextureSubresourceUploadDescription upload(
+        QByteArray::fromRawData(base, length));
+    upload.setDataStride(quint32(stride));
+    upload.setSourceSize(pixelBounds.size());
+    upload.setDestinationTopLeft(pixelBounds.topLeft());
+    batch->uploadTexture(
+        m_overlayTexture.get(), QRhiTextureUploadEntry(0, 0, upload));
 }
 
 void CanvasFrameView::render(QRhiCommandBuffer *cb)
@@ -236,6 +340,29 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
     };
     batch->updateDynamicBuffer(
         m_vertexBuffer.get(), 0, sizeof(vertices), vertices);
+    const float overlayVertices[16] = {
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        float(width()),
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        float(height()),
+        0.0f,
+        1.0f,
+        float(width()),
+        float(height()),
+        1.0f,
+        1.0f,
+    };
+    batch->updateDynamicBuffer(m_overlayVertexBuffer.get(),
+        0,
+        sizeof(overlayVertices),
+        overlayVertices);
+    updateOverlay(batch);
 
     QMatrix4x4 mvp = m_rhi->clipSpaceCorrMatrix();
     mvp.ortho(0.0f, float(width()), float(height()), 0.0f, -1.0f, 1.0f);
@@ -260,6 +387,14 @@ void CanvasFrameView::render(QRhiCommandBuffer *cb)
     cb->setShaderResources(m_bindings.get());
     const QRhiCommandBuffer::VertexInput vertexInput(m_vertexBuffer.get(), 0);
     cb->setVertexInput(0, 1, &vertexInput);
+    cb->draw(4);
+    cb->setGraphicsPipeline(m_overlayPipeline.get());
+    cb->setViewport(QRhiViewport(
+        0, 0, float(outputSize.width()), float(outputSize.height())));
+    cb->setShaderResources(m_overlayBindings.get());
+    const QRhiCommandBuffer::VertexInput overlayInput(
+        m_overlayVertexBuffer.get(), 0);
+    cb->setVertexInput(0, 1, &overlayInput);
     cb->draw(4);
     cb->endPass();
     // Dropped now that beginPass has committed the batch: holding this

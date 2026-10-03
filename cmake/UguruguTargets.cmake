@@ -44,6 +44,8 @@ qt_add_shaders(ugurugu_ui "ugurugu_canvas_shaders"
     FILES
     resources/shaders/canvas_frame.vert
     resources/shaders/canvas_frame.frag
+    resources/shaders/canvas_overlay.vert
+    resources/shaders/canvas_overlay.frag
 )
 
 if(APPLE)

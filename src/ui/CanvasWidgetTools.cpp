@@ -150,7 +150,7 @@ void CanvasWidget::continueStroke(
     // the resolves it no longer runs per report.
     if (m_strokePreviewResolvedSincePaint)
     {
-        requestDisplayUpdate();
+        requestFrameUpdate();
         return;
     }
     m_strokePreviewResolvedSincePaint = true;
@@ -176,13 +176,13 @@ void CanvasWidget::continueStroke(
                 / static_cast<qreal>(renderSize.width()),
             m_activeStrokePreviewPatchBounds.height() * document.size.height()
                 / static_cast<qreal>(renderSize.height()));
-        requestDisplayUpdate(documentTransform()
+        requestFrameUpdate(documentTransform()
                 .mapRect(documentRect)
                 .toAlignedRect()
                 .adjusted(-2, -2, 2, 2));
         return;
     }
-    requestDisplayUpdate();
+    requestFrameUpdate();
 }
 
 void CanvasWidget::endStroke(const QPointF &widgetPosition, quint64 timestamp)
