@@ -251,6 +251,9 @@ $requiredFiles = @(
     'Qt6Widgets.dll'
     'platforms\qwindows.dll'
     'imageformats\qjpeg.dll'
+    'imageformats\qgif.dll'
+    'imageformats\qwebp.dll'
+    'imageformats\qtiff.dll'
     'qt.conf'
     'velopack_libc.dll'
     'LICENSE'
@@ -258,6 +261,7 @@ $requiredFiles = @(
     'THIRD_PARTY_NOTICES.md'
     'Velopack-LICENSE.txt'
     'zlib-LICENSE.txt'
+    'libtiff-LICENSE.txt'
 )
 foreach ($relativePath in $requiredFiles) {
     $requiredPath = Join-Path $resolvedPackageRoot $relativePath

@@ -25,10 +25,23 @@ without rebuilding Ugurugu. LGPLv3 adds permissions on top of
 GPLv3; both texts are included, as `LGPL-3.0.txt` and `LICENSE`. Qt source
 for the bundled libraries and the full relinking obligations are available
 from <https://www.qt.io/licensing/open-source-lgpl-obligations> and
-<https://code.qt.io/>.
+<https://code.qt.io/>. Qt's Korean and Japanese translation catalogs
+(`qtbase_ko.qm`, `qtbase_ja.qm` from the qttranslations module) are compiled
+into the desktop app's resources under the same license.
 
 The browser build links Qt and zlib statically instead; see the web section
 below for how the same obligation is met there.
+
+### Qt Image Formats plugins
+
+The desktop packages include Qt's GIF, JPEG, WebP and TIFF image plugins so
+Insert image can read those formats. The WebP plugin carries its own copy of
+libwebp, covered by the libwebp notice below. The TIFF plugin carries
+LibTIFF:
+
+Copyright © 1988-1997 Sam Leffler. Copyright © 1991-1997 Silicon Graphics,
+Inc. Licensed under the LibTIFF license, with the Berkeley notice for its LZW
+code; see `libtiff-LICENSE.txt`.
 
 ## spdlog 1.16.0
 

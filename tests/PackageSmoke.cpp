@@ -86,6 +86,8 @@ int main(int argc, char **argv)
         QDir(resourceRoot).filePath(QStringLiteral("spdlog-LICENSE.txt"));
     const QString compressionLicenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("zlib-LICENSE.txt"));
+    const QString tiffLicenseFile =
+        QDir(resourceRoot).filePath(QStringLiteral("libtiff-LICENSE.txt"));
 
     if (!QFileInfo(jpegPlugin).isFile())
     {
@@ -135,6 +137,7 @@ int main(int argc, char **argv)
         || !QFileInfo(fontLicenseFile).isFile()
         || !QFileInfo(loggingLicenseFile).isFile()
         || !QFileInfo(compressionLicenseFile).isFile()
+        || !QFileInfo(tiffLicenseFile).isFile()
         || !QFileInfo(updaterLicenseFile).isFile())
     {
         return fail(QStringLiteral(
@@ -185,6 +188,74 @@ int main(int argc, char **argv)
     {
         return fail(QStringLiteral(
             "JPEG read-back dimensions do not match the source image."));
+    }
+
+    // Every format Insert image means to offer has to decode from the
+    // installed plugins. QtGui reads PNG and BMP itself; GIF has no writer,
+    // so it is read from a fixed one-pixel file.
+    for (const QByteArray &format : {QByteArrayLiteral("png"),
+             QByteArrayLiteral("bmp"),
+             QByteArrayLiteral("webp"),
+             QByteArrayLiteral("tiff")})
+    {
+        const QString path = outputDirectory.filePath(
+            QStringLiteral("package-smoke.") + QString::fromLatin1(format));
+        QImageWriter formatWriter(path, format);
+        if (!formatWriter.write(source))
+        {
+            return fail(QStringLiteral("%1 write failed: %2")
+                    .arg(QString::fromLatin1(format),
+                        formatWriter.errorString()));
+        }
+        QImageReader formatReader(path);
+        const QImage formatImage = formatReader.read();
+        if (formatImage.size() != source.size())
+        {
+            return fail(QStringLiteral("%1 read-back failed: %2")
+                    .arg(QString::fromLatin1(format),
+                        formatReader.errorString()));
+        }
+    }
+    static const unsigned char onePixelGif[] = {0x47,
+        0x49,
+        0x46,
+        0x38,
+        0x39,
+        0x61,
+        0x01,
+        0x00,
+        0x01,
+        0x00,
+        0x80,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0xff,
+        0xff,
+        0xff,
+        0x2c,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x02,
+        0x02,
+        0x44,
+        0x01,
+        0x00,
+        0x3b};
+    QImage gif;
+    if (!gif.loadFromData(onePixelGif, sizeof(onePixelGif), "GIF")
+        || gif.size() != QSize(1, 1))
+    {
+        return fail(QStringLiteral("GIF decoding failed."));
     }
 
     return 0;

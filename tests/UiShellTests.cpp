@@ -3,10 +3,13 @@
 
 #include "support/UiTestHelpers.hpp"
 #include "support/UiTestSuites.hpp"
+#include "ui/ImageImportFormats.hpp"
+#include "ui/InterfaceTranslators.hpp"
 #include "ui/PaletteDockTitleBar.hpp"
 #include "ui/PopoverToolButton.hpp"
 #include "ui/SavePathDialog.hpp"
 
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFutureWatcher>
 #include <QImageReader>
@@ -18,7 +21,6 @@
 #include <QTabBar>
 #include <QThreadPool>
 #include <QToolBar>
-#include <QTranslator>
 #include <QtConcurrentRun>
 
 #include <atomic>
@@ -2197,33 +2199,56 @@ private slots:
         }
     }
 
+    // Insert image listed WebP and TIFF while the packages carried no plugin
+    // for them; it now offers only what this installation can read.
+    void offersOnlyImageFormatsThatCanBeRead()
+    {
+        const QStringList offered = ImageImportFormats::suffixes();
+        const QList<QByteArray> readable =
+            QImageReader::supportedImageFormats();
+        for (const QString &suffix : offered)
+        {
+            QVERIFY2(readable.contains(suffix.toLatin1()), qPrintable(suffix));
+        }
+        for (const QString &suffix : {QStringLiteral("png"),
+                 QStringLiteral("jpg"),
+                 QStringLiteral("bmp")})
+        {
+            QVERIFY2(offered.contains(suffix), qPrintable(suffix));
+        }
+        QVERIFY(ImageImportFormats::nameFilterPattern().startsWith(
+            QStringLiteral("*.png *.jpg")));
+    }
+
+    // Qt's own strings were looked up in the Qt installation, where a
+    // deployed copy kept them under another name (Windows) or not at all
+    // (macOS), so standard buttons and dialogs stayed English.
+    void translatesQtStringsFromTheAppItself()
+    {
+        for (const QString &locale :
+            {QStringLiteral("ko"), QStringLiteral("ja")})
+        {
+            QVERIFY(QFile::exists(
+                QStringLiteral(":/i18n/qtbase_%1.qm").arg(locale)));
+            QVERIFY(QFile::exists(
+                QStringLiteral(":/i18n/ugurugu_%1.qm").arg(locale)));
+        }
+
+        const InterfaceTranslators korean{QLocale(QLocale::Korean)};
+        QVERIFY(korean.translatesQt());
+        QVERIFY(korean.translatesApplication());
+        QDialogButtonBox buttons(QDialogButtonBox::Cancel);
+        QCOMPARE(buttons.button(QDialogButtonBox::Cancel)->text(),
+            QStringLiteral("취소"));
+    }
+
     void keepsToolRailAndDockWidthsStableAcrossToolSwitches()
     {
         // The report came from the Korean UI, whose rail labels lay out
         // differently from the English source strings, so the test runs
         // with the Korean translation installed.
-        // The multi-config Windows build nests the test binary one level
-        // below where qt_add_translation writes the .qm files.
-        QTranslator korean;
-        const QString applicationDir = QCoreApplication::applicationDirPath();
-        bool koreanLoaded = false;
-        for (const QString &directory : {applicationDir,
-                 applicationDir + QStringLiteral("/.."),
-                 applicationDir + QStringLiteral("/../..")})
-        {
-            if (korean.load(QStringLiteral("ugurugu_ko"), directory))
-            {
-                koreanLoaded = true;
-                break;
-            }
-        }
-        QVERIFY(koreanLoaded);
-        QCoreApplication::installTranslator(&korean);
-        const auto removeTranslator = qScopeGuard(
-            [&korean]()
-            {
-                QCoreApplication::removeTranslator(&korean);
-            });
+        const InterfaceTranslators korean{QLocale(QLocale::Korean)};
+        QVERIFY(korean.translatesApplication());
 
         MainWindow window;
         window.resize(1280, 820);

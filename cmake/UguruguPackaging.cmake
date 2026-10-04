@@ -30,6 +30,10 @@ install(
     DESTINATION "${UGURUGU_DOCUMENTATION_DESTINATION}"
 )
 install(
+    FILES resources/licenses/libtiff-LICENSE.txt
+    DESTINATION "${UGURUGU_DOCUMENTATION_DESTINATION}"
+)
+install(
     FILES resources/fonts/OFL.txt
     DESTINATION "${UGURUGU_DOCUMENTATION_DESTINATION}"
     RENAME Pretendard-OFL.txt
@@ -103,11 +107,24 @@ if(APPLE)
         "${UGURUGU_QT_PLUGIN_ROOT}/platforms/libqcocoa.dylib"
         REALPATH
     )
-    get_filename_component(
-        UGURUGU_JPEG_PLUGIN
-        "${UGURUGU_QT_PLUGIN_ROOT}/imageformats/libqjpeg.dylib"
-        REALPATH
-    )
+    # The formats Insert image reads beyond PNG and BMP, which QtGui
+    # decodes itself. WebP and TIFF come from the Qt Image Formats module.
+    set(UGURUGU_IMAGE_FORMAT_PLUGINS)
+    foreach(plugin IN ITEMS qjpeg qgif qwebp qtiff)
+        get_filename_component(
+            plugin_path
+            "${UGURUGU_QT_PLUGIN_ROOT}/imageformats/lib${plugin}.dylib"
+            REALPATH
+        )
+        if(NOT EXISTS "${plugin_path}")
+            message(
+                FATAL_ERROR
+                "${plugin_path} is missing. Install the Qt Image Formats "
+                "module."
+            )
+        endif()
+        list(APPEND UGURUGU_IMAGE_FORMAT_PLUGINS "${plugin_path}")
+    endforeach()
     get_filename_component(
         UGURUGU_MAC_STYLE_PLUGIN
         "${UGURUGU_QT_PLUGIN_ROOT}/styles/libqmacstyle.dylib"
@@ -121,7 +138,7 @@ if(APPLE)
     )
     install(
         FILES
-        "${UGURUGU_JPEG_PLUGIN}"
+        ${UGURUGU_IMAGE_FORMAT_PLUGINS}
         DESTINATION
         "Ugurugu.app/Contents/PlugIns/imageformats"
     )
@@ -161,6 +178,8 @@ qt_generate_deploy_app_script(
     DEPLOY_TOOL_OPTIONS ${UGURUGU_DEPLOY_TOOL_OPTIONS}
     ${UGURUGU_DEPLOY_PLUGIN_OPTIONS}
     ${UGURUGU_DEPLOY_RUNTIME_OPTIONS}
+    # Qt's catalogs for the supported languages are compiled into the app.
+    NO_TRANSLATIONS
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${ugurugu_deploy_script})

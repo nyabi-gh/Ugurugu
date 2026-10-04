@@ -22,6 +22,7 @@
 #include "app/Logging.hpp"
 #include "app/UpdateController.hpp"
 #include "ui/FileOpenEventRouter.hpp"
+#include "ui/InterfaceTranslators.hpp"
 #include "ui/MainWindow.hpp"
 #include "ui/SettingsDialog.hpp"
 #include "ui/Theme.hpp"
@@ -31,13 +32,11 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QInputDevice>
-#include <QLibraryInfo>
 #include <QLocale>
 #include <QMessageBox>
 #include <QObject>
 #include <QPointingDevice>
 #include <QSettings>
-#include <QTranslator>
 
 #include <spdlog/spdlog.h>
 
@@ -183,27 +182,11 @@ int runApplication(int argc, char *argv[])
     }
     ugurugu::Theme::apply(application);
 
-    QTranslator qtBaseTranslator;
     const QString configuredLanguage = ugurugu::SettingsDialog::uiLanguage();
-    const QLocale interfaceLocale =
+    const ugurugu::InterfaceTranslators translators(
         configuredLanguage == QStringLiteral("system")
             ? QLocale::system()
-            : QLocale(configuredLanguage);
-    if (qtBaseTranslator.load(interfaceLocale,
-            QStringLiteral("qtbase"),
-            QStringLiteral("_"),
-            QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
-    {
-        QApplication::installTranslator(&qtBaseTranslator);
-    }
-    QTranslator appTranslator;
-    if (appTranslator.load(interfaceLocale,
-            QStringLiteral("ugurugu"),
-            QStringLiteral("_"),
-            QStringLiteral(":/i18n")))
-    {
-        QApplication::installTranslator(&appTranslator);
-    }
+            : QLocale(configuredLanguage));
 
     if (instanceResult
         == ugurugu::ApplicationInstanceLock::AcquireResult::AlreadyRunning)

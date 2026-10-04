@@ -2387,8 +2387,8 @@ The recovery file was not deleted. You can find it at:
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="1471"/>
-        <source>Image files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff);;All files (*)</source>
-        <translation>이미지 파일 (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff);;모든 파일 (*)</translation>
+        <source>Image files (%1);;All files (*)</source>
+        <translation>이미지 파일 (%1);;모든 파일 (*)</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="1484"/>

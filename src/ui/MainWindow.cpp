@@ -21,6 +21,7 @@
 #include "ui/ColorHistoryDock.hpp"
 #include "ui/EraserPopoverPanel.hpp"
 #include "ui/Icons.hpp"
+#include "ui/ImageImportFormats.hpp"
 #include "ui/ImageSizeDialog.hpp"
 #include "ui/LassoPopoverPanel.hpp"
 #include "ui/LayerDock.hpp"
@@ -1610,8 +1611,8 @@ void MainWindow::chooseInsertImage()
     const QString filePath = QFileDialog::getOpenFileName(this,
         tr("Insert image"),
         {},
-        tr("Image files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff);;"
-           "All files (*)"));
+        tr("Image files (%1);;All files (*)")
+            .arg(ImageImportFormats::nameFilterPattern()));
     if (filePath.isEmpty())
     {
         return;

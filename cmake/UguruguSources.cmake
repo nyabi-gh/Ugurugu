@@ -206,8 +206,12 @@ set(UGURUGU_UI_SOURCES
     src/ui/HelpDialog.hpp
     src/ui/Icons.cpp
     src/ui/Icons.hpp
+    src/ui/ImageImportFormats.cpp
+    src/ui/ImageImportFormats.hpp
     src/ui/ImageSizeDialog.cpp
     src/ui/ImageSizeDialog.hpp
+    src/ui/InterfaceTranslators.cpp
+    src/ui/InterfaceTranslators.hpp
     src/ui/LayerDock.cpp
     src/ui/LayerDock.hpp
     src/ui/LayerItemDelegate.cpp

@@ -163,7 +163,7 @@ jobs:
           aqtsource: '${{ env.AQT_SOURCE }}'
           host: mac
           target: desktop
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       - name: Configure
@@ -588,7 +588,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       - name: Install Velopack

@@ -48,6 +48,40 @@ qt_add_shaders(ugurugu_ui "ugurugu_canvas_shaders"
     resources/shaders/canvas_overlay.frag
 )
 
+qt_add_translation(
+    UGURUGU_QM_FILES
+    i18n/ugurugu_ko.ts
+    i18n/ugurugu_ja.ts
+)
+set(
+    UGURUGU_QT_TRANSLATIONS_DIR
+    "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_TRANSLATIONS}"
+)
+foreach(locale IN ITEMS ko ja)
+    set(qt_catalog "${UGURUGU_QT_TRANSLATIONS_DIR}/qtbase_${locale}.qm")
+    if(NOT EXISTS "${qt_catalog}")
+        message(
+            FATAL_ERROR
+            "${qt_catalog} is missing. Install the Qt translations."
+        )
+    endif()
+    configure_file(
+        "${qt_catalog}"
+        "${CMAKE_CURRENT_BINARY_DIR}/qtbase_${locale}.qm"
+        COPYONLY
+    )
+    list(
+        APPEND
+        UGURUGU_QM_FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/qtbase_${locale}.qm"
+    )
+endforeach()
+qt_add_resources(ugurugu_ui "ugurugu_translations"
+    PREFIX "/i18n"
+    BASE "${CMAKE_CURRENT_BINARY_DIR}"
+    FILES ${UGURUGU_QM_FILES}
+)
+
 if(APPLE)
     target_sources(
         ugurugu_ui
@@ -104,16 +138,6 @@ elseif(WIN32)
     )
 endif()
 
-qt_add_translation(
-    UGURUGU_QM_FILES
-    i18n/ugurugu_ko.ts
-    i18n/ugurugu_ja.ts
-)
-qt_add_resources(Ugurugu "ugurugu_translations"
-    PREFIX "/i18n"
-    BASE "${CMAKE_CURRENT_BINARY_DIR}"
-    FILES ${UGURUGU_QM_FILES}
-)
 qt_add_resources(Ugurugu "ugurugu_fonts"
     PREFIX "/fonts"
     BASE "resources/fonts"

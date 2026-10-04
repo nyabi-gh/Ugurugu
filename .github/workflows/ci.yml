@@ -163,7 +163,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       # Qt ships wasm as a single Windows-built archive; only qtbase exists for
@@ -251,7 +251,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       # Xcode's clang ships no libclang_rt.fuzzer_osx.a, so -fsanitize=fuzzer
@@ -323,7 +323,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       - name: Install LLVM 22
@@ -387,7 +387,7 @@ jobs:
           host: '${{ matrix.qt-host }}'
           target: desktop
           arch: '${{ matrix.qt-arch }}'
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       - name: Configure
@@ -469,7 +469,7 @@ jobs:
           host: '${{ matrix.qt-host }}'
           target: desktop
           arch: '${{ matrix.qt-arch }}'
-          modules: qtshadertools
+          modules: qtshadertools qtimageformats
           cache: true
 
       - name: Configure
