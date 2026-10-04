@@ -1590,7 +1590,10 @@ private slots:
         QVERIFY(otherAction);
         QCOMPARE(ShortcutBinding::primary(zoomAction), zoomPrimary);
         QCOMPARE(ShortcutBinding::primary(otherAction), zoomAlias);
-        QCOMPARE(zoomAction->shortcuts(), QList<QKeySequence>({zoomPrimary}));
+        const QList<QKeySequence> platformAliases =
+            QKeySequence::keyBindings(QKeySequence::ZoomIn).mid(1);
+        QCOMPARE(zoomAction->shortcuts(),
+            QList<QKeySequence>({zoomPrimary}) + platformAliases);
         QCOMPARE(otherAction->shortcuts(), QList<QKeySequence>({zoomAlias}));
 
         SettingsDialog dialog(nullptr, {zoomAction, otherAction});
@@ -1602,7 +1605,8 @@ private slots:
         otherEditor->setKeySequence(replacement);
         QTRY_COMPARE(ShortcutBinding::primary(otherAction), replacement);
         QCOMPARE(zoomAction->shortcuts(),
-            QList<QKeySequence>({zoomPrimary, zoomAlias}));
+            QList<QKeySequence>({zoomPrimary}) + platformAliases
+                + QList<QKeySequence>({zoomAlias}));
     }
 
     void showsApplicationVersionInAboutTab()
@@ -2196,6 +2200,43 @@ private slots:
         {
             QVERIFY(window.isVisible());
             QVERIFY(window.isWindowModified());
+        }
+    }
+
+    // QKeySequence(StandardKey) keeps only the first platform binding, so
+    // Windows lost Ctrl+Shift+Z for Redo and the second keys of cut, copy and
+    // paste.
+    void bindsEveryPlatformKeyOfStandardShortcuts()
+    {
+        MainWindow window;
+        const std::pair<const char *, QKeySequence::StandardKey> actions[] = {
+            {"newAction", QKeySequence::New},
+            {"openAction", QKeySequence::Open},
+            {"saveAction", QKeySequence::Save},
+            {"saveAsAction", QKeySequence::SaveAs},
+            {"undoAction", QKeySequence::Undo},
+            {"redoAction", QKeySequence::Redo},
+            {"selectAllAction", QKeySequence::SelectAll},
+            {"cutSelectionAction", QKeySequence::Cut},
+            {"copySelectionAction", QKeySequence::Copy},
+            {"pasteAction", QKeySequence::Paste},
+            {"zoomInAction", QKeySequence::ZoomIn},
+            {"zoomOutAction", QKeySequence::ZoomOut},
+        };
+        for (const auto &[name, key] : actions)
+        {
+            auto *action = window.findChild<QAction *>(QLatin1String(name));
+            QVERIFY2(action, name);
+            const QList<QKeySequence> bindings = QKeySequence::keyBindings(key);
+            QVERIFY(!bindings.isEmpty());
+            QCOMPARE(action->shortcuts().value(0), bindings.first());
+            for (const QKeySequence &binding : bindings)
+            {
+                QVERIFY2(action->shortcuts().contains(binding),
+                    qPrintable(QStringLiteral("%1 lacks %2")
+                            .arg(QLatin1String(name),
+                                binding.toString(QKeySequence::PortableText))));
+            }
         }
     }
 

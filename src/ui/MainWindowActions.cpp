@@ -85,15 +85,27 @@ void MainWindow::createActions()
         ShortcutBinding::initialize(action, defaultShortcut, aliases);
         m_shortcutActions.append(action);
     };
+    // All of the platform's bindings, as QAction::setShortcut(StandardKey)
+    // takes them. QKeySequence(StandardKey) keeps only the first, which left
+    // Windows without Ctrl+Shift+Z for Redo.
+    const auto registerStandardShortcut =
+        [&registerShortcut](QAction *action,
+            QKeySequence::StandardKey key,
+            const QList<QKeySequence> &extraAliases = QList<QKeySequence>())
+    {
+        const QList<QKeySequence> bindings = QKeySequence::keyBindings(key);
+        registerShortcut(
+            action, bindings.value(0), bindings.mid(1) + extraAliases);
+    };
 
     auto *newAction = new QAction(tr("&New"), this);
     newAction->setObjectName(QStringLiteral("newAction"));
-    registerShortcut(newAction, QKeySequence(QKeySequence::New));
+    registerStandardShortcut(newAction, QKeySequence::New);
     connect(newAction, &QAction::triggered, this, &MainWindow::newDocument);
 
     auto *openAction = new QAction(tr("&Open…"), this);
     openAction->setObjectName(QStringLiteral("openAction"));
-    registerShortcut(openAction, QKeySequence(QKeySequence::Open));
+    registerStandardShortcut(openAction, QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::chooseOpenFile);
 
     auto *insertImageAction = new QAction(tr("Insert &image…"), this);
@@ -106,7 +118,7 @@ void MainWindow::createActions()
 
     m_saveAction = new QAction(tr("&Save"), this);
     m_saveAction->setObjectName(QStringLiteral("saveAction"));
-    registerShortcut(m_saveAction, QKeySequence(QKeySequence::Save));
+    registerStandardShortcut(m_saveAction, QKeySequence::Save);
     connect(m_saveAction,
         &QAction::triggered,
         this,
@@ -123,7 +135,7 @@ void MainWindow::createActions()
 
     auto *saveAsAction = new QAction(tr("Save &As…"), this);
     saveAsAction->setObjectName(QStringLiteral("saveAsAction"));
-    registerShortcut(saveAsAction, QKeySequence(QKeySequence::SaveAs));
+    registerStandardShortcut(saveAsAction, QKeySequence::SaveAs);
     connect(saveAsAction,
         &QAction::triggered,
         this,
@@ -156,14 +168,14 @@ void MainWindow::createActions()
 
     auto *quitAction = new QAction(tr("&Quit"), this);
     quitAction->setObjectName(QStringLiteral("quitAction"));
-    registerShortcut(quitAction, QKeySequence(QKeySequence::Quit));
+    registerStandardShortcut(quitAction, QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
     auto *settingsAction = new QAction(tr("&Settings…"), this);
     settingsAction->setObjectName(QStringLiteral("settingsAction"));
     settingsAction->setIcon(Icons::icon(IconGlyph::Settings));
     settingsAction->setToolTip(tr("Settings"));
-    registerShortcut(settingsAction, QKeySequence(QKeySequence::Preferences));
+    registerStandardShortcut(settingsAction, QKeySequence::Preferences);
     settingsAction->setMenuRole(QAction::PreferencesRole);
     connect(settingsAction,
         &QAction::triggered,
@@ -218,12 +230,12 @@ void MainWindow::createActions()
     QAction *undoAction = new QAction(tr("&Undo"), this);
     undoAction->setObjectName(QStringLiteral("undoAction"));
     undoAction->setIcon(Icons::icon(IconGlyph::Undo));
-    registerShortcut(undoAction, QKeySequence(QKeySequence::Undo));
+    registerStandardShortcut(undoAction, QKeySequence::Undo);
 
     QAction *redoAction = new QAction(tr("&Redo"), this);
     redoAction->setObjectName(QStringLiteral("redoAction"));
     redoAction->setIcon(Icons::icon(IconGlyph::Redo));
-    registerShortcut(redoAction, QKeySequence(QKeySequence::Redo));
+    registerStandardShortcut(redoAction, QKeySequence::Redo);
 
     // A pending selection transform is undone before any history entry, so the
     // visible undo action reflects that first and the stack's own state only
@@ -342,7 +354,7 @@ void MainWindow::createActions()
     m_selectAllAction = new QAction(tr("Select &all"), this);
     m_selectAllAction->setObjectName(QStringLiteral("selectAllAction"));
     m_selectAllAction->setToolTip(tr("Select the whole canvas"));
-    registerShortcut(m_selectAllAction, QKeySequence(QKeySequence::SelectAll));
+    registerStandardShortcut(m_selectAllAction, QKeySequence::SelectAll);
     connect(m_selectAllAction,
         &QAction::triggered,
         m_canvas,
@@ -365,7 +377,7 @@ void MainWindow::createActions()
     m_cutSelectionAction->setToolTip(
         tr("Copy the selection to the clipboard and delete it"));
     m_cutSelectionAction->setEnabled(false);
-    registerShortcut(m_cutSelectionAction, QKeySequence(QKeySequence::Cut));
+    registerStandardShortcut(m_cutSelectionAction, QKeySequence::Cut);
     connect(m_cutSelectionAction,
         &QAction::triggered,
         m_canvas,
@@ -377,7 +389,7 @@ void MainWindow::createActions()
     m_copySelectionAction->setToolTip(
         tr("Copy the selection to a new layer and the clipboard"));
     m_copySelectionAction->setEnabled(false);
-    registerShortcut(m_copySelectionAction, QKeySequence(QKeySequence::Copy));
+    registerStandardShortcut(m_copySelectionAction, QKeySequence::Copy);
     connect(m_copySelectionAction,
         &QAction::triggered,
         m_canvas,
@@ -386,7 +398,7 @@ void MainWindow::createActions()
     m_pasteAction = new QAction(tr("&Paste"), this);
     m_pasteAction->setObjectName(QStringLiteral("pasteAction"));
     m_pasteAction->setToolTip(tr("Paste the clipboard as a new layer"));
-    registerShortcut(m_pasteAction, QKeySequence(QKeySequence::Paste));
+    registerStandardShortcut(m_pasteAction, QKeySequence::Paste);
     connect(m_pasteAction,
         &QAction::triggered,
         this,
@@ -642,14 +654,14 @@ void MainWindow::createActions()
 
     auto *zoomInAction = new QAction(tr("Zoom &in"), this);
     zoomInAction->setObjectName(QStringLiteral("zoomInAction"));
-    registerShortcut(zoomInAction,
-        QKeySequence(QKeySequence::ZoomIn),
+    registerStandardShortcut(zoomInAction,
+        QKeySequence::ZoomIn,
         {QKeySequence(QStringLiteral("Ctrl+="))});
     connect(zoomInAction, &QAction::triggered, m_canvas, &CanvasWidget::zoomIn);
 
     auto *zoomOutAction = new QAction(tr("Zoom &out"), this);
     zoomOutAction->setObjectName(QStringLiteral("zoomOutAction"));
-    registerShortcut(zoomOutAction, QKeySequence(QKeySequence::ZoomOut));
+    registerStandardShortcut(zoomOutAction, QKeySequence::ZoomOut);
     connect(
         zoomOutAction, &QAction::triggered, m_canvas, &CanvasWidget::zoomOut);
 
