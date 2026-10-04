@@ -13,6 +13,10 @@ Android 계획 문서는 중복과 오래된 판단을 없애기 위해 제거�
 `review-evidence-2026-09-08/`는 당시 재현·로그·캡처의 원자료다.
 현재 코드의 새 실행 결과나 실기기·성능·업데이트 완료 근거로 대체하지 않는다.
 
+[ANALYSIS_REPORT.md](ANALYSIS_REPORT.md)는 `main` `60a11be`(2026-10-03) 기준
+데스크톱 앱 종합 분석 보고서다. 발견 번호(B-01 등)의 근거로 남기며,
+이후 진행 상태는 통합 문서에서만 갱신한다.
+
 사용자 안내는 root README(ko/en/ja), 빌드 절차는 BUILDING.md,
 기여 절차는 CONTRIBUTING.md, 보안·외부 고지는 SECURITY.md와
 THIRD_PARTY_NOTICES.md, 버전별 이력은 `release-notes/`를 사용한다.
