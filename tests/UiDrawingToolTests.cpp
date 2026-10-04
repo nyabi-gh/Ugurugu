@@ -231,7 +231,11 @@ private slots:
             Qt::NoButton);
         QApplication::sendEvent(&canvas, &tabletHover);
         QCOMPARE(canvas.cursor().shape(), Qt::BlankCursor);
-        QTest::mouseMove(&canvas, center + QPoint(10, 40));
+        // The QWidget overload only warps the system cursor, which macOS does
+        // not turn into a move event.
+        QWindow *window = canvas.window()->windowHandle();
+        QTest::mouseMove(window,
+            window->mapFromGlobal(canvas.mapToGlobal(center + QPoint(10, 40))));
         QCOMPARE(canvas.cursor().shape(), Qt::CrossCursor);
         QTabletEvent tabletPress(QEvent::TabletPress,
             &eraserStylus,

@@ -107,6 +107,18 @@ private slots:
 
     void configuresTheSaveDialogDefaultSuffix()
     {
+        // A native panel closed by reject() can still finish as Accepted
+        // (macOS every time, Windows intermittently, Qt 6.11.2), so the test
+        // inspects the configuration through Qt's own dialog.
+        const bool nativeDialogsWereDisabled =
+            QCoreApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+        QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+        auto restoreNativeDialogs = qScopeGuard(
+            [nativeDialogsWereDisabled]()
+            {
+                QCoreApplication::setAttribute(
+                    Qt::AA_DontUseNativeDialogs, nativeDialogsWereDisabled);
+            });
         QWidget parent;
         bool inspected = false;
         QTimer::singleShot(0,
@@ -1669,8 +1681,13 @@ private slots:
                 QApplication::setFont(original);
             });
 
+        // Points become pixels at 96 dpi on Windows and 72 on macOS, so the
+        // base is set from the minimum to stay above it on both.
+        const qreal pointsPerPixel =
+            72.0 / QGuiApplication::primaryScreen()->logicalDotsPerInch();
         QFont base = original;
-        base.setPointSizeF(9.0);
+        base.setPointSizeF(
+            Theme::minimumTextPixelSize() * pointsPerPixel * 1.5);
         const qreal title =
             Theme::scaledFont(base, Theme::TextRole::Title).pointSizeF();
         const qreal label =
