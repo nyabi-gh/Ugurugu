@@ -153,6 +153,20 @@
 - 수정: `activeStrokePreview`가 문서를 인자로 받지 않고 항상 `displayDocument()`로 합성한다. 호출자가 다른 문서를 넘길 경로가 없다.
 - 회귀: [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `promotesThePenUpFrameOfTheDisplayedDocument` — 문서·레이어 wobble × ON/OFF에서 승격 캐시 프레임과 표시 프레임이 `renderScaled(displayDocument(), …)`와 같고, 재생을 켰다 끈 뒤에도 같다. 수정 전에는 OFF 두 행이 실패하고 ON 두 행은 통과했다. offscreen CTest 13/13, windows 플랫폼에서도 통과.
 
+### B-01 · P1 · 클리핑 레이어가 얹힌 레이어의 아래 병합 — 해결 (`c247645`)
+
+근거: 클립 레이어는 바로 아래의 비클립 형제를 기준으로 잘린다. [DocumentControllerLayers.cpp](../src/document/DocumentControllerLayers.cpp)의 `mergeLayerDownStatus`는 원본 바로 위 형제가 클립 레이어여도 병합을 허용했고, 병합 뒤 클립 기준에 아래 레이어 그림이 더해져 픽셀이 바뀌었다(`ANALYSIS_REPORT.md` B-01).
+
+- 수정: 원본 바로 위 형제(컴포지션 계획과 같은 순서)가 클립 레이어이면 `UnsupportedProperties`를 반환한다. 병합 버튼 툴팁과 ko/ja 번역에 이 조건을 넣었다.
+- 회귀: [LayerCommandTests.cpp](../tests/LayerCommandTests.cpp)의 `refusesToMergeALayerThatAClippingLayerRestsOn` — 병합 거부·문서와 픽셀·undo 스택 불변, 사이에 일반 레이어를 두면 병합이 허용되고 픽셀이 같다. 수정 전 실패.
+
+### B-02 · P1 · 렌더·디코드 예외 뒤 캐시 슬롯 영구 대기 — 해결 (`00eac5d`)
+
+근거: [StaticLayerCache.cpp](../src/render/engine/StaticLayerCache.cpp)와 [RasterAssetCache.cpp](../src/render/RasterAssetCache.cpp)는 렌더·디코드가 정상 반환할 때만 계산 중 표시를 지웠다. 한 번 `bad_alloc`이 나면 같은 레이어·자산을 요청하는 이후 렌더가 모두 대기했고, GUI 스레드의 동기 렌더면 화면이 멈췄다(`ANALYSIS_REPORT.md` B-02).
+
+- 수정: 렌더를 맡은 스레드가 `PendingRender`(RAII)와 scope guard로 슬롯을 쥐고 모든 종료 경로에서 정리한 뒤 대기자를 깨운다. 자산 캐시의 계산 중 표시 로직은 단독 시험이 가능하도록 [ComputedImageCache](../src/render/engine/ComputedImageCache.hpp)로 분리했다.
+- 회귀: [WobbleAnimationTests.cpp](../tests/WobbleAnimationTests.cpp)의 `releasesAStaticLayerSlotWhoseRenderThrew`, [ComputedImageCacheTests.cpp](../tests/ComputedImageCacheTests.cpp)(동시 미스 1회 계산, 예외 뒤 대기자 재계산). 수정 전 실패. 2026-10-03 Windows 11 x64, Qt 6.11.2 Release(ClangCL) offscreen CTest 13/13, PR #10 CI(macOS ASan+UBSan 포함) 통과.
+
 ### D03 · P1 · 포커스·근접 이탈 시 획 처리 — 미해결 / 정책 필요
 
 근거: [CanvasWidgetEvents.cpp](../src/ui/CanvasWidgetEvents.cpp)와 [MainWindow.cpp](../src/ui/MainWindow.cpp)는 FocusOut·UngrabMouse·TabletLeaveProximity·WindowDeactivate에서 취소 경로를 호출하고, [CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 `cancelStroke`는 진행 획을 버린다.
