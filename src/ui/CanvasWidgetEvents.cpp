@@ -5,6 +5,7 @@
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
 #include "ui/CanvasDisplayWindow.hpp"
+#include "ui/CanvasShadow.hpp"
 #include "ui/CanvasViewport.hpp"
 #include "ui/CanvasWidget.hpp"
 #include "ui/SelectionActionBar.hpp"
@@ -280,58 +281,6 @@ void CanvasWidget::paintEvent(QPaintEvent *event)
 // equivalent), border, empty-document hint, selection outlines and the tool
 // cursor. Kept free of background and frame drawing so a texture-backed
 // display can paint it into a transparent layer of its own unchanged.
-// Redraws the shadow pixmap when the canvas outline's shape or the device
-// pixel ratio changed. The pixmap covers only the outline's neighbourhood and
-// is keyed on the outline relative to its own origin, so panning moves it
-// instead of baking a new one.
-void CanvasWidget::refreshCanvasShadow(const QPolygonF &canvasPolygon)
-{
-    // The widest pass is 28 px wide, centered on the edge and shifted 2 px
-    // down, plus a pixel of antialiasing.
-    constexpr qreal margin = 17.0;
-    const qreal ratio = devicePixelRatioF();
-    const QRectF bounds =
-        canvasPolygon.boundingRect().adjusted(-margin, -margin, margin, margin);
-    const QPolygonF outline = canvasPolygon.translated(-bounds.topLeft());
-    const QSize pixelSize = (bounds.size() * ratio).toSize();
-    m_shadowCacheOrigin = bounds.topLeft();
-    if (pixelSize.isEmpty())
-    {
-        m_shadowCache = QPixmap();
-        m_shadowCacheOutline = QPolygonF();
-        return;
-    }
-    if (!m_shadowCache.isNull() && m_shadowCache.size() == pixelSize
-        && qFuzzyCompare(m_shadowCacheRatio, ratio)
-        && m_shadowCacheOutline == outline)
-    {
-        return;
-    }
-
-    m_shadowCache = QPixmap(pixelSize);
-    m_shadowCache.setDevicePixelRatio(ratio);
-    m_shadowCache.fill(Qt::transparent);
-    m_shadowCacheOutline = outline;
-    m_shadowCacheRatio = ratio;
-
-    QPainterPath shadowPath;
-    shadowPath.addPolygon(outline);
-    shadowPath.closeSubpath();
-    shadowPath.translate(0.0, 2.0);
-
-    QPainter shadowPainter(&m_shadowCache);
-    shadowPainter.setRenderHint(QPainter::Antialiasing, true);
-    shadowPainter.setBrush(Qt::NoBrush);
-    for (int step = 14; step > 0; --step)
-    {
-        QColor shadow(Qt::black);
-        shadow.setAlphaF(static_cast<float>(0.020 * (1.0 - step / 14.0)));
-        shadowPainter.setPen(QPen(
-            shadow, step * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        shadowPainter.drawPath(shadowPath);
-    }
-}
-
 void CanvasWidget::paintOverlay(QPainter &painter, const QRegion &exposedRegion)
 {
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -346,23 +295,19 @@ void CanvasWidget::paintOverlay(QPainter &painter, const QRegion &exposedRegion)
     canvasPath.closeSubpath();
     const QRectF canvasBounds = canvasPath.boundingRect();
 
+    // A region built from the whole outline holds a rectangle per row, which
+    // runs to tens of thousands when the canvas is zoomed in.
+    const QRectF visibleArea = QRectF(rect()).adjusted(-1.0, -1.0, 1.0, 1.0);
     const QRegion shadowRegion = exposedRegion.subtracted(
-        QRegion(canvasPolygon.toPolygon()).intersected(rect()));
+        QRegion(canvasPolygon.intersected(QPolygonF(visibleArea)).toPolygon())
+            .intersected(rect()));
     if (!shadowRegion.isEmpty())
     {
-        // Baked once per outline instead of stroked on every repaint. The
-        // fourteen antialiased passes are cheap while the canvas is square to
-        // the screen and expensive the moment it is turned, so a rotated
-        // canvas paid four times an ordinary repaint for a picture that only
-        // changes when the geometry does.
-        refreshCanvasShadow(canvasPolygon);
-        if (!m_shadowCache.isNull())
-        {
-            painter.save();
-            painter.setClipRegion(shadowRegion);
-            painter.drawPixmap(m_shadowCacheOrigin, m_shadowCache);
-            painter.restore();
-        }
+        painter.save();
+        painter.setClipRegion(shadowRegion);
+        CanvasShadow::paint(
+            painter, canvasPolygon, QRectF(shadowRegion.boundingRect()));
+        painter.restore();
     }
 
     painter.setPen(QPen(Theme::canvasBorder(), 1.0));

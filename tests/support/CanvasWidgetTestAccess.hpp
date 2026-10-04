@@ -44,14 +44,6 @@ public:
         return canvas.grab().toImage();
     }
 
-    // Identifies the baked canvas shadow. A repaint that reuses it keeps the
-    // key; one that redraws the fourteen passes gets a new one.
-    static qint64 shadowCacheKey(const CanvasWidget &canvas)
-    {
-        return canvas.m_shadowCache.isNull() ? 0
-                                             : canvas.m_shadowCache.cacheKey();
-    }
-
     static QSize cachedRenderSize(const CanvasWidget &canvas)
     {
         return canvas.m_cachedRenderSize;

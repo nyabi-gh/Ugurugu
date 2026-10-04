@@ -2,9 +2,11 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 #include "support/DocumentControllerTestAccess.hpp"
+#include "support/ProcessMemory.hpp"
 #include "support/RenderTestHelpers.hpp"
 #include "support/UiTestHelpers.hpp"
 #include "support/UiTestSuites.hpp"
+#include "ui/CanvasShadow.hpp"
 #include "ui/TabletPressureRow.hpp"
 
 #include <QMenu>
@@ -887,13 +889,103 @@ private slots:
         }
     }
 
-    // The canvas shadow is fourteen antialiased passes over the canvas
-    // outline. Stroked on every repaint it cost four times an ordinary one as
-    // soon as the canvas was turned off the axes, so a rotated canvas dragged
-    // every repaint down, playback included. It is baked once per outline now.
-    void bakesTheCanvasShadowOncePerOutline()
+    // The shadow was stroked as fourteen widening passes, which a zoomed-in
+    // canvas could only afford through a pixmap the size of the whole
+    // outline. It is filled as gradient bands now and has to look the same.
+    void fillsTheCanvasShadowLikeItsStrokes_data()
     {
-        Document document = Document::createDefault(QSize(320, 240));
+        QTest::addColumn<qreal>("angle");
+        QTest::addColumn<bool>("mirrored");
+        QTest::addColumn<qreal>("ratio");
+
+        QTest::newRow("square") << 0.0 << false << 1.0;
+        QTest::newRow("rotated") << 30.0 << false << 1.0;
+        QTest::newRow("rotated at 2x") << 30.0 << false << 2.0;
+        QTest::newRow("mirrored") << 115.0 << true << 1.5;
+    }
+
+    void fillsTheCanvasShadowLikeItsStrokes()
+    {
+        QFETCH(qreal, angle);
+        QFETCH(bool, mirrored);
+        QFETCH(qreal, ratio);
+
+        QTransform transform;
+        transform.translate(200.0, 150.0);
+        transform.rotate(angle);
+        if (mirrored)
+        {
+            transform.scale(-1.0, 1.0);
+        }
+        const QPolygonF outline =
+            transform.map(QPolygonF(QRectF(-90.0, -60.0, 180.0, 120.0)));
+        const QRect area(0, 0, 400, 300);
+        const auto paintShadow = [&](const auto &draw)
+        {
+            QImage image((QSizeF(area.size()) * ratio).toSize(),
+                QImage::Format_ARGB32_Premultiplied);
+            image.setDevicePixelRatio(ratio);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            painter.setClipRegion(
+                QRegion(area).subtracted(QRegion(outline.toPolygon())));
+            draw(painter);
+            return image;
+        };
+
+        const QImage strokes = paintShadow(
+            [&outline](QPainter &painter)
+            {
+                QPainterPath path;
+                path.addPolygon(outline);
+                path.closeSubpath();
+                path.translate(0.0, 2.0);
+                painter.setBrush(Qt::NoBrush);
+                for (int step = 14; step > 0; --step)
+                {
+                    QColor shadow(Qt::black);
+                    shadow.setAlphaF(
+                        static_cast<float>(0.020 * (1.0 - step / 14.0)));
+                    painter.setPen(QPen(shadow,
+                        step * 2.0,
+                        Qt::SolidLine,
+                        Qt::RoundCap,
+                        Qt::RoundJoin));
+                    painter.drawPath(path);
+                }
+            });
+        const QImage bands = paintShadow(
+            [&outline, &area](QPainter &painter)
+            {
+                CanvasShadow::paint(painter, outline, QRectF(area));
+            });
+
+        int strongest = 0;
+        int largestDifference = 0;
+        for (int y = 0; y < strokes.height(); ++y)
+        {
+            for (int x = 0; x < strokes.width(); ++x)
+            {
+                const int expected = qAlpha(strokes.pixel(x, y));
+                strongest = std::max(strongest, expected);
+                largestDifference = std::max(largestDifference,
+                    std::abs(qAlpha(bands.pixel(x, y)) - expected));
+            }
+        }
+        QVERIFY(strongest > 20);
+        QVERIFY2(largestDifference <= 3,
+            qPrintable(
+                QStringLiteral("alpha differs by %1").arg(largestDifference)));
+    }
+
+    // Zoomed all the way in, the outline is tens of thousands of pixels
+    // across. The shadow was baked into a pixmap that size: 17 GB here, of
+    // which macOS kept 6 GB resident.
+    void boundsTheCanvasShadowAtTheHighestZoom()
+    {
+        Document document = Document::createDefault(QSize(4096, 4096));
+        document.background = Qt::white;
         DocumentController controller;
         QVERIFY(controller.loadDocument(document));
 
@@ -902,28 +994,38 @@ private slots:
         canvas.setAnimating(false);
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
-        canvas.fitToWindow();
         CanvasWidgetTestAccess::grabDisplay(canvas);
+        const qint64 peakBefore = peakResidentBytes();
+        canvas.setZoomPercent(1600);
 
-        const qint64 baked = CanvasWidgetTestAccess::shadowCacheKey(canvas);
-        QVERIFY(baked != 0);
+        const QPointF edgeMiddle(0.0, 2048.0);
+        const QPointF before =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, edgeMiddle);
+        CanvasWidgetTestAccess::panBy(canvas, QPointF(250.0, 200.0) - before);
+        const QPointF edge =
+            CanvasWidgetTestAccess::mapFromDocument(canvas, edgeMiddle);
+        QVERIFY(
+            QRectF(canvas.rect()).adjusted(60.0, 0.0, 0.0, 0.0).contains(edge));
 
-        CanvasWidgetTestAccess::grabDisplay(canvas);
-        QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
-
-        // Panning moves the outline without reshaping it.
-        CanvasWidgetTestAccess::panBy(canvas, QPointF(37.0, -21.0));
-        CanvasWidgetTestAccess::grabDisplay(canvas);
-        QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), baked);
-
-        canvas.rotateCanvasRight();
-        CanvasWidgetTestAccess::grabDisplay(canvas);
-        const qint64 rotated = CanvasWidgetTestAccess::shadowCacheKey(canvas);
-        QVERIFY(rotated != 0);
-        QVERIFY(rotated != baked);
-
-        CanvasWidgetTestAccess::grabDisplay(canvas);
-        QCOMPARE(CanvasWidgetTestAccess::shadowCacheKey(canvas), rotated);
+        const QImage image = CanvasWidgetTestAccess::grabDisplay(canvas);
+        constexpr qint64 mebibyte = qint64(1024) * 1024;
+        QVERIFY2(peakResidentBytes() - peakBefore < 256 * mebibyte,
+            qPrintable(QStringLiteral("peak grew by %1 MiB")
+                    .arg((peakResidentBytes() - peakBefore) / mebibyte)));
+        const qreal ratio = image.devicePixelRatio();
+        const auto lightnessAt = [&image, ratio](const QPointF &position)
+        {
+            return image
+                .pixelColor(
+                    qFloor(position.x() * ratio), qFloor(position.y() * ratio))
+                .lightness();
+        };
+        const int nearEdge = lightnessAt(edge - QPointF(2.0, 0.0));
+        const int awayFromEdge = lightnessAt(edge - QPointF(40.0, 0.0));
+        QVERIFY2(nearEdge + 2 < awayFromEdge,
+            qPrintable(QStringLiteral("near %1, away %2")
+                    .arg(nearEdge)
+                    .arg(awayFromEdge)));
     }
 
     void disablesTabletPressureForBrushAndEraserStrokes()

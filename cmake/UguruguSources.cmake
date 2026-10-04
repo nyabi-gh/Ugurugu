@@ -162,6 +162,8 @@ set(UGURUGU_UI_SOURCES
     src/ui/BucketPopoverPanel.hpp
     src/ui/CanvasDisplayWindow.cpp
     src/ui/CanvasDisplayWindow.hpp
+    src/ui/CanvasShadow.cpp
+    src/ui/CanvasShadow.hpp
     src/ui/CanvasSizeDialog.cpp
     src/ui/CanvasSizeDialog.hpp
     src/ui/CanvasTypes.hpp
@@ -319,6 +321,8 @@ set(UGURUGU_TEST_SOURCES
     tests/support/DocumentTestHelpers.hpp
     tests/support/DocumentTestSuites.hpp
     tests/support/MainWindowTestAccess.hpp
+    tests/support/ProcessMemory.cpp
+    tests/support/ProcessMemory.hpp
     tests/support/RenderTestHelpers.hpp
     tests/support/RenderTestSuites.hpp
     tests/support/UiTestHelpers.hpp

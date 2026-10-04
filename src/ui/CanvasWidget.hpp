@@ -291,7 +291,6 @@ private:
     void applyWobbleAnimationSetting(Document &document) const;
     DisplayedFrame resolveDisplayedFrame();
     void paintOverlay(QPainter &painter, const QRegion &exposedRegion);
-    void refreshCanvasShadow(const QPolygonF &canvasPolygon);
     void requestDisplayUpdate();
     void requestDisplayUpdate(const QRect &rect);
     // For changes to the frame pixels alone: the overlay stays as painted.
@@ -620,10 +619,6 @@ private:
     // The canvas drop shadow, baked once per geometry. Its fourteen
     // antialiased passes are cheap along the axes and expensive at an angle,
     // so redrawing them every repaint made a rotated canvas crawl.
-    QPixmap m_shadowCache;
-    QPolygonF m_shadowCacheOutline;
-    QPointF m_shadowCacheOrigin;
-    qreal m_shadowCacheRatio = 0.0;
     IncrementalStrokeRenderer m_incrementalStrokeRenderer;
     QImage m_composedPreviewFrame;
     QRect m_composedSelectionPreviewRegion;
