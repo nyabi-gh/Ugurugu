@@ -179,6 +179,7 @@
 - 수정: container가 네이티브 창을 갖는 순간(`WinIdChange`) 그 창도 입력 투명으로 만든다. 디스플레이 스택의 네이티브 창은 모두 입력을 통과시킨다는 불변식이며, Qt가 왜 네이티브로 만들었는지와 무관하다.
 - 수정 후: hover 이동 98건이 모두 `CanvasWidget`에 도착했고, 실제 화면 캡처에서 링이 커서 위치(x≈1766→2216)를 따라갔다.
 - 회귀: [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `hoverMovesReachTheCanvasUnderTheGpuDisplay`. 선택 액션바를 붙인 캔버스에서, 스택에서 입력 투명이 아닌 맨 위 창에 버튼 없는 이동을 넣는다. windows 플랫폼에서 수정 전 실패, 수정 후 통과. offscreen에서는 GPU 표시가 없어 건너뛴다. offscreen CTest 12/12, windows 플랫폼 UI 스위트 5개 실패 0.
+- 배포: 2.2.12(`caf602c`, 태그 `v2.2.12`). main CI 통과. Release 워크플로 결과와 2.2.11→2.2.12 업데이트는 기록 시점에 확인하지 않았다.
 - 남음: 실제 펜(WinTab) hover와 macOS(cocoa의 입력 투명 NSView) 확인.
 
 ### D03 · P1 · 포커스·근접 이탈 시 획 처리 — 미해결 / 정책 필요
@@ -393,8 +394,8 @@ Qt 번들 내 외부 구성요소 고지·소스/재링크 제공 범위, 웹 �
 
 | ID·우선순위·상태 | 근거와 원인 | 조치·완료 기준 |
 |---|---|---|
-| W-01 · P1 · 미해결(확인) | [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않는다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
-| W-02 · P1 · 미해결(경로 확인, 효과 추정) | 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
+| W-01 · P1 · 미해결(확인, 장애 주입 재현) | [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않는다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
+| W-02 · P1 · 미해결(경로 확인, 장애 주입 재현) | 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
 | W-03 · P1 · 미해결(한도 확인, OOM 추정) | 웹 열기는 파일 바이트(64MiB)만 보고, 엔진은 데스크톱 `DocumentLimits`(4096², 마스크 표 256MB, 래스터 256MB decoded)를 쓴다. 0 마스크는 약 1000:1로 압축되므로 작은 파일이 512MB heap을 넘길 수 있다(계산상 추정). [EngineBridge.cpp](../src/wasm/EngineBridge.cpp)의 열기는 입력을 한 번 더 복사한다. zlib 출력 자체는 `BoundedCompression`이 막는다 | 웹 전용 decode 예산(캔버스·마스크·래스터 총량)을 채택 전에 적용. R11과 함께 닫음. WASM 열기 경로 fuzz |
 | W-04 · P1 · 미해결(확인) | `autosave.start()`가 복원/버리기 배너가 결정되기 전에 시작된다. 배너를 둔 채 한 획만 그어도 15초 안에 단일 `slot`이 새 문서로 바뀌고, 다시 새로고침하면 이전 작업은 사라진다. 두 탭은 서로의 슬롯을 덮고 다른 탭의 살아 있는 문서를 "이전 세션"으로 제안한다 | offer 결정 전 슬롯 보호, 탭·세션별 키. R04의 세대 설계와 함께 |
 | W-05 · P1 · 미해결(확인) | [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts)의 `restore()`는 offer를 비우고 bytes를 워커로 transfer한다. 열기가 실패하면 배너와 메모리 사본이 모두 없다. `discard()`는 현재 세션이 방금 쓴 snapshot도 지우고, `savedRevision`이 같아 다음 편집 전까지 다시 쓰지 않는다 | 열기 성공 뒤에만 offer 소비, 복사본 전달. discard는 offer 출처만 삭제 |
@@ -515,6 +516,17 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 5. **제품 확장·유지보수:** 웹 선택 기능, D09·D10 artifact 점검, D22–D25의 남은 작업, Android A0–A2부터. 독립적으로 가능한 검증은 앞 단계와 병행할 수 있다.
 
 2026-10-05부터 웹 코드 수정을 시작한다. 순서: W-01·W-02(워커 메모리·abort) → R09 → R04·R05·W-04·W-05(복구·문서 교체) → W-03·R11(웹 decode 예산) → W-06–W-10 → W-11–W-13(배포·CI·고지). 공용 엔진을 건드리면 위 공통 완료 규칙대로 native suite와 WASM parity를 함께 확인한다.
+
+#### W-01·W-02 진행 (2026-10-05, 브랜치 `web/engine-worker-safety`) — 회귀만 추가, 수정 전
+
+- 환경: Windows 11에서 emsdk 4.0.7 + Qt 6.11.2 `wasm_singlethread`(호스트 Qt 6.11.2 msvc)로 엔진을 직접 빌드했다. `wasm-release` 프리셋은 macOS 전용이라 같은 옵션으로 수동 구성했다. 브라우저 시나리오를 실엔진으로 로컬에서 돌릴 수 있다.
+- 회귀: 하니스 `engineFault()`가 엔진 로더 뒤에 장애 주입 코드를 붙인다(`_malloc` 0 반환, export에서 `WebAssembly.RuntimeError`). [22-heap-allocation-failure.mjs](../web/tests/scenarios/22-heap-allocation-failure.mjs), [23-engine-abort.mjs](../web/tests/scenarios/23-engine-abort.mjs).
+- 수정 전 결과: heap 1건 실패. 상태가 `Open failed: illegal value (code 3)`로 나온다. 파일 바이트를 주소 0에 쓴 뒤 엔진이 다른 내용을 읽은 것이며, 메모리 부족으로 보고되지 않는다. abort 3건 실패. 치명 상태 안내가 없고, abort 뒤에도 획이 그려지며, 다음 자동저장이 복구 슬롯을 덮는다. 대조군 `failed-open`은 통과했다.
+- 수정 설계(미구현):
+  - 워커의 모든 힙 복사(open·points·text·insertImage·layerRename)를 null 검사와 `finally` 해제를 갖춘 헬퍼 하나로 모은다.
+  - 엔진 export(`_` 접두)를 모두 감싸서, export 밖으로 예외가 빠져나오면 엔진을 죽은 것으로 표시한다. C++ 정리 없이 풀린 상태이기 때문이다. 이후 요청은 `fatal` 응답으로 거부하고, 엔진 로드·ABI 불일치도 같은 경로로 보낸다.
+  - `EngineClient`는 `fatal` 응답에서 `#fail`을 부르고 실패 콜백으로 App에 알린다.
+  - App은 새로고침 안내가 담긴 고정 상태 메시지를 보이고, 자동저장 `ready`를 false로 두고 재생을 멈춘다.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
