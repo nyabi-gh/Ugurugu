@@ -1566,6 +1566,10 @@ void CanvasWidget::renderNextFrameCacheWarmup()
     // unique geometry, so frames cannot share work, which makes them ideal to
     // parallelise; dispatch stays in playback order so playback can step onto
     // finished frames while later ones are still rendering.
+    // QObject parenting retains each watcher until its finished callback
+    // queues deleteLater(); the analyzer does not model either Qt ownership
+    // mechanism.
+    // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
     while (m_frameCacheWarmupWorkersRunning
                < m_frameCacheWarmupPool.maxThreadCount()
            && m_frameCacheWarmupCursor < m_frameCacheWarmupFrames.size())
@@ -1702,6 +1706,7 @@ void CanvasWidget::renderNextFrameCacheWarmup()
                 return image;
             }));
     }
+    // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
 void CanvasWidget::updateTimerInterval()
