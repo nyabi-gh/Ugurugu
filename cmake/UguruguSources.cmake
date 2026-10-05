@@ -21,6 +21,8 @@ set(UGURUGU_ENGINE_SOURCES
     src/document/DocumentLimits.hpp
     src/document/FrozenFillMask.cpp
     src/document/FrozenFillMask.hpp
+    src/document/Identity.cpp
+    src/document/Identity.hpp
     src/document/history/DocumentDelta.cpp
     src/document/history/DocumentDelta.hpp
     src/document/history/DocumentUndoStack.cpp
@@ -290,6 +292,7 @@ set(UGURUGU_TEST_SOURCES
     tests/DocumentTests.cpp
     tests/FrozenFillMaskTests.cpp
     tests/GifWriterTests.cpp
+    tests/IdentityTests.cpp
     tests/LayerCommandTests.cpp
     tests/LayerCompositionTests.cpp
     tests/LayerSplitPreviewTests.cpp

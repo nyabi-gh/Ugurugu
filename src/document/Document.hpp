@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "document/Identity.hpp"
+
 #include <QByteArray>
 #include <QColor>
 #include <QImage>
@@ -174,7 +176,7 @@ struct StrokePoint
 
 struct Stroke
 {
-    QUuid id = QUuid::createUuid();
+    QUuid id = Identity::newId();
     quint64 seed = 0;
     StrokeMode mode = StrokeMode::Paint;
     QColor color = Qt::black;
@@ -217,7 +219,7 @@ bool isValidLayerKind(LayerKind kind);
 
 struct Layer
 {
-    QUuid id = QUuid::createUuid();
+    QUuid id = Identity::newId();
     QString name;
     LayerKind kind = LayerKind::Paint;
     QUuid parentGroupId;

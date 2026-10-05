@@ -5,6 +5,7 @@
 #include "brush/EraserPreset.hpp"
 #include "document/DocumentLimits.hpp"
 #include "document/DocumentOperations.hpp"
+#include "document/Identity.hpp"
 #include "document/SelectionOperation.hpp"
 #include "render/PreviewRenderPolicy.hpp"
 #include "render/RenderEngine.hpp"
@@ -14,7 +15,6 @@
 
 #include <QKeyEvent>
 #include <QPainter>
-#include <QRandomGenerator>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -72,7 +72,7 @@ void CanvasWidget::beginStroke(const QPointF &widgetPosition,
     // instead of competing with the multi-worker full-frame warmup.
     cancelFrameCacheWarmup();
     m_activeStroke = Stroke();
-    m_activeStroke.seed = QRandomGenerator::global()->generate64();
+    m_activeStroke.seed = Identity::newSeed();
     m_activeStrokeUsesTabletPressure = m_tabletPressureEnabled;
     const bool erasing = tabletEraser || m_tool == Tool::Eraser;
     m_activeStroke.mode = erasing ? StrokeMode::Erase : StrokeMode::Paint;

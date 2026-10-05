@@ -577,7 +577,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 | # | 단계 | 상태 |
 |---|---|---|
 | ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 구현, 로컬 확인 (브랜치 `rust/workspace-skeleton`). CI 결과 대기 |
-| ② | C++ seed·uuid 주입 지점 | 계획 |
+| ② | C++ seed·uuid 주입 지점 | 구현, Windows 확인 (브랜치 `ref/seed-uuid-injection`). CI 대기 |
 | ③ | C++ `ReferenceExport`(scene·geometry·frames·stabilize·dabs) | 계획 |
 | ④ | 장면 행렬과 C++ 참조 결과 | 계획 |
 | ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
@@ -591,6 +591,13 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - `deny.toml`: GPL-3.0-or-later와 호환되는 라이선스 허용 목록, crates.io 외 출처 거절, yanked 거절.
 - CI: `rust-static`(fmt, clippy `-D warnings`, 계층 검사, cargo-deny 0.18.9 바이너리 sha256 고정)과 `rust-test`(Windows·macOS·Linux 테스트 + wasm32 빌드)를 `continue-on-error`로 추가하고 `quality` needs에는 넣지 않았다. 기존 라이선스 헤더 검사에 `*.rs`를 추가했다.
 - 로컬(Windows 11, 2026-10-05): fmt·clippy·test·wasm32 빌드·계층 검사·`cargo deny check` 통과. CMake 빌드 파일은 바꾸지 않았다.
+
+②의 내용과 확인:
+
+- [Identity.hpp](../src/document/Identity.hpp): 레이어·획 id(`Layer`·`Stroke` 기본값, 레이어 복제·붙여넣기, 선택 복제)와 새 획 seed(그리기, 텍스트, 채우기)를 `Identity::newId()`·`newSeed()` 하나로 모았다. 평소에는 지금처럼 `QUuid::createUuid`·`QRandomGenerator::global()`을 쓴다. `Identity::DeterministicScope(seed)`가 살아 있는 동안에는 seed에서 갈라진 splitmix64 수열 둘(id용, seed용)로 바꾼다. 두 수열이 따로라 id를 더 만들어도 seed 수열이 밀리지 않고, OS에 관계없이 같은 값이 나온다(Rust 쪽도 같은 수식으로 재현할 수 있음). 범위는 중첩되고, 끝나면 이전 상태로 돌아간다.
+- 바꾸지 않은 곳: C++ 웹 엔진(`src/wasm`, 동결), 복구 세션 id(문서 내용이 아님).
+- 회귀: [IdentityTests.cpp](../tests/IdentityTests.cpp) 6개(같은 seed → 같은 수열, seed 0의 첫 값 고정, v4 UUID 형식, id가 seed 수열을 밀지 않음, 중첩 복원, 컨트롤러로 획을 그리고 레이어를 복제한 결과의 id 재현).
+- 로컬(Windows 11, windows-release, 2026-10-05): CTest 12/12 통과, IdentityTests 6/6 통과. wasm 빌드는 CI `wasm` 잡으로 확인한다.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
