@@ -34,7 +34,6 @@ set(UGURUGU_TEST_SUITES
     gif
     webp
     mask
-    release_notes
     stabilizer
     ui_shell
     ui_selection

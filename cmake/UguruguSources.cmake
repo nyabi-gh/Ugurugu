@@ -133,8 +133,6 @@ set(UGURUGU_DESKTOP_SERVICE_SOURCES
     src/app/RecoveryStore.hpp
     src/app/RecoveryWriter.cpp
     src/app/RecoveryWriter.hpp
-    src/app/ReleaseNotes.cpp
-    src/app/ReleaseNotes.hpp
     src/app/UpdateCheckPolicy.cpp
     src/app/UpdateCheckPolicy.hpp
     src/app/WatchedFutureResult.hpp
@@ -299,7 +297,6 @@ set(UGURUGU_TEST_SOURCES
     tests/MaskRegressionTests.cpp
     tests/MotionTimeModelTests.cpp
     tests/RasterAssetTableTests.cpp
-    tests/ReleaseNotesTests.cpp
     tests/RenderEngineTests.cpp
     tests/SelectionClipboardTests.cpp
     tests/RenderPreviewTests.cpp

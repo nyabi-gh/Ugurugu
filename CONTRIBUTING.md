@@ -47,4 +47,5 @@ whose license is incompatible with `GPL-3.0-or-later` cannot be linked in.
 - Format sources with `clang-format` using the repository `.clang-format`.
 - Add Korean and Japanese translations for every new `tr()` string. CI
   rejects `.ts` files that still contain unfinished entries.
-- Add a release note under `release-notes/` when the change is user visible.
+- Add a release note to `release-notes/<version>.en.md` when the change is
+  user visible. Release notes are written in English only.

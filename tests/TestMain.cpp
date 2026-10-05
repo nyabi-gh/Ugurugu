@@ -31,7 +31,6 @@ constexpr std::array suites{
     Suite{"gif", ugurugu::runGifWriterTests},
     Suite{"webp", ugurugu::runWebPWriterTests},
     Suite{"mask", ugurugu::runMaskRegressionTests},
-    Suite{"release_notes", ugurugu::runReleaseNotesTests},
     Suite{"stabilizer", ugurugu::runStrokeStabilizerTests},
     Suite{"ui_shell", ugurugu::runUiShellTests},
     Suite{"ui_selection", ugurugu::runUiSelectionTests},

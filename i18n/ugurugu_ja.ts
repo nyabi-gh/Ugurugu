@@ -3745,6 +3745,11 @@ Alt+click does the same from the brush, eraser or paint bucket.</source>
         <translation>今すぐダウンロードしてインストールしますか？</translation>
     </message>
     <message>
+        <location filename="../src/app/UpdateControllerWindows.cpp" line="210"/>
+        <source>Update</source>
+        <translation>アップデート</translation>
+    </message>
+    <message>
         <location filename="../src/app/UpdateControllerWindows.cpp" line="252"/>
         <source>Downloading update…</source>
         <translation>アップデートをダウンロード中…</translation>

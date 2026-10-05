@@ -127,20 +127,6 @@ if(UGURUGU_CLANG_TIDY AND UGURUGU_RUN_CLANG_TIDY_COMMAND)
     endif()
 endif()
 
-if(APPLE)
-    add_executable(
-        ugurugu_render_release_notes
-        tools/RenderReleaseNotes.cpp
-    )
-    target_link_libraries(
-        ugurugu_render_release_notes
-        PRIVATE
-        Qt6::Core
-        Qt6::Gui
-    )
-    ugurugu_target_defaults(ugurugu_render_release_notes)
-endif()
-
 add_executable(
     ugurugu_raster_asset_probe
     EXCLUDE_FROM_ALL

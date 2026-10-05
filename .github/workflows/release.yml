@@ -50,17 +50,15 @@ jobs:
             echo "Manual release builds must run from $DEFAULT_BRANCH or a release tag"
             exit 1
           fi
-          for language in ko en ja; do
-            notes="release-notes/$version.$language.md"
-            if [[ ! -s "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
-              echo "Missing or empty release notes: $notes"
-              exit 1
-            fi
-          done
+          notes="release-notes/$version.en.md"
+          if [[ ! -s "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "Missing or empty release notes: $notes"
+            exit 1
+          fi
           shopt -s nullglob
           notes=(release-notes/"$version".*.md)
-          if [[ ${#notes[@]} -ne 3 ]]; then
-            echo "Expected exactly ko, en, and ja release notes for version $version"
+          if [[ ${#notes[@]} -ne 1 ]]; then
+            echo "Expected only English release notes for version $version"
             printf 'Found: %s\n' "${notes[@]}"
             exit 1
           fi
@@ -308,12 +306,6 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
             release_tag="v${version}"
           fi
-          for language in ko en ja; do
-            if [[ ! -f "release-notes/${version}.${language}.md" ]]; then
-              echo "Missing release notes: release-notes/${version}.${language}.md"
-              exit 1
-            fi
-          done
           mkdir -p artifacts "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/sparkle-updates"
           cp -R "$RUNNER_TEMP/install/Ugurugu.app" "$RUNNER_TEMP/dmg/"
           ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
@@ -331,15 +323,6 @@ jobs:
             --keepParent \
             "$RUNNER_TEMP/install/Ugurugu.app" \
             "$RUNNER_TEMP/sparkle-updates/$archive"
-          out/build/macos-distribution/ugurugu_render_release_notes \
-            "release-notes/${version}.en.md" \
-            "$RUNNER_TEMP/sparkle-updates/${archive%.zip}.html"
-          out/build/macos-distribution/ugurugu_render_release_notes \
-            "release-notes/${version}.ko.md" \
-            "$RUNNER_TEMP/sparkle-updates/${archive%.zip}.ko.html"
-          out/build/macos-distribution/ugurugu_render_release_notes \
-            "release-notes/${version}.ja.md" \
-            "$RUNNER_TEMP/sparkle-updates/${archive%.zip}.ja.html"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
@@ -388,16 +371,12 @@ jobs:
             out/build/macos-distribution/_deps/sparkle-src/bin/generate_appcast \
               --ed-key-file - \
               --download-url-prefix "https://github.com/nyabi-gh/Ugurugu/releases/download/${RELEASE_TAG}/" \
-              --release-notes-url-prefix "https://github.com/nyabi-gh/Ugurugu/releases/download/${RELEASE_TAG}/" \
               --link "https://github.com/nyabi-gh/Ugurugu" \
-              --embed-release-notes \
               --maximum-versions 1 \
               --maximum-deltas 0 \
               "$RUNNER_TEMP/sparkle-updates"
           cp "$RUNNER_TEMP/sparkle-updates/$ARCHIVE" artifacts/
           cp "$RUNNER_TEMP/sparkle-updates/appcast.xml" artifacts/
-          cp "$RUNNER_TEMP/sparkle-updates/${ARCHIVE%.zip}.ko.html" artifacts/
-          cp "$RUNNER_TEMP/sparkle-updates/${ARCHIVE%.zip}.ja.html" artifacts/
 
       - name: Verify final macOS containers
         env:
@@ -630,16 +609,6 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
             throw "Release tag $env:GITHUB_REF_NAME does not match project version $version"
           }
-          $releaseNotes = Join-Path $env:RUNNER_TEMP "release-notes.md"
-          $sections = foreach ($language in @('ko', 'en', 'ja')) {
-            $file = "release-notes/$version.$language.md"
-            if (-not (Test-Path $file)) {
-              throw "Missing release notes: $file"
-            }
-            "<!-- lang:$language -->"
-            Get-Content $file -Raw
-          }
-          Set-Content -Path $releaseNotes -Value ($sections -join "`n")
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           vpk pack `
             --packId Ugurugu `
@@ -649,7 +618,6 @@ jobs:
             --packTitle Ugurugu `
             --packAuthors nyabi-gh `
             --icon resources/icons/Ugurugu.ico `
-            --releaseNotes $releaseNotes `
             --runtime win10-x64 `
             --framework vcredist145-x64 `
             --channel win `
@@ -772,26 +740,9 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Assemble release notes
+      - name: Locate release notes
         id: notes
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          {
-            cat "release-notes/${version}.ko.md"
-            echo
-            echo "<details><summary>English</summary>"
-            echo
-            cat "release-notes/${version}.en.md"
-            echo
-            echo "</details>"
-            echo
-            echo "<details><summary>日本語</summary>"
-            echo
-            cat "release-notes/${version}.ja.md"
-            echo
-            echo "</details>"
-          } > "$RUNNER_TEMP/release-body.md"
-          echo "path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
+        run: echo "path=release-notes/${GITHUB_REF_NAME#v}.en.md" >> "$GITHUB_OUTPUT"
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:

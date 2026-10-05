@@ -62,17 +62,15 @@ jobs:
             echo "Release tag $GITHUB_REF_NAME does not match project version $version"
             exit 1
           fi
-          for language in ko en ja; do
-            notes="release-notes/$version.$language.md"
-            if [[ ! -s "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
-              echo "Missing or empty release notes: $notes"
-              exit 1
-            fi
-          done
+          notes="release-notes/$version.en.md"
+          if [[ ! -s "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "Missing or empty release notes: $notes"
+            exit 1
+          fi
           shopt -s nullglob
           notes=(release-notes/"$version".*.md)
-          if [[ ${#notes[@]} -ne 3 ]]; then
-            echo "Expected exactly ko, en, and ja release notes for version $version"
+          if [[ ${#notes[@]} -ne 1 ]]; then
+            echo "Expected only English release notes for version $version"
             printf 'Found: %s\n' "${notes[@]}"
             exit 1
           fi

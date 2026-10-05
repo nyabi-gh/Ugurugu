@@ -349,7 +349,7 @@ AA/가변 필압 긴 획의 반복 래스터(5절 측정 있음), 선택 clip pa
 
 배포 유지 사항: 의존성 URL/hash·Actions SHA 고정, main CI 통과 확인, macOS 서명·공증·Gatekeeper·rpath 감사, 테스트별 설정/복구 경로 격리, 번역·SPDX 게이트. 검증을 편하게 하려고 완화하지 않는다.
 
-배포 후속은 아직 남아 있다. 2.2.10의 당시 CI·release 성공 기록은 실제 **2.2.9→2.2.10 updater UI·설치 완료·재실행** 검증을 대신하지 않는다. 앱 내부 세 언어 release notes dialog, Windows 실기기 설치/업데이트도 별도 확인한다.
+배포 후속은 아직 남아 있다. 2.2.10의 당시 CI·release 성공 기록은 실제 **2.2.9→2.2.10 updater UI·설치 완료·재실행** 검증을 대신하지 않는다. Windows 실기기 설치/업데이트도 별도 확인한다. 2.2.11부터 릴리스 노트는 영어 한 파일이고 업데이트 창은 노트를 보여주지 않는다. Windows는 업데이트·취소 두 버튼이고, macOS는 Sparkle 기본 창에서 노트만 숨긴다(`SUShowReleaseNotes`). 업데이트 피드에도 노트를 싣지 않는다.
 
 2026-09-18 `npm audit`은 현재 lockfile의 전이 의존성 `devalue 5.9.0`과 `nanoid 3.3.17`에 각각 [입력 기반 DoS](https://github.com/advisories/GHSA-9rgm-9g3h-6x36), [0 크기 custom generator 무한 반복](https://github.com/advisories/GHSA-2v37-7h3g-55p8) 권고를 보고했고 자동 수정 가능 버전은 제시하지 않았다. 둘을 실제 제품 취약점으로 단정하거나 검증 없이 override하지 않는다. 업스트림 호환 버전과 브라우저 런타임 도달 가능성을 확인하는 별도 의존성 후속으로 남긴다.
 
