@@ -570,6 +570,28 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - 2026-10-05 main에 fast-forward 병합·푸시(`04aa1d6`). 이 변경을 담은 main CI 결과는 다음 세션에서 확인한다(문서 커밋 푸시로 이전 run은 취소될 수 있음).
 - 남은 것: R03의 느린 엔진 매트릭스(pen-up·undo·레이어 변경 직후 저장, pending text/transform), 끝난 세션 기록이 쌓이는 상한(지금은 사용자가 하나씩 버림), Web Locks 없는 브라우저에서의 두 탭 구분.
 
+### Rust 포팅 0단계 (2026-10-05~) — 진행 중
+
+[RUST_PORT_PLAN.md](RUST_PORT_PLAN.md) §7 0단계를 아래 순서의 브랜치로 나눠 진행한다(2026-10-05 사용자 확정). 계획 문서는 2026-10-05 main에 fast-forward(`ccc1437`).
+
+| # | 단계 | 상태 |
+|---|---|---|
+| ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 구현, 로컬 확인 (브랜치 `rust/workspace-skeleton`). CI 결과 대기 |
+| ② | C++ seed·uuid 주입 지점 | 계획 |
+| ③ | C++ `ReferenceExport`(scene·geometry·frames·stabilize·dabs) | 계획 |
+| ④ | 장면 행렬과 C++ 참조 결과 | 계획 |
+| ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
+| ⑥ | 허용치 기준선(C++ Windows vs macOS, macOS는 CI 러너) | 계획 |
+| ⑦–⑨ | S3 파일 형식 → S1 래스터라이저 → S2 셸·펜 지연 | 계획 |
+
+①의 내용과 확인:
+
+- 루트 `Cargo.toml` 워크스페이스(resolver 3, edition 2024, `unsafe_code = "forbid"`), `rust-toolchain.toml`(1.99.0, rustfmt·clippy·wasm32-unknown-unknown), `Cargo.lock`, 빈 `crates/ugu-base`. 다른 크레이트는 해당 단계에서 만든다.
+- [tools/check_crate_dependencies.mjs](../tools/check_crate_dependencies.mjs): 계획 §3.1 의존 표를 `cargo metadata`로 검사한다. 표에 없는 크레이트도 거절한다. 임시 크레이트로 위반(`ugu-base → ugu-raster`, 표에 없는 크레이트) 2건이 실패로 보고되는 것을 확인했다.
+- `deny.toml`: GPL-3.0-or-later와 호환되는 라이선스 허용 목록, crates.io 외 출처 거절, yanked 거절.
+- CI: `rust-static`(fmt, clippy `-D warnings`, 계층 검사, cargo-deny 0.18.9 바이너리 sha256 고정)과 `rust-test`(Windows·macOS·Linux 테스트 + wasm32 빌드)를 `continue-on-error`로 추가하고 `quality` needs에는 넣지 않았다. 기존 라이선스 헤더 검사에 `*.rs`를 추가했다.
+- 로컬(Windows 11, 2026-10-05): fmt·clippy·test·wasm32 빌드·계층 검사·`cargo deny check` 통과. CMake 빌드 파일은 바꾸지 않았다.
+
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
 공통 완료 규칙:

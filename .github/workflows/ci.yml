@@ -40,7 +40,7 @@ jobs:
             if ! head -n 3 "$file" | grep -qF "$identifier"; then
               missing+=("$file")
             fi
-          done < <(git ls-files -- '*.cpp' '*.hpp' '*.mm' '*.vert' '*.frag' '*.js')
+          done < <(git ls-files -- '*.cpp' '*.hpp' '*.mm' '*.vert' '*.frag' '*.js' '*.rs')
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "Sources missing the '$identifier' header:"
             printf '  %s\n' "${missing[@]}"
@@ -510,6 +510,69 @@ jobs:
             & $testExecutable.FullName 2>&1
             "direct run exit code: $LASTEXITCODE"
           }
+
+  rust-static:
+    name: Rust format, lint and dependencies
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Check crate layering
+        run: node tools/check_crate_dependencies.mjs
+
+      - name: Install cargo-deny
+        env:
+          CARGO_DENY_VERSION: 0.18.9
+          CARGO_DENY_SHA256: 491d04e4c05d7c92582e3d40ec94126c52472a546326a6d29473a5a4e73babd2
+        run: |
+          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSLO "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${archive}"
+          echo "${CARGO_DENY_SHA256}  ${archive}" | sha256sum --check
+          tar xzf "$archive" --strip-components=1 -C "$HOME/.cargo/bin" "${archive%.tar.gz}/cargo-deny"
+
+      - name: Check licenses, advisories and sources
+        run: cargo deny --locked check
+
+  rust-test:
+    name: Rust ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            command: cargo test --workspace --locked
+          - name: macOS
+            os: macos-15
+            command: cargo test --workspace --locked
+          - name: Linux
+            os: ubuntu-latest
+            command: cargo test --workspace --locked
+          - name: wasm build
+            os: ubuntu-latest
+            command: cargo build --target wasm32-unknown-unknown --locked -p ugu-base
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Test
+        run: ${{ matrix.command }}
 
   quality:
     name: Quality gate
