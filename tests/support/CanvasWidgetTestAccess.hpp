@@ -45,6 +45,17 @@ public:
         return canvas.grab().toImage();
     }
 
+    // The native windows stacked over the canvas, topmost first.
+    static QList<QWindow *> displayWindows(const CanvasWidget &canvas)
+    {
+        if (!canvas.m_displayWindow)
+        {
+            return {};
+        }
+        return {
+            canvas.m_displayWindow, canvas.m_displayContainer->windowHandle()};
+    }
+
     // The bindings objects the display's two pipelines were created with.
     static std::pair<const void *, const void *> displayPipelineBindings(
         const CanvasWidget &canvas)

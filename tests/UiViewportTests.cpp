@@ -2390,6 +2390,58 @@ private slots:
         QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
     }
 
+    // The platform gives a move with no button held to the topmost native
+    // window under the pointer that accepts input. The native selection bar
+    // makes its sibling, the window container, a native window of its own,
+    // stacked between the canvas and the display window, and that window
+    // swallowed those moves: the brush ring froze wherever the pointer
+    // entered the canvas until a button was pressed.
+    void hoverMovesReachTheCanvasUnderTheGpuDisplay()
+    {
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(320, 240)));
+        QWidget window;
+        auto *layout = new QVBoxLayout(&window);
+        auto *canvas = new CanvasWidget(&controller);
+        canvas->setSelectionActionBar(new SelectionActionBar(canvas));
+        layout->addWidget(canvas);
+        window.resize(400, 300);
+        canvas->setAnimating(false);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        if (!CanvasWidgetTestAccess::usingGpuDisplay(*canvas))
+        {
+            QSKIP("Needs a platform with a GPU display.");
+        }
+
+        QList<QWindow *> stack =
+            CanvasWidgetTestAccess::displayWindows(*canvas);
+        stack << canvas->windowHandle() << window.windowHandle();
+        QWindow *target = nullptr;
+        for (QWindow *candidate : std::as_const(stack))
+        {
+            if (candidate
+                && !candidate->flags().testFlag(Qt::WindowTransparentForInput))
+            {
+                target = candidate;
+                break;
+            }
+        }
+        QVERIFY(target);
+
+        QSignalSpy pointerChanges(
+            canvas, &CanvasWidget::pointerPositionChanged);
+        const QPoint start = canvas->rect().center();
+        for (int step = 0; step < 3; ++step)
+        {
+            const QPoint global =
+                canvas->mapToGlobal(start + QPoint(step * 10, 0));
+            QTest::mouseMove(target, target->mapFromGlobal(global));
+        }
+        QVERIFY(pointerChanges.size() >= 3);
+        QCOMPARE(pointerChanges.constLast().at(1).toBool(), true);
+    }
+
     // A new frame or overlay texture replaced the bindings object, leaving
     // both pipelines pointing at a destroyed one. Only the explicit
     // setShaderResources call kept that from being read.

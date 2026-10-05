@@ -930,7 +930,24 @@ void CanvasWidget::initializeDisplayViews()
         },
         Qt::QueuedConnection);
     syncDisplayViewGeometry();
+    m_displayContainer->installEventFilter(this);
     m_displayContainer->show();
+}
+
+bool CanvasWidget::eventFilter(QObject *watched, QEvent *event)
+{
+    // The container gets a native window of its own once the canvas is shown,
+    // stacked between the canvas and the display window. Input the display
+    // window passes through lands on that window, and Qt hands it to the
+    // container rather than to the canvas, so it has to pass input on too.
+    if (watched == m_displayContainer && event->type() == QEvent::WinIdChange)
+    {
+        if (QWindow *handle = m_displayContainer->windowHandle())
+        {
+            handle->setFlag(Qt::WindowTransparentForInput);
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void CanvasWidget::discardDisplayViews()

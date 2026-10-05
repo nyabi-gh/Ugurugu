@@ -169,6 +169,18 @@
 - 수정: 렌더를 맡은 스레드가 `PendingRender`(RAII)와 scope guard로 슬롯을 쥐고 모든 종료 경로에서 정리한 뒤 대기자를 깨운다. 자산 캐시의 계산 중 표시 로직은 단독 시험이 가능하도록 [ComputedImageCache](../src/render/engine/ComputedImageCache.hpp)로 분리했다.
 - 회귀: [WobbleAnimationTests.cpp](../tests/WobbleAnimationTests.cpp)의 `releasesAStaticLayerSlotWhoseRenderThrew`, [ComputedImageCacheTests.cpp](../tests/ComputedImageCacheTests.cpp)(동시 미스 1회 계산, 예외 뒤 대기자 재계산). 수정 전 실패. 2026-10-03 Windows 11 x64, Qt 6.11.2 Release(ClangCL) offscreen CTest 13/13, PR #10 CI(macOS ASan+UBSan 포함) 통과.
 
+### D26 · P1 · 2.2.11 회귀: 그리지 않을 때 캔버스 위 브러시 링이 멈춤 — 해결 (Windows 마우스 확인, 펜 확인 대기)
+
+증상(사용자 보고, 2.2.11): 펜·마우스가 캔버스에 들어온 뒤 버튼을 누르지 않고 움직이면 링이 들어온 자리에 멈춘다. 그리는 중에는 따라가고 캔버스 밖은 정상이다.
+
+원인: 선택 액션바는 GPU 표시 창 위에 보이도록 네이티브 위젯이다(`23bd7a5`). Qt는 네이티브 위젯의 형제를 기본으로 네이티브로 만들기 때문에, 형제인 window container가 자체 네이티브 창을 갖고 캔버스와 표시 창 사이에 놓였다. 표시 창은 `WindowTransparentForInput`이라 OS가 아래 창에 입력을 넘기는데, 그 창이 container였다. container의 `WA_TransparentForMouseEvents`는 같은 창 안에서 위젯을 고를 때만 쓰이므로, 버튼 없는 이동을 container가 받고 버렸다. 버튼을 누르면 grab으로 이벤트가 캔버스에 바로 가서 그리는 중에는 정상이었다.
+
+- 확인 (2026-10-05, Windows 11, 실행 중인 2.2.11과 같은 코드의 Release 빌드, `SendInput` 마우스): 앱 전역 이벤트 계측에서 hover `MouseMove` 98건이 모두 `QWindowContainer`로 가고 `CanvasWidget`에는 0건이었다. 표시 창은 요청이 올 때마다 정상적으로 present했고, 링 갱신 요청은 입장 때 1번뿐이었다.
+- 수정: container가 네이티브 창을 갖는 순간(`WinIdChange`) 그 창도 입력 투명으로 만든다. 디스플레이 스택의 네이티브 창은 모두 입력을 통과시킨다는 불변식이며, Qt가 왜 네이티브로 만들었는지와 무관하다.
+- 수정 후: hover 이동 98건이 모두 `CanvasWidget`에 도착했고, 실제 화면 캡처에서 링이 커서 위치(x≈1766→2216)를 따라갔다.
+- 회귀: [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `hoverMovesReachTheCanvasUnderTheGpuDisplay`. 선택 액션바를 붙인 캔버스에서, 스택에서 입력 투명이 아닌 맨 위 창에 버튼 없는 이동을 넣는다. windows 플랫폼에서 수정 전 실패, 수정 후 통과. offscreen에서는 GPU 표시가 없어 건너뛴다. offscreen CTest 12/12, windows 플랫폼 UI 스위트 5개 실패 0.
+- 남음: 실제 펜(WinTab) hover와 macOS(cocoa의 입력 투명 NSView) 확인.
+
 ### D03 · P1 · 포커스·근접 이탈 시 획 처리 — 미해결 / 정책 필요
 
 근거: [CanvasWidgetEvents.cpp](../src/ui/CanvasWidgetEvents.cpp)와 [MainWindow.cpp](../src/ui/MainWindow.cpp)는 FocusOut·UngrabMouse·TabletLeaveProximity·WindowDeactivate에서 취소 경로를 호출하고, [CanvasWidgetTools.cpp](../src/ui/CanvasWidgetTools.cpp)의 `cancelStroke`는 진행 획을 버린다.
