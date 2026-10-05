@@ -69,7 +69,7 @@
     import { AutosaveController } from "./lib/AutosaveController.svelte";
     import { downloadBlob } from "./lib/download";
 
-    const engine = new EngineClient();
+    const engine = new EngineClient(onEngineStopped);
     const profile: MemoryProfile = detectMemoryProfile();
 
     let surfaceCanvas: HTMLCanvasElement;
@@ -88,6 +88,9 @@
     let frameIndex = $state(0);
     let playing = $state(false);
     let status = $state("Loading engine…");
+    // Shown instead of status for the rest of the session: no later operation
+    // can succeed, so no later message may hide how to get back.
+    let engineStopped = $state<string | null>(null);
     let documentName = $state("Untitled.ugu");
     let canUndo = $state(false);
     let canRedo = $state(false);
@@ -167,7 +170,9 @@
     const activeTool = $derived(toolDefinition(tool));
 
     const autosave = new AutosaveController({
-        ready: () => meta !== null && !drawing,
+        // A stopped engine may hold a half-changed document; the last good
+        // snapshot must stay in the slot.
+        ready: () => meta !== null && !drawing && engineStopped === null,
         revision: () => contentRevision,
         name: () => documentName,
         serialize: () => engine.serialize(),
@@ -296,6 +301,13 @@
 
     function describe(error: unknown): string {
         return String(error).replace(/^(Error:\s*)+/, "");
+    }
+
+    function onEngineStopped(error: Error) {
+        stopPlayback();
+        engineStopped =
+            `Engine stopped: ${describe(error)}. Reload the page to start ` +
+            "again; the last recovery snapshot, if any, is offered then.";
     }
 
     function scheduleThumbnailRefresh() {
@@ -795,7 +807,7 @@
             stopPlayback();
             return;
         }
-        if (!meta || meta.frameCount < 2) {
+        if (!meta || meta.frameCount < 2 || engineStopped !== null) {
             return;
         }
         cancelTransformForBoundary(
@@ -2369,7 +2381,7 @@
 
 {#snippet statusBar()}
     <div class="status-bar">
-        <p id="status">{status}</p>
+        <p id="status">{engineStopped ?? status}</p>
         <p id="autosave-status">{autosave.status}</p>
         <p id="presenter-status">
             {activeTool.label} · {usingWebGL ? "WebGL 2" : "Canvas 2D"} ·

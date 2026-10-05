@@ -8,17 +8,51 @@ importScripts("ugurugu_engine_spike.js");
 // unrelated call; refusing here names the real problem instead.
 const expectedAbiVersion = 9;
 
-const enginePromise = createUguruguEngine().then((engine) => {
-    const version = engine._ugu_abi_version?.();
-    if (version !== expectedAbiVersion) {
-        throw new Error(
-            `engine ABI ${version ?? "unknown"} does not match the shell's ` +
-                `${expectedAbiVersion}; rebuild the wasm-release preset and ` +
-                `run npm run sync-engine`,
-        );
+// Set once the engine can no longer be trusted: it failed to load, or a trap
+// or abort unwound out of an export. Every later request is refused with it.
+let engineFailure = null;
+
+const enginePromise = createUguruguEngine()
+    .then((engine) => {
+        const version = engine._ugu_abi_version?.();
+        if (version !== expectedAbiVersion) {
+            throw new Error(
+                `engine ABI ${version ?? "unknown"} does not match the shell's ` +
+                    `${expectedAbiVersion}; rebuild the wasm-release preset and ` +
+                    `run npm run sync-engine`,
+            );
+        }
+        guardExports(engine);
+        return engine;
+    })
+    .catch((error) => {
+        engineFailure = error;
+        throw error;
+    });
+
+// The engine is built without exception support, so a C++ throw becomes an
+// abort, and an abort or trap unwinds straight out of the export without
+// running any C++ cleanup. Whatever it was changing is left half done, so
+// nothing may call into the engine after that.
+function guardExports(engine) {
+    for (const name of Object.keys(engine)) {
+        const run = engine[name];
+        if (!name.startsWith("_") || typeof run !== "function") {
+            continue;
+        }
+        engine[name] = (...args) => {
+            if (engineFailure) {
+                throw engineFailure;
+            }
+            try {
+                return run(...args);
+            } catch (error) {
+                engineFailure = error;
+                throw error;
+            }
+        };
     }
-    return engine;
-});
+}
 let documentHandle = 0;
 // The outline is only worth reading back when it changed, so the worker
 // remembers what it last sent. Replies leave the worker in request order, so
@@ -170,11 +204,38 @@ function createDocument(engine, width, height, undoLimit) {
     return adoptDocument(engine, handle, undoLimit);
 }
 
+// Copies bytes into the wasm heap and runs the call with the pointer. A failed
+// _malloc returns 0 under ALLOW_MEMORY_GROWTH, and copying through it would
+// overwrite the engine's own static data.
+function withHeapCopy(engine, bytes, run) {
+    const pointer = engine._malloc(bytes.byteLength);
+    if (!pointer) {
+        throw new Error(
+            `out of memory: the engine could not reserve ${bytes.byteLength} bytes`,
+        );
+    }
+    try {
+        engine.HEAPU8.set(bytes, pointer);
+        return run(pointer);
+    } finally {
+        if (!engineFailure) {
+            engine._free(pointer);
+        }
+    }
+}
+
+function utf8z(text) {
+    return new TextEncoder().encode(text + "\0");
+}
+
+function doublesOf(values) {
+    return new Uint8Array(new Float64Array(values).buffer);
+}
+
 function openDocument(engine, bytes, undoLimit) {
-    const pointer = engine._malloc(bytes.length);
-    engine.HEAPU8.set(bytes, pointer);
-    const handle = engine._ugu_document_open(pointer, bytes.length);
-    engine._free(pointer);
+    const handle = withHeapCopy(engine, bytes, (pointer) =>
+        engine._ugu_document_open(pointer, bytes.length),
+    );
     if (!handle) {
         throw engineError(engine);
     }
@@ -346,21 +407,6 @@ function fullRender(engine, frame) {
     }
 }
 
-// Copies a flat x, y point list into the wasm heap as doubles and runs the
-// call with it, freeing the buffer whichever way the call goes.
-function withPoints(engine, points, run) {
-    const bytes = points.length * 8;
-    const pointer = engine._malloc(bytes);
-    try {
-        new Float64Array(engine.HEAPU8.buffer, pointer, points.length).set(
-            points,
-        );
-        return run(pointer);
-    } finally {
-        engine._free(pointer);
-    }
-}
-
 function serializeDocument(engine) {
     const handle = requireDocument();
     const pointer = engine._ugu_serialize(handle);
@@ -384,6 +430,9 @@ function exportGif(engine) {
 self.onmessage = async (event) => {
     const { id, type } = event.data;
     try {
+        if (engineFailure) {
+            throw engineFailure;
+        }
         const engine = await enginePromise;
         const handleFor = () => requireDocument();
         if (type === "open") {
@@ -485,16 +534,19 @@ self.onmessage = async (event) => {
                 throw engineError(engine);
             }
         } else if (type === "selectionShape") {
-            const applied = withPoints(engine, event.data.points, (pointer) =>
-                engine._ugu_selection_shape(
-                    handleFor(),
-                    event.data.frame,
-                    event.data.shape,
-                    pointer,
-                    event.data.points.length / 2,
-                    event.data.combine,
-                    event.data.paint ? 1 : 0,
-                ),
+            const applied = withHeapCopy(
+                engine,
+                doublesOf(event.data.points),
+                (pointer) =>
+                    engine._ugu_selection_shape(
+                        handleFor(),
+                        event.data.frame,
+                        event.data.shape,
+                        pointer,
+                        event.data.points.length / 2,
+                        event.data.combine,
+                        event.data.paint ? 1 : 0,
+                    ),
             );
             if (!applied) {
                 throw engineError(engine);
@@ -621,32 +673,24 @@ self.onmessage = async (event) => {
             regionReply(engine, id, documentMeta(engine));
             return;
         } else if (type === "text") {
-            const values = new Float64Array(event.data.commands);
-            const pointer = engine._malloc(values.byteLength);
-            if (!pointer) throw new Error("Not enough memory for text.");
-            try {
-                engine.HEAPU8.set(new Uint8Array(values.buffer), pointer);
-                if (!engine._ugu_text_path(handleFor(), event.data.index, pointer,
-                    values.length, event.data.x, event.data.y, event.data.width,
-                    event.data.filled ? 1 : 0, event.data.color)) {
-                    throw engineError(engine);
-                }
-            } finally { engine._free(pointer); }
+            const commands = event.data.commands;
+            const applied = withHeapCopy(engine, doublesOf(commands), (pointer) =>
+                engine._ugu_text_path(handleFor(), event.data.index, pointer,
+                    commands.length, event.data.x, event.data.y, event.data.width,
+                    event.data.filled ? 1 : 0, event.data.color));
+            if (!applied) {
+                throw engineError(engine);
+            }
             fullRender(engine, event.data.frame);
         } else if (type === "insertImage") {
             const pixels = new Uint8Array(event.data.pixels);
-            const name = new TextEncoder().encode(event.data.name + "\0");
-            const pointer = engine._malloc(pixels.length);
-            const namePointer = engine._malloc(name.length);
-            try {
-                if (!pointer || !namePointer) throw new Error("Not enough memory for the image.");
-                engine.HEAPU8.set(pixels, pointer);
-                engine.HEAPU8.set(name, namePointer);
-                if (!engine._ugu_insert_image(handleFor(), pointer, pixels.length,
-                    event.data.width, event.data.height, namePointer)) {
-                    throw engineError(engine);
-                }
-            } finally { engine._free(pointer); engine._free(namePointer); }
+            const inserted = withHeapCopy(engine, pixels, (pointer) =>
+                withHeapCopy(engine, utf8z(event.data.name), (namePointer) =>
+                    engine._ugu_insert_image(handleFor(), pointer, pixels.length,
+                        event.data.width, event.data.height, namePointer)));
+            if (!inserted) {
+                throw engineError(engine);
+            }
             fullRender(engine, event.data.frame);
         } else if (type === "layerActivate") {
             engine._ugu_layer_activate(handleFor(), event.data.index);
@@ -753,15 +797,13 @@ self.onmessage = async (event) => {
             engine._ugu_layer_remove(handleFor(), event.data.index);
             fullRender(engine, event.data.frame);
         } else if (type === "layerRename") {
-            const utf8 = new TextEncoder().encode(event.data.name + "\0");
-            const namePointer = engine._malloc(utf8.length);
-            engine.HEAPU8.set(utf8, namePointer);
-            engine._ugu_layer_rename(
-                handleFor(),
-                event.data.index,
-                namePointer,
+            withHeapCopy(engine, utf8z(event.data.name), (namePointer) =>
+                engine._ugu_layer_rename(
+                    handleFor(),
+                    event.data.index,
+                    namePointer,
+                ),
             );
-            engine._free(namePointer);
             fullRender(engine, event.data.frame);
         } else if (type === "layerMove") {
             engine._ugu_layer_move(
@@ -825,6 +867,11 @@ self.onmessage = async (event) => {
         }
         regionReply(engine, id);
     } catch (error) {
-        postMessage({ id, ok: false, error: String(error) });
+        postMessage({
+            id,
+            ok: false,
+            fatal: engineFailure !== null,
+            error: String(error),
+        });
     }
 };

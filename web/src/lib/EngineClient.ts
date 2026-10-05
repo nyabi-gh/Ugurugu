@@ -159,15 +159,22 @@ export class EngineClient {
     // Set once the worker is known to be dead. Every later request fails fast
     // with the same reason instead of waiting for a reply that cannot come.
     #failure: Error | null = null;
+    #onFailure: (error: Error) => void;
 
-    constructor() {
+    // onFailure is called once, when the engine stops for good.
+    constructor(onFailure: (error: Error) => void) {
+        this.#onFailure = onFailure;
         // Relative to the page so the worker stays same-origin under
         // itch.io's project subdirectory as well as the dev server.
         this.#worker = new Worker(
             new URL("engine/engine-worker.js", document.baseURI),
         );
         this.#worker.onmessage = (event) => {
-            const { id, ok, error } = event.data;
+            const { id, ok, error, fatal } = event.data;
+            if (fatal) {
+                this.#fail(new Error(error));
+                return;
+            }
             const pending = this.#pending.get(id);
             if (!pending) {
                 return;
@@ -200,11 +207,15 @@ export class EngineClient {
     }
 
     #fail(error: Error) {
+        const first = this.#failure === null;
         this.#failure ??= error;
         const waiting = [...this.#pending.values()];
         this.#pending.clear();
         for (const pending of waiting) {
             pending.reject(this.#failure);
+        }
+        if (first) {
+            this.#onFailure(this.#failure);
         }
     }
 
