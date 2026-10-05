@@ -5,6 +5,7 @@
 
 #include "document/DocumentLimits.hpp"
 #include "document/DocumentOperations.hpp"
+#include "document/LayerHierarchy.hpp"
 #include "document/SelectionOperation.hpp"
 #include "document/StrokeMask.hpp"
 #include "render/FloodFillMask.hpp"
@@ -23,11 +24,13 @@
 #include <QHash>
 #include <QPainter>
 #include <QRadialGradient>
+#include <QSet>
 #include <QtMath>
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 
 namespace ugurugu
 {
@@ -119,20 +122,25 @@ bool RenderEngine::supportsLayerSplit(
         return false;
     }
 
-    const auto carriesContent = [&document](const Layer &layer)
+    std::optional<LayerHierarchyAnalysis> hierarchy;
+    const auto carriesContent = [&document, &hierarchy](const Layer &layer)
     {
         if (layer.kind != LayerKind::Group)
         {
             return !layer.strokes.isEmpty();
         }
+        if (!hierarchy)
+        {
+            hierarchy = analyzeLayerHierarchy(document);
+        }
         return std::any_of(document.layers.cbegin(),
             document.layers.cend(),
-            [&document, &layer](const Layer &candidate)
+            [&hierarchy, &layer](const Layer &candidate)
             {
                 return candidate.kind == LayerKind::Paint
                        && !candidate.strokes.isEmpty() && candidate.visible
                        && candidate.opacity > 0.0
-                       && document.isLayerDescendantOf(candidate.id, layer.id);
+                       && hierarchy->isDescendantOf(candidate.id, layer.id);
             });
     };
 
@@ -232,9 +240,25 @@ RenderEngine::LayerSplitFrame RenderEngine::renderLayerSplit(
     belowDocument.activeLayerId = QUuid();
     aboveDocument.activeLayerId = QUuid();
     aboveDocument.background = Qt::transparent;
+    // supportsLayerSplit checked the hierarchy, so every parent chain ends at
+    // a root layer.
+    QHash<QUuid, QUuid> parents;
+    parents.reserve(document.layers.size());
+    for (const Layer &layer : document.layers)
+    {
+        parents.insert(layer.id, layer.parentGroupId);
+    }
+    const auto rootOf = [&parents](QUuid id)
+    {
+        for (QUuid parent = parents.value(id); !parent.isNull();
+            parent = parents.value(id))
+        {
+            id = parent;
+        }
+        return id;
+    };
+    QSet<QUuid> aboveRoots;
     bool afterTarget = false;
-    QVector<QUuid> belowRoots;
-    QVector<QUuid> aboveRoots;
     for (const Layer &layer : document.layers)
     {
         if (!layer.parentGroupId.isNull())
@@ -244,33 +268,25 @@ RenderEngine::LayerSplitFrame RenderEngine::renderLayerSplit(
         if (layer.id == layerId)
         {
             afterTarget = true;
+        }
+        else if (afterTarget)
+        {
+            aboveRoots.insert(layer.id);
+        }
+    }
+    QVector<Layer> belowLayers;
+    QVector<Layer> aboveLayers;
+    for (const Layer &layer : document.layers)
+    {
+        if (layer.id == layerId)
+        {
             continue;
         }
-        (afterTarget ? aboveRoots : belowRoots).append(layer.id);
+        (aboveRoots.contains(rootOf(layer.id)) ? aboveLayers : belowLayers)
+            .append(layer);
     }
-    const auto keepRoots = [&document](
-                               Document &half, const QVector<QUuid> &roots)
-    {
-        QVector<Layer> kept;
-        kept.reserve(document.layers.size());
-        for (const Layer &layer : document.layers)
-        {
-            const bool belongs = std::any_of(roots.cbegin(),
-                roots.cend(),
-                [&document, &layer](const QUuid &root)
-                {
-                    return layer.id == root
-                           || document.isLayerDescendantOf(layer.id, root);
-                });
-            if (belongs)
-            {
-                kept.append(layer);
-            }
-        }
-        half.layers = std::move(kept);
-    };
-    keepRoots(belowDocument, belowRoots);
-    keepRoots(aboveDocument, aboveRoots);
+    belowDocument.layers = std::move(belowLayers);
+    aboveDocument.layers = std::move(aboveLayers);
 
     below = renderScaled(
         belowDocument, frameIndex, outputSize, mode, nullptr, cancellation);
