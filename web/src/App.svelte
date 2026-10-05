@@ -68,6 +68,7 @@
     import type { PinchMeasurement, ViewState } from "./lib/ViewTransform";
     import { AutosaveController } from "./lib/AutosaveController.svelte";
     import { downloadBlob } from "./lib/download";
+    import { readPreference, writePreference } from "./lib/Preferences";
 
     const engine = new EngineClient(onEngineStopped);
     const profile: MemoryProfile = detectMemoryProfile();
@@ -160,8 +161,7 @@
     );
     // Same default as the desktop's canvas/animateWhileDrawing setting.
     let animateWhileDrawing = $state(
-        window.localStorage.getItem("ugurugu-web-animate-while-drawing") ===
-            "1",
+        readPreference("ugurugu-web-animate-while-drawing") === "1",
     );
 
     const recentColorCapacity = 16;
@@ -259,9 +259,7 @@
 
     function loadRecentColors(): string[] {
         try {
-            const stored = window.localStorage.getItem(
-                "ugurugu-web-color-history",
-            );
+            const stored = readPreference("ugurugu-web-color-history");
             const parsed = stored ? JSON.parse(stored) : [];
             return Array.isArray(parsed)
                 ? parsed.filter(
@@ -280,14 +278,10 @@
             color,
             ...recentColors.filter((existing) => existing !== color),
         ].slice(0, recentColorCapacity);
-        try {
-            window.localStorage.setItem(
-                "ugurugu-web-color-history",
-                JSON.stringify(recentColors),
-            );
-        } catch {
-            // History is a convenience; drawing must not fail on storage.
-        }
+        writePreference(
+            "ugurugu-web-color-history",
+            JSON.stringify(recentColors),
+        );
     }
 
     function chooseColor(color: string) {
@@ -570,14 +564,10 @@
     });
 
     $effect(() => {
-        try {
-            window.localStorage.setItem(
-                "ugurugu-web-animate-while-drawing",
-                animateWhileDrawing ? "1" : "0",
-            );
-        } catch {
-            // A preference that cannot be stored still applies this session.
-        }
+        writePreference(
+            "ugurugu-web-animate-while-drawing",
+            animateWhileDrawing ? "1" : "0",
+        );
     });
 
     $effect(() => {

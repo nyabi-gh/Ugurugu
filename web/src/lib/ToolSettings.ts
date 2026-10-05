@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
+import { readPreference, writePreference } from "./Preferences";
 import type { LassoMode, SelectionShapeName } from "./tools";
 
 // Everything the tool options column edits, in one object so the shell owns a
@@ -52,7 +53,7 @@ export function defaultToolSettings(): ToolSettings {
 export function loadToolSettings(): ToolSettings {
     const settings = defaultToolSettings();
     try {
-        const stored = window.localStorage.getItem(storageKey);
+        const stored = readPreference(storageKey);
         if (!stored) {
             return settings;
         }
@@ -77,9 +78,5 @@ export function loadToolSettings(): ToolSettings {
 }
 
 export function saveToolSettings(settings: ToolSettings) {
-    try {
-        window.localStorage.setItem(storageKey, JSON.stringify(settings));
-    } catch {
-        // Preferences that cannot be stored still apply for this session.
-    }
+    writePreference(storageKey, JSON.stringify(settings));
 }

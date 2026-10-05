@@ -33,6 +33,7 @@ import clipboardAndLayers from "./scenarios/20-clipboard-and-layers.mjs";
 import textWobbleImage from "./scenarios/21-text-wobble-image.mjs";
 import heapAllocationFailure from "./scenarios/22-heap-allocation-failure.mjs";
 import engineAbort from "./scenarios/23-engine-abort.mjs";
+import blockedStorage from "./scenarios/24-blocked-storage.mjs";
 
 // Order matters only in that the cheapest, most fundamental checks come first:
 // a failure in scenario 1 makes every later one meaningless.
@@ -60,6 +61,7 @@ const scenarios = [
     ["text-wobble-image", textWobbleImage],
     ["heap-allocation-failure", heapAllocationFailure],
     ["engine-abort", engineAbort],
+    ["blocked-storage", blockedStorage],
 ];
 
 const filter = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
