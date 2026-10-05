@@ -199,7 +199,7 @@
 | D13 · P2 · UX 결정 | [MainWindow.cpp](../src/ui/MainWindow.cpp)의 회전은 즉시 적용, 크기 변경은 pending. 즉시/대기 정책과 안내를 통일할지 결정 | 적용·취소·undo·연속 회전/크기 변경이 선택한 정책과 일치 |
 | D20 · P2 · 미해결 | [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 일반 변환은 구형 `visibilityClip`을 옮기지 않음. 복제 경로는 실체화. 구형 reader의 클립 보존 사례 필요 | schema 5 이전 fixture의 이동/회전/복제·재저장 픽셀 검증. Android reader 제거로 데스크톱 문제를 닫지 않음 |
 | R08 · P2 · 부분 해결 | [Shortcuts.ts](../web/src/lib/Shortcuts.ts)의 range 방향키·button Enter가 앱 명령으로 처리됨. 과거 소스 함수 재현. 2026-10-05 코드 기준 button Enter/Space는 App에서 보호됨. range·checkbox의 방향키·Enter·Delete는 여전히 앱 명령(`isTextEntry`) | Tab으로 range/Home/End/방향키, button Enter/Space를 기본 의미로 사용 |
-| R09 · P2 · 미해결 | [App.svelte](../web/src/App.svelte)의 `animateWhileDrawing` 초기화가 localStorage를 보호 없이 읽음. 안전한 preference reader와 세션 기본값 사용 | getter/getItem/setItem/IDB 각각 실패해도 새 문서·다운로드 가능 |
+| R09 · P2 · 해결(`13d1b56`, 브라우저 회귀 2026-10-05, main 미병합) | (수정 전) [App.svelte](../web/src/App.svelte)의 `animateWhileDrawing` 초기화가 localStorage를 보호 없이 읽음. 저장소 접근이 네 호출부에 흩어져 각자 try/catch하던 구조에서 한 곳이 빠졌고, 사이트 데이터 차단 시 getter 예외로 셸 전체가 시작하지 못했다. 이제 모든 preference 접근이 [Preferences.ts](../web/src/lib/Preferences.ts)를 거치고 거부는 기본값으로 처리 | getter/getItem/setItem/IDB 각각 실패해도 새 문서·다운로드 가능 |
 | R10 · P2 · 미해결 | 웹 dialog·sheet의 focus 순환/복귀·배경 단축키 차단 불일치. `aria-modal`과 실제 배경 조작 정책을 맞춤 | Tab/Shift+Tab/Escape/호출 버튼 복귀, 크기 dialog 뒤 문서가 단축키로 바뀌지 않음 |
 | R12 · P2 · 미해결 | [ColorWheel.cpp](../src/ui/ColorWheel.cpp)·[ColorDock.cpp](../src/ui/ColorDock.cpp): ClickFocus·마우스 중심, HEX는 표시용. 검증 가능한 HEX/RGB 입력과 교환 액션 필요 | 키보드로 임의 색 입력·실제 브러시 적용·값 낭독. accessibleName 하나로 전체 접근성 판단 금지 |
 | R13 · P3 · 미해결 | [Theme.cpp](../src/ui/Theme.cpp)의 비선형 RGB 밝기 선택. 과거 `#00B900`에서 밝은 후보 약 2.54:1 / 어두운 후보 약 6.70:1 계산 | sRGB 상대 휘도 대비로 후보 선택, hover/pressed·명암 테마 확인 |
@@ -390,12 +390,12 @@ Qt 번들 내 외부 구성요소 고지·소스/재링크 제공 범위, 웹 �
 
 기준 `143931c`. `web/`·`src/wasm/`·워커·웹 CI를 코드로 추적한 결과다. 이 환경에는 WASM 툴체인이 없어 **실행 재현은 하지 않았다**. "확인"은 코드 경로를 끝까지 따라간 것, "추정"은 실행으로 증명해야 하는 것이다. 기존 ID와 겹치는 부분은 해당 ID에 적고 여기에는 새 원인만 둔다.
 
-기존 ID의 현재 상태: R03(자동저장이 `engine.serialize()` 직접 호출)·R04(`reset()`이 진행 중 snapshot을 무효화하지 않음, 이름을 await 뒤에 읽음)·R05(새 문서·열기·복원 시 dirty 확인 없음, `beforeunload` 없음)·R09(`animateWhileDrawing` 초기화의 무방비 `localStorage`)·R10·R11(`onFileChosen`이 `file.arrayBuffer()` 후 크기 검사) 모두 그대로 남아 있다. R08은 button Enter/Space는 고쳐졌고 range·checkbox의 방향키·Enter·Delete가 앱 명령으로 가는 문제가 남았다(`Shortcuts.ts`의 `isTextEntry`).
+기존 ID의 현재 상태: R03(자동저장이 `engine.serialize()` 직접 호출)·R04(`reset()`이 진행 중 snapshot을 무효화하지 않음, 이름을 await 뒤에 읽음)·R05(새 문서·열기·복원 시 dirty 확인 없음, `beforeunload` 없음)·R10·R11(`onFileChosen`이 `file.arrayBuffer()` 후 크기 검사) 모두 그대로 남아 있다. R08은 button Enter/Space는 고쳐졌고 range·checkbox의 방향키·Enter·Delete가 앱 명령으로 가는 문제가 남았다(`Shortcuts.ts`의 `isTextEntry`).
 
 | ID·우선순위·상태 | 근거와 원인 | 조치·완료 기준 |
 |---|---|---|
-| W-01 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05; 실제 heap 고갈은 미측정, main 미병합) | (수정 전) [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않았다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
-| W-02 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05, main 미병합) | (수정 전) 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
+| W-01 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05; 실제 heap 고갈은 미측정, main `d182672`) | (수정 전) [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않았다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
+| W-02 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05, main `d182672`) | (수정 전) 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
 | W-03 · P1 · 미해결(한도 확인, OOM 추정) | 웹 열기는 파일 바이트(64MiB)만 보고, 엔진은 데스크톱 `DocumentLimits`(4096², 마스크 표 256MB, 래스터 256MB decoded)를 쓴다. 0 마스크는 약 1000:1로 압축되므로 작은 파일이 512MB heap을 넘길 수 있다(계산상 추정). [EngineBridge.cpp](../src/wasm/EngineBridge.cpp)의 열기는 입력을 한 번 더 복사한다. zlib 출력 자체는 `BoundedCompression`이 막는다 | 웹 전용 decode 예산(캔버스·마스크·래스터 총량)을 채택 전에 적용. R11과 함께 닫음. WASM 열기 경로 fuzz |
 | W-04 · P1 · 미해결(확인) | `autosave.start()`가 복원/버리기 배너가 결정되기 전에 시작된다. 배너를 둔 채 한 획만 그어도 15초 안에 단일 `slot`이 새 문서로 바뀌고, 다시 새로고침하면 이전 작업은 사라진다. 두 탭은 서로의 슬롯을 덮고 다른 탭의 살아 있는 문서를 "이전 세션"으로 제안한다 | offer 결정 전 슬롯 보호, 탭·세션별 키. R04의 세대 설계와 함께 |
 | W-05 · P1 · 미해결(확인) | [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts)의 `restore()`는 offer를 비우고 bytes를 워커로 transfer한다. 열기가 실패하면 배너와 메모리 사본이 모두 없다. `discard()`는 현재 세션이 방금 쓴 snapshot도 지우고, `savedRevision`이 같아 다음 편집 전까지 다시 쓰지 않는다 | 열기 성공 뒤에만 offer 소비, 복사본 전달. discard는 offer 출처만 삭제 |
@@ -517,7 +517,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 
 2026-10-05부터 웹 코드 수정을 시작한다. 순서: W-01·W-02(워커 메모리·abort) → R09 → R04·R05·W-04·W-05(복구·문서 교체) → W-03·R11(웹 decode 예산) → W-06–W-10 → W-11–W-13(배포·CI·고지). 공용 엔진을 건드리면 위 공통 완료 규칙대로 native suite와 WASM parity를 함께 확인한다.
 
-#### W-01·W-02 진행 (2026-10-05, 브랜치 `web/engine-worker-safety`) — 수정 완료, main 미병합
+#### W-01·W-02 진행 (2026-10-05, 브랜치 `web/engine-worker-safety`) — 수정 완료, main 병합
 
 - 환경: Windows 11에서 emsdk 4.0.7 + Qt 6.11.2 `wasm_singlethread`(호스트 Qt 6.11.2 msvc)로 엔진을 직접 빌드했다. `wasm-release` 프리셋은 macOS 전용이라 같은 옵션으로 수동 구성했다. 브라우저 시나리오를 실엔진으로 로컬에서 돌릴 수 있다.
 - 회귀: 하니스 `engineFault()`가 엔진 로더 뒤에 장애 주입 코드를 붙인다(`_malloc` 0 반환, export에서 `WebAssembly.RuntimeError`). [22-heap-allocation-failure.mjs](../web/tests/scenarios/22-heap-allocation-failure.mjs), [23-engine-abort.mjs](../web/tests/scenarios/23-engine-abort.mjs).
@@ -529,6 +529,14 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
   - App은 `Engine stopped: … Reload the page …` 메시지를 이후 모든 상태 메시지보다 우선해 보이고, 재생을 멈추고 다시 시작하지 않으며, 자동저장 `ready`를 false로 두어 마지막 정상 복구본을 지킨다.
 - 수정 후 결과(같은 로컬 엔진 빌드, Chromium, 2026-10-05): `heap-allocation-failure` 3/3, `engine-abort` 4/4 통과. 전체 browser suite 23개 시나리오 통과, `npm run check` 0 오류·0 경고. 같은 빌드에서 수정 전 코드로 되돌려 다시 돌리면 위 기록대로 heap 1건·abort 3건이 실패한다.
 - 남은 것: 실제 heap 고갈(512MB 근처에서 64MiB 열기)은 장애 주입으로 대신했고 실측하지 않았다. 이 상한은 W-03의 웹 decode 예산과 함께 다룬다. CI `wasm` 잡은 main 병합·푸시 뒤 확인한다.
+- 2026-10-05 main에 fast-forward 병합·푸시(`d182672`).
+
+#### R09 진행 (2026-10-05, 브랜치 `web/storage-guards`) — 수정 완료, main 미병합
+
+- 회귀: [24-blocked-storage.mjs](../web/tests/scenarios/24-blocked-storage.mjs)가 localStorage getter·`getItem`·`setItem` 차단을 차례로 주입하고, 매번 IndexedDB `open`도 실패시킨 채 문서 표시·새 문서·그리기·`.ugu` 다운로드·미처리 예외 없음을 확인한다.
+- 수정 전 결과: getter·`getItem` 차단에서 컴포넌트 초기화가 예외로 끝나 셸이 문서를 띄우지 못했다(4건 실패). `setItem` 차단은 이미 통과했다.
+- 수정(`13d1b56`): `readPreference`·`writePreference` 하나로 모든 preference 접근(도구 설정, 최근 색, 그리는 중 애니메이션)을 모았다. 공용 엔진 변경 없음.
+- 수정 후 결과(Chromium, 로컬 엔진 빌드): `blocked-storage` 15/15, 전체 browser suite 24개 시나리오 통과, `npm run check` 0 오류·0 경고.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
