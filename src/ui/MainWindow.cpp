@@ -731,12 +731,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         || (event->type() == QEvent::WindowDeactivate && watched == this))
     {
         m_canvas->cancelActiveInteraction();
+        m_canvas->releaseKeyboardModifiers();
         saveDrawingToolSettings();
         writeAutosave();
     }
     else if (event->type() == QEvent::TabletLeaveProximity)
     {
-        m_canvas->cancelActiveInteraction();
+        m_canvas->handleTabletLeftProximity();
     }
 
     return QMainWindow::eventFilter(watched, event);

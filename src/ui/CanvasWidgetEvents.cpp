@@ -214,10 +214,15 @@ bool CanvasWidget::event(QEvent *event)
     switch (event->type())
     {
     case QEvent::FocusOut:
-    case QEvent::UngrabMouse:
-    case QEvent::TabletLeaveProximity:
     case QEvent::WindowDeactivate:
         cancelActiveInteraction();
+        releaseKeyboardModifiers();
+        break;
+    case QEvent::UngrabMouse:
+        cancelActiveInteraction();
+        break;
+    case QEvent::TabletLeaveProximity:
+        handleTabletLeftProximity();
         break;
     case QEvent::CursorChange:
         // The display window covers the widget, so the platform shows its
@@ -704,6 +709,13 @@ void CanvasWidget::tabletEvent(QTabletEvent *event)
     updateCursor();
     if (event->type() == QEvent::TabletPress)
     {
+        // A side button pressed with the tip down is not a new contact; the
+        // stroke under the tip carries on.
+        if (m_tabletSequence && event->button() != Qt::LeftButton)
+        {
+            event->accept();
+            return;
+        }
         if (m_tabletSequence)
         {
             cancelActiveInteraction();
@@ -838,6 +850,12 @@ void CanvasWidget::tabletEvent(QTabletEvent *event)
         event->accept();
         return;
     }
+    if (event->type() == QEvent::TabletRelease && m_tabletSequence
+        && event->buttons().testFlag(Qt::LeftButton))
+    {
+        event->accept();
+        return;
+    }
     if (event->type() == QEvent::TabletRelease && m_tabletSequence)
     {
         if (m_rotatingCanvas)
@@ -941,6 +959,12 @@ void CanvasWidget::keyReleaseEvent(QKeyEvent *event)
 
 void CanvasWidget::leaveEvent(QEvent *event)
 {
+    clearPointerPresence();
+    QWidget::leaveEvent(event);
+}
+
+void CanvasWidget::clearPointerPresence()
+{
     const QRect pointerRect = pointerUpdateRect();
     m_pointerInside = false;
     m_pointerOverWidget = false;
@@ -949,6 +973,5 @@ void CanvasWidget::leaveEvent(QEvent *event)
     {
         requestOverlayUpdate(pointerRect);
     }
-    QWidget::leaveEvent(event);
 }
 }

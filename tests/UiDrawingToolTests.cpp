@@ -10,6 +10,7 @@
 #include "ui/TabletPressureRow.hpp"
 
 #include <QMenu>
+#include <QSignalSpy>
 
 namespace ugurugu
 {
@@ -1403,10 +1404,204 @@ private slots:
         QCOMPARE(canvas.cursor().shape(), Qt::ClosedHandCursor);
         QEvent ungrabMouse(QEvent::UngrabMouse);
         QApplication::sendEvent(&canvas, &ungrabMouse);
-        QCOMPARE(canvas.cursor().shape(), Qt::BlankCursor);
+        // The pan ends with the grab; Space is still held.
+        QCOMPARE(canvas.cursor().shape(), Qt::OpenHandCursor);
         QTest::mouseRelease(
             &canvas, Qt::LeftButton, Qt::NoModifier, center.toPoint());
         QCOMPARE(controller.document().layers.first().strokes.size(), 1);
+        canvas.setPanModifierActive(false);
+        QCOMPARE(canvas.cursor().shape(), Qt::BlankCursor);
+    }
+
+    // A side button pressed with the tip down arrived as another
+    // TabletPress, which canceled the stroke under the tip; its points were
+    // gone and the tip's release found no stroke to finish.
+    void keepsTheStrokeWhenASideButtonIsPressedMidStroke()
+    {
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(100, 100)));
+        CanvasWidget canvas(&controller);
+        canvas.resize(400, 400);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+
+        QPointingDevice stylus(QStringLiteral("Side button stylus"),
+            3,
+            QInputDevice::DeviceType::Stylus,
+            QPointingDevice::PointerType::Pen,
+            QInputDevice::Capability::Position
+                | QInputDevice::Capability::Pressure,
+            1,
+            3);
+        const QPointF center = canvas.rect().center();
+        const auto send = [&](QEvent::Type type,
+                              const QPointF &offset,
+                              Qt::MouseButton button,
+                              Qt::MouseButtons buttons)
+        {
+            const QPointF position = center + offset;
+            QTabletEvent event(type,
+                &stylus,
+                position,
+                canvas.mapToGlobal(position),
+                buttons.testFlag(Qt::LeftButton) ? 0.6 : 0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                Qt::NoModifier,
+                button,
+                buttons);
+            QApplication::sendEvent(&canvas, &event);
+        };
+
+        send(QEvent::TabletPress, {-60.0, 0.0}, Qt::LeftButton, Qt::LeftButton);
+        send(QEvent::TabletMove, {-30.0, 0.0}, Qt::NoButton, Qt::LeftButton);
+        send(QEvent::TabletPress,
+            {-20.0, 0.0},
+            Qt::RightButton,
+            Qt::LeftButton | Qt::RightButton);
+        send(QEvent::TabletMove,
+            {0.0, 0.0},
+            Qt::NoButton,
+            Qt::LeftButton | Qt::RightButton);
+        send(QEvent::TabletRelease,
+            {10.0, 0.0},
+            Qt::RightButton,
+            Qt::LeftButton);
+        QVERIFY(controller.document().layers.first().strokes.isEmpty());
+        send(QEvent::TabletMove, {30.0, 0.0}, Qt::NoButton, Qt::LeftButton);
+        send(QEvent::TabletRelease, {60.0, 0.0}, Qt::LeftButton, Qt::NoButton);
+
+        const QList<Stroke> strokes =
+            controller.document().layers.first().strokes;
+        QCOMPARE(strokes.size(), 1);
+        qreal left = std::numeric_limits<qreal>::max();
+        qreal right = std::numeric_limits<qreal>::lowest();
+        for (const StrokePoint &point : strokes.first().points)
+        {
+            left = std::min(left, point.position.x());
+            right = std::max(right, point.position.x());
+        }
+        const QPointF start = CanvasWidgetTestAccess::mapToDocument(
+            canvas, center + QPointF(-60.0, 0.0));
+        const QPointF end = CanvasWidgetTestAccess::mapToDocument(
+            canvas, center + QPointF(60.0, 0.0));
+        QVERIFY(left <= start.x() + 1.0);
+        QVERIFY(right >= end.x() - 1.0);
+    }
+
+    // Leaving proximity reset Shift and Space along with the pointer, so
+    // lifting the pen during a Space pan turned the next contact into a
+    // stroke while Space was still held.
+    void keepsHeldKeysWhenThePenLeavesProximity()
+    {
+        DocumentController controller;
+        QVERIFY(controller.newDocument(QSize(100, 100)));
+        CanvasWidget canvas(&controller);
+        canvas.resize(400, 400);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.fitToWindow();
+
+        QPointingDevice stylus(QStringLiteral("Proximity stylus"),
+            4,
+            QInputDevice::DeviceType::Stylus,
+            QPointingDevice::PointerType::Pen,
+            QInputDevice::Capability::Position
+                | QInputDevice::Capability::Pressure,
+            1,
+            1);
+        const QPointF center = canvas.rect().center();
+        QTabletEvent hover(QEvent::TabletMove,
+            &stylus,
+            center,
+            canvas.mapToGlobal(center),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Qt::NoModifier,
+            Qt::NoButton,
+            Qt::NoButton);
+        QApplication::sendEvent(&canvas, &hover);
+        canvas.setPanModifierActive(true);
+        QCOMPARE(canvas.cursor().shape(), Qt::OpenHandCursor);
+
+        QSignalSpy pointerChanges(
+            &canvas, &CanvasWidget::pointerPositionChanged);
+        QTabletEvent leave(QEvent::TabletLeaveProximity,
+            &stylus,
+            QPointF(),
+            QPointF(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Qt::NoModifier,
+            Qt::NoButton,
+            Qt::NoButton);
+        QApplication::sendEvent(&canvas, &leave);
+        QCOMPARE(canvas.cursor().shape(), Qt::OpenHandCursor);
+        QVERIFY(!pointerChanges.isEmpty());
+        QCOMPARE(pointerChanges.last().at(1).toBool(), false);
+
+        const QPointF start =
+            CanvasWidgetTestAccess::mapToDocument(canvas, center);
+        QTabletEvent press(QEvent::TabletPress,
+            &stylus,
+            center,
+            canvas.mapToGlobal(center),
+            0.6,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Qt::NoModifier,
+            Qt::LeftButton,
+            Qt::LeftButton);
+        QApplication::sendEvent(&canvas, &press);
+        QCOMPARE(canvas.cursor().shape(), Qt::ClosedHandCursor);
+        const QPointF moved = center + QPointF(40.0, 0.0);
+        QTabletEvent move(QEvent::TabletMove,
+            &stylus,
+            moved,
+            canvas.mapToGlobal(moved),
+            0.6,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Qt::NoModifier,
+            Qt::NoButton,
+            Qt::LeftButton);
+        QApplication::sendEvent(&canvas, &move);
+        QTabletEvent release(QEvent::TabletRelease,
+            &stylus,
+            moved,
+            canvas.mapToGlobal(moved),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Qt::NoModifier,
+            Qt::LeftButton,
+            Qt::NoButton);
+        QApplication::sendEvent(&canvas, &release);
+        QVERIFY(controller.document().layers.first().strokes.isEmpty());
+        QVERIFY(CanvasWidgetTestAccess::mapToDocument(canvas, center) != start);
     }
 
     void undoDuringActiveStrokeCancelsStrokeAndPreservesRedoTail()

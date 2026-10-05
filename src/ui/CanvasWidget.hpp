@@ -173,6 +173,10 @@ public slots:
     void setSelectionMoveMode(bool enabled);
     void handleEscape();
     void cancelActiveInteraction();
+    // Shift and Space are tracked from key events, which stop arriving once
+    // the canvas loses keyboard focus or the window is deactivated.
+    void releaseKeyboardModifiers();
+    void handleTabletLeftProximity();
 
 signals:
     void toolChanged(Tool tool);
@@ -385,6 +389,7 @@ private:
     void endColorPick();
     void pickColorAt(const QPointF &widgetPosition);
     void updatePointerPosition(const QPointF &widgetPosition);
+    void clearPointerPresence();
     void updateCursor();
     void notifyZoomChanged();
     QRect pointerUpdateRect() const;

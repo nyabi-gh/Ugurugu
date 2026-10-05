@@ -1678,10 +1678,23 @@ void CanvasWidget::cancelActiveInteraction()
     endColorPick();
     m_tabletSequence = false;
     m_tabletPointerEraser = false;
+    updateCursor();
+    requestDisplayUpdate();
+}
+
+void CanvasWidget::releaseKeyboardModifiers()
+{
     m_shiftPressed = false;
     setPanModifierActive(false);
     updateCursor();
-    requestDisplayUpdate();
+}
+
+// The pen is gone, so its hover ring goes with it; held keys are not, and a
+// Space pan carries on with the next contact.
+void CanvasWidget::handleTabletLeftProximity()
+{
+    cancelActiveInteraction();
+    clearPointerPresence();
 }
 
 }
