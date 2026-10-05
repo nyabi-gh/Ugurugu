@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import {
+    acceptReplacePrompts,
     brushColor,
     check,
     countBrushPixels,
@@ -18,6 +19,7 @@ export default async function run({ browser, origin }) {
         hasTouch: true,
     });
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);

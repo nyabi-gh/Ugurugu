@@ -3,6 +3,7 @@
 
 import { readFile } from "node:fs/promises";
 import {
+    acceptReplacePrompts,
     check,
     countBrushPixels,
     drawStroke,
@@ -17,6 +18,7 @@ import {
 export default async function run({ browser, origin }) {
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(`${origin}/?autosave=1`);
     await waitForDocumentLoaded(page);

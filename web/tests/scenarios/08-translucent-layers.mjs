@@ -3,6 +3,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import {
+    acceptReplacePrompts,
     check,
     scratchFile,
     screenPixel,
@@ -15,6 +16,7 @@ import {
 export default async function run({ browser, origin }) {
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);
 

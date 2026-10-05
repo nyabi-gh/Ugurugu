@@ -1,20 +1,23 @@
-export interface RecoverySnapshot {
+// One record per document, keyed by the document's id, so two tabs or two
+// documents in one tab never write over each other. session names the tab
+// that owns the record; records written before sessions existed have none.
+export interface RecoveryRecord {
+    key: string;
+    session: string | null;
     name: string;
     bytes: ArrayBuffer;
     savedAt: number;
 }
 
+// crypto.randomUUID exists only in secure contexts; a dev server reached over
+// plain http on a LAN address is not one.
+export function newRecoveryKey(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 const databaseName = "ugurugu-web";
 const storeName = "recovery";
-const slotKey = "slot";
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error("IndexedDB request failed"));
-    });
-}
 
 function openDatabase(): Promise<IDBDatabase> {
     if (typeof indexedDB === "undefined") {
@@ -37,16 +40,16 @@ function openDatabase(): Promise<IDBDatabase> {
     });
 }
 
+// operation issues its requests and returns how to read the result once the
+// transaction has committed; any failed request aborts the whole transaction.
 async function withStore<T>(
     mode: IDBTransactionMode,
-    operation: (store: IDBObjectStore) => IDBRequest<T>,
+    operation: (store: IDBObjectStore) => () => T,
 ): Promise<T> {
     const database = await openDatabase();
     try {
         const transaction = database.transaction(storeName, mode);
-        const result = await requestToPromise(
-            operation(transaction.objectStore(storeName)),
-        );
+        const result = operation(transaction.objectStore(storeName));
         await new Promise<void>((resolve, reject) => {
             transaction.oncomplete = () => resolve();
             transaction.onabort = () =>
@@ -58,30 +61,59 @@ async function withStore<T>(
                     transaction.error ?? new Error("IndexedDB write failed"),
                 );
         });
-        return result;
+        return result();
     } finally {
         database.close();
     }
 }
 
-export async function readRecoverySnapshot(): Promise<RecoverySnapshot | null> {
-    const record = await withStore("readonly", (store) => store.get(slotKey));
-    if (
-        !record ||
-        typeof record !== "object" ||
-        !((record as RecoverySnapshot).bytes instanceof ArrayBuffer)
-    ) {
+function toRecord(key: IDBValidKey, value: unknown): RecoveryRecord | null {
+    if (!value || typeof value !== "object") {
         return null;
     }
-    return record as RecoverySnapshot;
+    const record = value as Partial<RecoveryRecord>;
+    if (!(record.bytes instanceof ArrayBuffer)) {
+        return null;
+    }
+    return {
+        key: String(key),
+        session: typeof record.session === "string" ? record.session : null,
+        name: typeof record.name === "string" ? record.name : "Untitled.ugu",
+        bytes: record.bytes,
+        savedAt: typeof record.savedAt === "number" ? record.savedAt : 0,
+    };
 }
 
-export async function writeRecoverySnapshot(
-    snapshot: RecoverySnapshot,
-): Promise<void> {
-    await withStore("readwrite", (store) => store.put(snapshot, slotKey));
+export function readRecoveryRecords(): Promise<RecoveryRecord[]> {
+    return withStore("readonly", (store) => {
+        const records: RecoveryRecord[] = [];
+        const request = store.openCursor();
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+                return;
+            }
+            const record = toRecord(cursor.key, cursor.value);
+            if (record) {
+                records.push(record);
+            }
+            cursor.continue();
+        };
+        return () => records;
+    });
 }
 
-export async function clearRecoverySnapshot(): Promise<void> {
-    await withStore("readwrite", (store) => store.delete(slotKey));
+export function writeRecoveryRecord(record: RecoveryRecord): Promise<void> {
+    const { key, ...value } = record;
+    return withStore("readwrite", (store) => {
+        store.put(value, key);
+        return () => undefined;
+    });
+}
+
+export function deleteRecoveryRecord(key: string): Promise<void> {
+    return withStore("readwrite", (store) => {
+        store.delete(key);
+        return () => undefined;
+    });
 }

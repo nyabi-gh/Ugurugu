@@ -111,6 +111,110 @@ export async function eventually(page, condition, argument, timeout = 15000) {
     }
 }
 
+// For scenarios that replace a document they have drawn on: the shell asks
+// before discarding unsaved work, and they mean to discard it.
+export function acceptReplacePrompts(page) {
+    page.on("dialog", (dialog) => void dialog.accept());
+}
+
+// Every record in the recovery store, whatever key it is under, oldest first.
+export function recoveryRecords(page) {
+    return page.evaluate(
+        () =>
+            new Promise((resolve, reject) => {
+                const open = indexedDB.open("ugurugu-web", 1);
+                open.onupgradeneeded = () =>
+                    open.result.createObjectStore("recovery");
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const records = [];
+                    const cursor = open.result
+                        .transaction("recovery", "readonly")
+                        .objectStore("recovery")
+                        .openCursor();
+                    cursor.onerror = () => reject(cursor.error);
+                    cursor.onsuccess = () => {
+                        const current = cursor.result;
+                        if (current) {
+                            records.push({
+                                key: String(current.key),
+                                name: current.value.name,
+                                savedAt: current.value.savedAt,
+                                size: current.value.bytes.byteLength,
+                            });
+                            current.continue();
+                            return;
+                        }
+                        open.result.close();
+                        resolve(records.sort((a, b) => a.savedAt - b.savedAt));
+                    };
+                };
+            }),
+    );
+}
+
+// Writes a record the way a session that has since gone away left it.
+export function seedRecoveryRecord(page, key, record) {
+    return page.evaluate(
+        ({ key, record }) =>
+            new Promise((resolve, reject) => {
+                const open = indexedDB.open("ugurugu-web", 1);
+                open.onupgradeneeded = () =>
+                    open.result.createObjectStore("recovery");
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const transaction = open.result.transaction(
+                        "recovery",
+                        "readwrite",
+                    );
+                    transaction
+                        .objectStore("recovery")
+                        .put(
+                            { ...record, bytes: new Uint8Array(record.bytes).buffer },
+                            key,
+                        );
+                    transaction.oncomplete = () => {
+                        open.result.close();
+                        resolve();
+                    };
+                    transaction.onerror = () => reject(transaction.error);
+                };
+            }),
+        { key, record },
+    );
+}
+
+// Holds every IndexedDB open for window.__slowRecovery milliseconds, so a
+// recovery write can be caught in flight. window.__recoveryOpens counts opens.
+export function installRecoveryDelay(page) {
+    return page.addInitScript(() => {
+        window.__recoveryOpens = 0;
+        const open = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function (...args) {
+            window.__recoveryOpens += 1;
+            const request = open.apply(this, args);
+            const delay = window.__slowRecovery ?? 0;
+            if (delay > 0) {
+                const descriptor = Object.getOwnPropertyDescriptor(
+                    IDBRequest.prototype,
+                    "onsuccess",
+                );
+                Object.defineProperty(request, "onsuccess", {
+                    set(handler) {
+                        descriptor.set.call(this, (event) =>
+                            setTimeout(() => handler(event), delay),
+                        );
+                    },
+                    get() {
+                        return descriptor.get.call(this);
+                    },
+                });
+            }
+            return request;
+        };
+    });
+}
+
 export function countBrushPixels(page) {
     return page.evaluate((color) => {
         const canvas = document.querySelector("#document-surface");

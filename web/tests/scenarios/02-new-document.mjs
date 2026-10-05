@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import {
+    acceptReplacePrompts,
     check,
     countBrushPixels,
     drawStroke,
@@ -12,6 +13,7 @@ import {
 export default async function run({ browser, origin }) {
     const context = await browser.newContext();
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await page.goto(`${origin}/`);
     await waitForDocumentLoaded(page);
 

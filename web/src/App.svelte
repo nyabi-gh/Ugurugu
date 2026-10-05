@@ -67,6 +67,7 @@
     } from "./lib/ViewTransform";
     import type { PinchMeasurement, ViewState } from "./lib/ViewTransform";
     import { AutosaveController } from "./lib/AutosaveController.svelte";
+    import { newRecoveryKey } from "./lib/RecoveryStore";
     import { downloadBlob } from "./lib/download";
     import { readPreference, writePreference } from "./lib/Preferences";
 
@@ -173,10 +174,20 @@
         // A stopped engine may hold a half-changed document; the last good
         // snapshot must stay in the slot.
         ready: () => meta !== null && !drawing && engineStopped === null,
+        document: () => documentId,
         revision: () => contentRevision,
-        name: () => documentName,
-        serialize: () => engine.serialize(),
-        open: (bytes, name) => void openDocument(bytes, name),
+        capture: () =>
+            queued(async () => {
+                if (!meta || documentId === null) {
+                    return null;
+                }
+                const id = documentId;
+                const revision = contentRevision;
+                const name = documentName;
+                const bytes = await engine.serialize();
+                return { document: id, revision, name, bytes };
+            }),
+        open: (bytes, name, document) => openDocument(bytes, name, document),
     });
     let exportingGif = $state(false);
 
@@ -234,6 +245,14 @@
     let pendingPoints: number[] = [];
     let chain = Promise.resolve();
     let contentRevision = 0;
+    // Names the open document for its recovery record; a new one per adopt.
+    let documentId: string | null = null;
+    // The revision the last download started from. null when the document
+    // exists nowhere outside this tab and its recovery record, as after a
+    // restore. A started download is not proof the file reached the disk, but
+    // it is the artist's own save, the same point at which the desktop stops
+    // asking.
+    let downloadedRevision: number | null = 0;
     let thumbnailTimer: ReturnType<typeof setTimeout> | null = null;
     let selectionDrag: DragShape | null = null;
     let selectionCombine: CombineValue = selectionCombines.replace;
@@ -328,6 +347,32 @@
     // document has to run in order with everything else: posted out of band it
     // could land between the halves of an older operation, leaving queued work
     // to be applied to a document the user never chose.
+    // Same queue again, for a caller that needs the operation's own result or
+    // failure rather than a status line.
+    function queued<T>(operation: () => Promise<T>): Promise<T> {
+        const result = chain.then(operation);
+        chain = result.then(
+            () => undefined,
+            () => undefined,
+        );
+        return result;
+    }
+
+    function hasUnsavedChanges() {
+        return meta !== null && contentRevision !== downloadedRevision;
+    }
+
+    // Asked before anything replaces the open document. The recovery record
+    // goes with the document, so this is the artist's explicit discard.
+    function confirmReplace(): boolean {
+        if (!hasUnsavedChanges() || engineStopped !== null) {
+            return true;
+        }
+        return window.confirm(
+            `Discard the changes to ${documentName} since its last download?`,
+        );
+    }
+
     function enqueueExclusive(operation: () => Promise<void>): Promise<void> {
         const next = chain.then(operation).catch((error) => {
             status = describe(error);
@@ -698,14 +743,26 @@
         });
     }
 
-    function adoptDocument(next: DocumentMeta, name: string) {
+    function adoptDocument(
+        next: DocumentMeta,
+        name: string,
+        id: string,
+        downloaded: number | null,
+    ) {
+        const previous = documentId;
+        documentId = id;
+        downloadedRevision = downloaded;
+        if (previous !== null && previous !== id) {
+            void autosave.forget(previous).catch((error) => {
+                autosave.status = `Could not clear the recovery slot — ${error}`;
+            });
+        }
         documentGeneration += 1;
         if (tool === "text") tool = "brush";
         meta = next;
         documentName = name;
         frameIndex = 0;
         contentRevision = 0;
-        autosave.reset();
         layers = next.layers;
         presets = next.presets;
         eraserPresets = next.eraserPresets;
@@ -734,8 +791,18 @@
         scheduleThumbnailRefresh();
     }
 
-    function openDocument(bytes: ArrayBuffer, name: string): Promise<void> {
-        return enqueueExclusive(async () => {
+    // recovered names the recovery record the bytes came from; the document
+    // keeps that id so its snapshots go on updating the same record.
+    async function openDocument(
+        bytes: ArrayBuffer,
+        name: string,
+        recovered: string | null = null,
+    ): Promise<boolean> {
+        if (!confirmReplace()) {
+            return false;
+        }
+        let opened = false;
+        await enqueueExclusive(async () => {
             stopPlayback();
             const verdict = checkImportSize(bytes.byteLength, profile);
             if (!verdict.allowed) {
@@ -745,7 +812,13 @@
             status = `Opening ${name}…`;
             try {
                 const next = await engine.open(bytes, profile.undoLimit);
-                adoptDocument(next, name);
+                adoptDocument(
+                    next,
+                    name,
+                    recovered ?? newRecoveryKey(),
+                    recovered === null ? 0 : null,
+                );
+                opened = true;
                 const warning = verdict.warning ? ` ⚠ ${verdict.warning}` : "";
                 status =
                     `${name} — ${next.width}×${next.height}, ` +
@@ -758,10 +831,14 @@
                 status = `Open failed: ${describe(error)}`;
             }
         });
+        return opened;
     }
 
     function createDocument(width: number, height: number): Promise<void> {
         showNewDocument = false;
+        if (!confirmReplace()) {
+            return Promise.resolve();
+        }
         return enqueueExclusive(async () => {
             stopPlayback();
             status = `Creating a ${width}×${height} document…`;
@@ -771,7 +848,7 @@
                     height,
                     profile.undoLimit,
                 );
-                adoptDocument(next, "Untitled.ugu");
+                adoptDocument(next, "Untitled.ugu", newRecoveryKey(), 0);
                 status =
                     `New document — ${next.width}×${next.height}, ` +
                     `${next.frameCount} frames @ ${next.fps} fps, ` +
@@ -1729,11 +1806,17 @@
         }
         return enqueueExclusive(async () => {
             try {
+                const downloading = documentId;
+                const revision = contentRevision;
                 const bytes = await engine.serialize();
                 downloadBlob(
                     new Blob([bytes], { type: "application/octet-stream" }),
                     documentName,
                 );
+                if (documentId === downloading) {
+                    downloadedRevision = revision;
+                }
+                status = `Download of ${documentName} started`;
             } catch (error) {
                 status = `Save failed: ${describe(error)}`;
             }
@@ -1882,6 +1965,12 @@
 
     // Switching windows swallows the key up, and a stuck space turns every
     // later click into a pan.
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+        if (hasUnsavedChanges() && engineStopped === null) {
+            event.preventDefault();
+        }
+    }
+
     function onWindowBlur() {
         spaceHeld = false;
         rotating = false;
@@ -1900,7 +1989,7 @@
         observer.observe(viewportElement);
         resizeDisplay();
         void (async () => {
-            await autosave.readOffer();
+            await autosave.readOffers();
             await createDocument(
                 profile.defaultCanvasWidth,
                 profile.defaultCanvasHeight,
@@ -1930,6 +2019,7 @@
     onkeydown={onKeyDown}
     onkeyup={onKeyUp}
     onblur={onWindowBlur}
+    onbeforeunload={onBeforeUnload}
 />
 
 <!-- File inputs survive mobile sheet dismissal and desktop/mobile switches. -->

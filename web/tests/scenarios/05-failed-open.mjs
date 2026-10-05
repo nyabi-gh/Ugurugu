@@ -3,6 +3,7 @@
 
 import { writeFile } from "node:fs/promises";
 import {
+    acceptReplacePrompts,
     check,
     countBrushPixels,
     dragBetween,
@@ -16,6 +17,7 @@ import {
 export default async function run({ browser, origin }) {
     const context = await browser.newContext();
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);

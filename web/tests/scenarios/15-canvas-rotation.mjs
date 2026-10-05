@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 import {
+    acceptReplacePrompts,
     brushColor,
     check,
     countBrushPixels,
@@ -20,6 +21,7 @@ export default async function run({ browser, origin }) {
         viewport: { width: 1180, height: 820 },
     });
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);

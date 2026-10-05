@@ -3,6 +3,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+    acceptReplacePrompts,
     check,
     countBrushPixels,
     dragBetween,
@@ -26,6 +27,7 @@ export default async function run({ browser }) {
     });
     const context = await browser.newContext();
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(faulty.origin);
     await waitForDocumentLoaded(page);

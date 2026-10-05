@@ -9,29 +9,10 @@ import {
     engineFault,
     eventually,
     installPixelCounter,
+    recoveryRecords,
     startServer,
     waitForDocumentLoaded,
 } from "../harness.mjs";
-
-// Serialised into the page, so it may not close over anything.
-function readRecoverySlot() {
-    return new Promise((resolve, reject) => {
-        const open = indexedDB.open("ugurugu-web", 1);
-        open.onerror = () => reject(open.error);
-        open.onsuccess = () => {
-            const request = open.result
-                .transaction("recovery", "readonly")
-                .objectStore("recovery")
-                .get("slot");
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                open.result.close();
-                const slot = request.result;
-                resolve(slot ? { savedAt: slot.savedAt, size: slot.bytes.byteLength } : null);
-            };
-        };
-    });
-}
 
 // A wasm abort unwinds the engine mid-operation without running any C++
 // cleanup, so whatever it was changing is left half done. From then on the
@@ -55,8 +36,8 @@ export default async function run({ browser }) {
         undefined,
         { timeout: 20000 },
     );
-    const before = await page.evaluate(readRecoverySlot);
-    check(before !== null, "a recovery snapshot exists before the abort");
+    const before = await recoveryRecords(page);
+    check(before.length > 0, "a recovery snapshot exists before the abort");
     const drawn = await countBrushPixels(page);
 
     await page.locator("#layer-add").click();
@@ -81,9 +62,9 @@ export default async function run({ browser }) {
         (await countBrushPixels(page)) === drawn,
         "nothing is drawn on an engine that aborted",
     );
-    const after = await page.evaluate(readRecoverySlot);
+    const after = await recoveryRecords(page);
     check(
-        after?.savedAt === before?.savedAt && after?.size === before?.size,
+        JSON.stringify(after) === JSON.stringify(before),
         "the last good recovery snapshot survives an engine abort",
     );
     await context.close();

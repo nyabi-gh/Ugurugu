@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+    acceptReplacePrompts,
     check,
     countBrushPixels,
     installPixelCounter,
@@ -16,6 +17,7 @@ export default async function run({ browser, origin }) {
         viewport: { width: 1440, height: 1000 },
     });
     const page = await context.newPage();
+    acceptReplacePrompts(page);
     await installPixelCounter(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);
