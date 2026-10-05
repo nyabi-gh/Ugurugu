@@ -55,6 +55,25 @@ private slots:
             next.acquire(), ApplicationInstanceLock::AcquireResult::Acquired);
     }
 
+    // Shutdown kept the lock until detached work finished, so a relaunch in
+    // that window only reported that Ugurugu was already running.
+    void releasesTheInstanceLockBeforeTheProcessEnds()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString lockPath =
+            directory.filePath(QStringLiteral("instance.lock"));
+        ApplicationInstanceLock running(lockPath);
+        QCOMPARE(running.acquire(),
+            ApplicationInstanceLock::AcquireResult::Acquired);
+        running.release();
+        QVERIFY(!running.isAcquired());
+
+        ApplicationInstanceLock relaunched(lockPath);
+        QCOMPARE(relaunched.acquire(),
+            ApplicationInstanceLock::AcquireResult::Acquired);
+    }
+
     void enforcesSingleApplicationInstanceAcrossProcesses()
     {
         QTemporaryDir directory;

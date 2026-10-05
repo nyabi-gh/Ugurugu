@@ -30,6 +30,7 @@ public:
         const ApplicationInstanceLock &) = delete;
 
     AcquireResult acquire(QString *error = nullptr);
+    void release();
     bool isAcquired() const;
     QString filePath() const;
 

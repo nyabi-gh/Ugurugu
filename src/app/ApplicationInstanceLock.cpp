@@ -83,6 +83,12 @@ ApplicationInstanceLock::AcquireResult ApplicationInstanceLock::acquire(
     return AcquireResult::Failed;
 }
 
+void ApplicationInstanceLock::release()
+{
+    m_lock.reset();
+    m_acquired = false;
+}
+
 bool ApplicationInstanceLock::isAcquired() const
 {
     return m_acquired;

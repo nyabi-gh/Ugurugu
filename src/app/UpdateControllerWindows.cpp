@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTextBrowser>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtConcurrentRun>
@@ -42,6 +43,16 @@ namespace
 
 constexpr auto repositoryUrl = "https://github.com/nyabi-gh/Ugurugu";
 constexpr auto lastAutomaticCheckKey = "updates/lastAutomaticCheck";
+
+// Checks and downloads wait on the network and cannot be canceled. Shutdown
+// joins the global pool, so they run on one of their own, which is never
+// destroyed because its destructor would wait for them as well. Their
+// results reach the UI through watchers that go with the window.
+QThreadPool *networkPool()
+{
+    static QThreadPool *const pool = new QThreadPool;
+    return pool;
+}
 
 std::unique_ptr<Velopack::UpdateManager> createUpdateManager()
 {
@@ -165,7 +176,7 @@ public:
                 offerUpdate(*result.update);
             });
 
-        watcher->setFuture(QtConcurrent::run(
+        watcher->setFuture(QtConcurrent::run(networkPool(),
             []()
             {
                 try
@@ -308,7 +319,7 @@ public:
 
         const auto sharedUpdate =
             std::make_shared<const Velopack::UpdateInfo>(update);
-        watcher->setFuture(QtConcurrent::run(
+        watcher->setFuture(QtConcurrent::run(networkPool(),
             [sharedUpdate](QPromise<DownloadResult> &promise)
             {
                 promise.setProgressRange(0, 100);

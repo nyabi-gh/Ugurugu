@@ -288,6 +288,9 @@ int runApplication(int argc, char *argv[])
             QObject::tr("The application encountered an unexpected error."));
     }
 
+    // The window is gone, so a new instance may start while the remaining
+    // background work finishes.
+    instanceLock.release();
     ugurugu::joinDetachedBackgroundWork();
     ugurugu::Logging::shutdown();
     return result;
