@@ -185,7 +185,7 @@
 | D12 · P2 · 미해결 | [MainWindowActions.cpp](../src/ui/MainWindowActions.cpp)의 window 범위 Return 변환 적용이 편집기 Enter와 충돌할 가능성. 캔버스/세션 맥락으로 제한 | pending transform 상태의 line edit·spinbox·IME·버튼 Enter 보존 |
 | D13 · P2 · UX 결정 | [MainWindow.cpp](../src/ui/MainWindow.cpp)의 회전은 즉시 적용, 크기 변경은 pending. 즉시/대기 정책과 안내를 통일할지 결정 | 적용·취소·undo·연속 회전/크기 변경이 선택한 정책과 일치 |
 | D20 · P2 · 미해결 | [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 일반 변환은 구형 `visibilityClip`을 옮기지 않음. 복제 경로는 실체화. 구형 reader의 클립 보존 사례 필요 | schema 5 이전 fixture의 이동/회전/복제·재저장 픽셀 검증. Android reader 제거로 데스크톱 문제를 닫지 않음 |
-| R08 · P2 · 미해결 | [Shortcuts.ts](../web/src/lib/Shortcuts.ts)의 range 방향키·button Enter가 앱 명령으로 처리됨. 과거 소스 함수 재현. 현재 App의 Space 버튼 보호만으로 해결되지 않음 | Tab으로 range/Home/End/방향키, button Enter/Space를 기본 의미로 사용 |
+| R08 · P2 · 부분 해결 | [Shortcuts.ts](../web/src/lib/Shortcuts.ts)의 range 방향키·button Enter가 앱 명령으로 처리됨. 과거 소스 함수 재현. 2026-10-05 코드 기준 button Enter/Space는 App에서 보호됨. range·checkbox의 방향키·Enter·Delete는 여전히 앱 명령(`isTextEntry`) | Tab으로 range/Home/End/방향키, button Enter/Space를 기본 의미로 사용 |
 | R09 · P2 · 미해결 | [App.svelte](../web/src/App.svelte)의 `animateWhileDrawing` 초기화가 localStorage를 보호 없이 읽음. 안전한 preference reader와 세션 기본값 사용 | getter/getItem/setItem/IDB 각각 실패해도 새 문서·다운로드 가능 |
 | R10 · P2 · 미해결 | 웹 dialog·sheet의 focus 순환/복귀·배경 단축키 차단 불일치. `aria-modal`과 실제 배경 조작 정책을 맞춤 | Tab/Shift+Tab/Escape/호출 버튼 복귀, 크기 dialog 뒤 문서가 단축키로 바뀌지 않음 |
 | R12 · P2 · 미해결 | [ColorWheel.cpp](../src/ui/ColorWheel.cpp)·[ColorDock.cpp](../src/ui/ColorDock.cpp): ClickFocus·마우스 중심, HEX는 표시용. 검증 가능한 HEX/RGB 입력과 교환 액션 필요 | 키보드로 임의 색 입력·실제 브러시 적용·값 낭독. accessibleName 하나로 전체 접근성 판단 금지 |
@@ -373,6 +373,35 @@ Qt 번들 내 외부 구성요소 고지·소스/재링크 제공 범위, 웹 �
 - 개발 중 WASM 재빌드 후 `npm run sync-engine`이 필요하다. ABI가 같아도 낡은 엔진 artifact가 남을 수 있으므로 빌드 식별·검증 방식을 정한다.
 - EngineClient/Worker/C ABI의 명령·응답·오류 계약과 진단 정보(앱/ABI/렌더러/프로파일/마지막 성공 revision)를 관리한다. 기본 진단에 문서 본문·개인 경로를 수집하지 않는다.
 
+### 2026-10-05 웹 정적 분석 — 새 발견 W-01–W-16
+
+기준 `143931c`. `web/`·`src/wasm/`·워커·웹 CI를 코드로 추적한 결과다. 이 환경에는 WASM 툴체인이 없어 **실행 재현은 하지 않았다**. "확인"은 코드 경로를 끝까지 따라간 것, "추정"은 실행으로 증명해야 하는 것이다. 기존 ID와 겹치는 부분은 해당 ID에 적고 여기에는 새 원인만 둔다.
+
+기존 ID의 현재 상태: R03(자동저장이 `engine.serialize()` 직접 호출)·R04(`reset()`이 진행 중 snapshot을 무효화하지 않음, 이름을 await 뒤에 읽음)·R05(새 문서·열기·복원 시 dirty 확인 없음, `beforeunload` 없음)·R09(`animateWhileDrawing` 초기화의 무방비 `localStorage`)·R10·R11(`onFileChosen`이 `file.arrayBuffer()` 후 크기 검사) 모두 그대로 남아 있다. R08은 button Enter/Space는 고쳐졌고 range·checkbox의 방향키·Enter·Delete가 앱 명령으로 가는 문제가 남았다(`Shortcuts.ts`의 `isTextEntry`).
+
+| ID·우선순위·상태 | 근거와 원인 | 조치·완료 기준 |
+|---|---|---|
+| W-01 · P1 · 미해결(확인) | [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않는다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
+| W-02 · P1 · 미해결(경로 확인, 효과 추정) | 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
+| W-03 · P1 · 미해결(한도 확인, OOM 추정) | 웹 열기는 파일 바이트(64MiB)만 보고, 엔진은 데스크톱 `DocumentLimits`(4096², 마스크 표 256MB, 래스터 256MB decoded)를 쓴다. 0 마스크는 약 1000:1로 압축되므로 작은 파일이 512MB heap을 넘길 수 있다(계산상 추정). [EngineBridge.cpp](../src/wasm/EngineBridge.cpp)의 열기는 입력을 한 번 더 복사한다. zlib 출력 자체는 `BoundedCompression`이 막는다 | 웹 전용 decode 예산(캔버스·마스크·래스터 총량)을 채택 전에 적용. R11과 함께 닫음. WASM 열기 경로 fuzz |
+| W-04 · P1 · 미해결(확인) | `autosave.start()`가 복원/버리기 배너가 결정되기 전에 시작된다. 배너를 둔 채 한 획만 그어도 15초 안에 단일 `slot`이 새 문서로 바뀌고, 다시 새로고침하면 이전 작업은 사라진다. 두 탭은 서로의 슬롯을 덮고 다른 탭의 살아 있는 문서를 "이전 세션"으로 제안한다 | offer 결정 전 슬롯 보호, 탭·세션별 키. R04의 세대 설계와 함께 |
+| W-05 · P1 · 미해결(확인) | [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts)의 `restore()`는 offer를 비우고 bytes를 워커로 transfer한다. 열기가 실패하면 배너와 메모리 사본이 모두 없다. `discard()`는 현재 세션이 방금 쓴 snapshot도 지우고, `savedRevision`이 같아 다음 편집 전까지 다시 쓰지 않는다 | 열기 성공 뒤에만 offer 소비, 복사본 전달. discard는 offer 출처만 삭제 |
+| W-06 · P2 · 미해결(추정) | `onWindowBlur`가 `drawing`·`panning`·`picking`·`activeTouches`를 초기화하지 않고 `lostpointercapture` 처리가 없다. pointer-up을 잃으면 `ready()`가 계속 false라 자동저장이 멈추고, 대기 중 stroke 작업은 문서 세대 검사 없이 새 문서에 적용된다. 잃은 touch-up 뒤 한 손가락이 pinch로 처리된다. `strokeAppend`/일괄 `strokeEnd`는 `frameIndex`를 실행 시점에 읽어 그리는 중 재생과 어긋날 수 있다 | D03과 같은 정책으로 웹 입력 종료 정의. stroke 작업에 시작 시 frame·세대 캡처 |
+| W-07 · P2 · 미해결(확인) | 크기 dialog·모바일 Sheet가 열려도 App 단축키(Delete, Ctrl+Z, Enter, Ctrl+O)가 배경 문서에 적용된다. Sheet의 Escape는 window 리스너에서 `stopPropagation`만 해 App 핸들러도 실행된다. WobblePanel의 `<summary>`는 Enter/Space가 재생·팬으로 가서 키보드로 열 수 없다 | R10과 함께. 모달 열림 상태 하나로 단축키 차단 |
+| W-08 · P2 · 미해결(확인) | 셸↔워커 프로토콜 버전 검사가 없다. 워커·엔진은 해시 없는 고정 경로라 캐시된 옛 워커가 새 셸과 짝지어질 수 있고, 바뀐 필드는 `undefined`→0으로 엉뚱한 레이어·프레임을 바꾼다 | 워커가 프로토콜 버전을 보고하고 셸이 거부. 엔진 파일명에 빌드 식별 포함 |
+| W-09 · P2 · 미해결(확인) | [EngineBridgeExport.cpp](../src/wasm/EngineBridgeExport.cpp)의 `exportBytes`·`serialized`가 JS 복사 뒤에도 handle에 남아 512MB 예산을 차지한다. GIF 내보내기는 전 프레임을 메모리에 렌더(128MiB 상한)하며 워커를 막는다. 워커 응답 타임아웃·생존 확인이 없다 | 복사 뒤 즉시 해제, 데스크톱처럼 프레임 순차 공급. 7장의 GIF 진행·취소 항목과 함께 |
+| W-10 · P2 · 미해결(확인) | 웹 PNG 내보내기는 premultiplied BGRA를 8비트로 되돌린 뒤 `putImageData`→`toBlob`([CanvasPresenter.ts](../web/src/lib/CanvasPresenter.ts))을 거친다. 브라우저가 다시 premultiply하므로 반투명 픽셀이 데스크톱 PNG와 다를 수 있다. 미리보기=최종 계약의 웹 PNG 경로 위반 가능성 | 엔진 PNG 인코딩으로 통일하거나, 저알파 fixture로 네이티브와 바이트·픽셀 비교 |
+| W-11 · P2 · 미해결(확인) | `release.yml`에 웹 빌드·게시 단계가 없어 itch.io 패키지가 커밋과 연결되지 않는다. `check_itchio_package.mjs`는 엔진 없는 `web` 잡에서만 돈다. [sync-engine.mjs](../web/sync-engine.mjs)는 엔진·zlib 라이선스가 없어도 경고만 한다 | 7장의 strict 검사를 실제 엔진 포함 산출물에 적용하고 CI artifact로 보관 |
+| W-12 · P2 · 미해결(확인) | CI가 `playwright@1.62.1 install chromium`을 쓰는데 lockfile은 `playwright-core` 1.63.0이다. 리비전이 다르면 하니스가 러너의 시스템 Chrome으로 조용히 바뀐다. emsdk는 HEAD를 clone한다(SDK 4.0.7만 고정) | 두 버전 일치·불일치 시 실패. emsdk 커밋 고정 |
+| W-13 · P2 · 미해결(일부 추정) | 웹 고지: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)의 Svelte 5.56.8(실제 5.57.1), `clsx` 누락, 정적 링크된 Qt 내장 서드파티·Emscripten libc++/musl은 링크로만 안내. [NoticesDialog.svelte](../web/src/lib/NoticesDialog.svelte)의 소스 링크가 태그·커밋이 아닌 저장소 루트. Pretendard 서브셋의 OFL 예약 이름 사용 여부 확인 필요 | 실제 웹 artifact 기준 감사(6장 고지 항목과 함께) |
+| W-14 · P3 · 미해결(확인) | JS 입력 검증 공백: `ugu_set_brush` width NaN·색 범위, stabilization 강도, 음수·NaN timestamp의 `quint64` 변환(UB), 짧은 points 배열. 셸 코드에서만 오는 값이라 파일로는 도달 불가 | 브리지 경계에서 유한값·범위 검사 |
+| W-15 · P3 · 미해결(확인) | CSP·보안 헤더 없음(XSS 싱크는 없음, itch.io는 헤더 불가라 `<meta>` CSP). 레이어 이름 변경이 `window.prompt`뿐이라 `allow-modals` 없는 iframe에서 조용히 실패. DPR만 바뀌는 모니터 이동은 ResizeObserver로 감지되지 않음. ColorWheel ARIA·status live region 없음. [SECURITY.md](../SECURITY.md)에 웹 빌드 범위 없음, 웹 `package.json` 버전 0.1.0 | 항목별 |
+| W-16 · P3 · 미해결(확인) | 테스트 공백: Chromium만, 메모리 한계 근처·대용량 열기 없음, WASM 열기 fuzz 없음, 교차 출처 iframe·하위 경로 호스팅 없음 | 위 W 항목의 회귀와 함께 추가 |
+
+확인한 정상 경로: XSS 싱크(`{@html}`·`innerHTML`·`eval`) 없음, 이미지 삽입의 크기·헤더 치수 선검사와 ImageBitmap 해제, 번들 폰트만 파싱, object URL 해제, 레이어 명령의 id 해석, WebGL context loss 대체, 재생 backpressure, 워크플로 `contents: read`·액션 SHA 고정·`pull_request_target` 없음.
+
+데스크톱 대비 웹에 없는 것(아래 선택 기능 외): `.wawa` 열기, JPEG·WebP 내보내기, GIF 배율·투명도 옵션, 시스템 폰트, 변형 샘플링 선택, `.wwpreset`, 단축키 재지정, 필압 끄기·펜 지우개 끝, bmp/gif/tiff 삽입. 되돌리기는 개수(64/32)만 있고 바이트 예산이 연결되지 않는다(R11). root README 세 언어는 웹 빌드를 언급하지 않는다(D25).
+
 ### 실기기·배포 완료 기준
 
 Android Chrome·iPad, 데스크톱 Chromium/Firefox/Safari/Edge 지원 행렬, visibility 복귀·다운로드·복구·낮은 메모리를 확인한다. iframe 내부 단축키·새로고침 후 IDB·PNG/GIF 권한·실제 배포 고지도 별도 시험한다. 자동 WebGL context loss→fallback 검사는 실제 driver loss 경험과 구분한다. Mobile Friendly 표시는 확인한 범위에 맞춘다.
@@ -472,6 +501,8 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 3. **입력·액션·접근성:** D03·D11–D13·D17, R07–R10·R12–R14, D15·D18. 실제 입력과 저장 결과를 함께 확인한다.
 4. **측정 기반 성능:** 기존 두 구현의 A/B, D08·D14·D21·R11과 웹 Worker 점유. 측정 뒤에만 최적화 경계를 선택한다.
 5. **제품 확장·유지보수:** 웹 선택 기능, D09·D10 artifact 점검, D22–D25의 남은 작업, Android A0–A2부터. 독립적으로 가능한 검증은 앞 단계와 병행할 수 있다.
+
+2026-10-05부터 웹 코드 수정을 시작한다. 순서: W-01·W-02(워커 메모리·abort) → R09 → R04·R05·W-04·W-05(복구·문서 교체) → W-03·R11(웹 decode 예산) → W-06–W-10 → W-11–W-13(배포·CI·고지). 공용 엔진을 건드리면 위 공통 완료 규칙대로 native suite와 WASM parity를 함께 확인한다.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
