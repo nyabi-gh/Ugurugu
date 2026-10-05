@@ -29,8 +29,9 @@ export const contentTypes = {
 };
 
 // withoutEngine serves everything but the engine loader, which is how a
-// blocked or missing wasm artifact looks to the browser.
-export function startServer({ withoutEngine = false } = {}) {
+// blocked or missing wasm artifact looks to the browser. engineFault is
+// appended to the loader; see engineFault() below.
+export function startServer({ withoutEngine = false, engineFault = "" } = {}) {
     const server = createServer(async (request, response) => {
         try {
             const url = new URL(request.url, "http://localhost");
@@ -47,7 +48,10 @@ export function startServer({ withoutEngine = false } = {}) {
                 response.end();
                 return;
             }
-            const file = await readFile(join(distRoot, path));
+            let file = await readFile(join(distRoot, path));
+            if (engineFault && path.includes("ugurugu_engine_spike.js")) {
+                file = Buffer.concat([file, Buffer.from(engineFault)]);
+            }
             response.writeHead(200, {
                 "Content-Type":
                     contentTypes[extname(path)] ?? "application/octet-stream",
@@ -66,6 +70,45 @@ export function startServer({ withoutEngine = false } = {}) {
             });
         });
     });
+}
+
+// Runs in the worker after the engine loader and before the worker builds the
+// engine, so it sees the module exactly as the worker will. A failed _malloc
+// returns 0 under ALLOW_MEMORY_GROWTH, and a wasm abort or trap surfaces as a
+// WebAssembly.RuntimeError thrown out of the export that hit it.
+export function engineFault({ failMallocAtLeast = null, abortIn = null }) {
+    return `
+;(() => {
+    const create = createUguruguEngine;
+    createUguruguEngine = (...args) =>
+        create(...args).then((engine) => {
+            const failMallocAtLeast = ${JSON.stringify(failMallocAtLeast)};
+            const abortIn = ${JSON.stringify(abortIn)};
+            if (failMallocAtLeast !== null) {
+                const malloc = engine._malloc;
+                engine._malloc = (size) =>
+                    size >= failMallocAtLeast ? 0 : malloc(size);
+            }
+            if (abortIn !== null) {
+                engine[abortIn] = () => {
+                    throw new WebAssembly.RuntimeError("Aborted(injected)");
+                };
+            }
+            return engine;
+        });
+})();
+`;
+}
+
+// Resolves false instead of throwing when the condition never holds, so a
+// scenario can report it through check() and carry on.
+export async function eventually(page, condition, argument, timeout = 15000) {
+    try {
+        await page.waitForFunction(condition, argument, { timeout });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export function countBrushPixels(page) {
