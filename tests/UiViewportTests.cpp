@@ -1671,6 +1671,56 @@ private slots:
                     != initialRenderSize);
     }
 
+    void warmsPlaybackAtTheSizeTheFirstDisplayRenders()
+    {
+        const std::optional<Document> fixture =
+            animatedFramebufferHistoryDocument();
+        QVERIFY(fixture.has_value());
+
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(*fixture));
+        CanvasWidget canvas(&controller);
+        CanvasWidgetTestAccess::stopAnimationTimer(canvas);
+        // Startup lays the canvas out small before the window reaches its
+        // final size, so the first warmup runs at a size nobody displays.
+        canvas.resize(100, 30);
+        canvas.fitToWindow();
+        const QSize startupSize =
+            CanvasWidgetTestAccess::previewRenderSize(canvas);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::cachedFrameCount(canvas)
+                == controller.document().animationFrames,
+            5000);
+        QCOMPARE(CanvasWidgetTestAccess::cachedRenderSize(canvas), startupSize);
+
+        canvas.resize(384, 288);
+        canvas.fitToWindow();
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const QSize displaySize =
+            CanvasWidgetTestAccess::previewRenderSize(canvas);
+        QVERIFY(displaySize != startupSize);
+        const quint64 synchronousRenders =
+            CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas);
+        CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::cachedRenderSize(canvas) == displaySize
+                && CanvasWidgetTestAccess::cachedFrameCount(canvas)
+                       == controller.document().animationFrames
+                && !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas),
+            5000);
+        for (int frame = 0; frame < controller.document().animationFrames;
+            ++frame)
+        {
+            CanvasWidgetTestAccess::advanceFrame(canvas);
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        }
+        // Only the very first display, with nothing on screen yet, may render
+        // on the GUI thread.
+        QVERIFY(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas)
+                <= synchronousRenders + 1);
+    }
+
     void rendersTheZoomedPreviewOffTheGuiThread_data()
     {
         QTest::addColumn<bool>("animating");

@@ -106,6 +106,10 @@ QImage CanvasWidget::frameImage(int frame)
     {
         resetFrameCacheStorage();
         m_cachedRenderSize = renderSize;
+        // A warmup filling the previous size would deliver nothing usable,
+        // and playback would then render every frame here.
+        cancelFrameCacheWarmup();
+        scheduleFrameCacheWarmup();
     }
     const bool stale = m_frameCacheStaleFrames.contains(frame);
     if (!stale)
