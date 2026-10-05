@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <memory>
+#include <utility>
 
 namespace ugurugu
 {
@@ -42,6 +43,31 @@ public:
             return canvas.m_displayWindow->grabFramebuffer();
         }
         return canvas.grab().toImage();
+    }
+
+    // The bindings objects the display's two pipelines were created with.
+    static std::pair<const void *, const void *> displayPipelineBindings(
+        const CanvasWidget &canvas)
+    {
+        const CanvasDisplayWindow *window = canvas.m_displayWindow;
+        if (!window || !window->m_pipeline || !window->m_overlayPipeline)
+        {
+            return {};
+        }
+        return {window->m_pipeline->shaderResourceBindings(),
+            window->m_overlayPipeline->shaderResourceBindings()};
+    }
+
+    // The bindings objects the display draws with.
+    static std::pair<const void *, const void *> displayBindings(
+        const CanvasWidget &canvas)
+    {
+        const CanvasDisplayWindow *window = canvas.m_displayWindow;
+        if (!window)
+        {
+            return {};
+        }
+        return {window->m_bindings.get(), window->m_overlayBindings.get()};
     }
 
     static QSize cachedRenderSize(const CanvasWidget &canvas)

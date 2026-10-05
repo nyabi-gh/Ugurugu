@@ -66,6 +66,23 @@ QRhi *createRhi()
 #endif
 }
 
+// The pipelines keep a pointer to the bindings object they were created with,
+// so a new texture is swapped into the same object rather than a new one.
+void bindResources(QRhi &rhi,
+    std::unique_ptr<QRhiShaderResourceBindings> &bindings,
+    std::initializer_list<QRhiShaderResourceBinding> resources)
+{
+    if (!bindings)
+    {
+        bindings.reset(rhi.newShaderResourceBindings());
+        bindings->setBindings(resources);
+        bindings->create();
+        return;
+    }
+    bindings->setBindings(resources);
+    bindings->updateResources();
+}
+
 }
 
 CanvasDisplayWindow::CanvasDisplayWindow(CanvasWidget *canvas)
@@ -109,34 +126,35 @@ void CanvasDisplayWindow::fail()
     emit renderFailed();
 }
 
-void CanvasDisplayWindow::rebuildShaderResourceBindings()
+void CanvasDisplayWindow::bindFrameResources()
 {
-    m_bindings.reset(m_rhi->newShaderResourceBindings());
-    m_bindings->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(0,
-            QRhiShaderResourceBinding::VertexStage
-                | QRhiShaderResourceBinding::FragmentStage,
-            m_uniformBuffer.get()),
-        QRhiShaderResourceBinding::sampledTexture(1,
-            QRhiShaderResourceBinding::FragmentStage,
-            m_frameTexture.get(),
-            m_sampler.get()),
-    });
-    m_bindings->create();
+    bindResources(*m_rhi,
+        m_bindings,
+        {
+            QRhiShaderResourceBinding::uniformBuffer(0,
+                QRhiShaderResourceBinding::VertexStage
+                    | QRhiShaderResourceBinding::FragmentStage,
+                m_uniformBuffer.get()),
+            QRhiShaderResourceBinding::sampledTexture(1,
+                QRhiShaderResourceBinding::FragmentStage,
+                m_frameTexture.get(),
+                m_sampler.get()),
+        });
 }
 
-void CanvasDisplayWindow::rebuildOverlayShaderResourceBindings()
+void CanvasDisplayWindow::bindOverlayResources()
 {
-    m_overlayBindings.reset(m_rhi->newShaderResourceBindings());
-    m_overlayBindings->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(
-            0, QRhiShaderResourceBinding::VertexStage, m_uniformBuffer.get()),
-        QRhiShaderResourceBinding::sampledTexture(1,
-            QRhiShaderResourceBinding::FragmentStage,
-            m_overlayTexture.get(),
-            m_sampler.get()),
-    });
-    m_overlayBindings->create();
+    bindResources(*m_rhi,
+        m_overlayBindings,
+        {
+            QRhiShaderResourceBinding::uniformBuffer(0,
+                QRhiShaderResourceBinding::VertexStage,
+                m_uniformBuffer.get()),
+            QRhiShaderResourceBinding::sampledTexture(1,
+                QRhiShaderResourceBinding::FragmentStage,
+                m_overlayTexture.get(),
+                m_sampler.get()),
+        });
 }
 
 bool CanvasDisplayWindow::initialize()
@@ -175,13 +193,13 @@ bool CanvasDisplayWindow::initialize()
     // the shader skips sampling while frameValid is zero.
     m_frameTexture.reset(m_rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1)));
     m_frameTexture->create();
-    rebuildShaderResourceBindings();
+    bindFrameResources();
     m_overlayVertexBuffer.reset(m_rhi->newBuffer(
         QRhiBuffer::Dynamic, QRhiBuffer::VertexBuffer, sizeof(float) * 4 * 4));
     m_overlayVertexBuffer->create();
     m_overlayTexture.reset(m_rhi->newTexture(QRhiTexture::BGRA8, QSize(1, 1)));
     m_overlayTexture->create();
-    rebuildOverlayShaderResourceBindings();
+    bindOverlayResources();
 
     const QShader vertexShader =
         loadShader(QStringLiteral(":/shaders/canvas_frame.vert.qsb"));
@@ -295,7 +313,7 @@ void CanvasDisplayWindow::updateOverlay(
         m_overlayTexture.reset(
             m_rhi->newTexture(QRhiTexture::BGRA8, pixelSize));
         m_overlayTexture->create();
-        rebuildOverlayShaderResourceBindings();
+        bindOverlayResources();
         m_overlayImage = QImage(pixelSize, QImage::Format_ARGB32_Premultiplied);
         m_overlayImage.setDevicePixelRatio(ratio);
         dirty = QRect(QPoint(), size());
@@ -403,7 +421,7 @@ bool CanvasDisplayWindow::renderFrame(QRhiReadbackResult *readback)
             m_frameTexture.reset(
                 m_rhi->newTexture(QRhiTexture::BGRA8, source.size()));
             m_frameTexture->create();
-            rebuildShaderResourceBindings();
+            bindFrameResources();
         }
         const QRect uploadBounds =
             (recreate ? source.rect() : frame.dirtyBounds)
@@ -500,8 +518,6 @@ bool CanvasDisplayWindow::renderFrame(QRhiReadbackResult *readback)
     cb->beginPass(target, Theme::canvasBackground(), {1.0f, 0}, batch);
     cb->setGraphicsPipeline(m_pipeline.get());
     cb->setViewport(viewport);
-    // Passed explicitly: recreating the frame texture replaces the bindings
-    // object, while the pipeline still holds the one it was created with.
     cb->setShaderResources(m_bindings.get());
     const QRhiCommandBuffer::VertexInput vertexInput(m_vertexBuffer.get(), 0);
     cb->setVertexInput(0, 1, &vertexInput);

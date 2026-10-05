@@ -2390,6 +2390,41 @@ private slots:
         QCOMPARE(controller.document().layers.constFirst().strokes.size(), 1);
     }
 
+    // A new frame or overlay texture replaced the bindings object, leaving
+    // both pipelines pointing at a destroyed one. Only the explicit
+    // setShaderResources call kept that from being read.
+    void keepsTheDisplayPipelineBindingsAcrossTextureChanges()
+    {
+        Document document = Document::createDefault(QSize(320, 240));
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(document));
+        CanvasWidget canvas(&controller);
+        canvas.resize(400, 300);
+        canvas.setAnimating(false);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        if (!CanvasWidgetTestAccess::usingGpuDisplay(canvas))
+        {
+            QSKIP("Needs a platform with a GPU display.");
+        }
+        CanvasWidgetTestAccess::grabDisplay(canvas);
+        const auto pipelines =
+            CanvasWidgetTestAccess::displayPipelineBindings(canvas);
+        QVERIFY(pipelines.first && pipelines.second);
+        QCOMPARE(CanvasWidgetTestAccess::displayBindings(canvas), pipelines);
+
+        // A larger window resizes the overlay texture; zooming resizes the
+        // frame texture.
+        canvas.resize(520, 380);
+        canvas.setZoomPercent(200);
+        QTRY_VERIFY(!CanvasWidgetTestAccess::zoomRenderPending(canvas));
+        const QImage shown = CanvasWidgetTestAccess::grabDisplay(canvas);
+        QCOMPARE(shown.size() / shown.devicePixelRatio(), QSize(520, 380));
+        QCOMPARE(
+            CanvasWidgetTestAccess::displayPipelineBindings(canvas), pipelines);
+        QCOMPARE(CanvasWidgetTestAccess::displayBindings(canvas), pipelines);
+    }
+
     void gpuDisplayMatchesTheSoftwareDisplay()
     {
         Document document = Document::createDefault(QSize(320, 240));

@@ -13,6 +13,7 @@ namespace ugurugu
 {
 
 class CanvasWidget;
+class CanvasWidgetTestAccess;
 
 // GPU half of the canvas display: draws the CPU-composed frame image as a
 // textured quad under the document transform, with the checker background
@@ -35,6 +36,7 @@ class CanvasWidget;
 class CanvasDisplayWindow final : public QWindow
 {
     Q_OBJECT
+    friend class CanvasWidgetTestAccess;
 
 public:
     explicit CanvasDisplayWindow(CanvasWidget *canvas);
@@ -54,8 +56,8 @@ private:
     bool initialize();
     void releaseResources();
     void fail();
-    void rebuildShaderResourceBindings();
-    void rebuildOverlayShaderResourceBindings();
+    void bindFrameResources();
+    void bindOverlayResources();
     void updateOverlay(QRhiResourceUpdateBatch *batch, const QSize &pixelSize);
     bool renderFrame(QRhiReadbackResult *readback = nullptr);
 
