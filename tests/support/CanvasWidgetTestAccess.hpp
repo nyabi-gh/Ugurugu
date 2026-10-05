@@ -96,6 +96,11 @@ public:
         return canvas.m_zoomRenderTimer.isActive();
     }
 
+    static void settleZoomRender(CanvasWidget &canvas)
+    {
+        canvas.m_zoomRenderTimer.stop();
+    }
+
     static bool hasCachedFrame(const CanvasWidget &canvas, int frame)
     {
         return canvas.m_frameCache.object(frame) != nullptr;

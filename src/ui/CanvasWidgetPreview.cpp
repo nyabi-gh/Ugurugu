@@ -646,12 +646,30 @@ CanvasWidget::DisplayedFrame CanvasWidget::resolveDisplayedFrame()
         // Rendering here while a worker renders the same frame doubled the
         // work and blocked input for a whole render. The frame already on
         // screen stays up instead, and delivery repaints.
-        const bool cached = !m_frameCacheStaleFrames.contains(m_currentFrame)
-                            && m_frameCache.object(m_currentFrame);
         const QImage &lastDisplayedFrame = m_lastDisplayedFrameIsComposedPreview
                                                ? m_composedPreviewFrame
                                                : m_lastDisplayedFrame;
-        if (!cached && lastDisplayedFrame.size() == renderSize
+        // A zoom or resize only changes the resolution, so workers render the
+        // new size while the display scales the frame already on screen.
+        const bool resized = previewResizePending();
+        if (resized && !m_drawing && !renderSize.isEmpty()
+            && !lastDisplayedFrame.isNull()
+            && (lastDisplayedFrame.size() == m_cachedRenderSize
+                || lastDisplayedFrame.cacheKey() == m_resizeStandInKey))
+        {
+            m_resizeStandInKey = lastDisplayedFrame.cacheKey();
+            if (!m_frameCacheWarmupScheduled)
+            {
+                cancelFrameCacheWarmup();
+                scheduleFrameCacheWarmup();
+            }
+        }
+        const bool cached = !resized
+                            && !m_frameCacheStaleFrames.contains(m_currentFrame)
+                            && m_frameCache.object(m_currentFrame);
+        if (!cached && !lastDisplayedFrame.isNull()
+            && (lastDisplayedFrame.size() == renderSize
+                || lastDisplayedFrame.cacheKey() == m_resizeStandInKey)
             && backgroundRenderWillDeliver(m_currentFrame, renderSize))
         {
             displayedFrame = lastDisplayedFrame;
@@ -1215,6 +1233,12 @@ QSize CanvasWidget::previewRenderSize() const
     return memo.renderSize;
 }
 
+bool CanvasWidget::previewResizePending() const
+{
+    return m_cachedRenderSize.isValid()
+           && previewRenderSize() != m_cachedRenderSize;
+}
+
 PreviewSurfaceUsage CanvasWidget::previewSurfaceUsage() const
 {
     PreviewSurfaceUsage usage;
@@ -1367,6 +1391,7 @@ void CanvasWidget::invalidateFrames()
     cancelInteractionFrameWarmup();
     resetFrameCacheStorage();
     m_cachedRenderSize = {};
+    m_resizeStandInKey = 0;
     m_previewSplit = {};
     m_previewSplitLayer = QUuid();
     m_previewSplitFrame = -1;
@@ -1424,8 +1449,9 @@ void CanvasWidget::scheduleFrameCacheWarmup()
 {
     // Paused views prepare their current interaction frame separately. Defer
     // all other frames until playback resumes so speculative work cannot
-    // compete with continued drawing.
-    if (!m_animating)
+    // compete with continued drawing. A resize still renders the current
+    // frame here, since nothing else prepares it off the GUI thread.
+    if (!m_animating && !previewResizePending())
     {
         return;
     }
@@ -1440,17 +1466,13 @@ void CanvasWidget::scheduleFrameCacheWarmup()
                 return;
             }
             m_frameCacheWarmupScheduled = false;
-            if (m_frameCacheWarmupActive || !m_animating
-                || !m_wobbleAnimationEnabled || m_drawing)
-            {
-                resumeDeferredDisplay();
-                return;
-            }
-
             const QSize renderSize = previewRenderSize();
             const int frameCount =
                 std::max(1, m_controller->document().animationFrames);
-            if (renderSize.isEmpty() || frameCount <= 1)
+            const bool wholeAnimation =
+                m_animating && m_wobbleAnimationEnabled && frameCount > 1;
+            if (m_frameCacheWarmupActive || m_drawing || renderSize.isEmpty()
+                || (!wholeAnimation && !previewResizePending()))
             {
                 resumeDeferredDisplay();
                 return;
@@ -1463,8 +1485,9 @@ void CanvasWidget::scheduleFrameCacheWarmup()
 
             QVector<int> missingFrames;
             QVector<int> staleFrames;
-            missingFrames.reserve(frameCount);
-            for (int offset = 0; offset < frameCount; ++offset)
+            const int warmedFrames = wholeAnimation ? frameCount : 1;
+            missingFrames.reserve(warmedFrames);
+            for (int offset = 0; offset < warmedFrames; ++offset)
             {
                 const int frame = (m_currentFrame + offset) % frameCount;
                 if (!m_frameCache.object(frame))

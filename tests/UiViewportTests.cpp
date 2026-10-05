@@ -1671,6 +1671,73 @@ private slots:
                     != initialRenderSize);
     }
 
+    void rendersTheZoomedPreviewOffTheGuiThread_data()
+    {
+        QTest::addColumn<bool>("animating");
+        QTest::newRow("paused") << false;
+        QTest::newRow("playing") << true;
+    }
+
+    void rendersTheZoomedPreviewOffTheGuiThread()
+    {
+        QFETCH(bool, animating);
+        const std::optional<Document> fixture =
+            animatedFramebufferHistoryDocument();
+        QVERIFY(fixture.has_value());
+
+        DocumentController controller;
+        QVERIFY(controller.loadDocument(*fixture));
+        CanvasWidget canvas(&controller);
+        canvas.resize(384, 288);
+        canvas.setAnimating(animating);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        if (animating)
+        {
+            CanvasWidgetTestAccess::stopAnimationTimer(canvas);
+        }
+        canvas.setZoomPercent(100);
+        QTRY_VERIFY(!CanvasWidgetTestAccess::zoomRenderPending(canvas));
+        CanvasWidgetTestAccess::resolveDisplayedFrame(canvas);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas), 5000);
+        const QSize initialSize =
+            CanvasWidgetTestAccess::previewRenderSize(canvas);
+        QCOMPARE(CanvasWidgetTestAccess::cachedRenderSize(canvas), initialSize);
+        QVERIFY(CanvasWidgetTestAccess::hasCachedFrame(
+            canvas, canvas.currentFrame()));
+        const quint64 synchronousRenders =
+            CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas);
+
+        canvas.setZoomPercent(50);
+        CanvasWidgetTestAccess::settleZoomRender(canvas);
+        const QSize zoomedSize =
+            CanvasWidgetTestAccess::previewRenderSize(canvas);
+        QVERIFY(zoomedSize != initialSize);
+
+        // The frame already on screen stands in, scaled by the display, until
+        // the worker delivers the new resolution.
+        QCOMPARE(
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas).image.size(),
+            initialSize);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            CanvasWidgetTestAccess::cachedRenderSize(canvas) == zoomedSize
+                && CanvasWidgetTestAccess::hasCachedFrame(
+                    canvas, canvas.currentFrame())
+                && !CanvasWidgetTestAccess::frameCacheWarmupActive(canvas),
+            5000);
+        if (animating)
+        {
+            QCOMPARE(CanvasWidgetTestAccess::cachedFrameCount(canvas),
+                controller.document().animationFrames);
+        }
+        QCOMPARE(
+            CanvasWidgetTestAccess::resolveDisplayedFrame(canvas).image.size(),
+            zoomedSize);
+        QCOMPARE(CanvasWidgetTestAccess::synchronousPreviewRenderCount(canvas),
+            synchronousRenders);
+    }
+
     void keepsRegionalStrokePreviewFreeOfSeams()
     {
         DocumentController controller;

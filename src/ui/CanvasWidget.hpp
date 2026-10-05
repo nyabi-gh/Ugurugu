@@ -312,6 +312,7 @@ private:
         const QPointF &widgetPosition, bool *inside = nullptr) const;
     QPointF clampedDocumentPosition(const QPointF &position) const;
     QSize previewRenderSize() const;
+    bool previewResizePending() const;
     PreviewSurfaceUsage previewSurfaceUsage() const;
     void updateFrameCacheBudget();
     QImage frameImage(int frame);
@@ -645,6 +646,9 @@ private:
     // reference would make each patch of the preview copy the whole frame.
     QImage m_lastDisplayedFrame;
     bool m_lastDisplayedFrameIsComposedPreview = false;
+    // Cache key of a displayed frame whose only flaw is its resolution, so it
+    // may stand in for a different render size until workers deliver.
+    qint64 m_resizeStandInKey = 0;
     bool m_displayAwaitsBackgroundFrame = false;
     QTimer m_animationTimer;
     QTimer m_selectionAnimationTimer;
