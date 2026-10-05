@@ -159,6 +159,9 @@ endif()
 
 set(UGURUGU_DEPLOY_RUNTIME_OPTIONS)
 if(WIN32)
+    # The canvas draws through Direct3D 11 or the raster engine, never
+    # OpenGL, so Mesa's software OpenGL (opengl32sw.dll) is not shipped.
+    list(APPEND UGURUGU_DEPLOY_TOOL_OPTIONS --no-opengl-sw)
     # The deploy script's compiler runtime copy depends on windeployqt
     # finding the VC redist directory in the environment and silently skips
     # it otherwise, which shipped releases without MSVCP140_1.dll. The

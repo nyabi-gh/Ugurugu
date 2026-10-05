@@ -262,7 +262,18 @@ $requiredFiles = @(
     'Velopack-LICENSE.txt'
     'zlib-LICENSE.txt'
     'libtiff-LICENSE.txt'
+    'LGPL-3.0.txt'
+    'libwebp-LICENSE.txt'
+    'libwebp-PATENTS.txt'
 )
+$unexpectedFiles = @(
+    'opengl32sw.dll'
+)
+foreach ($relativePath in $unexpectedFiles) {
+    if (Test-Path -LiteralPath (Join-Path $resolvedPackageRoot $relativePath)) {
+        throw "The installed package unexpectedly contains $relativePath."
+    }
+}
 foreach ($relativePath in $requiredFiles) {
     $requiredPath = Join-Path $resolvedPackageRoot $relativePath
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {

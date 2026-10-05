@@ -88,6 +88,12 @@ int main(int argc, char **argv)
         QDir(resourceRoot).filePath(QStringLiteral("zlib-LICENSE.txt"));
     const QString tiffLicenseFile =
         QDir(resourceRoot).filePath(QStringLiteral("libtiff-LICENSE.txt"));
+    const QString qtLicenseFile =
+        QDir(resourceRoot).filePath(QStringLiteral("LGPL-3.0.txt"));
+    const QString webpLicenseFile =
+        QDir(resourceRoot).filePath(QStringLiteral("libwebp-LICENSE.txt"));
+    const QString webpPatentsFile =
+        QDir(resourceRoot).filePath(QStringLiteral("libwebp-PATENTS.txt"));
 
     if (!QFileInfo(jpegPlugin).isFile())
     {
@@ -138,6 +144,9 @@ int main(int argc, char **argv)
         || !QFileInfo(loggingLicenseFile).isFile()
         || !QFileInfo(compressionLicenseFile).isFile()
         || !QFileInfo(tiffLicenseFile).isFile()
+        || !QFileInfo(qtLicenseFile).isFile()
+        || !QFileInfo(webpLicenseFile).isFile()
+        || !QFileInfo(webpPatentsFile).isFile()
         || !QFileInfo(updaterLicenseFile).isFile())
     {
         return fail(QStringLiteral(

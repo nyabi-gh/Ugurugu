@@ -14,18 +14,23 @@ Windows contain everything listed below except the web section; the browser
 build contains only Qt, Pretendard JP and the components named under
 [Web (WebAssembly) build](#web-webassembly-build).
 
-## Qt 6
+## Qt 6.11.1
 
 Copyright © The Qt Company Ltd. and other contributors.
 
 Ugurugu uses Qt under the GNU Lesser General Public License
-version 3. Desktop release packages ship Qt as separate dynamic libraries, so
+version 3. The desktop packages ship the Qt Core, Gui, Widgets and Concurrent
+libraries with their platform, style and image format plugins; Qt Shader
+Tools and Qt Linguist are used only while building. Desktop release packages
+ship Qt as separate dynamic libraries, so
 the bundled Qt can be replaced with a modified build of the same version
 without rebuilding Ugurugu. LGPLv3 adds permissions on top of
 GPLv3; both texts are included, as `LGPL-3.0.txt` and `LICENSE`. Qt source
 for the bundled libraries and the full relinking obligations are available
-from <https://www.qt.io/licensing/open-source-lgpl-obligations> and
-<https://code.qt.io/>. Qt's Korean and Japanese translation catalogs
+from <https://www.qt.io/licensing/open-source-lgpl-obligations>,
+<https://download.qt.io/archive/qt/6.11/6.11.1/> and <https://code.qt.io/>.
+The third-party code Qt itself contains, and its licenses, are listed at
+<https://doc.qt.io/qt-6/licenses-used-in-qt.html>. Qt's Korean and Japanese translation catalogs
 (`qtbase_ko.qm`, `qtbase_ja.qm` from the qttranslations module) are compiled
 into the desktop app's resources under the same license.
 
