@@ -316,6 +316,15 @@ Qt 6.11.2 `QWidgetRepaintManager::paintAndFlush`는 래스터로 칠할 영역�
 
 probe는 커밋하지 않았다. 재현에는 `kimcozo_service.ugu`(저장소 미포함, 루트에 둠)와 위 조건이 필요하다.
 
+### D27 · P1 · 줌·창 크기 변경 뒤 GUI 스레드 동기 렌더 — 해결 (브랜치 `perf/zoom-background-render`, Windows 측정)
+
+물리 배율 100% 미만에서는 미리보기 렌더 크기가 줌을 따라간다. 줌 입력이 80ms 멈추면 `frameImage()`가 프레임 캐시를 비우고 현재 프레임을 GUI 스레드에서 렌더했다. 줌 경로는 warmup을 예약하지 않았으므로, 재생 중에는 재생 틱마다 프레임 하나씩 GUI 스레드 렌더가 이어졌다. 워커를 기다리는 동안 화면 프레임을 유지하는 경로는 크기가 같을 때만 동작해서 이 경우를 덮지 못했다. 100% 이상에서는 렌더 크기가 원본에 고정되어 문제가 없었다.
+
+- **수정:** 렌더 크기만 바뀐 경우(`previewResizePending`: 캐시 크기는 유효한데 목표 크기가 다름)에는 화면의 프레임을 대역으로 표시한다. GPU 표시는 문서 사각형에 텍스처를 매핑하므로 크기가 달라도 위치가 맞다. 새 크기는 frame-cache warmup이 워커에서 렌더한다. 재생 중이면 전체 프레임, 정지 중이면 현재 프레임만 렌더한다. 대역은 `m_resizeStandInKey`로 식별하고, 문서 내용·크기를 바꾸는 `invalidateFrames`에서 해제한다. 따라서 다른 문서 기하의 프레임이 대역이 되지 않는다.
+- **측정 (실제 앱, 4K 모니터 최대화, `kimcozo_service.ugu` 1024×768·30프레임, SendInput 휠 + 2ms 간격 `WM_NULL` 응답 지연, 33ms 넘는 정지 수 / 최대):** 재생 중 빠른 확대 16 / 60ms(1.2초 중 약 0.9초 정지), 느린 확대(150ms 간격) 23–25 / 57ms, 느린 축소 6–7 / 52ms → 모든 시나리오 0 / 최대 5ms. 정지 상태 느린 줌 2–3 / 52ms → 0 / 3.6ms. 정지 상태에서 12칸 축소 후 같은 수만큼 확대해 1.5초 뒤 찍은 화면은 시작 화면과 픽셀이 같다.
+- **회귀:** [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `rendersTheZoomedPreviewOffTheGuiThread`(paused/playing). 줌 직후 표시가 이전 크기 대역이고, 워커가 새 크기 프레임을 채운 뒤 동기 렌더 수가 늘지 않는지 확인한다. 수정 전에는 두 행 모두 실패한다. offscreen 전체 스위트와 windows 플랫폼 `ui_viewport`·`ui_drawing_tools`가 통과한다.
+- **남은 것:** 재생 중에는 새 크기 프레임이 도착할 때까지 애니메이션이 대역 프레임에 머문다. 그 시간은 재지 않았다. 줌 직후 바로 그리기를 시작하는 경로와 macOS(Retina·트랙패드 핀치)는 확인하지 않았다.
+
 ### D08 · P2 · 프레임 warmup의 동시 임시 표면 — 조사·예산 공백
 
 [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)의 최대 8 worker와 [CanvasWidgetPreview.cpp](../src/ui/CanvasWidgetPreview.cpp)의 동시 렌더에 대해 [PreviewRenderPolicy.cpp](../src/render/PreviewRenderPolicy.cpp)의 임시 비용 계산은 동시 작업 전체를 반영하지 않는다. 보존 표면 예산 테스트가 프로세스 peak를 보장하지 않는다.
