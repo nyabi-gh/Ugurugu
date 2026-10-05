@@ -1,6 +1,6 @@
 # Ugurugu 통합 검토·개선 계획
 
-정리일: 2026-10-03 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리 · 데스크톱 성능: `perf/desktop-render-pipeline` 브랜치(`be2a06d` 기준, 그리기 지연 작업 `c9d6808`까지)
+정리일: 2026-10-05 · 제품: **2.2.10** · 코드 기준: `054fca681894fa4f0c1621356a5c163d00192cb0` 이후 현재 작업 트리 · 데스크톱 성능: `perf/desktop-render-pipeline` 브랜치(`be2a06d` 기준, 그리기 지연 작업 `c9d6808`까지)
 
 이 문서는 데스크톱·공용 엔진·웹의 검토 결과, 성능 후속 작업, Android 이식 계획을 합친 **현재 상태의 단일 기준 문서**다. 과거 문서의 발견 번호 `R01–R14`, `D01–D25`는 추적용으로 유지한다. 중복 번호를 독립 결함 수로 합산하지 않는다.
 
@@ -48,6 +48,7 @@
 | 2026-09-08 웹 기능 추가 | 브라우저 21시나리오·194체크, WASM 스모크, 관련 네이티브 2스위트, Svelte 검사. 당시 완전 패키지 17파일·11.40MiB | 모든 브라우저·모바일·iframe 권한·배포 의무 검토 |
 | 2026-09-16 Android 계획 작성 | `73004d7`, macOS Qt 6.11.2 재빌드·13/13, Svelte 오류·경고 0 기록 | Android 빌드·APK·S Pen·S8 실측 |
 | 2026-10-03 데스크톱 성능 | Windows 11 x64, VS 18 BuildTools ClangCL(clang-cl 22.1.3), Qt 6.11.2 Release. CTest 13/13. 렌더 A/B는 `ugurugu_render_benchmark`, UI는 offscreen 회귀와 실제 D3D11 창 probe. 세부는 5절 | macOS Metal·Apple Silicon, 실제 펜 입력, 배포 Qt 6.11.1, 사용자 문서 외 실제 작업 문서 |
+| 2026-10-05 macOS 데스크톱 | macOS 27.0.1 arm64, Apple clang 21, Homebrew Qt 6.11.2 Debug/Release. offscreen CTest 13/13, UI 5개 스위트를 `QT_QPA_PLATFORM=cocoa`(Metal 표시)로 실행해 실패 0. Release 설치 번들과 `ugurugu_package_smoke_test` 통과. 수정 전후 비교는 별도 worktree에서 같은 설정으로 실행 | 배포 Qt 6.11.1(aqt), Windows 빌드·패키지(이번 변경 중 Windows 전용 코드는 이 환경에서 컴파일하지 않음), WASM(툴체인 없음), 실제 펜·앱 수동 조작 |
 | 2026-09-18 현재 작업 | bounded decode·Sparkle 2.9.6·최종 저장 경로 확인·Windows 패키지 격리 smoke 반영. Svelte 검사 0 오류·0 경고, 웹 production build와 itch.io 패키지 검사 통과. Windows CMake에서 zlib 1.3.2 구성과 Clang 22 식별까지 확인 | Qt 6 개발 패키지 부재로 네이티브 build·CTest·실제 Windows 패키지 smoke 미실행. WASM·macOS package/update·새 peak memory 측정 미실행 |
 
 9월 8일 초기 검토의 12파일·0.79MiB 웹 빌드는 **WASM 없는 셸**이었다. 이후 실엔진 패키지 기록과 혼동하지 않는다. 13은 CTest 스위트 수이지 개별 테스트 수가 아니다.
@@ -87,7 +88,8 @@
 - 구현됨: 공용 저장 대화상자가 형식별 기본 접미사를 선택 전에 설정한다. 알려진 이미지 접미사는 선택 필터보다 우선해 PNG/JPEG 명시를 보존하고, 알 수 없는 접미사는 선택 형식의 접미사를 덧붙인다. 정규화로 경로가 바뀌고 그 최종 대상이 이미 있으면 별도 확인한다. 프로젝트·PNG/JPEG·GIF/WebP·WWP 프리셋이 같은 경로를 사용하며 기존 `QSaveFile` 저장은 유지한다. [Qt `defaultSuffix`](https://doc.qt.io/qt-6/qfiledialog.html#defaultSuffix-prop), [Qt overwrite 확인 기본값](https://doc.qt.io/qt-6/qfiledialog.html#Option-enum).
 - 회귀 추가: 기본 접미사, 확장자 없음·다른 접미사·대소문자가 다른 같은 접미사, 정규화 뒤 확인 취소 시 기존 파일 보존, 이미 확인된 같은 이름 경로를 검사한다.
 - 확인 (2026-10-03, Windows 11 x64, Qt 6.11.2 Release(ClangCL)): offscreen(Qt 위젯 대화상자)에서 `configuresTheSaveDialogDefaultSuffix`·`normalizesSaveExtensions`·`cancelingFinalOverwritePreservesTheExistingFile`(2행)·`acceptsAnAlreadyConfirmedFinalSavePath` 통과. windows 플랫폼(Windows 기본 대화상자)에서는 나머지는 통과하지만 `configuresTheSaveDialogDefaultSuffix`가 간헐적으로 실패한다(이날 9회 중 5회, `reject()` 뒤에도 경로가 반환됨). 같은 날의 다른 변경(D02) 전후 모두에서 나타났다. 테스트가 기본 대화상자가 뜨기 전에 `reject()`를 부르는 시점 문제인지 제품 동작인지는 확인하지 않았다.
-- 남음: Windows·macOS 기본 대화상자에서 접미사 없음·다른 접미사·취소를 사람이 수용 검증하고, 위 windows 플랫폼 실패의 원인을 확인한다. 이 검증 전에는 해결로 닫지 않는다.
+- 원인 확인 (2026-10-05, `295fdd6`): 기본 대화상자에 코드로 `reject()`를 호출하면 `finished(0)` 직후 패널이 `Accepted`로 다시 끝난다. 별도 probe에서 macOS 기본 패널은 지연 0·300ms 모두 매번 그랬다. 제품 코드에는 열린 대화상자를 코드로 닫는 경로가 없으므로 제품 결함이 아니라 테스트 방식 문제다. 테스트는 `AA_DontUseNativeDialogs`로 Qt 위젯 대화상자를 띄워 우리 설정만 검사한다. offscreen·cocoa 모두 통과.
+- 남음: Windows·macOS 기본 대화상자에서 접미사 없음·다른 접미사·취소를 사람이 수용 검증한다. 이 검증 전에는 해결로 닫지 않는다.
 
 ### R03 · P1 · 웹 저장 순서 — 부분 해결
 
@@ -138,13 +140,13 @@
 
 ## 4. 렌더·변환·입력·접근성
 
-### D01 / R02 · P1 · 이미지와 선택 변환의 합성 순서 — 검증 대기
+### D01 / R02 · P1 · 이미지와 선택 변환의 합성 순서 — 해결
 
 근거: Qt는 `QTransform` 곱의 왼쪽 변환을 먼저 적용한다. [Qt 변환 합성](https://doc.qt.io/qt-6/qtransform.html#combining-transforms). [DocumentControllerStrokes.cpp](../src/document/DocumentControllerStrokes.cpp)의 마스크 없는 `duplicateStrokes`·`transformStrokes`는 자산→문서 배치 뒤에 문서 좌표 delta를 적용하도록 `existing * delta`로 결합한다. [CanvasWidget.cpp](../src/ui/CanvasWidget.cpp)와 [CanvasWidgetSelection.cpp](../src/ui/CanvasWidgetSelection.cpp)의 떠 있는 선택 세션도 기존 누적 변환 뒤에 새 이동·회전·크기·뒤집기 delta를 붙인다. 마스크 분기의 직렬화된 `PixelSelectionOp` 계약은 바꾸지 않았다.
 
 - 회귀: [StrokeCommandTests.cpp](../tests/StrokeCommandTests.cpp)는 비균일 축소·중앙 배치 이미지의 복제와 이동→회전→뒤집기를 독립적인 점 매핑 oracle, 렌더 픽셀, undo/redo와 비교한다. [UiSelectionTests.cpp](../tests/UiSelectionTests.cpp)는 떠 있는 선택 영역에서 같은 연속 동작의 누적 행렬, 미리보기·커밋 픽셀, undo/redo를 비교한다.
 - 확인 (2026-10-03, Windows 11 x64, Qt 6.11.2 Release(ClangCL)): `composesPlacedImageTransformsInDocumentCoordinates`(document 스위트)와 `composesFloatingSelectionActionsInDocumentOrder`(ui_selection, offscreen·windows 플랫폼 모두) 통과. 수정 전 코드에서 실패하는지는 다시 확인하지 않았다.
-- 남음: macOS에서 같은 suite를 실행해 통과를 확인한다. 그전에는 해결로 닫지 않는다.
+- 확인 (2026-10-05, macOS 27 arm64, Qt 6.11.2): `document` 스위트(offscreen)와 `ui_selection` 스위트(offscreen·cocoa) 통과.
 
 ### D02 · P1 · 우글거림 OFF에서 pen-up 프리뷰 승격 — 해결 (`bc36217`)
 
@@ -296,7 +298,7 @@ Qt 6.11.2 `QWidgetRepaintManager::paintAndFlush`는 래스터로 칠할 영역�
 1. **실제 펜 확인(최우선).** 앱은 시작 시 Wacom WinTab을 켜는데, WinTab 패킷은 `QWindowsScreen::windowAt`으로 대상 창을 찾으므로 `CanvasDisplayWindow`로 가서 전달될 것으로 예상하지만 합성 입력으로 재현할 수 없어 확인하지 못했다. 사용자의 펜으로 그리기·필압·지우개 끝·호버 커서 링·근접 이탈을 확인하고, 체감 끊김이 사라졌는지 묻는다. 계측이 필요하면 `QApplication::notify`를 감싸 2ms 이상 이벤트와 태블릿 이벤트를 CSV로 남기는 임시 계측을 다시 만든다(이번 세션의 것은 커밋하지 않았다).
 2. **눈으로 확인할 UI.** 선택 액션바가 캔버스 위에 보이는지, 도크를 끌 때 위치 표시가 캔버스에 가려지지 않는지, 창 크기 변경·최소화 복귀·모니터 간 이동(배율 변경)·전체 화면에서 캔버스가 맞게 그려지는지.
 3. **미해결 관찰.** windows 플랫폼 테스트에서 획의 첫 이동 직후 캔버스 위젯 전체 paint가 한 번에 2회 생긴다(이후 이동에는 0회). GPU 표시는 유지되고, 활성화·노출·배율 변화 이벤트는 없었다. 원인 미확인이며 회귀 테스트는 첫 이동 뒤부터 센다.
-4. **macOS.** Metal 경로(`QRhiMetalInitParams`, `MetalSurface`)는 컴파일·실행 모두 확인하지 못했다. 입력 투명 자식 창의 이벤트 전달, Retina 배율, 트랙패드 제스처 전달을 확인한다.
+4. **macOS.** 2026-10-05 macOS 27(Apple Silicon, Homebrew Qt 6.11.2)에서 Metal 경로를 빌드했고, cocoa 플랫폼 UI 스위트에서 GPU 표시 테스트(`gpuDisplayMatchesTheSoftwareDisplay` 등)가 통과했다. 실제 앱에서 입력 투명 자식 창의 이벤트 전달, Retina 배율, 트랙패드 제스처 전달은 사람이 확인해야 한다.
 5. **남은 지연.** 화면 잠금이 아닌 상태에서 캔버스 창 프레임의 GUI 작업은 평균 약 0.4ms이고, 입력→present 반환 p50 3.8ms의 대부분은 vsync 대기다. 따라서 렌더 스레드로 옮겨도 GUI 작업에서 줄일 여지는 작다. 먼저 PresentMon 등으로 present 이후 화면 표시까지의 실제 지연(스왑체인 대기열 깊이·DWM 합성)을 재고, 그 결과로 frame latency waitable object나 present 직전 최신 획 반영이 필요한지 판단한다. 펜 입력에서 화면까지의 지연을 더 줄이려면 이 구조 위에서 렌더 스레드로 옮기고 present 직전에 최신 획을 반영하는 방법을 검토한다. 먼저 PresentMon 등으로 실제 표시 지연을 잰다.
 
 probe는 커밋하지 않았다. 재현에는 `kimcozo_service.ugu`(저장소 미포함, 루트에 둠)와 위 조건이 필요하다.
@@ -337,8 +339,8 @@ AA/가변 필압 긴 획의 반복 래스터(5절 측정 있음), 선택 clip pa
 |---|---|---|
 | D06 · P1 · 부분 해결 | Windows 설치본에 [qt.conf](../resources/windows/qt.conf)를 두어 plugin 기준을 실행 파일 디렉터리로 제한한다. Qt는 원래 실행 파일 옆 경로뿐 아니라 설치 prefix도 탐색하므로 환경변수 정리만으로는 격리가 완전하지 않다. [Qt plugin deployment](https://doc.qt.io/qt-6/deployment-plugins.html), [Using `qt.conf`](https://doc.qt.io/qt-6/qt-conf.html). [TestWindowsPackage.ps1](../tests/TestWindowsPackage.ps1)은 PATH를 Windows 시스템 디렉터리만으로 다시 만들고 Qt/QML plugin 환경변수를 제거한 뒤 실제 `Ugurugu.exe`와 [PackageSmoke.cpp](../tests/PackageSmoke.cpp)를 실행한다. 설정·복구 경로도 임시 profile로 격리하며 CI 설치 트리와 최종 Velopack 설치본이 같은 검사를 사용한다. | 실제 앱 기동과 JPEG read-back이 성공해야 한다. `qwindows.dll` 또는 `Qt6Core.dll`을 뺀 임시 복사본은 반드시 실패한다. 실제 CI/release 성공을 확인하고, Velopack의 외부 `vcredist145-x64` prerequisite는 Qt·개발 도구가 없는 clean Windows 설치에서 별도 검증한다. |
 | D09 · P2 · 미해결 | `.ugu` 파일 연결과 이미 실행 중인 앱에 두 번째 경로 전달 부재. [main.cpp](../src/main.cpp), [Info.plist.in](../resources/macos/Info.plist.in) | 새/기존 인스턴스에서 파일 열기, 공백·한글 경로·dirty 보호. `.wwpreset`은 지원 시 프로젝트와 다른 라우팅 |
-| D10 · P2 · 배포 확인 필요 | 이미지 필터가 광고하는 WebP/TIFF 등과 실제 배포 plugin 구성이 일치하는지 확인. 구성만으로 최종 artifact 지원을 단정하지 않음 | Windows/macOS 설치 산출물에서 PNG/JPEG/WebP/BMP/GIF/TIFF fixture decode. 지원하지 않는 형식은 필터/안내 조정 |
-| D15 · P2 · 미해결/감사 | Wawa·프리셋·복구 오류 literal, Qt 기본 번역 배포, numerus 사용 점검 | ko/en/ja 오류·파일 dialog·복수형 실제 표시. 번역 추출 100%와 사용자 경로 완전 번역을 구분 |
+| D10 · P2 · 검증 대기 (`5b34baa`) | 원인 확정(분석 보고서 R-01): CI·릴리스가 Qt Image Formats를 설치하지 않았고 macOS는 JPEG 플러그인만 복사했다. 모듈 설치·macOS GIF/WebP/TIFF 플러그인 동봉·런타임 지원 형식으로 만든 삽입 필터·패키지 smoke의 형식별 왕복으로 수정. macOS 설치 번들 smoke 통과, WebP 플러그인을 뺀 음성 대조는 실패 | Windows CI 패키지와 배포 Qt 6.11.1 macOS 번들에서 같은 smoke 통과 |
+| D15 · P2 · 부분 해결 | Qt 기본 번역은 `5b34baa`에서 해결(분석 보고서 U-01: windeployqt는 `qt_<lang>.qm`으로 합쳐 배포, macdeployqt는 미배포, 앱은 `qtbase_<lang>`을 Qt 설치 경로에서 찾았다. ko/ja `qtbase` 카탈로그를 앱 리소스에 넣고 `InterfaceTranslators`로 설치). Wawa·프리셋·복구 오류 literal(U-14), numerus 점검은 남음 | ko/en/ja 오류·파일 dialog·복수형 실제 표시. 번역 추출 100%와 사용자 경로 완전 번역을 구분 |
 | D18 · P2 · 미해결 | Windows 업데이트 확인 busy 중 수동 요청이 무시될 수 있고 자동 offer가 시작 dialog와 겹침. 취소/다운로드 상태도 확인 | 자동→수동 요청, 시작 dialog 중 offer, 네트워크 실패·취소·재시도·설치 경로. 보관하지 않은 installer로 ‘나중 설치’를 약속하지 않음 |
 | D22 · P3 · 구조 제안 | Canvas/App의 공유 상태, 액션 중복 계산·이름 재탐색, global filter, controller/serializer 결합 | session identity·pending edit·queue·채택 규칙 테스트 후 한 경계씩 분리. 매크로 staged document 노출은 현재 소비자 계약을 먼저 확인 |
 | D23 · P3 · 정리 후보 | ToolPopover 호출 여부, 마스크 분기 조기 반환 뒤 코드, 이벤트 중복, mask/transform/선택 helper 중복 | 모든 지원 빌드/호출자를 확인하고 제거. 샘플러·렌더 품질·epsilon의 의미가 다른 코드는 모양만 보고 합치지 않음 |
@@ -445,8 +447,28 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 
 ## 9. 다음 실행 순서와 닫는 기준
 
-1. **안전한 입력·배포:** D04/R01 bounded decode, D16 보안 버전 검토, D05 최종 경로 확인, D06 격리된 패키지 검증. 각 항목 독립 재현·회귀를 먼저 만든다.
-2. **문서 정확성·보존:** D01/R02, D02, R03의 잔여 자동저장, R04·R05, R06, D07·D19·D20. 문서 identity와 pending edit 정책을 공유하되 한 번에 전부 리팩터링하지 않는다.
+### 분석 보고서 발견의 진행 (2026-10-05, macOS)
+
+[ANALYSIS_REPORT.md](ANALYSIS_REPORT.md) §11 "바로 고칠 것"을 데스크톱 우선으로 처리했다. 웹 항목은 후순위로 미뤘다. 각 수정은 수정 전 실패하는 회귀를 같은 설정의 별도 worktree에서 확인했고, offscreen CTest 13/13과 cocoa 플랫폼 UI 스위트를 통과했다(증거 범위 표의 2026-10-05 행).
+
+| ID | 상태 · commit | 원인과 수정 | 남은 검증 |
+|---|---|---|---|
+| B-01, B-02 | 해결 (`c247645`, `00eac5d`) | 4절 참조 | — |
+| B-03 | 해결 (`710e33f`) | 그림자 pixmap이 윤곽 경계 사각형 전체였다(4096² 1600%에서 17GB 할당, macOS peak RSS +5.7–6.2GiB). 그림자 alpha는 이동한 윤곽까지 거리만의 함수이므로 변 gradient 띠와 모서리 radial로 직접 칠한다. 캐시 없음, 기존 14패스와 alpha 차이 최대 3/255. 캔버스 clip 영역도 위젯과 교차한 윤곽으로 만든다. Release 팬(30°) 50% 1.74→1.77ms, 400% 8.0→0.86ms, 1600% 110→0.87ms | Windows 실측 |
+| U-01 | 해결 (`5b34baa`) | D15 참조 | Windows·macOS 배포본 ko/ja 표준 버튼 육안 확인 |
+| R-01 | 검증 대기 (`5b34baa`) | D10 참조. LibTIFF 고지 추가 | Windows CI 패키지 |
+| U-02 | 해결 (`22c654a`) | `QKeySequence(StandardKey)`가 첫 바인딩만 썼다. 표준 키 액션은 `keyBindings()` 전체를 기본+별칭으로 등록(Windows Redo의 Ctrl+Shift+Z, Cut/Copy/Paste 보조 키) | Windows 실키 확인 |
+| B-15 | 해결 (`ed37683`) | 텍스처 교체마다 바인딩 객체를 새로 만들어 파이프라인이 해제된 객체를 가리켰다. 객체를 유지하고 `setBindings`+`updateResources`로 리소스만 교체 | Windows D3D11 창 크기 변경 |
+| P-05 | 해결 (`5d2693a`) | `Document::isLayerDescendantOf`가 호출마다 계층 전체를 분석했다. split은 부모 맵으로 루트를 한 번씩 찾고, `supportsLayerSplit`은 필요할 때 한 번만 분석. 226레이어 64×48 split 156→2.6ms, 결과 동일 | WASM build/parity(툴체인 없음) |
+| B-08 | 검증 대기 (`8edf708`) | 취소할 수 없는 Velopack 확인·다운로드가 종료 시 join하는 전역 풀에 있었고, 그동안 인스턴스 락을 쥐었다. 전용 풀(종료 시 기다리지 않음)로 옮기고 창·업데이트 컨트롤러 정리 직후 락을 푼다 | Windows 빌드·오프라인 종료 후 재실행. 다운로드 취소 버튼(D18)은 Velopack API에 취소가 없어 남음 |
+| B-06, B-07 | 해결 (`0f826e3`) | 접촉 중 측면 버튼 Press가 획을 취소했다 → 무시하고 팁 Release만 시퀀스를 닫는다. 근접 이탈이 포커스 상실과 같은 초기화로 Shift·Space까지 풀었다 → 포인터 취소와 키 수정자 해제를 분리하고 근접 이탈은 호버 링도 숨긴다 | 실제 펜(WinTab·macOS)에서 측면 버튼·근접 순서 확인(인수인계 1번) |
+| L-01, L-03, R-13 | 부분 해결 (`af980d2`) | Qt 버전·모듈·소스 위치·Qt 내장 서드파티 목록 고지. `opengl32sw.dll` 동봉 중단(`--no-opengl-sw`, Windows 패키지 테스트가 부재 확인). smoke 필수 라이선스에 LGPL·libwebp 추가 | `D3Dcompiler_47.dll`·`Qt6Network.dll` 동봉 필요성 판단, About Qt 버튼, L-02 폰트 고지 |
+| Q-03 일부 | 보류 | `StrokePresence` 이펙트는 구독자가 없지만, 같은 마스크 패킹이 선택 픽셀이 없는 클립 마스크 획을 `RejectedMaskLimit`로 거절하는 역할을 겸한다. 그 결과 코드를 정한 뒤 제거한다 | — |
+
+테스트 하네스 정리 (`295fdd6`): cocoa에서만 실패하던 UI 테스트 4건은 모두 테스트 쪽 문제였다(기본 대화상자 `reject()`, 72dpi에서 11px 최소치 아래인 9pt 기준 폰트, macOS가 이동 이벤트로 바꾸지 않는 `QCursor::setPos`, GPU 표시에서 성립하지 않는 software 체커 전제).
+
+1. **실기기 확인과 안전한 입력·배포:** 위 표의 Windows·실제 펜 검증, D04/R01 WASM parity, D16 Sparkle 실제 업데이트, D05 기본 대화상자 수용, D06 clean Windows 설치.
+2. **문서 정확성·보존:** 분석 보고서 B-04(그리는 중 합성과 최종 렌더 차이), B-09–B-14(열기·히스토리·저장·복구 실패 경로), R06, D07·D19·D20. 웹 R03–R05는 데스크톱 뒤로 미뤘다. 문서 identity와 pending edit 정책을 공유하되 한 번에 전부 리팩터링하지 않는다.
 3. **입력·액션·접근성:** D03·D11–D13·D17, R07–R10·R12–R14, D15·D18. 실제 입력과 저장 결과를 함께 확인한다.
 4. **측정 기반 성능:** 기존 두 구현의 A/B, D08·D14·D21·R11과 웹 Worker 점유. 측정 뒤에만 최적화 경계를 선택한다.
 5. **제품 확장·유지보수:** 웹 선택 기능, D09·D10 artifact 점검, D22–D25의 남은 작업, Android A0–A2부터. 독립적으로 가능한 검증은 앞 단계와 병행할 수 있다.
