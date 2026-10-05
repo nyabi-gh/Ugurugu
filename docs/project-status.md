@@ -99,7 +99,7 @@
 
 - 완료: 느린 엔진에서 pen-up·undo·레이어 변경 직후 수동/자동 저장, 저장 직후 열기, pending text/transform 각각을 시험한다. 수동 저장 수정은 유지하고 자동저장도 동일한 세션 순서 계약을 따른다.
 
-### R04 · P1 · 웹 자동복구의 문서 세대 — 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main 미병합)
+### R04 · P1 · 웹 자동복구의 문서 세대 — 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main `04aa1d6`)
 
 근거: [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts), [RecoveryStore.ts](../web/src/lib/RecoveryStore.ts). `reset()`은 `savedRevision`만 0으로 바꾸며 진행 중 snapshot을 무효화하지 않는다. 저장 뒤 이전 revision이 새 문서의 저장 상태를 덮을 수 있다. 이름은 serialize 이후에 읽으므로 문서와 이름의 소속도 함께 고정해야 한다.
 
@@ -108,7 +108,7 @@
 - 조치: session/project identity·generation·revision을 캡처한다. await 이후 상태 채택뿐 아니라 오래된 IDB write 자체가 현 복구본을 대체하지 못하도록 저장소 키/채택 규칙을 설계한다.
 - 완료: serialize 지연, IDB 지연, 연속 문서 교체, 복구 폐기 중 저장 완료, 복수 탭을 시험한다. 낡은 완료가 새 문서의 저장 표시·복구본을 바꾸면 실패다.
 
-### R05 · P1 · 웹 문서 교체 전 미저장 작업 보호 — 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main 미병합)
+### R05 · P1 · 웹 문서 교체 전 미저장 작업 보호 — 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main `04aa1d6`)
 
 근거: [App.svelte](../web/src/App.svelte)의 `createDocument`·`openDocument`·`adoptDocument`. 문서 교체는 큐를 따르지만 수동 저장 기준 dirty 보호가 없다. 정상 파일 열기/새 문서는 이전 handle을 대체한다. 15초 자동저장 간격과 단일 복구 슬롯은 명시적 버리기 동의를 대신하지 못한다.
 
@@ -397,8 +397,8 @@ Qt 번들 내 외부 구성요소 고지·소스/재링크 제공 범위, 웹 �
 | W-01 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05; 실제 heap 고갈은 미측정, main `d182672`) | (수정 전) [engine-worker.js](../web/public/engine/engine-worker.js)의 `openDocument`·`withPoints`·`layerRename`이 `_malloc` 결과를 검사하지 않았다. `ALLOW_MEMORY_GROWTH=1`([UguruguWasm.cmake](../cmake/UguruguWasm.cmake))에서 실패한 malloc은 0을 반환하고, `HEAPU8.set(bytes, 0)`이 정적 데이터·스택을 덮는다. 새 문서를 연 뒤 이전 문서를 닫으므로 큰 문서가 열린 상태의 큰 파일 열기에서 도달 가능하다. `text`·`insertImage`는 이미 검사한다 | 모든 할당 null 검사와 `try/finally` 해제. 512MB 근처에서 64MiB 열기가 명시적 오류로 끝나고 기존 문서가 유지됨 |
 | W-02 · P1 · 해결(`c610588`, 장애 주입 검증 2026-10-05, main `d182672`) | (수정 전) 예외 모드가 없어 C++ throw(`qBadAlloc` 등)는 `abort()`가 된다. 워커에 `onAbort`가 없고 catch-all이 `RuntimeError`를 일반 `ok:false`로 돌려준다. [EngineClient.ts](../web/src/lib/EngineClient.ts)의 `#fail`은 `worker.onerror`에서만 불리므로 셸은 죽은 엔진에 계속 명령을 보내고, 다음 자동저장이 반쯤 바뀐 문서를 단일 복구 슬롯에 쓸 수 있다 | abort를 치명 상태로 전파해 이후 요청·자동저장 차단, 사용자에게 마지막 정상 복구본 안내. 강제 abort 시나리오 브라우저 회귀 |
 | W-03 · P1 · 미해결(한도 확인, OOM 추정) | 웹 열기는 파일 바이트(64MiB)만 보고, 엔진은 데스크톱 `DocumentLimits`(4096², 마스크 표 256MB, 래스터 256MB decoded)를 쓴다. 0 마스크는 약 1000:1로 압축되므로 작은 파일이 512MB heap을 넘길 수 있다(계산상 추정). [EngineBridge.cpp](../src/wasm/EngineBridge.cpp)의 열기는 입력을 한 번 더 복사한다. zlib 출력 자체는 `BoundedCompression`이 막는다 | 웹 전용 decode 예산(캔버스·마스크·래스터 총량)을 채택 전에 적용. R11과 함께 닫음. WASM 열기 경로 fuzz |
-| W-04 · P1 · 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main 미병합) | (수정 전) `autosave.start()`가 복원/버리기 배너가 결정되기 전에 시작된다. 배너를 둔 채 한 획만 그어도 15초 안에 단일 `slot`이 새 문서로 바뀌고, 다시 새로고침하면 이전 작업은 사라진다. 두 탭은 서로의 슬롯을 덮고 다른 탭의 살아 있는 문서를 "이전 세션"으로 제안한다 | offer 결정 전 슬롯 보호, 탭·세션별 키. R04의 세대 설계와 함께 |
-| W-05 · P1 · 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main 미병합) | (수정 전) [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts)의 `restore()`는 offer를 비우고 bytes를 워커로 transfer한다. 열기가 실패하면 배너와 메모리 사본이 모두 없다. `discard()`는 현재 세션이 방금 쓴 snapshot도 지우고, `savedRevision`이 같아 다음 편집 전까지 다시 쓰지 않는다 | 열기 성공 뒤에만 offer 소비, 복사본 전달. discard는 offer 출처만 삭제 |
+| W-04 · P1 · 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main `04aa1d6`) | (수정 전) `autosave.start()`가 복원/버리기 배너가 결정되기 전에 시작된다. 배너를 둔 채 한 획만 그어도 15초 안에 단일 `slot`이 새 문서로 바뀌고, 다시 새로고침하면 이전 작업은 사라진다. 두 탭은 서로의 슬롯을 덮고 다른 탭의 살아 있는 문서를 "이전 세션"으로 제안한다 | offer 결정 전 슬롯 보호, 탭·세션별 키. R04의 세대 설계와 함께 |
+| W-05 · P1 · 해결(`58e6aac`, 브라우저 회귀 2026-10-05, main `04aa1d6`) | (수정 전) [AutosaveController.svelte.ts](../web/src/lib/AutosaveController.svelte.ts)의 `restore()`는 offer를 비우고 bytes를 워커로 transfer한다. 열기가 실패하면 배너와 메모리 사본이 모두 없다. `discard()`는 현재 세션이 방금 쓴 snapshot도 지우고, `savedRevision`이 같아 다음 편집 전까지 다시 쓰지 않는다 | 열기 성공 뒤에만 offer 소비, 복사본 전달. discard는 offer 출처만 삭제 |
 | W-06 · P2 · 미해결(추정) | `onWindowBlur`가 `drawing`·`panning`·`picking`·`activeTouches`를 초기화하지 않고 `lostpointercapture` 처리가 없다. pointer-up을 잃으면 `ready()`가 계속 false라 자동저장이 멈추고, 대기 중 stroke 작업은 문서 세대 검사 없이 새 문서에 적용된다. 잃은 touch-up 뒤 한 손가락이 pinch로 처리된다. `strokeAppend`/일괄 `strokeEnd`는 `frameIndex`를 실행 시점에 읽어 그리는 중 재생과 어긋날 수 있다 | D03과 같은 정책으로 웹 입력 종료 정의. stroke 작업에 시작 시 frame·세대 캡처 |
 | W-07 · P2 · 미해결(확인) | 크기 dialog·모바일 Sheet가 열려도 App 단축키(Delete, Ctrl+Z, Enter, Ctrl+O)가 배경 문서에 적용된다. Sheet의 Escape는 window 리스너에서 `stopPropagation`만 해 App 핸들러도 실행된다. WobblePanel의 `<summary>`는 Enter/Space가 재생·팬으로 가서 키보드로 열 수 없다 | R10과 함께. 모달 열림 상태 하나로 단축키 차단 |
 | W-08 · P2 · 미해결(확인) | 셸↔워커 프로토콜 버전 검사가 없다. 워커·엔진은 해시 없는 고정 경로라 캐시된 옛 워커가 새 셸과 짝지어질 수 있고, 바뀐 필드는 `undefined`→0으로 엉뚱한 레이어·프레임을 바꾼다 | 워커가 프로토콜 버전을 보고하고 셸이 거부. 엔진 파일명에 빌드 식별 포함 |
@@ -515,7 +515,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 4. **측정 기반 성능:** 기존 두 구현의 A/B, D08·D14·D21·R11과 웹 Worker 점유. 측정 뒤에만 최적화 경계를 선택한다.
 5. **제품 확장·유지보수:** 웹 선택 기능, D09·D10 artifact 점검, D22–D25의 남은 작업, Android A0–A2부터. 독립적으로 가능한 검증은 앞 단계와 병행할 수 있다.
 
-2026-10-05부터 웹 코드 수정을 시작한다. 순서: W-01·W-02(워커 메모리·abort) → R09 → R04·R05·W-04·W-05(복구·문서 교체) → W-03·R11(웹 decode 예산) → W-06–W-10 → W-11–W-13(배포·CI·고지). 공용 엔진을 건드리면 위 공통 완료 규칙대로 native suite와 WASM parity를 함께 확인한다.
+2026-10-05부터 웹 코드 수정을 시작한다. 순서: W-01·W-02(워커 메모리·abort) → R09 → R04·R05·W-04·W-05(복구·문서 교체) — 여기까지 2026-10-05 main 병합 — → **다음: W-03·R11**(웹 decode 예산) → W-06–W-10 → W-11–W-13(배포·CI·고지). 공용 엔진을 건드리면 위 공통 완료 규칙대로 native suite와 WASM parity를 함께 확인한다.
 
 #### W-01·W-02 진행 (2026-10-05, 브랜치 `web/engine-worker-safety`) — 수정 완료, main 병합
 
@@ -538,7 +538,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - 수정(`13d1b56`): `readPreference`·`writePreference` 하나로 모든 preference 접근(도구 설정, 최근 색, 그리는 중 애니메이션)을 모았다. 공용 엔진 변경 없음.
 - 수정 후 결과(Chromium, 로컬 엔진 빌드): `blocked-storage` 15/15, 전체 browser suite 24개 시나리오 통과, `npm run check` 0 오류·0 경고.
 
-#### R04·R05·W-04·W-05 진행 (2026-10-05, 브랜치 `web/recovery-and-replace`) — 수정 완료, main 미병합
+#### R04·R05·W-04·W-05 진행 (2026-10-05, 브랜치 `web/recovery-and-replace`) — 수정 완료, main 병합(`04aa1d6`)
 
 - 회귀: [25-recovery-sessions.mjs](../web/tests/scenarios/25-recovery-sessions.mjs)(답하지 않은 offer 보존, 버리기 범위, 실패한 복원, 두 탭), [26-document-replace.mjs](../web/tests/scenarios/26-document-replace.mjs)(새 문서·열기·이탈 전 확인, 쓰기가 지연된 동안 문서를 교체한 뒤의 복구본). 하니스에 `recoveryRecords`·`seedRecoveryRecord`·`installRecoveryDelay`(IndexedDB open 지연)·`acceptReplacePrompts`를 추가했다.
 - 수정 전 결과: 25에서 5건, 26에서 6건 실패. 새 세션 snapshot이 offer를 덮었고, 버리기가 현재 세션 snapshot까지 지웠고, 실패한 복원이 배너를 없앴고, 둘째 탭이 첫 탭의 살아 있는 문서를 제안하고 덮었고, 교체·이탈 확인이 없었고, 쓰기가 지연된 동안 교체한 새 문서 대신 이전 문서가 복구본으로 남았다.
@@ -549,6 +549,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
   - 마지막 다운로드 이후 바뀐 문서를 새 문서·열기·복원으로 교체하면 `confirm`으로 묻고, 수락하면 교체 성공 뒤 이전 문서의 기록을 지운다. 바뀐 문서가 있으면 `beforeunload`로 묻는다. 다운로드는 "Download of … started"로만 표시하고 디스크 저장으로 표시하지 않는다. 다만 교체 확인 기준으로는 다운로드 시작을 저장으로 본다(데스크톱의 저장 뒤와 같음). 복원된 문서는 다운로드 전까지 바뀐 문서로 본다.
   - 그린 문서를 교체하는 기존 시나리오 12개(01·02·04·05·08·09·15·16·17·19·21·22)는 확인 대화상자를 수락하게 했다.
 - 수정 후 결과(Chromium, 로컬 엔진 빌드): 25·26 통과, 전체 browser suite 26개 시나리오 통과, `npm run check` 0 오류·0 경고.
+- 2026-10-05 main에 fast-forward 병합·푸시(`04aa1d6`). 이 변경을 담은 main CI 결과는 다음 세션에서 확인한다(문서 커밋 푸시로 이전 run은 취소될 수 있음).
 - 남은 것: R03의 느린 엔진 매트릭스(pen-up·undo·레이어 변경 직후 저장, pending text/transform), 끝난 세션 기록이 쌓이는 상한(지금은 사용자가 하나씩 버림), Web Locks 없는 브라우저에서의 두 탭 구분.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
