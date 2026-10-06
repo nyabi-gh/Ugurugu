@@ -177,6 +177,18 @@ target_link_libraries(
 ugurugu_target_defaults(ugurugu_stress_document_generator)
 
 add_executable(
+    ugurugu_fixture_generator
+    EXCLUDE_FROM_ALL
+    tools/FixtureGenerator.cpp
+)
+target_link_libraries(
+    ugurugu_fixture_generator
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_fixture_generator)
+
+add_executable(
     ugurugu_engine_digest_probe
     EXCLUDE_FROM_ALL
     tools/EngineDigestProbe.cpp
