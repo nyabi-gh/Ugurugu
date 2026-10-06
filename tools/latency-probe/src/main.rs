@@ -26,7 +26,7 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
     MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, VIRTUAL_KEY, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOT, GetAncestor, GetClientRect, GetForegroundWindow, GetSystemMetrics,
@@ -398,6 +398,9 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
             let _ = ShowWindow(hwnd, SW_MAXIMIZE);
         },
     }
+    // Windows lets a background process take the foreground only right after
+    // input of its own; Alt alone does nothing in the target.
+    send_key(VK_MENU.0 as u8);
     // SAFETY: valid window.
     let _ = unsafe { SetForegroundWindow(hwnd) };
     std::thread::sleep(Duration::from_millis(1500));
