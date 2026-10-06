@@ -887,6 +887,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "latency-probe"
+version = "3.0.0-dev"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

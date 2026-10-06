@@ -47,7 +47,7 @@ jobs:
             while IFS= read -r path; do
               case "$path" in
                 docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md) ;;
-                apps/*|crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml)
+                apps/*|crates/*|tools/latency-probe/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml)
                   rust=true ;;
                 web/*|tools/check_itchio_package.mjs|tools/wasm_*)
                   web=true ;;
