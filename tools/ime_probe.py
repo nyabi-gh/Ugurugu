@@ -9,7 +9,8 @@ Usage: python ime_probe.py <ko|ja> <ugurugu.exe> <output-dir> [window-x,window-y
 The window position picks the monitor, and so the scale the IME sees.
 
 Input goes to the foreground window, so it stops before sending any when the
-app is not in front. Needs the Microsoft Korean or Japanese IME and Pillow."""
+app is not in front. Needs the Microsoft Korean or Japanese IME and Pillow;
+the Japanese IME also needs the Japanese basic typing feature."""
 import ctypes
 import ctypes.wintypes as wt
 import json
@@ -23,12 +24,13 @@ from PIL import ImageGrab
 
 user32 = ctypes.windll.user32
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
-for name in ("GetForegroundWindow", "WindowFromPoint", "GetAncestor"):
+for name in ("GetForegroundWindow", "WindowFromPoint", "GetAncestor", "GetKeyboardLayout"):
     getattr(user32, name).restype = ctypes.c_void_p
 user32.WindowFromPoint.argtypes = [wt.POINT]
 user32.LoadKeyboardLayoutW.restype = ctypes.c_void_p
 user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p]
 user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
 LANGUAGE = sys.argv[1]
 EXE = os.path.abspath(sys.argv[2])
@@ -162,7 +164,7 @@ def screenshot(name):
 
 
 VK_RETURN, VK_BACK, VK_SPACE, VK_CONTROL, VK_HANGUL, VK_HANJA, VK_MENU = 0x0D, 0x08, 0x20, 0x11, 0x15, 0x19, 0x12
-VK_IME_ON = 0x16
+VK_IME_ON, VK_RIGHT = 0x16, 0x27
 WM_INPUTLANGCHANGEREQUEST = 0x50
 
 
@@ -203,11 +205,23 @@ def korean(results, line_rect, text_rect):
     results["2-4 canvas Enter from text"] = count("canvas Enter") - enter_before
 
 
-def japanese(results, line_rect, text_rect):
-    # Switch this window to the Japanese keyboard and turn the IME on.
-    hkl = user32.LoadKeyboardLayoutW("00000411", 0)
+def window_layout():
+    return user32.GetKeyboardLayout(user32.GetWindowThreadProcessId(HWND, None)) or 0
+
+
+def switch_layout(hkl):
     user32.PostMessageW(HWND, WM_INPUTLANGCHANGEREQUEST, 0, hkl)
     time.sleep(0.5)
+    return window_layout() == hkl
+
+
+def japanese(results, line_rect, text_rect):
+    # Switch this window to the Japanese keyboard and turn the IME on. With
+    # per-app input switching off, the switch applies to the whole desktop, so
+    # the caller restores the original layout. VK_IME_ON does nothing unless
+    # the Japanese basic typing feature (its dictionaries) is installed.
+    if not switch_layout(user32.LoadKeyboardLayoutW("00000411", 0)):
+        raise SystemExit(f"the window did not switch to Japanese (HKL {window_layout():#x})")
     click(*to_screen(line_rect))
     tap(VK_IME_ON, 0.3)
     type_keys("a")
@@ -224,10 +238,14 @@ def japanese(results, line_rect, text_rect):
     results["1 line after Enter"] = last_texts()[0]
     results["1 canvas Enter from text Enter"] = count("canvas Enter") - enter_before
 
-    # 2. A phrase converted in segments; 3. the candidate list.
+    # 2. A phrase converted in segments: move the focused segment with Right
+    # and commit all; 3. the candidate list.
     click(*to_screen(text_rect))
     type_keys("watashihagakuseidesu")
     tap(VK_SPACE, 0.6)
+    screenshot("segments.png")
+    tap(VK_RIGHT, 0.3)
+    screenshot("segments-next.png")
     tap(VK_RETURN, 0.4)
     tap(VK_RETURN, 0.3)
     type_keys("kanji")
@@ -242,6 +260,7 @@ env = dict(os.environ, UGURUGU_LOG="info,ugurugu::ime_probe=debug")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)
 HWND = None
+ORIGINAL_LAYOUT = None
 results = {}
 try:
     for _ in range(100):
@@ -250,6 +269,7 @@ try:
         if HWND:
             break
     assert HWND, "no window"
+    ORIGINAL_LAYOUT = window_layout()
     time.sleep(1.5)
     user32.SetWindowPos(HWND, 0, PLACE[0], PLACE[1], 1600, 1000, 0x0004)
     send([key(VK_MENU), key(VK_MENU, True)])
@@ -275,6 +295,8 @@ try:
     results["5 text after shortcuts"] = last_texts()[1]
     screenshot("final.png")
 finally:
+    if HWND and ORIGINAL_LAYOUT and window_layout() != ORIGINAL_LAYOUT:
+        switch_layout(ORIGINAL_LAYOUT)
     if HWND:
         user32.PostMessageW(HWND, 0x0010, 0, 0)
     try:
