@@ -2146,6 +2146,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ugu-render"
+version = "3.0.0-dev"
+dependencies = [
+ "tracing",
+ "wgpu",
+ "windows",
+]
+
+[[package]]
 name = "ugu-win"
 version = "3.0.0-dev"
 dependencies = [
@@ -2163,6 +2172,7 @@ dependencies = [
  "pollster",
  "tracing",
  "tracing-subscriber",
+ "ugu-render",
  "ugu-win",
  "wgpu",
  "winit",

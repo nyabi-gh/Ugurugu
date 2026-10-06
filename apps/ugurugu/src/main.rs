@@ -7,6 +7,7 @@ mod app;
 mod canvas;
 mod input;
 mod latency;
+mod render;
 
 use tracing_subscriber::EnvFilter;
 use winit::event_loop::EventLoop;
@@ -23,14 +24,14 @@ fn main() {
         tracing::error!(%error, "cannot route the mouse through pointer input");
         std::process::exit(1);
     }
-    let event_loop = match EventLoop::new() {
+    let event_loop = match EventLoop::<app::UiEvent>::with_user_event().build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!(%error, "cannot create the event loop");
             std::process::exit(1);
         }
     };
-    let mut app = app::App::default();
+    let mut app = app::App::new(event_loop.create_proxy());
     if let Err(error) = event_loop.run_app(&mut app) {
         tracing::error!(%error, "event loop failed");
         std::process::exit(1);
