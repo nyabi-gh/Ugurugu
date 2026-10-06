@@ -4,6 +4,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod canvas;
+mod input;
+mod latency;
 
 use tracing_subscriber::EnvFilter;
 use winit::event_loop::EventLoop;
@@ -16,6 +19,10 @@ fn main() {
         )
         .init();
 
+    if let Err(error) = ugu_win::pointer::enable_mouse_in_pointer() {
+        tracing::error!(%error, "cannot route the mouse through pointer input");
+        std::process::exit(1);
+    }
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(error) => {

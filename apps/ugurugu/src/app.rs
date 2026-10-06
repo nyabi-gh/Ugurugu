@@ -7,10 +7,17 @@ use std::time::Instant;
 
 use egui_wgpu::winit::Painter;
 use egui_wgpu::{RendererOptions, WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+use ugu_win::clock::Ticks;
+use ugu_win::pointer::PointerInput;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
+
+use crate::canvas::ProbeCanvas;
+use crate::input::InputRouter;
+use crate::latency::LatencyLog;
 
 #[derive(Default)]
 pub struct App {
@@ -19,12 +26,17 @@ pub struct App {
 }
 
 struct Session {
+    // Dropped first: the subclass must go before the window it is attached to.
+    pointer: PointerInput,
     window: Arc<Window>,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     painter: Painter,
     adapter_summary: String,
     repaint_at: Option<Instant>,
+    router: InputRouter,
+    canvas: ProbeCanvas,
+    latency: LatencyLog,
 }
 
 impl App {
@@ -50,6 +62,16 @@ fn wgpu_configuration() -> WgpuConfiguration {
     }
 }
 
+fn hwnd_of(window: &Window) -> Result<isize, String> {
+    let handle = window
+        .window_handle()
+        .map_err(|error| format!("the window has no handle: {error}"))?;
+    match handle.as_raw() {
+        RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get()),
+        _ => Err("the window is not a Win32 window".to_owned()),
+    }
+}
+
 impl Session {
     fn create(event_loop: &ActiveEventLoop) -> Result<Self, String> {
         let attributes = Window::default_attributes()
@@ -60,6 +82,10 @@ impl Session {
                 .create_window(attributes)
                 .map_err(|error| format!("cannot create the window: {error}"))?,
         );
+        // SAFETY: the window is alive and owned by this thread, and `Session`
+        // drops the subclass before the window.
+        let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
+            .map_err(|error| format!("cannot receive pointer input: {error}"))?;
 
         let egui_ctx = egui::Context::default();
         let mut painter = pollster::block_on(Painter::new(
@@ -86,22 +112,64 @@ impl Session {
         );
 
         Ok(Self {
+            pointer,
             window,
             egui_ctx,
             egui_state,
             painter,
             adapter_summary,
             repaint_at: Some(Instant::now()),
+            router: InputRouter::default(),
+            canvas: ProbeCanvas::default(),
+            latency: LatencyLog::default(),
         })
     }
 
+    fn pump_pointer_input(&mut self) {
+        let events = self.pointer.drain();
+        if events.is_empty() {
+            return;
+        }
+        let pixels_per_point = egui_winit::pixels_per_point(&self.egui_ctx, &self.window);
+        let modifiers = self.egui_ctx.input(|input| input.modifiers);
+        let canvas = &self.canvas;
+        let routed = self
+            .router
+            .route(events, pixels_per_point, modifiers, |position| {
+                canvas.contains(position)
+            });
+        self.egui_state.egui_input_mut().events.extend(routed.egui);
+        for input in routed.canvas {
+            self.canvas.apply(input);
+        }
+        self.window.request_redraw();
+    }
+
     fn redraw(&mut self) {
+        self.pump_pointer_input();
         let input = self.egui_state.take_egui_input(&self.window);
-        let adapter_summary = &self.adapter_summary;
+        let Self {
+            adapter_summary,
+            canvas,
+            latency,
+            ..
+        } = self;
         let output = self.egui_ctx.run_ui(input, |ui| {
             egui::Panel::bottom("status").show(ui, |ui| {
-                ui.label(adapter_summary);
+                ui.horizontal(|ui| {
+                    ui.label(adapter_summary.as_str());
+                    ui.separator();
+                    ui.label(format!("samples {}", canvas.sample_count()));
+                    if let Some(summary) = latency.summary() {
+                        ui.separator();
+                        ui.label(summary);
+                    }
+                    if ui.button("Clear").clicked() {
+                        canvas.clear();
+                    }
+                });
             });
+            egui::CentralPanel::default().show(ui, |ui| canvas.show(ui));
         });
 
         self.egui_state
@@ -110,6 +178,7 @@ impl Session {
             .egui_ctx
             .tessellate(output.shapes, output.pixels_per_point);
         let mut textures_delta = output.textures_delta;
+        let oldest_input = self.router.take_oldest_unpresented();
         self.painter.paint_and_update_textures(
             egui::ViewportId::ROOT,
             output.pixels_per_point,
@@ -119,11 +188,23 @@ impl Session {
             Vec::new(),
             &self.window,
         );
+        if let Some(oldest_input) = oldest_input {
+            self.latency
+                .record(Ticks::now().seconds_since(oldest_input));
+        }
 
         self.repaint_at = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
             .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(summary) = self.latency.summary() {
+            tracing::info!(%summary, samples = self.canvas.sample_count(), "input to present-return latency");
+        }
     }
 }
 
@@ -148,7 +229,10 @@ impl ApplicationHandler for App {
         }
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.session = None;
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => {
                 if let (Some(width), Some(height)) =
                     (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
@@ -164,9 +248,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.as_mut() else {
             return;
         };
+        session.pump_pointer_input();
         match session.repaint_at {
             Some(at) if at <= Instant::now() => {
                 session.window.request_redraw();
