@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Dxgi::{DXGI_FRAME_STATISTICS, IDXGISwapChain3};
+use windows::Win32::System::Performance::QueryPerformanceCounter;
 use windows::Win32::System::Threading::WaitForSingleObject;
 
 /// Swap chain buffers the app may queue ahead of the display. One keeps
@@ -41,6 +42,8 @@ pub fn backend_options() -> wgpu::BackendOptions {
 pub struct Displayed {
     /// The QPC time of the oldest input the frame showed.
     pub input_qpc: u64,
+    /// The QPC time just before the frame was presented.
+    pub present_qpc: u64,
     /// The QPC time of the vertical blank that started showing it.
     pub display_qpc: u64,
 }
@@ -51,11 +54,18 @@ pub enum Acquired {
     Skip,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Pending {
+    count: u32,
+    input_qpc: u64,
+    present_qpc: u64,
+}
+
 pub struct Presenter {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    /// Present counts with the input time they showed, oldest first.
-    pending: VecDeque<(u32, u64)>,
+    /// Presents awaiting their display time, oldest first.
+    pending: VecDeque<Pending>,
 }
 
 impl Presenter {
@@ -85,6 +95,7 @@ impl Presenter {
             color_space: wgpu::SurfaceColorSpace::Srgb,
             view_formats: Vec::new(),
         };
+        tracing::info!(?format, ?size, "swap chain");
         surface.configure(device, &config);
         Ok(Self {
             surface,
@@ -147,6 +158,7 @@ impl Presenter {
         frame: wgpu::SurfaceTexture,
         input_qpc: Option<u64>,
     ) {
+        let present_qpc = qpc();
         queue.present(frame);
         let (Some(input_qpc), Some(swap_chain)) = (input_qpc, self.swap_chain()) else {
             return;
@@ -156,7 +168,11 @@ impl Presenter {
             if self.pending.len() == PENDING_LIMIT {
                 self.pending.pop_front();
             }
-            self.pending.push_back((count, input_qpc));
+            self.pending.push_back(Pending {
+                count,
+                input_qpc,
+                present_qpc,
+            });
         }
     }
 
@@ -201,17 +217,18 @@ impl Presenter {
 
 /// Resolves pending presents against the newest displayed present: that one
 /// gets `display_qpc`; older ones were replaced unseen and are dropped.
-fn settle(pending: &mut VecDeque<(u32, u64)>, shown: u32, display_qpc: u64) -> Vec<Displayed> {
+fn settle(pending: &mut VecDeque<Pending>, shown: u32, display_qpc: u64) -> Vec<Displayed> {
     let mut displayed = Vec::new();
-    while let Some(&(count, input_qpc)) = pending.front() {
-        let ahead = count.wrapping_sub(shown) as i32;
+    while let Some(&front) = pending.front() {
+        let ahead = front.count.wrapping_sub(shown) as i32;
         if ahead > 0 {
             break;
         }
         pending.pop_front();
         if ahead == 0 {
             displayed.push(Displayed {
-                input_qpc,
+                input_qpc: front.input_qpc,
+                present_qpc: front.present_qpc,
                 display_qpc,
             });
         }
@@ -219,41 +236,60 @@ fn settle(pending: &mut VecDeque<(u32, u64)>, shown: u32, display_qpc: u64) -> V
     displayed
 }
 
+fn qpc() -> u64 {
+    let mut value = 0i64;
+    // SAFETY: valid out pointer; the call cannot fail on supported Windows.
+    let _ = unsafe { QueryPerformanceCounter(&mut value) };
+    value as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn pending(entries: &[(u32, u64)]) -> VecDeque<Pending> {
+        entries
+            .iter()
+            .map(|&(count, input_qpc)| Pending {
+                count,
+                input_qpc,
+                present_qpc: input_qpc + 1,
+            })
+            .collect()
+    }
+
     #[test]
     fn the_shown_present_gets_the_display_time() {
-        let mut pending = VecDeque::from([(7, 100), (8, 200)]);
+        let mut queue = pending(&[(7, 100), (8, 200)]);
         assert_eq!(
-            settle(&mut pending, 7, 900),
+            settle(&mut queue, 7, 900),
             [Displayed {
                 input_qpc: 100,
+                present_qpc: 101,
                 display_qpc: 900
             }]
         );
-        assert_eq!(pending, [(8, 200)]);
+        assert_eq!(queue, pending(&[(8, 200)]));
     }
 
     #[test]
     fn replaced_presents_are_dropped_without_a_time() {
-        let mut pending = VecDeque::from([(5, 1), (6, 2), (7, 3)]);
-        assert_eq!(settle(&mut pending, 7, 50).len(), 1);
-        assert!(pending.is_empty());
+        let mut queue = pending(&[(5, 1), (6, 2), (7, 3)]);
+        assert_eq!(settle(&mut queue, 7, 50).len(), 1);
+        assert!(queue.is_empty());
     }
 
     #[test]
     fn presents_not_shown_yet_stay_pending() {
-        let mut pending = VecDeque::from([(9, 1)]);
-        assert!(settle(&mut pending, 8, 50).is_empty());
-        assert_eq!(pending, [(9, 1)]);
+        let mut queue = pending(&[(9, 1)]);
+        assert!(settle(&mut queue, 8, 50).is_empty());
+        assert_eq!(queue, pending(&[(9, 1)]));
     }
 
     #[test]
     fn present_counts_wrap() {
-        let mut pending = VecDeque::from([(u32::MAX, 1), (0, 2)]);
-        assert_eq!(settle(&mut pending, 0, 50)[0].input_qpc, 2);
-        assert!(pending.is_empty());
+        let mut queue = pending(&[(u32::MAX, 1), (0, 2)]);
+        assert_eq!(settle(&mut queue, 0, 50)[0].input_qpc, 2);
+        assert!(queue.is_empty());
     }
 }

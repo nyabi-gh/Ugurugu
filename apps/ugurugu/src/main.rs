@@ -9,35 +9,45 @@ mod input;
 mod latency;
 mod render;
 
+use std::io::IsTerminal;
+use std::process::ExitCode;
+
 use tracing_subscriber::EnvFilter;
 use winit::event_loop::EventLoop;
 
-fn main() {
+fn main() -> ExitCode {
+    // Logging must never block the render thread on a slow or full output.
+    let (log_writer, _log_flush) = tracing_appender::non_blocking(std::io::stdout());
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_env("UGURUGU_LOG")
                 .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn")),
         )
+        .with_ansi(std::io::stdout().is_terminal())
+        .with_writer(log_writer)
         .init();
 
-    if let Err(error) = ugu_win::pointer::enable_mouse_in_pointer() {
-        tracing::error!(%error, "cannot route the mouse through pointer input");
-        std::process::exit(1);
-    }
-    let event_loop = match EventLoop::<app::UiEvent>::with_user_event().build() {
-        Ok(event_loop) => event_loop,
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            tracing::error!(%error, "cannot create the event loop");
-            std::process::exit(1);
+            tracing::error!(error, "exiting after a fatal error");
+            ExitCode::FAILURE
         }
-    };
-    let mut app = app::App::new(event_loop.create_proxy());
-    if let Err(error) = event_loop.run_app(&mut app) {
-        tracing::error!(%error, "event loop failed");
-        std::process::exit(1);
     }
-    if let Some(error) = app.fatal_error() {
-        tracing::error!(error, "exiting after a fatal error");
-        std::process::exit(1);
+}
+
+fn run() -> Result<(), String> {
+    ugu_win::pointer::enable_mouse_in_pointer()
+        .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
+    let event_loop = EventLoop::<app::UiEvent>::with_user_event()
+        .build()
+        .map_err(|error| format!("cannot create the event loop: {error}"))?;
+    let mut app = app::App::new(event_loop.create_proxy());
+    event_loop
+        .run_app(&mut app)
+        .map_err(|error| format!("event loop failed: {error}"))?;
+    match app.fatal_error() {
+        Some(error) => Err(error.to_owned()),
+        None => Ok(()),
     }
 }

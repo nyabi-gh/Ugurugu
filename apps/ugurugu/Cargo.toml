@@ -12,6 +12,7 @@ egui-winit.workspace = true
 egui-wgpu.workspace = true
 pollster.workspace = true
 tracing.workspace = true
+tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 ugu-render.workspace = true
 ugu-win.workspace = true

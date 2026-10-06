@@ -310,6 +310,8 @@ fn run(options: &Options) -> Result<(), String> {
         .arg(&options.csv)
         .args([
             "--qpc_time",
+            // Input tracking delays the app's input by several milliseconds.
+            "--no_track_input",
             "--timed",
             &seconds.to_string(),
             "--terminate_after_timed",

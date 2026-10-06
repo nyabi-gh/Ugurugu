@@ -323,6 +323,12 @@ impl RenderThread {
 
     fn collect_display_times(&mut self) {
         for displayed in self.presenter.take_display_times() {
+            tracing::trace!(
+                input_qpc = displayed.input_qpc,
+                present_qpc = displayed.present_qpc,
+                display_qpc = displayed.display_qpc,
+                "frame displayed"
+            );
             self.display_latency
                 .record(Ticks(displayed.display_qpc).seconds_since(Ticks(displayed.input_qpc)));
         }
