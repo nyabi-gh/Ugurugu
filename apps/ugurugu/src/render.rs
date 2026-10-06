@@ -7,20 +7,15 @@
 //! waits on the GPU or the display. A frame waits for the swap chain first and
 //! reads the input queued meanwhile afterwards, so it shows the newest input.
 
-use std::num::NonZeroIsize;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use ugu_render::present::{self, Acquired, Presenter};
+use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::CanvasView;
 use ugu_win::clock::Ticks;
-use ugu_win::composition;
 use ugu_win::pointer::PointerEvent;
 use winit::event::WindowEvent;
-use winit::raw_window_handle::{
-    RawDisplayHandle, RawWindowHandle, Win32WindowHandle, WindowsDisplayHandle,
-};
 use winit::window::Window;
 
 use crate::canvas::{self, ProbeCanvas};
@@ -39,38 +34,6 @@ const IDLE_WAKE: Duration = Duration::from_secs(1);
 const DISPLAY_POLL: Duration = Duration::from_millis(2);
 const FRAME_WAIT_LIMIT: Duration = Duration::from_millis(100);
 
-/// The surface of the canvas child window, made on the UI thread.
-pub struct CanvasSurface {
-    hwnd: isize,
-    surface: wgpu::Surface<'static>,
-}
-
-impl CanvasSurface {
-    pub fn create(instance: &wgpu::Instance, hwnd: isize) -> Result<Self, String> {
-        let handle = Win32WindowHandle::new(
-            NonZeroIsize::new(hwnd).ok_or("the canvas window has no handle")?,
-        );
-        // SAFETY: the UI thread destroys the child window only after the
-        // render thread, which owns this surface, has ended.
-        let surface = unsafe {
-            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(RawDisplayHandle::Windows(WindowsDisplayHandle::new())),
-                raw_window_handle: RawWindowHandle::Win32(handle),
-            })
-        }
-        .map_err(|error| format!("cannot create the canvas surface: {error}"))?;
-        Ok(Self { hwnd, surface })
-    }
-}
-
-/// The canvas swap chain in its own child window.
-struct ChildCanvas {
-    hwnd: isize,
-    presenter: Presenter,
-    /// Where the window was last placed, in parent client physical pixels.
-    placed: Option<[i32; 4]>,
-}
-
 pub struct RenderThread {
     window: Arc<Window>,
     egui_ctx: egui::Context,
@@ -80,7 +43,6 @@ pub struct RenderThread {
     presenter: Presenter,
     egui_renderer: egui_wgpu::Renderer,
     canvas_view: CanvasView,
-    child: Option<ChildCanvas>,
     adapter_summary: String,
     router: InputRouter,
     canvas: ProbeCanvas,
@@ -113,7 +75,6 @@ impl RenderThread {
         window: Arc<Window>,
         instance: &wgpu::Instance,
         surface: wgpu::Surface<'static>,
-        canvas_surface: Option<CanvasSurface>,
         egui_ctx: egui::Context,
         egui_state: egui_winit::State,
     ) -> Result<Self, String> {
@@ -137,23 +98,7 @@ impl RenderThread {
             presenter.format(),
             egui_wgpu::RendererOptions::default(),
         );
-        let format = presenter.format();
-        let canvas_view = CanvasView::new(&device, format, canvas::PAPER);
-        let child = match canvas_surface {
-            Some(canvas) => {
-                let presenter = Presenter::new(canvas.surface, &adapter, &device, [1, 1])?;
-                // One canvas pipeline serves both swap chains.
-                if presenter.format() != format {
-                    return Err("the canvas and window swap chains differ in format".to_owned());
-                }
-                Some(ChildCanvas {
-                    hwnd: canvas.hwnd,
-                    presenter,
-                    placed: None,
-                })
-            }
-            None => None,
-        };
+        let canvas_view = CanvasView::new(&device, presenter.format(), canvas::PAPER);
         Ok(Self {
             window,
             egui_ctx,
@@ -163,7 +108,6 @@ impl RenderThread {
             presenter,
             egui_renderer,
             canvas_view,
-            child,
             adapter_summary,
             router: InputRouter::default(),
             canvas: ProbeCanvas::default(),
@@ -199,7 +143,7 @@ impl RenderThread {
             if self.repaint_at.is_some_and(|at| at <= Instant::now()) {
                 self.needs_frame = true;
             }
-            if self.needs_frame && self.wait_for_frame() {
+            if self.needs_frame && self.presenter.wait_for_frame(FRAME_WAIT_LIMIT) {
                 if !self.apply_queued(messages) {
                     break;
                 }
@@ -215,29 +159,12 @@ impl RenderThread {
         }
     }
 
-    fn wait_for_frame(&self) -> bool {
-        match &self.child {
-            Some(child) => {
-                present::wait_for_frames(&[&self.presenter, &child.presenter], FRAME_WAIT_LIMIT)
-            }
-            None => present::wait_for_frames(&[&self.presenter], FRAME_WAIT_LIMIT),
-        }
-    }
-
-    /// The presenter that shows the canvas, and so the input.
-    fn canvas_presenter(&mut self) -> &mut Presenter {
-        match &mut self.child {
-            Some(child) => &mut child.presenter,
-            None => &mut self.presenter,
-        }
-    }
-
-    fn wake_timeout(&mut self) -> Duration {
+    fn wake_timeout(&self) -> Duration {
         let mut timeout = IDLE_WAKE;
         if let Some(at) = self.repaint_at {
             timeout = timeout.min(at.saturating_duration_since(Instant::now()));
         }
-        if self.canvas_presenter().has_pending_display_times() {
+        if self.presenter.has_pending_display_times() {
             timeout = timeout.min(DISPLAY_POLL);
         }
         timeout
@@ -342,49 +269,27 @@ impl RenderThread {
             .update(&self.device, &self.queue, self.canvas.raster_mut());
         let canvas_origin = [canvas_area[0].max(0) as u32, canvas_area[1].max(0) as u32];
 
-        // The canvas goes first, so its present is the first one after input.
-        let mut canvas_shown = true;
-        if let Some(child) = self.child.as_mut() {
-            child.place(&self.device, canvas_area);
-            match draw(
-                &self.device,
-                &self.queue,
-                &mut child.presenter,
-                Some((&mut self.canvas_view, [0, 0])),
-                None,
-            ) {
-                Some(frame) => present_input(
-                    &self.queue,
-                    &mut child.presenter,
-                    frame,
-                    &mut self.router,
-                    &mut self.present_latency,
-                ),
-                None => canvas_shown = false,
-            }
-        }
-        let in_child = self.child.is_some();
-        let parent_canvas = (!in_child).then_some((&mut self.canvas_view, canvas_origin));
         match draw(
             &self.device,
             &self.queue,
             &mut self.presenter,
-            parent_canvas,
-            Some((&mut self.egui_renderer, &primitives, pixels_per_point)),
+            &mut self.canvas_view,
+            canvas_origin,
+            &mut self.egui_renderer,
+            &primitives,
+            pixels_per_point,
         ) {
-            Some(frame) if in_child => self.presenter.present(&self.queue, frame, None),
-            Some(frame) => present_input(
-                &self.queue,
-                &mut self.presenter,
-                frame,
-                &mut self.router,
-                &mut self.present_latency,
-            ),
-            None => canvas_shown &= in_child,
-        }
-        if !canvas_shown {
+            Some(frame) => {
+                let oldest_input = self.router.take_oldest_unpresented();
+                self.presenter
+                    .present(&self.queue, frame, oldest_input.map(|ticks| ticks.0));
+                if let Some(oldest_input) = oldest_input {
+                    self.present_latency
+                        .record(Ticks::now().seconds_since(oldest_input));
+                }
+            }
             // The input stays marked unpresented and is drawn next time.
-            self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT);
+            None => self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT),
         }
 
         for id in &textures.free {
@@ -393,7 +298,7 @@ impl RenderThread {
     }
 
     fn collect_display_times(&mut self) {
-        for displayed in self.canvas_presenter().take_display_times() {
+        for displayed in self.presenter.take_display_times() {
             tracing::trace!(
                 input_qpc = displayed.input_qpc,
                 present_qpc = displayed.present_qpc,
@@ -406,49 +311,32 @@ impl RenderThread {
     }
 }
 
-impl ChildCanvas {
-    /// Places the window over `area`, in parent client physical pixels.
-    fn place(&mut self, device: &wgpu::Device, area: [i32; 4]) {
-        if self.placed == Some(area) {
-            return;
-        }
-        composition::place_child(self.hwnd, area);
-        self.presenter.resize(
-            device,
-            [
-                (area[2] - area[0]).max(1) as u32,
-                (area[3] - area[1]).max(1) as u32,
-            ],
-        );
-        self.placed = Some(area);
-    }
-}
-
-/// Draws the canvas at an origin and then egui into the next buffer of
-/// `presenter`, and submits it. Returns `None` when there is no buffer to
-/// draw into now.
+/// Draws the canvas with its top-left pixel at `canvas_origin`, then egui
+/// over it, into the next buffer of `presenter`, and submits it. Returns
+/// `None` when there is no buffer to draw into now.
+#[expect(clippy::too_many_arguments, reason = "one frame's parts, used once")]
 fn draw(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     presenter: &mut Presenter,
-    canvas: Option<(&mut CanvasView, [u32; 2])>,
-    egui: Option<(&mut egui_wgpu::Renderer, &[egui::ClippedPrimitive], f32)>,
+    canvas: &mut CanvasView,
+    canvas_origin: [u32; 2],
+    egui_renderer: &mut egui_wgpu::Renderer,
+    primitives: &[egui::ClippedPrimitive],
+    pixels_per_point: f32,
 ) -> Option<wgpu::SurfaceTexture> {
     let frame = match presenter.acquire(device) {
         Acquired::Frame(frame) => frame,
         Acquired::Skip => return None,
     };
     let size = presenter.size();
+    let screen = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: size,
+        pixels_per_point,
+    };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    let mut commands = Vec::new();
-    let egui = egui.map(|(renderer, primitives, pixels_per_point)| {
-        let screen = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: size,
-            pixels_per_point,
-        };
-        commands = renderer.update_buffers(device, queue, &mut encoder, primitives, &screen);
-        (renderer, primitives, screen)
-    });
+    let mut commands =
+        egui_renderer.update_buffers(device, queue, &mut encoder, primitives, &screen);
     let view = frame
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
@@ -471,31 +359,11 @@ fn draw(
                 multiview_mask: None,
             })
             .forget_lifetime();
-        if let Some((canvas, origin)) = canvas {
-            canvas.draw(queue, &mut pass, origin, size);
-            pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-        }
-        if let Some((renderer, primitives, screen)) = egui {
-            renderer.render(&mut pass, primitives, &screen);
-        }
+        canvas.draw(queue, &mut pass, canvas_origin, size);
+        pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
+        egui_renderer.render(&mut pass, primitives, &screen);
     }
     commands.push(encoder.finish());
     queue.submit(commands);
     Some(frame)
-}
-
-/// Presents the frame that shows the canvas, stamped with the oldest input
-/// it shows.
-fn present_input(
-    queue: &wgpu::Queue,
-    presenter: &mut Presenter,
-    frame: wgpu::SurfaceTexture,
-    router: &mut InputRouter,
-    present_latency: &mut LatencyLog,
-) {
-    let oldest_input = router.take_oldest_unpresented();
-    presenter.present(queue, frame, oldest_input.map(|ticks| ticks.0));
-    if let Some(oldest_input) = oldest_input {
-        present_latency.record(Ticks::now().seconds_since(oldest_input));
-    }
 }

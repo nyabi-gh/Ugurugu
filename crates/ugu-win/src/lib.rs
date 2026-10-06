@@ -4,5 +4,4 @@
 //! Windows input and OS services. GPU presentation lives in `ugu-render`.
 
 pub mod clock;
-pub mod composition;
 pub mod pointer;
