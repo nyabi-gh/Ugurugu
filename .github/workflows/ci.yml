@@ -28,6 +28,7 @@ jobs:
     outputs:
       cpp: ${{ steps.detect.outputs.cpp }}
       web: ${{ steps.detect.outputs.web }}
+      rust: ${{ steps.detect.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -39,27 +40,30 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          cpp=false web=false
+          cpp=false web=false rust=false
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            cpp=true web=true
+            cpp=true web=true rust=true
           else
             while IFS= read -r path; do
               case "$path" in
                 docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md) ;;
+                apps/*|crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml)
+                  rust=true ;;
                 web/*|tools/check_itchio_package.mjs|tools/wasm_*)
                   web=true ;;
                 # Everything else can reach the desktop app, and the wasm
                 # engine and web package build from the same sources.
                 *)
-                  cpp=true web=true ;;
+                  cpp=true web=true rust=true ;;
               esac
             done < <(git diff --name-only "$BASE" HEAD)
           fi
           {
             echo "cpp=$cpp"
             echo "web=$web"
+            echo "rust=$rust"
           } >> "$GITHUB_OUTPUT"
-          echo "cpp=$cpp web=$web"
+          echo "cpp=$cpp web=$web rust=$rust"
 
   static:
     name: Format and release metadata
@@ -547,10 +551,52 @@ jobs:
             "direct run exit code: $LASTEXITCODE"
           }
 
+  rust:
+    name: Rust Windows
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a
+        with:
+          tool: cargo-deny@0.18.9
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Dependencies
+        run: cargo deny --locked check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Release build
+        run: cargo build --workspace --release --locked
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ugurugu-rust-windows-x64
+          path: target/release/ugurugu.exe
+          if-no-files-found: error
+          retention-days: 14
+
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, package]
+    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, package, rust]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -565,6 +611,7 @@ jobs:
           TIDY_RESULT: ${{ needs.tidy.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
         run: |
           failed=0
           # A check may be skipped only because its paths did not change,
@@ -573,7 +620,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD PACKAGE; do
+          for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD PACKAGE RUST; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

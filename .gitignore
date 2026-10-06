@@ -21,3 +21,6 @@ artifacts/
 # AI
 .codex/
 .claude/
+
+# Rust
+/target/
