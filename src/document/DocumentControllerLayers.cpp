@@ -4,7 +4,6 @@
 #include "document/DocumentBudget.hpp"
 #include "document/DocumentController.hpp"
 #include "document/DocumentLimits.hpp"
-#include "document/Identity.hpp"
 #include "document/LayerHierarchy.hpp"
 #include "document/SelectionOperation.hpp"
 #include "document/history/HistoryEffects.hpp"
@@ -407,7 +406,7 @@ void DocumentController::duplicateLayer(const QUuid &id)
         return;
     }
     Layer copy = current.layers[sourceIndex];
-    copy.id = Identity::newId();
+    copy.id = QUuid::createUuid();
     copy.name = tr("%1 copy").arg(copy.name);
     if (copy.name.size() > DocumentLimits::maximumLayerNameLength)
     {
@@ -415,7 +414,7 @@ void DocumentController::duplicateLayer(const QUuid &id)
     }
     for (Stroke &stroke : copy.strokes)
     {
-        stroke.id = Identity::newId();
+        stroke.id = QUuid::createUuid();
     }
     Document withCopy = current;
     withCopy.layers.insert(sourceIndex + 1, copy);
@@ -687,10 +686,10 @@ DocumentController::PasteLayerResult DocumentController::pasteLayer(Layer layer,
         reframe.points.clear();
         layer.strokes.append(std::move(reframe));
     }
-    layer.id = Identity::newId();
+    layer.id = QUuid::createUuid();
     for (Stroke &stroke : layer.strokes)
     {
-        stroke.id = Identity::newId();
+        stroke.id = QUuid::createUuid();
     }
     layer.name = nextLayerName();
     layer.visible = true;

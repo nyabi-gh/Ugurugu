@@ -177,39 +177,3 @@ existing WOFF2 subset. Both the font licence and the OpenType.js licence ship
 in the web notices panel. `npm run test:browser -- text-wobble-image` runs the
 content-editing regression scenario; append `--screenshots` to save desktop
 and phone-sized text-panel screenshots in the system temporary directory.
-
-## Rust engine (in progress)
-
-The Rust port described in [docs/RUST_PORT_PLAN.md](docs/RUST_PORT_PLAN.md)
-lives in the Cargo workspace under `crates/`, next to the CMake project. It
-does not change the C++ build. `rust-toolchain.toml` pins the toolchain, so
-rustup installs it on first use.
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo build --target wasm32-unknown-unknown --locked -p ugu-base
-node tools/check_crate_dependencies.mjs
-cargo deny --locked check
-```
-
-`tools/check_crate_dependencies.mjs` enforces the crate layering table in
-section 3.1 of the plan. `cargo deny` needs `cargo install --locked cargo-deny`
-and checks licences against GPL-3.0-or-later, advisories and crate sources.
-The CI `rust-static` and `rust-test` jobs run the same commands and only
-report for now; they are not part of the quality gate yet.
-
-The C++ side of the port's feel comparison is the `ugurugu_reference_export`
-tool target (`tools/ReferenceExport.cpp`, not built by default). For a
-document it writes a neutral `scene.json` with every default and layer
-override resolved, `geometry.jsonl` with each stroke's prepared points per
-frame, rendered `frames/` and each paint stroke rendered alone in `strokes/`;
-`stabilize` runs a recorded pen trace through the stabilizer. Every export
-records the Qt version, OS and CPU in `manifest.json`.
-
-```sh
-cmake --build out/build/windows-release --config Release --target ugurugu_reference_export
-ugurugu_reference_export all scene.ugu --out reference/scene --frames all
-ugurugu_reference_export stabilize trace.json --out reference/trace
-```

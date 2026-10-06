@@ -4,7 +4,6 @@
 #include "app/WatchedFutureResult.hpp"
 #include "document/DocumentLimits.hpp"
 #include "document/DocumentOperations.hpp"
-#include "document/Identity.hpp"
 #include "document/SelectionOperation.hpp"
 #include "document/SelectionVisibility.hpp"
 #include "document/StrokeMask.hpp"
@@ -19,6 +18,7 @@
 #include <QHash>
 #include <QPainter>
 #include <QPointer>
+#include <QRandomGenerator>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -631,7 +631,7 @@ void CanvasWidget::commitFrozenFill(const QImage &coverage)
     }
 
     Stroke fillStroke;
-    fillStroke.seed = Identity::newSeed();
+    fillStroke.seed = QRandomGenerator::global()->generate64();
     fillStroke.mode = StrokeMode::Fill;
     fillStroke.color = m_brushColor;
     fillStroke.width = std::clamp(m_brushWidth,

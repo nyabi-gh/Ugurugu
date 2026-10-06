@@ -4,7 +4,6 @@
 #include "document/DocumentBudget.hpp"
 #include "document/DocumentController.hpp"
 #include "document/DocumentLimits.hpp"
-#include "document/Identity.hpp"
 #include "document/SelectionOperation.hpp"
 #include "document/SelectionVisibility.hpp"
 #include "document/StrokeMask.hpp"
@@ -542,7 +541,7 @@ bool DocumentController::duplicateStrokes(const QUuid &layerId,
         }
 
         Stroke copy = stroke;
-        copy.id = Identity::newId();
+        copy.id = QUuid::createUuid();
         if (copy.imageOp)
         {
             copy.imageOp->transform = copy.imageOp->transform * transform;

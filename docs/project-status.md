@@ -570,45 +570,6 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - 2026-10-05 main에 fast-forward 병합·푸시(`04aa1d6`). 이 변경을 담은 main CI 결과는 다음 세션에서 확인한다(문서 커밋 푸시로 이전 run은 취소될 수 있음).
 - 남은 것: R03의 느린 엔진 매트릭스(pen-up·undo·레이어 변경 직후 저장, pending text/transform), 끝난 세션 기록이 쌓이는 상한(지금은 사용자가 하나씩 버림), Web Locks 없는 브라우저에서의 두 탭 구분.
 
-### Rust 포팅 0단계 (2026-10-05~) — 진행 중
-
-[RUST_PORT_PLAN.md](RUST_PORT_PLAN.md) §7 0단계를 아래 순서의 브랜치로 나눠 진행한다(2026-10-05 사용자 확정). 계획 문서는 2026-10-05 main에 fast-forward(`ccc1437`).
-
-| # | 단계 | 상태 |
-|---|---|---|
-| ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 완료. main `a128e55`(2026-10-06), Rust 잡 5개 녹색 |
-| ② | C++ seed·uuid 주입 지점 | 완료. main `ca51af1`(2026-10-06), PR CI 전 잡 녹색 |
-| ③ | C++ `ReferenceExport`(scene·geometry·frames·strokes·stabilize) | 구현, Windows 확인 (브랜치 `ref/reference-export`) |
-| ④ | 장면 행렬과 C++ 참조 결과 | 계획 |
-| ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
-| ⑥ | 허용치 기준선(C++ Windows vs macOS, macOS는 CI 러너) | 계획 |
-| ⑦–⑨ | S3 파일 형식 → S1 래스터라이저 → S2 셸·펜 지연 | 계획 |
-
-①의 내용과 확인:
-
-- 루트 `Cargo.toml` 워크스페이스(resolver 3, edition 2024, `unsafe_code = "forbid"`), `rust-toolchain.toml`(1.99.0, rustfmt·clippy·wasm32-unknown-unknown), `Cargo.lock`, 빈 `crates/ugu-base`. 다른 크레이트는 해당 단계에서 만든다.
-- [tools/check_crate_dependencies.mjs](../tools/check_crate_dependencies.mjs): 계획 §3.1 의존 표를 `cargo metadata`로 검사한다. 표에 없는 크레이트도 거절한다. 임시 크레이트로 위반(`ugu-base → ugu-raster`, 표에 없는 크레이트) 2건이 실패로 보고되는 것을 확인했다.
-- `deny.toml`: GPL-3.0-or-later와 호환되는 라이선스 허용 목록, crates.io 외 출처 거절, yanked 거절.
-- CI: `rust-static`(fmt, clippy `-D warnings`, 계층 검사, cargo-deny 0.18.9 바이너리 sha256 고정)과 `rust-test`(Windows·macOS·Linux 테스트 + wasm32 빌드)를 `continue-on-error`로 추가하고 `quality` needs에는 넣지 않았다. 기존 라이선스 헤더 검사에 `*.rs`를 추가했다.
-- 로컬(Windows 11, 2026-10-05): fmt·clippy·test·wasm32 빌드·계층 검사·`cargo deny check` 통과. CMake 빌드 파일은 바꾸지 않았다.
-
-②의 내용과 확인:
-
-- [Identity.hpp](../src/document/Identity.hpp): 레이어·획 id(`Layer`·`Stroke` 기본값, 레이어 복제·붙여넣기, 선택 복제)와 새 획 seed(그리기, 텍스트, 채우기)를 `Identity::newId()`·`newSeed()` 하나로 모았다. 평소에는 지금처럼 `QUuid::createUuid`·`QRandomGenerator::global()`을 쓴다. `Identity::DeterministicScope(seed)`가 살아 있는 동안에는 seed에서 갈라진 splitmix64 수열 둘(id용, seed용)로 바꾼다. 두 수열이 따로라 id를 더 만들어도 seed 수열이 밀리지 않고, OS에 관계없이 같은 값이 나온다(Rust 쪽도 같은 수식으로 재현할 수 있음). 범위는 중첩되고, 끝나면 이전 상태로 돌아간다.
-- 바꾸지 않은 곳: C++ 웹 엔진(`src/wasm`, 동결), 복구 세션 id(문서 내용이 아님).
-- 회귀: [IdentityTests.cpp](../tests/IdentityTests.cpp) 6개(같은 seed → 같은 수열, seed 0의 첫 값 고정, v4 UUID 형식, id가 seed 수열을 밀지 않음, 중첩 복원, 컨트롤러로 획을 그리고 레이어를 복제한 결과의 id 재현).
-- 로컬(Windows 11, windows-release, 2026-10-05): CTest 12/12 통과, IdentityTests 6/6 통과. wasm 빌드는 CI `wasm` 잡으로 확인한다.
-
-①을 main에 넣기 전 main CI의 Clang-Tidy가 `CanvasWidgetPreview.cpp` warmup 루프의 `QFutureWatcher`를 누수로 보고하고 있었다(`61ab90a`부터, D27/D28 변경 뒤 분석 경로가 바뀜). 위젯을 부모로 두고 완료 시 `deleteLater()`하는 구조라 실제 누수는 아니며, 다른 watcher 자리와 같은 NOLINT 구역으로 표시했다(`68ff0b8`). 로컬 clang-tidy에서 수정 전 같은 오류, 수정 후 없음.
-
-**간헐 실패 — 웹 시나리오 01(recovery-and-png-export)**: CI `wasm` 잡의 브라우저 단계가 main push `61ab90a`·`a128e55`에서 같은 지점에서 실패했다(`98fa406`, PR #11·#12는 통과). 새로고침 뒤 복구 배너를 눌렀는데 30초 안에 그린 획의 픽셀 수와 같아지지 않는다. Rust 작업과 무관(웹 셸·엔진 변경 없음). 로컬(Windows, Chromium, 로컬 엔진)에서는 10/10 통과하고, CPU 6배 throttle, 그리기 전 2.5초 지연, 썸네일 대기 생략으로도 재현되지 않았다. 확인한 것: 테스트가 기다리는 "Recovery snapshot saved" 문구는 획 이전의 빈 문서 스냅샷에서도 이미 표시될 수 있어, 획이 저장됐다는 보장이 아니다(그리기 전 2.5초 지연 시 문구가 획 전에 이미 떠 있음). 그래도 로컬에서는 새로고침 때 숨김 이벤트 스냅샷이 획을 저장해 통과한다. 원인 확정 전이며, 다음은 CI에서 실패 시점의 복원된 픽셀 수·복구 기록(savedAt·크기)을 남기는 진단이다.
-
-③의 내용과 확인:
-
-- [tools/ReferenceExport.cpp](../tools/ReferenceExport.cpp), 타깃 `ugurugu_reference_export`(`EXCLUDE_FROM_ALL`). 명령: `scene`(모든 기본값과 레이어 override를 풀어 쓴 중립 장면 JSON, u64 seed는 문자열, 마스크·자산은 패딩 없는 행 base64), `geometry`(획·프레임별 `StrokeRenderer::prepare` 결과 JSONL: 점·압력·보이는 구간·굵기), `frames`(프레임 PNG, `--size`면 `NativeExact` 축소 렌더), `strokes`(paint 획 하나씩 투명 바탕에 렌더, 에어브러시 dab·스프레이 입자 비교용), `stabilize`(펜 기록 → 1€ 필터 출력), `all`. 모든 출력에 Qt 버전·OS·CPU를 담은 `manifest.json`.
-- 계획 §4.2의 `dabs <cases>`는 `strokes`로 대신했다. 획 하나를 따로 렌더하면 선·dab·입자가 모두 같은 방식으로 나오고, 경우 정의는 ④ 장면 행렬 문서가 맡는다. 획 샘플링 규칙(0.75px 간격, 끝점 압력)은 지금 `CanvasWidget` 안에 있어 `stabilize`에 들어 있지 않다. 1단계 I층 비교 전에 순수 함수로 꺼낸다.
-- 확인(Windows 11, Release, Qt 6.11.2, 2026-10-06): 레거시 fixture 3개를 두 번씩 내보내 결과가 바이트 동일. `frames` PNG에서 계산한 digest가 `LegacyRenderGoldenTests`의 Windows 값과 일치(animated 0·1, fill-hierarchy 0). 로컬 clang-tidy 경고 없음.
-
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
 공통 완료 규칙:

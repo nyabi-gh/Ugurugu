@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-#include "document/Identity.hpp"
 #include "document/TextStrokeBuilder.hpp"
 #include "ui/CanvasViewport.hpp"
 #include "ui/CanvasWidget.hpp"
@@ -9,6 +8,7 @@
 
 #include <QFontMetricsF>
 #include <QPainter>
+#include <QRandomGenerator>
 
 #include <algorithm>
 #include <optional>
@@ -218,7 +218,7 @@ bool CanvasWidget::applyTextPlacement()
     options.brush.antialiasing = m_brushAntialiasing;
     options.filled = m_textFilled;
     options.canvasSize = document.size;
-    options.baseSeed = Identity::newSeed();
+    options.baseSeed = QRandomGenerator::global()->generate64();
     QVector<Stroke> strokes = TextStrokeBuilder::build(options);
     if (strokes.isEmpty())
     {
