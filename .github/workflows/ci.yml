@@ -574,6 +574,69 @@ jobs:
       - name: Test
         run: ${{ matrix.command }}
 
+  # The C++ side of the Rust port's feel comparison (docs/RUST_PORT_PLAN.md
+  # §4.2). Report only: it regenerates the scene matrix and this platform's
+  # references, uploads them, and says whether the committed ones are current.
+  reference:
+    name: Reference ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-2025
+            preset: windows-release
+            tools: out/build/windows-release/Release
+            qt-host: windows
+            qt-arch: win64_msvc2022_64
+          - platform: macos
+            os: macos-15
+            preset: macos-release
+            tools: out/build/macos-release
+            qt-host: mac
+            qt-arch: clang_64
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
+        with:
+          version: '${{ env.QT_VERSION }}'
+          aqtsource: '${{ env.AQT_SOURCE }}'
+          host: '${{ matrix.qt-host }}'
+          target: desktop
+          arch: '${{ matrix.qt-arch }}'
+          modules: qtshadertools qtimageformats
+          cache: true
+
+      - name: Build the reference tools
+        run: |
+          cmake --preset ${{ matrix.preset }} -DBUILD_TESTING=OFF
+          cmake --build --preset ${{ matrix.preset }} --parallel --target ugurugu_reference_scenes ugurugu_reference_export
+
+      - name: Regenerate the references
+        run: node tools/reference_matrix.mjs ${{ matrix.tools }} ${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: reference-${{ matrix.platform }}
+          path: |
+            tests/reference/scenes
+            tests/reference/cpp/${{ matrix.platform }}
+
+      - name: Check the committed references are current
+        shell: bash
+        run: |
+          git add --intent-to-add tests/reference
+          git diff --stat --exit-code -- tests/reference/scenes "tests/reference/cpp/${{ matrix.platform }}"
+
   quality:
     name: Quality gate
     if: always()
