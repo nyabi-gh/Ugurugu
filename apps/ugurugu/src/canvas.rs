@@ -72,7 +72,9 @@ impl ProbeCanvas {
         self.sample_count
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) {
+    /// Takes the rest of `ui` and returns the canvas shapes relative to its
+    /// top-left corner, in points.
+    pub fn layout(&mut self, ui: &mut egui::Ui) -> (egui::Rect, Vec<egui::Shape>) {
         let rect = ui.max_rect();
         let ppp = ui.ctx().pixels_per_point() as f64;
         self.area = Some([
@@ -81,18 +83,21 @@ impl ProbeCanvas {
             rect.right() as f64 * ppp,
             rect.bottom() as f64 * ppp,
         ]);
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, egui::Color32::from_gray(245));
-        let to_screen = |point: &[f64; 2]| {
-            rect.min + egui::vec2((point[0] / ppp) as f32, (point[1] / ppp) as f32)
-        };
+        let to_local =
+            |point: &[f64; 2]| egui::pos2((point[0] / ppp) as f32, (point[1] / ppp) as f32);
+        let mut shapes = vec![egui::Shape::rect_filled(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, rect.size()),
+            0.0,
+            egui::Color32::from_gray(245),
+        )];
         for stroke in self.strokes.iter().chain(self.live.iter()) {
             let color = match stroke.kind {
                 PointerKind::Pen => egui::Color32::from_rgb(20, 60, 160),
                 _ => egui::Color32::from_gray(20),
             };
-            let points: Vec<egui::Pos2> = stroke.points.iter().map(to_screen).collect();
-            painter.add(egui::Shape::line(points, egui::Stroke::new(2.0, color)));
+            let points: Vec<egui::Pos2> = stroke.points.iter().map(to_local).collect();
+            shapes.push(egui::Shape::line(points, egui::Stroke::new(2.0, color)));
         }
+        (rect, shapes)
     }
 }

@@ -231,6 +231,7 @@ impl Lcg {
 
 /// One present of the target as PresentMon reports it.
 struct Frame {
+    swap_chain: String,
     present_qpc: i64,
     /// `None` when the frame never reached the screen.
     until_displayed_ms: Option<f64>,
@@ -248,8 +249,9 @@ fn read_frames(csv: &PathBuf, pid: u32) -> Result<Vec<Frame>, String> {
             .position(|field| *field == name)
             .ok_or_else(|| format!("PresentMon CSV has no {name} column"))
     };
-    let (process, time, displayed, mode) = (
+    let (process, swap_chain, time, displayed, mode) = (
         column("ProcessID")?,
+        column("SwapChainAddress")?,
         column("TimeInQPC")?,
         column("MsUntilDisplayed")?,
         column("PresentMode")?,
@@ -264,6 +266,11 @@ fn read_frames(csv: &PathBuf, pid: u32) -> Result<Vec<Frame>, String> {
             continue;
         };
         frames.push(Frame {
+            swap_chain: fields
+                .get(swap_chain)
+                .copied()
+                .unwrap_or_default()
+                .to_owned(),
             present_qpc,
             until_displayed_ms: fields.get(displayed).and_then(|value| value.parse().ok()),
             mode: fields.get(mode).copied().unwrap_or_default().to_owned(),
@@ -429,7 +436,31 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
     Ok((inputs, end))
 }
 
+/// Reports each swap chain on its own: an app may show the canvas in one
+/// swap chain and the rest of its window in another.
 fn report(frames: &[Frame], inputs: &[i64], end: i64) {
+    let mut swap_chains: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame.swap_chain.as_str())
+        .collect();
+    swap_chains.sort_unstable();
+    swap_chains.dedup();
+    println!(
+        "steps={} frames={} swap_chains={}",
+        inputs.len(),
+        frames.len(),
+        swap_chains.len()
+    );
+    for swap_chain in swap_chains {
+        let frames: Vec<&Frame> = frames
+            .iter()
+            .filter(|frame| frame.swap_chain == swap_chain)
+            .collect();
+        report_swap_chain(swap_chain, &frames, inputs, end);
+    }
+}
+
+fn report_swap_chain(swap_chain: &str, frames: &[&Frame], inputs: &[i64], end: i64) {
     let ticks_per_ms = qpc_ticks_per_ms();
     let mut to_present = Vec::new();
     let mut to_display = Vec::new();
@@ -457,11 +488,10 @@ fn report(frames: &[Frame], inputs: &[i64], end: i64) {
     }
 
     println!(
-        "steps={} frames={} misses={misses} undisplayed={undisplayed} extra_presents={extra_presents}",
-        inputs.len(),
+        "swap chain {swap_chain}: frames={} misses={misses} undisplayed={undisplayed} extra_presents={extra_presents}",
         frames.len()
     );
-    println!("present modes: {modes:?}");
-    summary("input -> present", to_present);
-    summary("input -> displayed", to_display);
+    println!("  present modes: {modes:?}");
+    summary("  input -> present", to_present);
+    summary("  input -> displayed", to_display);
 }

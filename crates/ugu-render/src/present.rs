@@ -15,7 +15,7 @@ use std::time::Duration;
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Dxgi::{DXGI_FRAME_STATISTICS, IDXGISwapChain3};
 use windows::Win32::System::Performance::QueryPerformanceCounter;
-use windows::Win32::System::Threading::WaitForSingleObject;
+use windows::Win32::System::Threading::WaitForMultipleObjects;
 
 /// Swap chain buffers the app may queue ahead of the display. One keeps
 /// input-to-display at one refresh after the frame is ready.
@@ -59,6 +59,24 @@ struct Pending {
     count: u32,
     input_qpc: u64,
     present_qpc: u64,
+}
+
+/// Waits until every swap chain can take another frame. Returns `false` on
+/// timeout, in which case the caller should not draw yet. All are waited for
+/// at once, so a timeout leaves no swap chain's frame slot taken.
+pub fn wait_for_frames(presenters: &[&Presenter], timeout: Duration) -> bool {
+    let handles: Vec<HANDLE> = presenters
+        .iter()
+        .filter_map(|presenter| presenter.waitable())
+        .collect();
+    if handles.is_empty() {
+        return true;
+    }
+    let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+    // SAFETY: the handles belong to the live swap chains of `presenters`.
+    let result = unsafe { WaitForMultipleObjects(&handles, true, millis) };
+    // With every handle awaited, any index in the signalled range means success.
+    (WAIT_OBJECT_0.0..WAIT_OBJECT_0.0 + handles.len() as u32).contains(&result.0)
 }
 
 pub struct Presenter {
@@ -121,17 +139,6 @@ impl Presenter {
         self.surface.configure(device, &self.config);
         // Present counts restart with a new buffer configuration.
         self.pending.clear();
-    }
-
-    /// Waits until the swap chain can take another frame. Returns `false` on
-    /// timeout, in which case the caller should not draw yet.
-    pub fn wait_for_frame(&self, timeout: Duration) -> bool {
-        let Some(handle) = self.waitable() else {
-            return true;
-        };
-        let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
-        // SAFETY: the handle belongs to the live swap chain of `self.surface`.
-        unsafe { WaitForSingleObject(handle, millis) == WAIT_OBJECT_0 }
     }
 
     pub fn acquire(&mut self, device: &wgpu::Device) -> Acquired {

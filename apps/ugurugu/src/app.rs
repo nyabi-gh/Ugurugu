@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 
+use ugu_win::composition::{self, SurfaceChild};
 use ugu_win::pointer::PointerInput;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -18,7 +19,29 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
-use crate::render::{RenderThread, ToRender};
+use crate::render::{CanvasSurface, RenderThread, ToRender};
+
+/// How the window's swap chains are laid out, chosen with `UGURUGU_PRESENT`
+/// while measuring which layout DWM shows without composing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresentLayout {
+    /// One swap chain for the whole client area.
+    Window,
+    /// As `Window`, with the rounded corners turned off.
+    SquareWindow,
+    /// The canvas in its own child window swap chain.
+    CanvasChild,
+}
+
+impl PresentLayout {
+    fn from_env() -> Self {
+        match std::env::var("UGURUGU_PRESENT").as_deref() {
+            Ok("square") => Self::SquareWindow,
+            Ok("child") => Self::CanvasChild,
+            _ => Self::Window,
+        }
+    }
+}
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
@@ -34,6 +57,8 @@ pub struct App {
 struct Session {
     // Dropped first: the subclass must go before the window it is attached to.
     pointer: PointerInput,
+    // Destroyed after the render thread dropped its swap chain, before the parent.
+    _canvas_child: Option<SurfaceChild>,
     _window: Arc<Window>,
     to_render: Sender<ToRender>,
     render_thread: Option<JoinHandle<()>>,
@@ -76,10 +101,26 @@ impl Session {
                 .create_window(attributes)
                 .map_err(|error| format!("cannot create the window: {error}"))?,
         );
+        let hwnd = hwnd_of(&window)?;
         // SAFETY: the window is alive and owned by this thread, and `Session`
         // drops the subclass before the window.
-        let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
+        let pointer = unsafe { PointerInput::install(hwnd) }
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
+        let layout = PresentLayout::from_env();
+        tracing::info!(?layout, "present layout");
+        if layout == PresentLayout::SquareWindow {
+            composition::set_square_corners(hwnd)
+                .map_err(|error| format!("cannot square the window corners: {error}"))?;
+        }
+        let canvas_child = match layout {
+            // SAFETY: the parent is alive on this thread, and `Session` drops
+            // the child on this thread after the render thread has ended.
+            PresentLayout::CanvasChild => Some(
+                unsafe { SurfaceChild::create(hwnd) }
+                    .map_err(|error| format!("cannot create the canvas window: {error}"))?,
+            ),
+            _ => None,
+        };
 
         let egui_ctx = egui::Context::default();
         let egui_state = egui_winit::State::new(
@@ -91,6 +132,10 @@ impl Session {
             None,
         );
         let (instance, surface) = RenderThread::create_surface(&window)?;
+        let canvas_surface = match &canvas_child {
+            Some(child) => Some(CanvasSurface::create(&instance, child.hwnd())?),
+            None => None,
+        };
         let (to_render, messages) = mpsc::channel();
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
@@ -100,6 +145,7 @@ impl Session {
                     render_window,
                     &instance,
                     surface,
+                    canvas_surface,
                     egui_ctx,
                     egui_state,
                 ) {
@@ -115,6 +161,7 @@ impl Session {
 
         Ok(Self {
             pointer,
+            _canvas_child: canvas_child,
             _window: window,
             to_render,
             render_thread: Some(render_thread),
