@@ -10,6 +10,7 @@ import {
     firstThumbnailDataUrl,
     installPixelCounter,
     isPlaying,
+    recoveryRecords,
     waitForDocumentLoaded,
     waitForThumbnails,
 } from "../harness.mjs";
@@ -62,34 +63,56 @@ export default async function run({ browser, origin }) {
     );
     check(true, "autosave snapshot reported in status bar");
 
+    const recordsBeforeReload = await recoveryRecords(page);
+    const reloadedAt = await page.evaluate(() => Date.now());
     await page.reload();
     await page.locator("#recovery-restore").waitFor({ timeout: 30000 });
     check(true, "recovery banner offered after reload");
     await page.locator("#recovery-restore").click();
-    await page.waitForFunction(
-        (expected) => {
-            const canvas = document.querySelector("#document-surface");
-            if (!canvas) {
-                return false;
-            }
-            const data = canvas
-                .getContext("2d")
-                .getImageData(0, 0, canvas.width, canvas.height).data;
-            let count = 0;
-            for (let index = 0; index < data.length; index += 4) {
-                if (
-                    data[index] === 29 &&
-                    data[index + 1] === 33 &&
-                    data[index + 2] === 41
-                ) {
-                    count += 1;
+    await page
+        .waitForFunction(
+            (expected) => {
+                const canvas = document.querySelector("#document-surface");
+                if (!canvas) {
+                    return false;
                 }
-            }
-            return count === expected;
-        },
-        drawnPixels,
-        { timeout: 30000 },
-    );
+                const data = canvas
+                    .getContext("2d")
+                    .getImageData(0, 0, canvas.width, canvas.height).data;
+                let count = 0;
+                for (let index = 0; index < data.length; index += 4) {
+                    if (
+                        data[index] === 29 &&
+                        data[index + 1] === 33 &&
+                        data[index + 2] === 41
+                    ) {
+                        count += 1;
+                    }
+                }
+                return count === expected;
+            },
+            drawnPixels,
+            { timeout: 30000 },
+        )
+        .catch(async (error) => {
+            // This wait fails intermittently on CI only; say what was restored.
+            const state = {
+                drawnPixels,
+                restoredPixels: await countBrushPixels(page),
+                status: await page.locator("#status").textContent(),
+                autosaveStatus: await page
+                    .locator("#autosave-status")
+                    .textContent(),
+                bannerStillShown:
+                    (await page.locator(".recovery-banner").count()) > 0,
+                reloadedAt,
+                recordsBeforeReload,
+                recordsNow: await recoveryRecords(page),
+            };
+            throw new Error(
+                `${error.message}\n${JSON.stringify(state, null, 2)}`,
+            );
+        });
     check(true, `restored document renders the stroke (${drawnPixels} px)`);
 
     const downloadPromise = page.waitForEvent("download", { timeout: 20000 });
