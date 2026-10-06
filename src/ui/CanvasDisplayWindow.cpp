@@ -89,7 +89,13 @@ CanvasDisplayWindow::CanvasDisplayWindow(CanvasWidget *canvas)
     : m_canvas(canvas)
 {
     setSurfaceType(platformSurfaceType());
+#ifdef Q_OS_MACOS
+    // Cocoa drops hover moves over a child window that is transparent for
+    // input, so the canvas would only see moves while a button is held.
+    setFlags(Qt::WindowDoesNotAcceptFocus);
+#else
     setFlags(Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus);
+#endif
 }
 
 CanvasDisplayWindow::~CanvasDisplayWindow()

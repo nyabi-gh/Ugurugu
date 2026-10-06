@@ -169,7 +169,7 @@
 - 수정: 렌더를 맡은 스레드가 `PendingRender`(RAII)와 scope guard로 슬롯을 쥐고 모든 종료 경로에서 정리한 뒤 대기자를 깨운다. 자산 캐시의 계산 중 표시 로직은 단독 시험이 가능하도록 [ComputedImageCache](../src/render/engine/ComputedImageCache.hpp)로 분리했다.
 - 회귀: [WobbleAnimationTests.cpp](../tests/WobbleAnimationTests.cpp)의 `releasesAStaticLayerSlotWhoseRenderThrew`, [ComputedImageCacheTests.cpp](../tests/ComputedImageCacheTests.cpp)(동시 미스 1회 계산, 예외 뒤 대기자 재계산). 수정 전 실패. 2026-10-03 Windows 11 x64, Qt 6.11.2 Release(ClangCL) offscreen CTest 13/13, PR #10 CI(macOS ASan+UBSan 포함) 통과.
 
-### D26 · P1 · 2.2.11 회귀: 그리지 않을 때 캔버스 위 브러시 링이 멈춤 — 해결 (Windows 마우스 확인, 펜 확인 대기)
+### D26 · P1 · 2.2.11 회귀: 그리지 않을 때 캔버스 위 브러시 링이 멈춤 — 해결 (Windows·macOS 마우스 확인, 펜 확인 대기)
 
 증상(사용자 보고, 2.2.11): 펜·마우스가 캔버스에 들어온 뒤 버튼을 누르지 않고 움직이면 링이 들어온 자리에 멈춘다. 그리는 중에는 따라가고 캔버스 밖은 정상이다.
 
@@ -180,7 +180,9 @@
 - 수정 후: hover 이동 98건이 모두 `CanvasWidget`에 도착했고, 실제 화면 캡처에서 링이 커서 위치(x≈1766→2216)를 따라갔다.
 - 회귀: [UiViewportTests.cpp](../tests/UiViewportTests.cpp)의 `hoverMovesReachTheCanvasUnderTheGpuDisplay`. 선택 액션바를 붙인 캔버스에서, 스택에서 입력 투명이 아닌 맨 위 창에 버튼 없는 이동을 넣는다. windows 플랫폼에서 수정 전 실패, 수정 후 통과. offscreen에서는 GPU 표시가 없어 건너뛴다. offscreen CTest 12/12, windows 플랫폼 UI 스위트 5개 실패 0.
 - 배포: 2.2.12(`caf602c`, 태그 `v2.2.12`). main CI 통과. Release 워크플로 결과와 2.2.11→2.2.12 업데이트는 기록 시점에 확인하지 않았다.
-- 남음: 실제 펜(WinTab) hover와 macOS(cocoa의 입력 투명 NSView) 확인.
+- macOS (사용자 보고, 2026-10-06): 위 수정 뒤에도 cocoa에서는 링이 멈췄다. Qt 6.11.2 `qnsview_mouse.mm`의 `mouseMovedImpl`은 포인터 아래 가장 깊은 자식 QWindow(`childWindowAt`, 입력 투명 여부를 보지 않음)를 `s_windowUnderMouse`로 잡고, 그 창이 아닌 view의 이동과 입력 투명 view의 이동을 모두 버린다. 표시 창이 그 자리라 hover 이동이 어디에도 전달되지 않았다.
+- macOS 수정: 표시 창은 macOS에서만 입력 투명을 빼고 포커스 거부만 남긴다. 받은 입력은 기존 `event()` 전달로 캔버스에 간다. macOS 27.0.1 arm64, Homebrew Qt 6.11.2 Release에서 offscreen CTest 12/12, cocoa UI 스위트 5개 실패 0. 위 회귀 테스트는 QWindow에 직접 이벤트를 넣어 NSView 단계의 누락을 재현하지 못한다. 사용자가 macOS 실기에서 마우스 hover 때 링이 따라오는 것을 확인했다.
+- 남음: 실제 펜(WinTab) hover, macOS 펜 hover와 표시 창을 거치게 된 클릭·휠·제스처 확인.
 
 ### D03 · P1 · 포커스·근접 이탈 시 획 처리 — 미해결 / 정책 필요
 
