@@ -1,5 +1,9 @@
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# No C++ modules here. Scanning for them adds @modmap arguments to the
+# compile database that point at files only a built target has, which breaks
+# clang-tidy on tools that are excluded from the default build.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)

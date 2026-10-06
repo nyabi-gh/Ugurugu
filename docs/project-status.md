@@ -570,6 +570,13 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - 2026-10-05 main에 fast-forward 병합·푸시(`04aa1d6`). 이 변경을 담은 main CI 결과는 다음 세션에서 확인한다(문서 커밋 푸시로 이전 run은 취소될 수 있음).
 - 남은 것: R03의 느린 엔진 매트릭스(pen-up·undo·레이어 변경 직후 저장, pending text/transform), 끝난 세션 기록이 쌓이는 상한(지금은 사용자가 하나씩 버림), Web Locks 없는 브라우저에서의 두 탭 구분.
 
+**CI 시간 단축 (2026-10-06, 사용자 결정)**: macOS 러너 대기가 CI 시간 대부분이었다.
+
+- 경로 조건: 첫 `changes` 잡이 PR의 바뀐 경로를 분류한다. 문서(`docs/`, `release-notes/`, README류)만 → 형식 검사만, `web/`·웹 도구 → Web shell·Wasm, 그 밖 → 전부. main 푸시는 항상 전부 돈다. Quality gate는 `changes` 성공을 요구하고 그 위에서만 "건너뜀"을 통과로 본다.
+- macOS 제외: macOS ASan + UBSan, macOS Coverage(라인 70% 게이트 포함), macOS package 잡을 뺐다. 형식 검사(clang-format 22.1.3 pipx 고정, 저장소 전체 통과 확인)와 번역 검사는 Linux로, wasm·퍼저·Clang-Tidy는 새 `linux-debug`·`linux-fuzzing` 프리셋으로 Ubuntu 24.04에 옮겼다(LLVM 22는 apt.llvm.org). 잃는 것: macOS 빌드·패키지 회귀, Windows Debug 외 sanitizer 실행, 커버리지 게이트. `release.yml`의 macOS 패키징은 그대로 둔다.
+- 로컬 확인(WSL Ubuntu 26.04, Qt 6.11.1): 앱·테스트 전체가 clang 22 경고=오류로 빌드, Linux 네이티브 probe의 Wave.ugu 프레임·직렬화 digest가 wasm 엔진과 일치, 퍼저 4종 ASan+UBSan 10초씩 무사, Clang-Tidy 183개 파일 경고 없음(59초). `.mm` 소스는 Linux 컴파일 DB에 없어 tidy 대상에서 빠진다.
+- CMake 4 + clang이 C++ 모듈 스캔용 `@modmap` 인자를 컴파일 DB에 넣어, 기본 빌드에서 빠진 도구의 tidy가 실패했다. 모듈을 쓰지 않으므로 `CMAKE_CXX_SCAN_FOR_MODULES`를 껐다.
+
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
 공통 완료 규칙:

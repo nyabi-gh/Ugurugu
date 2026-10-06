@@ -19,17 +19,62 @@ env:
   QT_FORCE_STDERR_LOGGING: 1
 
 jobs:
+  # Pull requests run only the jobs their changes can affect; pushes to main
+  # run everything. Paths no rule recognises run everything too.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cpp: ${{ steps.detect.outputs.cpp }}
+      web: ${{ steps.detect.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Classify the changed paths
+        id: detect
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cpp=false web=false
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            cpp=true web=true
+          else
+            while IFS= read -r path; do
+              case "$path" in
+                docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md) ;;
+                web/*|tools/check_itchio_package.mjs|tools/wasm_*)
+                  web=true ;;
+                # Everything else can reach the desktop app, and the wasm
+                # engine and web package build from the same sources.
+                *)
+                  cpp=true web=true ;;
+              esac
+            done < <(git diff --name-only "$BASE" HEAD)
+          fi
+          {
+            echo "cpp=$cpp"
+            echo "web=$web"
+          } >> "$GITHUB_OUTPUT"
+          echo "cpp=$cpp web=$web"
+
   static:
     name: Format and release metadata
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Install clang-format
+        run: pipx install clang-format==22.1.3
+
       - name: Check source formatting
         run: >-
           git ls-files -z -- '*.cpp' '*.hpp' '*.mm' |
-          xargs -0 xcrun clang-format --dry-run --Werror
+          xargs -0 clang-format --dry-run --Werror
 
       - name: Check license headers
         shell: bash
@@ -40,7 +85,7 @@ jobs:
             if ! head -n 3 "$file" | grep -qF "$identifier"; then
               missing+=("$file")
             fi
-          done < <(git ls-files -- '*.cpp' '*.hpp' '*.mm' '*.vert' '*.frag' '*.js')
+          done < <(git ls-files -- '*.cpp' '*.hpp' '*.mm' '*.vert' '*.frag' '*.js' '*.rs')
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "Sources missing the '$identifier' header:"
             printf '  %s\n' "${missing[@]}"
@@ -77,7 +122,9 @@ jobs:
 
   translations:
     name: Translations
-    runs-on: macos-15
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -87,9 +134,9 @@ jobs:
         with:
           version: '${{ env.QT_VERSION }}'
           aqtsource: '${{ env.AQT_SOURCE }}'
-          host: mac
+          host: linux
           target: desktop
-          arch: clang_64
+          arch: linux_gcc_64
           cache: true
 
       - name: Check translation completeness
@@ -112,6 +159,8 @@ jobs:
 
   web:
     name: Web shell
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -142,7 +191,9 @@ jobs:
 
   wasm:
     name: Wasm engine parity
-    runs-on: macos-15
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -153,14 +204,19 @@ jobs:
 
       # The desktop kit builds the native probe and, as QT_HOST_PATH, supplies
       # moc and rcc for the cross build.
+      - name: Install Linux build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
+
       - name: Install Qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
         with:
           version: '${{ env.QT_VERSION }}'
           aqtsource: '${{ env.AQT_SOURCE }}'
-          host: mac
+          host: linux
           target: desktop
-          arch: clang_64
+          arch: linux_gcc_64
           modules: qtshadertools qtimageformats
           cache: true
 
@@ -196,13 +252,13 @@ jobs:
 
       - name: Build the native probe
         run: |
-          cmake --preset macos-debug
-          cmake --build --preset macos-debug \
+          cmake --preset linux-debug -DBUILD_TESTING=OFF
+          cmake --build --preset linux-debug \
             --target ugurugu_engine_digest_probe --parallel
 
       - name: Compare native and wasm digests
         run: |
-          ./out/build/macos-debug/ugurugu_engine_digest_probe \
+          ./out/build/linux-debug/ugurugu_engine_digest_probe \
             examples/Wave.ugu > "$RUNNER_TEMP/native.txt"
           cat "$RUNNER_TEMP/native.txt"
           # The smoke script prints the same lines plus a header and a verdict,
@@ -228,7 +284,7 @@ jobs:
 
       # playwright-core never downloads a browser, so the matching CLI does.
       - name: Install Chromium
-        run: npx --yes playwright@1.62.1 install chromium
+        run: npx --yes playwright@1.62.1 install --with-deps chromium
 
       - name: Verify the web shell in a browser
         working-directory: web
@@ -236,7 +292,9 @@ jobs:
 
   fuzz:
     name: Fuzz parsers
-    runs-on: macos-15
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -246,33 +304,38 @@ jobs:
         with:
           version: '${{ env.QT_VERSION }}'
           aqtsource: '${{ env.AQT_SOURCE }}'
-          host: mac
+          host: linux
           target: desktop
-          arch: clang_64
+          arch: linux_gcc_64
           modules: qtshadertools qtimageformats
           cache: true
 
-      # Xcode's clang ships no libclang_rt.fuzzer_osx.a, so -fsanitize=fuzzer
-      # cannot link against it. macOS 15's linker also rejects the sanitizer
-      # relocations from current LLVM: https://github.com/llvm/llvm-project/issues/139684
-      - name: Install LLVM 22 and LLD
+      - name: Install Linux build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
+
+      # Ubuntu 24.04 packages LLVM 18; these checks are pinned to LLVM 22.
+      - name: Install LLVM 22
         run: |
-          brew install llvm@22 lld@22
-          echo "$(brew --prefix lld@22)/bin" >> "$GITHUB_PATH"
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key |
+            sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" |
+            sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y clang-22 clang-tidy-22 libclang-rt-22-dev
 
       # Deliberately without UGURUGU_WARNINGS_AS_ERRORS: the build jobs already
-      # gate warnings on the toolchains releases ship with, and a Homebrew LLVM
+      # gate warnings on the toolchains releases ship with, and an LLVM
       # bump should not be able to fail this job over a new diagnostic.
       - name: Configure
-        run: |
-          llvm_prefix="$(brew --prefix llvm@22)"
-          cmake --preset macos-fuzzing \
-            -DCMAKE_C_COMPILER="$llvm_prefix/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$llvm_prefix/bin/clang++" \
-            -DCMAKE_LINKER_TYPE=LLD
+        run: >-
+          cmake --preset linux-fuzzing
+          -DCMAKE_C_COMPILER=clang-22
+          -DCMAKE_CXX_COMPILER=clang++-22
 
       - name: Build
-        run: cmake --build --preset macos-fuzzing --parallel
+        run: cmake --build --preset linux-fuzzing --parallel
 
       # Qt's process-lifetime caches are indistinguishable from leaks here, so
       # only the memory-safety and undefined-behaviour checks gate the build.
@@ -283,7 +346,7 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
-          build=out/build/macos-fuzzing
+          build=out/build/linux-fuzzing
           fuzzed=0
           for target in "$build"/ugurugu_fuzz_*; do
             if [[ ! -f "$target" ]]; then
@@ -308,7 +371,9 @@ jobs:
 
   tidy:
     name: Clang-Tidy
-    runs-on: macos-15
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -318,35 +383,50 @@ jobs:
         with:
           version: '${{ env.QT_VERSION }}'
           aqtsource: '${{ env.AQT_SOURCE }}'
-          host: mac
+          host: linux
           target: desktop
-          arch: clang_64
+          arch: linux_gcc_64
           modules: qtshadertools qtimageformats
           cache: true
 
+      - name: Install Linux build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
+
+      # Ubuntu 24.04 packages LLVM 18; these checks are pinned to LLVM 22.
       - name: Install LLVM 22
-        run: brew install llvm@22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key |
+            sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" |
+            sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y clang-22 clang-tidy-22 libclang-rt-22-dev
 
       - name: Configure
-        run: |
-          llvm_prefix="$(brew --prefix llvm@22)"
-          cmake --preset macos-debug \
-            -DUGURUGU_WARNINGS_AS_ERRORS=ON \
-            -DUGURUGU_CLANG_TIDY="$llvm_prefix/bin/clang-tidy" \
-            -DUGURUGU_RUN_CLANG_TIDY="$llvm_prefix/bin/run-clang-tidy"
+        run: >-
+          cmake --preset linux-debug
+          -DCMAKE_C_COMPILER=clang-22
+          -DCMAKE_CXX_COMPILER=clang++-22
+          -DUGURUGU_WARNINGS_AS_ERRORS=ON
+          -DUGURUGU_CLANG_TIDY=/usr/bin/clang-tidy-22
+          -DUGURUGU_RUN_CLANG_TIDY=/usr/bin/run-clang-tidy-22
 
       - name: Build analysis inputs
         run: >-
-          cmake --build --preset macos-debug
+          cmake --build --preset linux-debug
           --target ugurugu_tests --parallel
 
       - name: Run Clang-Tidy
         run: >-
-          cmake --build --preset macos-debug
+          cmake --build --preset linux-debug
           --target ugurugu_tidy
 
   build:
     name: ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -356,22 +436,6 @@ jobs:
             preset: windows-debug
             qt-host: windows
             qt-arch: win64_msvc2022_64
-          # macOS 15 이미지의 AppleClang 17 ASan runtime은 Qt raster
-          # rasterizer가 cell pool 오버플로로 longjmp할 때
-          # __asan_handle_no_return의 stack unpoison 경로가 내부 CHECK로
-          # 죽는다. 다른 job과 달리 이 job만 최신 sanitizer runtime이
-          # 필요하다.
-          - name: macOS ASan + UBSan
-            os: macos-26
-            preset: macos-sanitized
-            qt-host: mac
-            qt-arch: clang_64
-          - name: macOS Coverage
-            os: macos-15
-            preset: macos-coverage
-            qt-host: mac
-            qt-arch: clang_64
-            coverage: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -396,28 +460,8 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      - name: Prepare coverage profiles
-        if: matrix.coverage
-        run: mkdir -p "out/build/${{ matrix.preset }}/profiles"
-
       - name: Test
         run: ctest --preset ${{ matrix.preset }} --parallel --output-on-failure
-
-      - name: Check source coverage
-        if: matrix.coverage
-        run: |
-          profile="out/build/${{ matrix.preset }}/coverage.profdata"
-          xcrun llvm-profdata merge \
-            -sparse \
-            "out/build/${{ matrix.preset }}"/profiles/*.profraw \
-            -o "$profile"
-          coverage_report=$(xcrun llvm-cov report \
-            "out/build/${{ matrix.preset }}/ugurugu_tests" \
-            -instr-profile="$profile" \
-            -ignore-filename-regex='(/tests/|/_deps/|/out/)')
-          printf '%s\n' "$coverage_report"
-          line_coverage=$(printf '%s\n' "$coverage_report" | awk '/^TOTAL/ { value=$10; gsub("%", "", value); print value }')
-          awk -v coverage="$line_coverage" 'BEGIN { exit !(coverage + 0 >= 70.0) }'
 
       - name: Test diagnostics
         if: failure() && runner.os == 'Windows'
@@ -438,16 +482,12 @@ jobs:
 
   package:
     name: ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS package
-            os: macos-15
-            preset: macos-distribution
-            qt-host: mac
-            qt-arch: clang_64
-            smoke: macos
           - name: Windows package
             os: windows-2025
             preset: windows-distribution
@@ -481,12 +521,6 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }} --parallel --output-on-failure
 
-      - name: Test installed macOS package
-        if: matrix.smoke == 'macos'
-        run: >-
-          cmake --build --preset ${{ matrix.preset }}
-          --target ugurugu_package_smoke_test
-
       - name: Test installed Windows package
         if: matrix.smoke == 'windows'
         shell: pwsh
@@ -514,12 +548,13 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [static, translations, web, wasm, fuzz, tidy, build, package]
+    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every quality check
+      - name: Require every quality check that ran
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_RESULT: ${{ needs.static.result }}
           TRANSLATIONS_RESULT: ${{ needs.translations.result }}
           WEB_RESULT: ${{ needs.web.result }}
@@ -530,10 +565,16 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           failed=0
+          # A check may be skipped only because its paths did not change,
+          # which needs change detection itself to have succeeded.
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "CHANGES result: $CHANGES_RESULT"
+            failed=1
+          fi
           for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD PACKAGE; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
-            if [[ "$result" != "success" ]]; then
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "$check result: $result"
               failed=1
             fi

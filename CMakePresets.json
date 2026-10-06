@@ -104,14 +104,46 @@
       }
     },
     {
+      "name": "linux-debug",
+      "inherits": "base",
+      "displayName": "Linux Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-fuzzing",
+      "inherits": "base",
+      "displayName": "Linux libFuzzer",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BUILD_TESTING": "OFF",
+        "UGURUGU_ENABLE_SANITIZERS": "ON",
+        "UGURUGU_ENABLE_FUZZING": "ON"
+      }
+    },
+    {
       "name": "wasm-release",
       "inherits": "base",
       "displayName": "WebAssembly Release",
       "toolchainFile": "$penv{HOME}/Qt/6.11.1/wasm_singlethread/lib/cmake/Qt6/qt.toolchain.cmake",
       "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Darwin"
+        "type": "inList",
+        "string": "${hostSystemName}",
+        "list": [
+          "Darwin",
+          "Linux"
+        ]
       },
       "environment": {
         "EMSDK": "$penv{HOME}/emsdk"
@@ -191,6 +223,15 @@
     {
       "name": "macos-fuzzing",
       "configurePreset": "macos-fuzzing",
+      "targets": "ugurugu_fuzzers"
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-debug"
+    },
+    {
+      "name": "linux-fuzzing",
+      "configurePreset": "linux-fuzzing",
       "targets": "ugurugu_fuzzers"
     },
     {
