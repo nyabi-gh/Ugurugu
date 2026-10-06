@@ -48,11 +48,11 @@ QImage ComputedImageCache::imageOrCompute(
     m_inFlight.insert(key);
     locker.unlock();
     [[maybe_unused]] const auto releaseClaim = qScopeGuard(
-        [this, &key]()
+        [&mutex = m_mutex, &inFlight = m_inFlight, &settled = m_settled, &key]()
         {
-            const QMutexLocker settled(&m_mutex);
-            m_inFlight.remove(key);
-            m_settled.wakeAll();
+            const QMutexLocker locked(&mutex);
+            inFlight.remove(key);
+            settled.wakeAll();
         });
 
     const QImage image = compute();

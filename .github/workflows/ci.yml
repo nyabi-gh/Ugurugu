@@ -282,9 +282,11 @@ jobs:
         working-directory: web
         run: npm run build
 
-      # playwright-core never downloads a browser, so the matching CLI does.
+      # The shell's own playwright-core installs the browser build it expects;
+      # a separately pinned CLI drifted from the lockfile and fetched another.
       - name: Install Chromium
-        run: npx --yes playwright@1.62.1 install --with-deps chromium
+        working-directory: web
+        run: npx playwright-core install --with-deps chromium
 
       - name: Verify the web shell in a browser
         working-directory: web
