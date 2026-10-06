@@ -39,12 +39,15 @@ use windows::core::BOOL;
 const SESSION: &str = "UguruguLatencyProbe";
 
 const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
-                     [--steps N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH]";
+                     [--steps N] [--warmup N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH]";
 
 struct Options {
     exe: PathBuf,
     presentmon: PathBuf,
     steps: usize,
+    /// Steps drawn first and left out of the results, so that the display
+    /// settles after the window was placed.
+    warmup: usize,
     radius: f64,
     /// Outer window size in physical pixels, the same for every app measured;
     /// `None` maximizes the window, where Windows 11 draws no rounded corners.
@@ -58,6 +61,7 @@ fn parse() -> Option<Options> {
     let mut exe = None;
     let mut presentmon = None;
     let mut steps = 200;
+    let mut warmup = 0;
     let mut radius = 0.12;
     let mut window = Some([2560, 1600]);
     let mut key = None;
@@ -69,6 +73,7 @@ fn parse() -> Option<Options> {
             "--exe" => exe = Some(PathBuf::from(value)),
             "--presentmon" => presentmon = Some(PathBuf::from(value)),
             "--steps" => steps = value.parse().ok()?,
+            "--warmup" => warmup = value.parse().ok()?,
             "--radius" => radius = value.parse().ok()?,
             "--window" if value == "max" => window = None,
             "--window" => {
@@ -87,6 +92,7 @@ fn parse() -> Option<Options> {
         exe: exe?,
         presentmon: presentmon?,
         steps,
+        warmup,
         radius,
         window,
         key,
@@ -316,7 +322,7 @@ fn run(options: &Options) -> Result<(), String> {
     // a DX12 swap chain created before the trace. It records for a fixed time
     // and exits by itself, which flushes every row; stopping its session
     // from outside loses them.
-    let seconds = 15 + options.steps * 45 / 1000;
+    let seconds = 15 + (options.warmup + options.steps) * 45 / 1000;
     let mut presentmon = Command::new(&options.presentmon)
         .args(["--process_name", exe_name, "--output_file"])
         .arg(&options.csv)
@@ -428,7 +434,7 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
     ];
     let radius = options.radius * f64::from(client.right.min(client.bottom));
     let point = |step: usize| {
-        let progress = step as f64 / options.steps as f64;
+        let progress = step as f64 / (options.warmup + options.steps) as f64;
         let angle = TAU * 2.0 * progress;
         let r = radius * (1.0 - 0.6 * progress);
         [
@@ -450,8 +456,10 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
     }
     send_mouse(MOUSEEVENTF_LEFTDOWN, None);
     std::thread::sleep(Duration::from_millis(300));
-    for step in 1..=options.steps {
-        inputs.push(qpc());
+    for step in 1..=options.warmup + options.steps {
+        if step > options.warmup {
+            inputs.push(qpc());
+        }
         send_mouse(MOUSEEVENTF_MOVE, Some(point(step)));
         std::thread::sleep(Duration::from_millis(
             15 + (random.next_unit() * 25.0) as u64,
@@ -495,6 +503,7 @@ fn report_swap_chain(swap_chain: &str, frames: &[&Frame], inputs: &[i64], end: i
     let mut undisplayed = 0;
     let mut extra_presents = 0;
     let mut modes = BTreeMap::<&str, usize>::new();
+    let mut by_mode = BTreeMap::<&str, Vec<f64>>::new();
     for (index, &input) in inputs.iter().enumerate() {
         let next = inputs.get(index + 1).copied().unwrap_or(end);
         let mut step_frames = frames
@@ -509,7 +518,13 @@ fn report_swap_chain(swap_chain: &str, frames: &[&Frame], inputs: &[i64], end: i
         let present_ms = (first.present_qpc - input) as f64 / ticks_per_ms;
         to_present.push(present_ms);
         match first.until_displayed_ms {
-            Some(displayed) => to_display.push(present_ms + displayed),
+            Some(displayed) => {
+                to_display.push(present_ms + displayed);
+                by_mode
+                    .entry(first.mode.as_str())
+                    .or_default()
+                    .push(present_ms + displayed);
+            }
             None => undisplayed += 1,
         }
     }
@@ -521,4 +536,9 @@ fn report_swap_chain(swap_chain: &str, frames: &[&Frame], inputs: &[i64], end: i
     println!("  present modes: {modes:?}");
     summary("  input -> present", to_present);
     summary("  input -> displayed", to_display);
+    if by_mode.len() > 1 {
+        for (mode, values) in by_mode {
+            summary(&format!("    {mode}"), values);
+        }
+    }
 }
