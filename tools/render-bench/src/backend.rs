@@ -250,10 +250,33 @@ impl Vello {
     }
 }
 
-fn draw(context: &mut vello_cpu::RenderContext, draw: &Draw) {
+/// The drawing calls Vello CPU and Vello GPU share.
+pub trait Painter {
+    fn set_paint(&mut self, paint: vello_cpu::PaintType);
+    fn set_stroke(&mut self, stroke: kurbo::Stroke);
+    fn fill_path(&mut self, path: &BezPath);
+    fn stroke_path(&mut self, path: &BezPath);
+}
+
+impl Painter for vello_cpu::RenderContext {
+    fn set_paint(&mut self, paint: vello_cpu::PaintType) {
+        vello_cpu::RenderContext::set_paint(self, paint);
+    }
+    fn set_stroke(&mut self, stroke: kurbo::Stroke) {
+        vello_cpu::RenderContext::set_stroke(self, stroke);
+    }
+    fn fill_path(&mut self, path: &BezPath) {
+        vello_cpu::RenderContext::fill_path(self, path);
+    }
+    fn stroke_path(&mut self, path: &BezPath) {
+        vello_cpu::RenderContext::stroke_path(self, path);
+    }
+}
+
+pub fn draw(context: &mut impl Painter, draw: &Draw) {
     match draw {
         Draw::Fill { path, color } => {
-            context.set_paint(vello_color(*color));
+            context.set_paint(vello_color(*color).into());
             context.fill_path(&bez_path(path));
         }
         Draw::Stroke {
@@ -266,7 +289,7 @@ fn draw(context: &mut vello_cpu::RenderContext, draw: &Draw) {
             for &next in &points[1..] {
                 path.line_to(point(next));
             }
-            context.set_paint(vello_color(*color));
+            context.set_paint(vello_color(*color).into());
             context.set_stroke(
                 kurbo::Stroke::new(f64::from(*width))
                     .with_caps(kurbo::Cap::Round)
@@ -286,7 +309,7 @@ fn draw(context: &mut vello_cpu::RenderContext, draw: &Draw) {
                     (0.5, vello_color(*color)),
                     (1.0, vello_color([r, g, b, 0])),
                 ]);
-            context.set_paint(gradient);
+            context.set_paint(gradient.into());
             context.fill_path(&kurbo::Circle::new(point(*center), f64::from(*radius)).to_path(0.1));
         }
     }
@@ -305,15 +328,15 @@ fn render(
     context.reset();
 }
 
-fn point([x, y]: [f32; 2]) -> kurbo::Point {
+pub fn point([x, y]: [f32; 2]) -> kurbo::Point {
     kurbo::Point::new(f64::from(x), f64::from(y))
 }
 
-fn vello_color([r, g, b, a]: Rgba) -> vello_cpu::color::AlphaColor<vello_cpu::color::Srgb> {
+pub fn vello_color([r, g, b, a]: Rgba) -> vello_cpu::color::AlphaColor<vello_cpu::color::Srgb> {
     vello_cpu::color::AlphaColor::from_rgba8(r, g, b, a)
 }
 
-fn bez_path(segments: &[Segment]) -> BezPath {
+pub fn bez_path(segments: &[Segment]) -> BezPath {
     let mut path = BezPath::new();
     for segment in segments {
         match *segment {
@@ -326,7 +349,7 @@ fn bez_path(segments: &[Segment]) -> BezPath {
     path
 }
 
-fn vello_blend(blend: Blend) -> BlendMode {
+pub fn vello_blend(blend: Blend) -> BlendMode {
     let mix = match blend {
         Blend::Normal => Mix::Normal,
         Blend::Multiply => Mix::Multiply,

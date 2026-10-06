@@ -7,6 +7,7 @@
 //! and writes its images; `diff` compares the images of two runs.
 
 mod backend;
+mod gpu;
 mod scene;
 
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use backend::{Backend, TinySkia, Vello};
 use scene::{Document, LAYER_BLENDS};
 
 const USAGE: &str = "usage:
-  render-bench run --renderer tiny-skia|vello|vello-mt[=THREADS] [--size 2048] [--strokes 2000]
+  render-bench run --renderer tiny-skia|vello|vello-mt[=THREADS]|vello-gpu [--size 2048] [--strokes 2000]
                    [--points 100] [--frames 30] [--segments 500] [--out DIR]
                    [--simd auto|baseline|sse4.2|avx2|avx512]  (Vello only)
   render-bench diff A.rgba B.rgba [HEATMAP.png]";
@@ -102,6 +103,7 @@ fn run(options: &Options) -> Result<(), String> {
         .ok_or_else(|| format!("SIMD level {} is unknown or not on this CPU", options.simd))?;
     match options.renderer.as_str() {
         "tiny-skia" => measure(options, TinySkia::new(options.size)),
+        "vello-gpu" => measure(options, gpu::VelloGpu::new(options.size, level)?),
         "vello" => measure(options, Vello::new(options.size, 0, level)),
         "vello-mt" => {
             let threads = vello_cpu::RenderSettings::default().num_threads;
