@@ -58,9 +58,21 @@ fn union(a: Option<PixelRect>, b: PixelRect) -> PixelRect {
     }
 }
 
+/// The SIMD level every document is drawn with, so that all CPUs give the
+/// same pixels. Vello's AVX2 path fuses multiply-adds (FMA), which rounds
+/// gradient colours differently; SSE4.2, which Windows 11 requires, has no FMA
+/// and draws the same bytes as plain SSE2. It costs no measured speed.
+pub fn document_level() -> vello_cpu::Level {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if let Some(sse) = vello_cpu::Level::new().as_sse4_2() {
+        return vello_cpu::Level::Sse4_2(sse);
+    }
+    vello_cpu::Level::baseline()
+}
+
 impl CanvasRaster {
     pub fn new(size: [u32; 2]) -> Self {
-        Self::with_level(size, vello_cpu::Level::new())
+        Self::with_level(size, document_level())
     }
 
     /// Uses the SIMD instructions of `level` instead of the best ones present.
