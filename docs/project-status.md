@@ -601,3 +601,26 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 [review-evidence-2026-09-08](review-evidence-2026-09-08/)의 probe·로그·메타데이터·캡처는 당시 재현의 원자료이므로 보존한다. 낡은 소스 추출 probe가 현재 함수에 맞지 않는다면 원본 증거를 고쳐 쓰지 말고 새 재현을 별도로 추가한다.
 
 root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기여 절차, SECURITY/THIRD_PARTY_NOTICES는 정책·고지, release-notes는 버전별 불변 이력이다. 이 성격이 다른 문서들은 통합 검토에 복사하거나 삭제하지 않는다.
+
+## 11. Rust 3.0 재작성 — M0 진행 중
+
+계획은 [RUST_WINDOWS_PORT_PLAN.md](RUST_WINDOWS_PORT_PLAN.md), 범위·결정은 [rust/scope.md](rust/scope.md), 측정·실증 근거는 [rust/m0-evidence.md](rust/m0-evidence.md)에 둔다. 작업 브랜치는 `rust/m0`이다. 이 절은 진행 상태만 적는다.
+
+2026-10-06 기준:
+
+| M0 작업 | 상태 |
+|---|---|
+| 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 인코딩만 `libwebp`로 하는 안이 사용자 확인 대기 |
+| 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
+| 3~4일차 기준선 | 부분. C++ 입력→표시 p50 24.7~26.1 / p95 32.6~33.3ms, stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
+| 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
+| 8~15일차 | 시작 전 |
+
+다음 작업:
+
+1. 직접 관리하는 캔버스 presenter를 만든다. 순서는 획득 대기 → 최신 입력 → 렌더 → present이고, DXGI frame statistics로 Rust 쪽 입력→표시를 계측한다. PresentMon은 wgpu DX12 present를 끝까지 추적하지 못한다.
+2. tiny-skia와 Vello CPU를 같은 scene으로 비교한다(10~11일차).
+3. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
+4. 한글·일본어 IME 실증(8~9일차).
+
+측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고 앱보다 먼저 시작해야 한다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --key P`.
