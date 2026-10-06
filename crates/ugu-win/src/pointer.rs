@@ -568,19 +568,24 @@ impl MovePoint {
 /// Entries of a newest-first move buffer between its first entry and the
 /// last delivered frame, newest first. Without the last frame's entry, only
 /// strictly newer times are certain to be new.
+///
+/// The first entry counts too when looking for the last frame's entry: a
+/// frame without a new move, such as a button release, finds that entry
+/// first, and the same-millisecond moves behind it are old.
 fn skipped_moves(
     newest_first: &[MovePoint],
     last_entry: Option<MovePoint>,
     last_time_ms: u32,
 ) -> Vec<MovePoint> {
     let current = newest_first[0];
-    newest_first[1..]
+    newest_first
         .iter()
         .copied()
         .take_while(|entry| {
             let age = entry.time_ms.wrapping_sub(last_time_ms) as i32;
             Some(*entry) != last_entry && (age > 0 || (age == 0 && last_entry.is_some()))
         })
+        .skip(1)
         .filter(|entry| *entry != current)
         .collect()
 }
@@ -722,6 +727,14 @@ mod tests {
             skipped_moves(&buffer, Some(point(3, 20)), 20),
             [point(4, 20)]
         );
+    }
+
+    #[test]
+    fn a_frame_without_a_new_move_skipped_nothing() {
+        // A button release where the last move happened: the newest buffer
+        // entry is the one the previous frame already delivered.
+        let buffer = [point(5, 20), point(4, 20), point(3, 20)];
+        assert_eq!(skipped_moves(&buffer, Some(point(5, 20)), 20), []);
     }
 
     #[test]
