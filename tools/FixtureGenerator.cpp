@@ -26,10 +26,10 @@
 #include <QUuid>
 
 #include <algorithm>
-#include <functional>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 namespace
 {
@@ -107,8 +107,8 @@ Stroke makeStroke(const QString &name, QSize canvas, const StrokeShape &shape)
         position.setY(std::clamp(position.y(), 0.0, canvas.height() - 1.0));
         const qreal progress =
             shape.points > 1 ? qreal(index) / (shape.points - 1) : 0.5;
-        stroke.points.append(StrokePoint{
-            position, 0.3 + 0.7 * std::sin(progress * tau / 2.0)});
+        stroke.points.append(
+            StrokePoint{position, 0.3 + 0.7 * std::sin(progress * tau / 2.0)});
     }
     return stroke;
 }
@@ -137,8 +137,10 @@ void addStrokes(Layer &layer,
     layer.strokes.reserve(layer.strokes.size() + count);
     for (int index = 0; index < count; ++index)
     {
-        layer.strokes.append(makeStroke(
-            layer.name + QStringLiteral("/%1").arg(index), canvas, shapeOf(index)));
+        layer.strokes.append(
+            makeStroke(layer.name + QStringLiteral("/%1").arg(index),
+                canvas,
+                shapeOf(index)));
     }
 }
 
@@ -184,7 +186,10 @@ Document simpleStrokes()
     const QSize canvas(1024, 1024);
     Document document = baseDocument(canvas);
     Layer layer = makeLayer(QStringLiteral("Simple"), canvas);
-    addStrokes(layer, canvas, 300, [](int)
+    addStrokes(layer,
+        canvas,
+        300,
+        [](int)
         {
             StrokeShape shape;
             shape.points = 60;
@@ -209,7 +214,10 @@ Document mixedWork()
         Layer layer = makeLayer(QStringLiteral("Paint %1").arg(index), canvas);
         layer.blendMode = blends[index % 4];
         layer.opacity = 0.6 + 0.4 * ((index * 37) % 10) / 9.0;
-        addStrokes(layer, canvas, 120, [](int stroke)
+        addStrokes(layer,
+            canvas,
+            120,
+            [](int stroke)
             {
                 return mixedShape(stroke, 80);
             });
@@ -232,8 +240,8 @@ Document mixedWork()
             layer.parentGroupId = groupB.id;
         }
         // Clipped to the layer below within the same parent.
-        layer.clipToLayerBelow = index == 4 || index == 5 || index == 10
-                                 || index == 13;
+        layer.clipToLayerBelow =
+            index == 4 || index == 5 || index == 10 || index == 13;
         document.layers.append(std::move(layer));
         if (index == 6)
         {
@@ -254,7 +262,10 @@ Document shortStrokes()
     const QSize canvas(2048, 2048);
     Document document = baseDocument(canvas);
     Layer layer = makeLayer(QStringLiteral("Short strokes"), canvas);
-    addStrokes(layer, canvas, DocumentLimits::maximumTotalStrokes, [](int)
+    addStrokes(layer,
+        canvas,
+        DocumentLimits::maximumTotalStrokes,
+        [](int)
         {
             StrokeShape shape;
             shape.points = 6;
@@ -290,8 +301,8 @@ QImage testImage(QSize size)
 // group whose layers clip to its base.
 std::optional<Document> imageMaskGroup()
 {
-    const QSize canvas(DocumentLimits::maximumCanvasEdge,
-        DocumentLimits::maximumCanvasEdge);
+    const QSize canvas(
+        DocumentLimits::maximumCanvasEdge, DocumentLimits::maximumCanvasEdge);
     Document document = baseDocument(canvas);
 
     std::optional<RasterAsset> asset =
@@ -313,7 +324,10 @@ std::optional<Document> imageMaskGroup()
     document.layers.append(std::move(image));
 
     Layer painted = makeLayer(QStringLiteral("Painted"), canvas);
-    addStrokes(painted, canvas, 400, [](int stroke)
+    addStrokes(painted,
+        canvas,
+        400,
+        [](int stroke)
         {
             StrokeShape shape = mixedShape(stroke, 100);
             shape.reach = 0.2;
@@ -350,9 +364,12 @@ std::optional<Document> imageMaskGroup()
             makeLayer(QStringLiteral("Group layer %1").arg(index), canvas);
         layer.parentGroupId = group.id;
         layer.clipToLayerBelow = index > 0;
-        layer.blendMode = index == 2 ? LayerBlendMode::Screen
-                                     : LayerBlendMode::Normal;
-        addStrokes(layer, canvas, 150, [](int stroke)
+        layer.blendMode =
+            index == 2 ? LayerBlendMode::Screen : LayerBlendMode::Normal;
+        addStrokes(layer,
+            canvas,
+            150,
+            [](int stroke)
             {
                 StrokeShape shape = mixedShape(stroke, 100);
                 shape.minimumWidth = 20.0;
@@ -421,8 +438,7 @@ int main(int argc, char **argv)
 {
     if (argc != 3)
     {
-        std::fprintf(
-            stderr, "usage: %s <1|2|4|5> <output.ugu>\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <1|2|4|5> <output.ugu>\n", argv[0]);
         return 2;
     }
     const QString id = QString::fromLatin1(argv[1]);
@@ -465,10 +481,12 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "cannot save: %s\n", qPrintable(error));
         return 1;
     }
-    const std::optional<Document> loaded = DocumentSerializer::load(path, &error);
+    const std::optional<Document> loaded =
+        DocumentSerializer::load(path, &error);
     if (!loaded)
     {
-        std::fprintf(stderr, "the app rejects the fixture: %s\n", qPrintable(error));
+        std::fprintf(
+            stderr, "the app rejects the fixture: %s\n", qPrintable(error));
         return 1;
     }
 
