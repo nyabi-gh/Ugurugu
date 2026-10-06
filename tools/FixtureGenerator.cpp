@@ -386,7 +386,7 @@ QJsonObject manifest(const QString &id, const Document &document, qint64 bytes)
 {
     const char *blendNames[] = {"normal", "multiply", "screen", "overlay"};
     QJsonArray layers;
-    int strokes = 0;
+    qsizetype strokes = 0;
     qsizetype points = 0;
     for (const Layer &layer : document.layers)
     {
