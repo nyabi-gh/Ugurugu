@@ -1,77 +1,94 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Measures input-to-screen latency of a drawing app from outside the app.
+//! Measures input-to-display latency of a drawing app from outside the app.
 //!
 //! The probe holds the primary mouse button in the target window and extends a
-//! spiral stroke one step at a time with `SendInput`. For each step it waits
-//! for the first desktop frame, captured with Desktop Duplication, in which
-//! the pixels around the new segment changed, and reports that frame's
-//! `LastPresentTime` minus the time just before the input was injected. The
-//! hardware cursor is not part of duplicated frames, so only app drawing
-//! counts. Both the C++ and the Rust app are measured the same way.
+//! spiral stroke one step at a time with `SendInput`, while PresentMon records
+//! the app's presents and when each reached the screen. The first present
+//! after a step is that step's response, so the target must not present while
+//! idle; presents beyond the first per step are reported to check this.
+//! Neither app is instrumented, and no screen capture runs, because capture
+//! changes how Windows presents the app. PresentMon needs administrator rights.
 
+use std::collections::BTreeMap;
 use std::f64::consts::TAU;
-use std::process::ExitCode;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::process::{Command, ExitCode, Stdio};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
-use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter1,
-    IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
-};
-use windows::Win32::Graphics::Gdi::{ClientToScreen, MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+    MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClientRect, GetSystemMetrics, GetWindowThreadProcessId, IsWindowVisible,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SetForegroundWindow,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
-use windows::core::{BOOL, Interface, Result};
+use windows::core::BOOL;
 
-const USAGE: &str =
-    "usage: latency-probe --pid <pid> [--steps N] [--radius FRACTION] [--margin PX]";
+const SESSION: &str = "UguruguLatencyProbe";
+
+const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
+                     [--steps N] [--radius FRACTION] [--window WxH] [--key LETTER] [--csv PATH]";
 
 struct Options {
-    pid: u32,
+    exe: PathBuf,
+    presentmon: PathBuf,
     steps: usize,
     radius: f64,
-    margin: i32,
+    /// Outer window size in physical pixels, the same for every app measured.
+    window: [i32; 2],
+    /// A key pressed once before measuring, such as the C++ app's playback toggle.
+    key: Option<u8>,
+    csv: PathBuf,
 }
 
 fn parse() -> Option<Options> {
-    let mut options = Options {
-        pid: 0,
-        steps: 200,
-        radius: 0.25,
-        margin: 6,
-    };
+    let mut exe = None;
+    let mut presentmon = None;
+    let mut steps = 200;
+    let mut radius = 0.12;
+    let mut window = [2560, 1600];
+    let mut key = None;
+    let mut csv = std::env::temp_dir().join("latency-probe-presentmon.csv");
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next()?;
         match arg.as_str() {
-            "--pid" => options.pid = value.parse().ok()?,
-            "--steps" => options.steps = value.parse().ok()?,
-            "--radius" => options.radius = value.parse().ok()?,
-            "--margin" => options.margin = value.parse().ok()?,
+            "--exe" => exe = Some(PathBuf::from(value)),
+            "--presentmon" => presentmon = Some(PathBuf::from(value)),
+            "--steps" => steps = value.parse().ok()?,
+            "--radius" => radius = value.parse().ok()?,
+            "--window" => {
+                let (width, height) = value.split_once('x')?;
+                window = [width.parse().ok()?, height.parse().ok()?];
+            }
+            "--key" => {
+                let letter = value.chars().next()?.to_ascii_uppercase();
+                key = letter.is_ascii_alphanumeric().then_some(letter as u8);
+            }
+            "--csv" => csv = PathBuf::from(value),
             _ => return None,
         }
     }
-    (options.pid != 0).then_some(options)
+    Some(Options {
+        exe: exe?,
+        presentmon: presentmon?,
+        steps,
+        radius,
+        window,
+        key,
+        csv,
+    })
 }
 
 fn main() -> ExitCode {
@@ -95,11 +112,11 @@ fn qpc() -> i64 {
     value
 }
 
-fn qpc_frequency() -> f64 {
+fn qpc_ticks_per_ms() -> f64 {
     let mut value = 0;
     // SAFETY: valid out pointer.
     let _ = unsafe { QueryPerformanceFrequency(&mut value) };
-    value as f64
+    value as f64 / 1000.0
 }
 
 fn find_window(pid: u32) -> Option<HWND> {
@@ -178,195 +195,26 @@ fn send_mouse(flags: MOUSE_EVENT_FLAGS, position: Option<[i32; 2]>) {
     unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
 }
 
-struct Capture {
-    device: ID3D11Device,
-    context: ID3D11DeviceContext,
-    duplication: IDXGIOutputDuplication,
-    /// Desktop origin of the duplicated output, in virtual-screen pixels.
-    origin: [i32; 2],
-    size: [i32; 2],
-    latest: Option<ID3D11Texture2D>,
-}
-
-impl Capture {
-    fn for_window(hwnd: HWND) -> Result<Self> {
-        // SAFETY: valid window.
-        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-        // SAFETY: COM factory creation.
-        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
-        let mut adapter_index = 0;
-        // SAFETY: enumeration stops at the first error.
-        while let Ok(adapter) = unsafe { factory.EnumAdapters1(adapter_index) } {
-            adapter_index += 1;
-            let mut output_index = 0;
-            // SAFETY: enumeration stops at the first error.
-            while let Ok(output) = unsafe { adapter.EnumOutputs(output_index) } {
-                output_index += 1;
-                // SAFETY: plain getter.
-                let desc = unsafe { output.GetDesc() }?;
-                if desc.Monitor != monitor {
-                    continue;
-                }
-                let rect = desc.DesktopCoordinates;
-                return Self::create(&adapter, &output.cast()?, rect);
-            }
-        }
-        Err(windows::core::Error::new(
-            windows::Win32::Foundation::E_FAIL,
-            "no DXGI output shows the target window",
-        ))
-    }
-
-    fn create(adapter: &IDXGIAdapter1, output: &IDXGIOutput1, rect: RECT) -> Result<Self> {
-        let mut device = None;
-        let mut context = None;
-        // SAFETY: out pointers are valid for the call.
-        unsafe {
-            D3D11CreateDevice(
-                adapter,
-                D3D_DRIVER_TYPE_UNKNOWN,
-                Default::default(),
-                D3D11_CREATE_DEVICE_FLAG(0),
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut device),
-                None,
-                Some(&mut context),
-            )
-        }?;
-        let device = device.expect("D3D11CreateDevice succeeded without a device");
-        let context = context.expect("D3D11CreateDevice succeeded without a context");
-        // SAFETY: the device belongs to the adapter that owns the output.
-        let duplication = unsafe { output.DuplicateOutput(&device) }?;
-        Ok(Self {
-            device,
-            context,
-            duplication,
-            origin: [rect.left, rect.top],
-            size: [rect.right - rect.left, rect.bottom - rect.top],
-            latest: None,
-        })
-    }
-
-    /// Waits up to `timeout` for a desktop update and keeps a copy of it.
-    /// Returns the update's present time, or `None` on timeout.
-    fn next_update(&mut self, timeout: Duration) -> Result<Option<i64>> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
-            let mut resource: Option<IDXGIResource> = None;
-            // SAFETY: out pointers are valid for the call.
-            match unsafe {
-                self.duplication.AcquireNextFrame(
-                    remaining.as_millis() as u32,
-                    &mut info,
-                    &mut resource,
-                )
-            } {
-                Ok(()) => {}
-                Err(error) if error.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
-                Err(error) => return Err(error),
-            }
-            let present = info.LastPresentTime;
-            let copied = match resource {
-                Some(resource) if present != 0 => self.keep(&resource.cast()?),
-                _ => Ok(()),
-            };
-            // SAFETY: a frame was acquired above.
-            unsafe { self.duplication.ReleaseFrame() }?;
-            copied?;
-            if present != 0 {
-                return Ok(Some(present));
-            }
-            if remaining.is_zero() {
-                return Ok(None);
-            }
-        }
-    }
-
-    fn keep(&mut self, frame: &ID3D11Texture2D) -> Result<()> {
-        if self.latest.is_none() {
-            let mut desc = D3D11_TEXTURE2D_DESC::default();
-            // SAFETY: valid out pointer.
-            unsafe { frame.GetDesc(&mut desc) };
-            desc.BindFlags = 0;
-            desc.MiscFlags = 0;
-            let mut texture = None;
-            // SAFETY: valid descriptor and out pointer.
-            unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut texture)) }?;
-            self.latest = texture;
-        }
-        let latest = self.latest.as_ref().expect("created above");
-        // SAFETY: both textures share size and format.
-        unsafe { self.context.CopyResource(latest, frame) };
-        Ok(())
-    }
-
-    /// Reads the BGRA pixels of a desktop rectangle from the latest update.
-    fn read(&self, rect: [i32; 4]) -> Result<Vec<u8>> {
-        let left = (rect[0] - self.origin[0]).clamp(0, self.size[0]);
-        let top = (rect[1] - self.origin[1]).clamp(0, self.size[1]);
-        let right = (rect[2] - self.origin[0]).clamp(left + 1, self.size[0]);
-        let bottom = (rect[3] - self.origin[1]).clamp(top + 1, self.size[1]);
-        let width = (right - left) as u32;
-        let height = (bottom - top) as u32;
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: width,
-            Height: height,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
+fn send_key(virtual_key: u8) {
+    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(u16::from(virtual_key)),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
             },
-            Usage: D3D11_USAGE_STAGING,
-            BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-            MiscFlags: 0,
-        };
-        let Some(latest) = self.latest.as_ref() else {
-            return Ok(Vec::new());
-        };
-        let mut staging = None;
-        // SAFETY: valid descriptor and out pointer.
-        unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut staging)) }?;
-        let staging = staging.expect("CreateTexture2D succeeded without a texture");
-        let source = D3D11_BOX {
-            left: left as u32,
-            top: top as u32,
-            front: 0,
-            right: right as u32,
-            bottom: bottom as u32,
-            back: 1,
-        };
-        // SAFETY: the box lies inside the desktop texture.
-        unsafe {
-            self.context
-                .CopySubresourceRegion(&staging, 0, 0, 0, 0, latest, 0, Some(&source))
-        };
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        // SAFETY: staging texture with CPU read access.
-        unsafe {
-            self.context
-                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-        }?;
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for row in 0..height {
-            // SAFETY: the mapping covers `height` rows of `RowPitch` bytes.
-            let line = unsafe {
-                std::slice::from_raw_parts(
-                    (mapped.pData as *const u8).add((row * mapped.RowPitch) as usize),
-                    (width * 4) as usize,
-                )
-            };
-            pixels.extend_from_slice(line);
-        }
-        // SAFETY: mapped above.
-        unsafe { self.context.Unmap(&staging, 0) };
-        Ok(pixels)
-    }
+        },
+    };
+    // SAFETY: valid input structures.
+    unsafe {
+        SendInput(
+            &[key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)],
+            size_of::<INPUT>() as i32,
+        )
+    };
 }
 
 struct Lcg(u64);
@@ -381,27 +229,167 @@ impl Lcg {
     }
 }
 
-fn percentile(sorted: &[f64], fraction: f64) -> f64 {
-    let index = (fraction * (sorted.len() - 1) as f64).round() as usize;
-    sorted[index.min(sorted.len() - 1)]
+/// One present of the target as PresentMon reports it.
+struct Frame {
+    present_qpc: i64,
+    /// `None` when the frame never reached the screen.
+    until_displayed_ms: Option<f64>,
+    mode: String,
 }
 
-fn run(options: &Options) -> Result<()> {
-    // SAFETY: called before any window or DXGI object exists in this process.
-    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }?;
-    let hwnd = find_window(options.pid).ok_or_else(|| {
-        windows::core::Error::new(
-            windows::Win32::Foundation::E_FAIL,
-            "the process has no visible window",
+fn read_frames(csv: &PathBuf, pid: u32) -> Result<Vec<Frame>, String> {
+    let text = std::fs::read_to_string(csv)
+        .map_err(|error| format!("cannot read {}: {error}", csv.display()))?;
+    let mut lines = text.trim_start_matches('\u{feff}').lines();
+    let header: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
+    let column = |name: &str| {
+        header
+            .iter()
+            .position(|field| *field == name)
+            .ok_or_else(|| format!("PresentMon CSV has no {name} column"))
+    };
+    let (process, time, displayed, mode) = (
+        column("ProcessID")?,
+        column("TimeInQPC")?,
+        column("MsUntilDisplayed")?,
+        column("PresentMode")?,
+    );
+    let mut frames = Vec::new();
+    for line in lines {
+        let fields: Vec<&str> = line.split(',').collect();
+        if fields.get(process).and_then(|value| value.parse().ok()) != Some(pid) {
+            continue;
+        }
+        let Some(present_qpc) = fields.get(time).and_then(|value| value.parse().ok()) else {
+            continue;
+        };
+        frames.push(Frame {
+            present_qpc,
+            until_displayed_ms: fields.get(displayed).and_then(|value| value.parse().ok()),
+            mode: fields.get(mode).copied().unwrap_or_default().to_owned(),
+        });
+    }
+    frames.sort_by_key(|frame| frame.present_qpc);
+    Ok(frames)
+}
+
+fn summary(name: &str, mut values: Vec<f64>) {
+    if values.is_empty() {
+        println!("{name}: no samples");
+        return;
+    }
+    values.sort_by(f64::total_cmp);
+    let rank = |fraction: f64| values[(fraction * (values.len() - 1) as f64).round() as usize];
+    println!(
+        "{name}: n={} p50={:.2}ms p95={:.2}ms max={:.2}ms min={:.2}ms",
+        values.len(),
+        rank(0.5),
+        rank(0.95),
+        values[values.len() - 1],
+        values[0],
+    );
+}
+
+fn run(options: &Options) -> Result<(), String> {
+    // SAFETY: called before any window exists in this process.
+    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }
+        .map_err(|error| error.to_string())?;
+    let exe_name = options
+        .exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("the app path has no file name")?;
+
+    // PresentMon must run before the app starts: it misses most presents of
+    // a DX12 swap chain created before the trace. It records for a fixed time
+    // and exits by itself, which flushes every row; stopping its session
+    // from outside loses them.
+    let seconds = 15 + options.steps * 45 / 1000;
+    let mut presentmon = Command::new(&options.presentmon)
+        .args(["--process_name", exe_name, "--output_file"])
+        .arg(&options.csv)
+        .args([
+            "--qpc_time",
+            "--timed",
+            &seconds.to_string(),
+            "--terminate_after_timed",
+            "--stop_existing_session",
+            "--no_console_stats",
+            "--session_name",
+            SESSION,
+        ])
+        // PresentMon stops at once when its stdout is a pipe.
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("cannot start PresentMon: {error}"))?;
+    let started = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        Command::new("logman")
+            .args(["query", SESSION, "-ets"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+    if !started {
+        let _ = presentmon.kill();
+        return Err("PresentMon did not start recording; it needs administrator rights".into());
+    }
+
+    let mut app = Command::new(&options.exe)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("cannot start {}: {error}", options.exe.display()))?;
+    let pid = app.id();
+    let result = measure(options, pid);
+    // Killed rather than closed so that an app cannot write its settings.
+    let _ = app.kill();
+    let _ = app.wait();
+    presentmon
+        .wait()
+        .map_err(|error| format!("PresentMon failed: {error}"))?;
+    let (inputs, end) = result?;
+    report(&read_frames(&options.csv, pid)?, &inputs, end);
+    Ok(())
+}
+
+/// Drives the stroke and returns the input times and the end of the last step.
+fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
+    let hwnd = (0..200)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            find_window(pid)
+        })
+        .ok_or("the app showed no window")?;
+    std::thread::sleep(Duration::from_secs(2));
+    // SAFETY: valid window.
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        SetWindowPos(
+            hwnd,
+            None,
+            100,
+            100,
+            options.window[0],
+            options.window[1],
+            SWP_NOZORDER | SWP_NOACTIVATE,
         )
-    })?;
+    }
+    .map_err(|error| error.to_string())?;
     // SAFETY: valid window.
     let _ = unsafe { SetForegroundWindow(hwnd) };
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1500));
+    if let Some(key) = options.key {
+        send_key(key);
+        std::thread::sleep(Duration::from_millis(500));
+    }
 
     let mut client = RECT::default();
     // SAFETY: valid window and out pointer.
-    unsafe { GetClientRect(hwnd, &mut client) }?;
+    unsafe { GetClientRect(hwnd, &mut client) }.map_err(|error| error.to_string())?;
+    println!("client {}x{}", client.right, client.bottom);
     let mut origin = POINT { x: 0, y: 0 };
     // SAFETY: valid window and out pointer.
     let _ = unsafe { ClientToScreen(hwnd, &mut origin) };
@@ -420,73 +408,58 @@ fn run(options: &Options) -> Result<()> {
         ]
     };
 
-    let mut capture = Capture::for_window(hwnd)?;
-    capture.next_update(Duration::from_millis(1000))?;
-    while capture.next_update(Duration::ZERO)?.is_some() {}
-
-    let frequency = qpc_frequency();
     let mut random = Lcg(0x5547_5550);
-    let mut latencies = Vec::with_capacity(options.steps);
-    let mut misses = 0;
-
+    let mut inputs = Vec::with_capacity(options.steps);
     send_mouse(MOUSEEVENTF_MOVE, Some(point(0)));
     std::thread::sleep(Duration::from_millis(200));
     send_mouse(MOUSEEVENTF_LEFTDOWN, None);
     std::thread::sleep(Duration::from_millis(300));
-    while capture.next_update(Duration::ZERO)?.is_some() {}
-
     for step in 1..=options.steps {
-        let [x0, y0] = point(step - 1);
-        let [x1, y1] = point(step);
-        let rect = [
-            x0.min(x1) - options.margin,
-            y0.min(y1) - options.margin,
-            x0.max(x1) + options.margin + 1,
-            y0.max(y1) + options.margin + 1,
-        ];
-        let before = capture.read(rect)?;
-        let sent = qpc();
-        send_mouse(MOUSEEVENTF_MOVE, Some([x1, y1]));
-
-        let deadline = Instant::now() + Duration::from_millis(500);
-        let mut hit = None;
-        while hit.is_none() && Instant::now() < deadline {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if let Some(present) = capture.next_update(remaining)?
-                && capture.read(rect)? != before
-            {
-                hit = Some((present - sent) as f64 * 1000.0 / frequency);
-            }
-        }
-        match hit {
-            Some(millis) => {
-                println!("step {step} latency_ms={millis:.2}");
-                latencies.push(millis);
-            }
-            None => {
-                println!("step {step} miss");
-                misses += 1;
-            }
-        }
+        inputs.push(qpc());
+        send_mouse(MOUSEEVENTF_MOVE, Some(point(step)));
         std::thread::sleep(Duration::from_millis(
             15 + (random.next_unit() * 25.0) as u64,
         ));
-        while capture.next_update(Duration::ZERO)?.is_some() {}
     }
+    let end = qpc();
     send_mouse(MOUSEEVENTF_LEFTUP, None);
+    std::thread::sleep(Duration::from_millis(500));
+    Ok((inputs, end))
+}
 
-    latencies.sort_by(f64::total_cmp);
-    if latencies.is_empty() {
-        println!("summary samples=0 misses={misses}");
-    } else {
-        println!(
-            "summary samples={} misses={misses} p50={:.2}ms p95={:.2}ms max={:.2}ms min={:.2}ms",
-            latencies.len(),
-            percentile(&latencies, 0.5),
-            percentile(&latencies, 0.95),
-            latencies[latencies.len() - 1],
-            latencies[0],
-        );
+fn report(frames: &[Frame], inputs: &[i64], end: i64) {
+    let ticks_per_ms = qpc_ticks_per_ms();
+    let mut to_present = Vec::new();
+    let mut to_display = Vec::new();
+    let mut misses = 0;
+    let mut undisplayed = 0;
+    let mut extra_presents = 0;
+    let mut modes = BTreeMap::<&str, usize>::new();
+    for (index, &input) in inputs.iter().enumerate() {
+        let next = inputs.get(index + 1).copied().unwrap_or(end);
+        let mut step_frames = frames
+            .iter()
+            .filter(|frame| frame.present_qpc >= input && frame.present_qpc < next);
+        let Some(first) = step_frames.next() else {
+            misses += 1;
+            continue;
+        };
+        extra_presents += step_frames.count();
+        *modes.entry(first.mode.as_str()).or_default() += 1;
+        let present_ms = (first.present_qpc - input) as f64 / ticks_per_ms;
+        to_present.push(present_ms);
+        match first.until_displayed_ms {
+            Some(displayed) => to_display.push(present_ms + displayed),
+            None => undisplayed += 1,
+        }
     }
-    Ok(())
+
+    println!(
+        "steps={} frames={} misses={misses} undisplayed={undisplayed} extra_presents={extra_presents}",
+        inputs.len(),
+        frames.len()
+    );
+    println!("present modes: {modes:?}");
+    summary("input -> present", to_present);
+    summary("input -> displayed", to_display);
 }
