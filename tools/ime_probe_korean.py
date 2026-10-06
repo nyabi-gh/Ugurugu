@@ -4,7 +4,9 @@
 """Drives the Windows Korean IME in the Rust M0 app's IME probe with real key
 input and records what the app reports (docs/rust/m0-evidence.md section 7).
 
-Usage: python ime_probe_korean.py <ugurugu.exe> <output-dir>
+Usage: python ime_probe_korean.py <ugurugu.exe> <output-dir> [window-x,window-y]
+
+The window position picks the monitor, and so the scale the IME sees.
 
 Input goes to the foreground window, so it stops before sending any when the
 app is not in front. Needs the Microsoft Korean IME and Pillow."""
@@ -26,8 +28,9 @@ for name in ("GetForegroundWindow", "WindowFromPoint", "GetAncestor"):
 user32.WindowFromPoint.argtypes = [wt.POINT]
 user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
 
-EXE = sys.argv[1]
+EXE = os.path.abspath(sys.argv[1])
 OUT = sys.argv[2]
+PLACE = [int(value) for value in sys.argv[3].split(",")] if len(sys.argv) > 3 else [100, 100]
 os.makedirs(OUT, exist_ok=True)
 LOG = os.path.join(OUT, "app.log")
 
@@ -170,7 +173,7 @@ try:
             break
     assert HWND, "no window"
     time.sleep(1.5)
-    user32.SetWindowPos(HWND, 0, 100, 100, 1600, 1000, 0x0004)
+    user32.SetWindowPos(HWND, 0, PLACE[0], PLACE[1], 1600, 1000, 0x0004)
     send([key(VK_MENU), key(VK_MENU, True)])
     user32.SetForegroundWindow(HWND)
     time.sleep(1.0)
