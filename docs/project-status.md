@@ -612,16 +612,16 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 |---|---|
 | 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 인코딩만 `libwebp`로 하는 안이 사용자 확인 대기 |
 | 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
-| 3~4일차 기준선 | 부분. C++ 입력→표시 p50 24.7~26.1 / p95 32.6~33.3ms, stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
+| 3~4일차 기준선 | 부분. C++ 입력→표시 p50 10.1~11.0 / p95 13.3~14.0ms(PresentMon 입력 추적 끔. 켜고 잰 이전 값 25/33ms는 폐기), stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
-| 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측. Rust 실증 캔버스 입력→표시 p50 약 10ms / p95 약 14.5ms (C++ 기준선과 출처가 다르고, 관리자 권한 교차 검증은 남음) |
+| 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측(PresentMon과 프레임 단위 교차 검증). Rust 실증 캔버스는 같은 도구로 입력→표시 p50 11.7~12.2 / p95 14.9~15.2ms. C++보다 약 1ms 느리며, 원인은 DWM 합성(Composed Flip) |
 | 8~12, 14~15일차 | 시작 전 |
 
 다음 작업:
 
-1. tiny-skia와 Vello CPU를 같은 scene으로 비교하고, 결과를 presenter 위 캔버스 표시에 연결한다(10~11일차).
-2. 관리자 권한 세션에서 DXGI 통계와 PresentMon을 같은 실행으로 교차 검증한다.
+1. Rust swapchain이 Independent Flip(MPO)으로 승격되지 않는 원인을 찾는다. 다음 실험은 캔버스를 자식 창 swapchain으로 분리하는 것이다. 이 구조는 egui 팝업 airspace 문제가 따라오므로 결과를 보고 ADR로 정한다.
+2. tiny-skia와 Vello CPU를 같은 scene으로 비교하고, 결과를 presenter 위 캔버스 표시에 연결한다(10~11일차).
 3. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
 4. 한글·일본어 IME 실증(8~9일차).
 
-측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고 앱보다 먼저 시작해야 한다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --key P`.
+측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --key P`.
