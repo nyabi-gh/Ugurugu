@@ -5,6 +5,7 @@
 
 mod app;
 mod canvas;
+mod ime_probe;
 mod input;
 mod latency;
 mod render;

@@ -19,7 +19,8 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::canvas::{self, ProbeCanvas};
-use crate::input::InputRouter;
+use crate::ime_probe::ImeProbe;
+use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
 
 pub enum ToRender {
@@ -46,6 +47,7 @@ pub struct RenderThread {
     adapter_summary: String,
     router: InputRouter,
     canvas: ProbeCanvas,
+    ime: ImeProbe,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
     needs_frame: bool,
@@ -111,6 +113,7 @@ impl RenderThread {
             adapter_summary,
             router: InputRouter::default(),
             canvas: ProbeCanvas::default(),
+            ime: ImeProbe::default(),
             present_latency: LatencyLog::default(),
             display_latency: LatencyLog::default(),
             needs_frame: true,
@@ -194,6 +197,11 @@ impl RenderThread {
                     });
                 self.egui_state.egui_input_mut().events.extend(routed.egui);
                 for input in routed.canvas {
+                    // egui never sees canvas presses, so it would keep a
+                    // text field focused and take the canvas's keys.
+                    if matches!(input, CanvasInput::Begin(..)) {
+                        self.egui_ctx.memory_mut(|memory| memory.stop_text_input());
+                    }
                     self.canvas.apply(input);
                 }
                 self.needs_frame = true;
@@ -226,9 +234,12 @@ impl RenderThread {
             adapter_summary,
             canvas,
             display_latency,
+            ime,
             ..
         } = self;
         let output = self.egui_ctx.run_ui(input, |ui| {
+            // Before the widgets run, so focus is what the key was pressed in.
+            ime.count_canvas_shortcuts(ui.ctx());
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(adapter_summary.as_str());
@@ -243,6 +254,7 @@ impl RenderThread {
                     }
                 });
             });
+            egui::Panel::right("ime").show(ui, |ui| ime.show(ui));
             // No panel fill: the canvas is drawn under egui.
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)

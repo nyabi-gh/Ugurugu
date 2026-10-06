@@ -82,6 +82,7 @@ impl Session {
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
 
         let egui_ctx = egui::Context::default();
+        crate::ime_probe::install_cjk_fonts(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
