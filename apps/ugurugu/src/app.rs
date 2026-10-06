@@ -223,6 +223,12 @@ impl ApplicationHandler for App {
         let Some(session) = self.session.as_mut() else {
             return;
         };
+        if event == WindowEvent::RedrawRequested {
+            // egui-winit asks to repaint on every redraw; following that would
+            // redraw forever. egui's own repaint delay decides the next frame.
+            session.redraw();
+            return;
+        }
         let response = session.egui_state.on_window_event(&session.window, &event);
         if response.repaint {
             session.window.request_redraw();
@@ -242,7 +248,6 @@ impl ApplicationHandler for App {
                         .on_window_resized(egui::ViewportId::ROOT, width, height);
                 }
             }
-            WindowEvent::RedrawRequested => session.redraw(),
             _ => {}
         }
     }
