@@ -615,13 +615,14 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 3~4일차 기준선 | 부분. C++ 입력→표시 p50 10.1~11.0 / p95 13.3~14.0ms(PresentMon 입력 추적 끔. 켜고 잰 이전 값 25/33ms는 폐기), stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
 | 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측(PresentMon과 프레임 단위 교차 검증). Rust 실증 캔버스는 같은 도구로 입력→표시 p50 11.7~12.2 / p95 14.9~15.2ms. C++보다 약 1ms 느리며, 원인은 DWM 합성(Composed Flip) |
+| 13일차 일부 (캔버스 표시) | 코드·테스트 완료. 창을 띄운 확인은 남음 |
 | 10~11일차 렌더러 비교 | 측정 완료(`tools/render-bench`, 2048² 교대 3회). Vello CPU가 1스레드에서 래스터화 3.4배, 8스레드에서 약 24배 빠르고 메모리는 비슷하다. tiny-skia와의 차이는 가장자리 안티에일리어싱뿐이다. Vello CPU 채택, Vello GPU 보류로 확정 |
 | 8~9, 12, 14~15일차 | 시작 전 |
 
 다음 작업:
 
 1. Composed Flip 원인 측정. 가설은 Windows 11 둥근 모서리를 DWM이 합성으로 자르는 것이다. `UGURUGU_PRESENT=square|child`와 `latency-probe --window max`로 네 조건을 재고, 결과로 구조 ADR을 쓴다(선택지와 권고는 [m0-evidence 4절](rust/m0-evidence.md)).
-2. Vello CPU 결과를 presenter 위 캔버스 표시에 연결한다(dirty rect 업로드, 전용 표시 셰이더).
+2. 캔버스 표시 연결은 코드 완료(`49b5809`): 입력 한 칸은 렌더 스레드에서 dirty rect만 Vello CPU 1스레드로 그리고, 크기 변경·취소는 다중 스레드로 다시 그린다. 바뀐 픽셀만 텍스처로 올리고 전용 셰이더가 1:1로 표시한다(GPU readback 테스트로 CPU 픽셀과 일치 확인). 창을 띄운 확인과 지연 측정은 1번 측정과 함께 한다.
 3. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
 4. 한글·일본어 IME 실증(8~9일차).
 
