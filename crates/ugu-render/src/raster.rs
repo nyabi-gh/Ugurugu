@@ -60,7 +60,16 @@ fn union(a: Option<PixelRect>, b: PixelRect) -> PixelRect {
 
 impl CanvasRaster {
     pub fn new(size: [u32; 2]) -> Self {
+        Self::with_level(size, vello_cpu::Level::new())
+    }
+
+    /// Uses the SIMD instructions of `level` instead of the best ones present.
+    pub fn with_level(size: [u32; 2], level: vello_cpu::Level) -> Self {
         let [width, height] = Self::pixmap_size(size);
+        let settings = RenderSettings {
+            level,
+            ..RenderSettings::default()
+        };
         Self {
             pixmap: vello_cpu::Pixmap::new(width, height),
             live: RenderContext::new_with(
@@ -68,10 +77,10 @@ impl CanvasRaster {
                 1,
                 RenderSettings {
                     num_threads: 0,
-                    ..RenderSettings::default()
+                    ..settings
                 },
             ),
-            full: RenderContext::new_with(width, height, RenderSettings::default()),
+            full: RenderContext::new_with(width, height, settings),
             resources: Resources::new(),
             dirty: Some([0, 0, u32::from(width), u32::from(height)]),
         }
@@ -102,7 +111,8 @@ impl CanvasRaster {
         if size == self.size() {
             return;
         }
-        *self = Self::new(size);
+        let level = self.full.render_settings().level;
+        *self = Self::with_level(size, level);
     }
 
     pub fn clear(&mut self) {
@@ -260,6 +270,76 @@ mod tests {
             .filter(|(a, b)| a.abs_diff(**b) > 8)
             .count();
         assert!(differing <= 16, "{differing} channels differ");
+    }
+
+    /// Every SIMD level this CPU has, so that pixels can be compared across
+    /// the levels other users' CPUs would pick.
+    fn levels() -> Vec<(&'static str, vello_cpu::Level)> {
+        let detected = vello_cpu::Level::new();
+        let mut levels = vec![("baseline", vello_cpu::Level::baseline())];
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(sse) = detected.as_sse4_2() {
+                levels.push(("sse4.2", vello_cpu::Level::Sse4_2(sse)));
+            }
+            if let Some(avx) = detected.as_avx2() {
+                levels.push(("avx2", vello_cpu::Level::Avx2(avx)));
+            }
+            if let Some(avx) = detected.as_avx512() {
+                levels.push(("avx512", vello_cpu::Level::Avx512(avx)));
+            }
+        }
+        levels
+    }
+
+    fn draw_sample(level: vello_cpu::Level) -> (Vec<u8>, Vec<u8>) {
+        let thin = StrokeStyle {
+            width: 1.3,
+            color: [200, 40, 30, 255],
+        };
+        let wide = StrokeStyle {
+            width: 17.5,
+            color: [30, 90, 200, 150],
+        };
+        let points: Vec<[f32; 2]> = (0..60)
+            .map(|index| {
+                let angle = index as f32 * 0.37;
+                [
+                    64.0 + angle.cos() * (10.0 + index as f32),
+                    64.0 + angle.sin() * 40.0,
+                ]
+            })
+            .collect();
+        let mut live = CanvasRaster::with_level([128, 128], level);
+        live.dot(points[0], thin);
+        for pair in points.windows(2) {
+            live.segment(pair[0], pair[1], thin);
+        }
+        let mut redrawn = CanvasRaster::with_level([128, 128], level);
+        redrawn.redraw([
+            (&points[..], wide),
+            (&points[5..9], thin),
+            (&points[..1], wide),
+        ]);
+        (live.pixels().to_vec(), redrawn.pixels().to_vec())
+    }
+
+    #[test]
+    fn every_simd_level_draws_the_same_pixels() {
+        let levels = levels();
+        let (reference_name, reference_level) = levels[0];
+        let reference = draw_sample(reference_level);
+        for &(name, level) in &levels[1..] {
+            let pixels = draw_sample(level);
+            assert!(
+                pixels.0 == reference.0,
+                "live drawing differs between {reference_name} and {name}"
+            );
+            assert!(
+                pixels.1 == reference.1,
+                "redraw differs between {reference_name} and {name}"
+            );
+        }
     }
 
     #[test]

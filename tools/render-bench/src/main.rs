@@ -19,6 +19,7 @@ use scene::{Document, LAYER_BLENDS};
 const USAGE: &str = "usage:
   render-bench run --renderer tiny-skia|vello|vello-mt[=THREADS] [--size 2048] [--strokes 2000]
                    [--points 100] [--frames 30] [--segments 500] [--out DIR]
+                   [--simd auto|baseline|sse4.2|avx2|avx512]  (Vello only)
   render-bench diff A.rgba B.rgba [HEATMAP.png]";
 
 struct Options {
@@ -28,6 +29,7 @@ struct Options {
     points: usize,
     frames: usize,
     segments: usize,
+    simd: String,
     out: PathBuf,
 }
 
@@ -39,6 +41,7 @@ fn parse_run(mut args: impl Iterator<Item = String>) -> Option<Options> {
         points: 100,
         frames: 30,
         segments: 500,
+        simd: "auto".to_owned(),
         out: std::env::temp_dir().join("render-bench"),
     };
     while let Some(arg) = args.next() {
@@ -50,6 +53,7 @@ fn parse_run(mut args: impl Iterator<Item = String>) -> Option<Options> {
             "--points" => options.points = value.parse().ok()?,
             "--frames" => options.frames = value.parse().ok().filter(|&frames| frames > 0)?,
             "--segments" => options.segments = value.parse().ok()?,
+            "--simd" => options.simd = value,
             "--out" => options.out = PathBuf::from(value),
             _ => return None,
         }
@@ -79,18 +83,32 @@ fn main() -> ExitCode {
     }
 }
 
+fn simd_level(name: &str) -> Option<vello_cpu::Level> {
+    let detected = vello_cpu::Level::new();
+    match name {
+        "auto" => Some(detected),
+        "baseline" => Some(vello_cpu::Level::baseline()),
+        "sse4.2" => detected.as_sse4_2().map(vello_cpu::Level::Sse4_2),
+        "avx2" => detected.as_avx2().map(vello_cpu::Level::Avx2),
+        "avx512" => detected.as_avx512().map(vello_cpu::Level::Avx512),
+        _ => None,
+    }
+}
+
 fn run(options: &Options) -> Result<(), String> {
     std::fs::create_dir_all(&options.out)
         .map_err(|error| format!("cannot create {}: {error}", options.out.display()))?;
+    let level = simd_level(&options.simd)
+        .ok_or_else(|| format!("SIMD level {} is unknown or not on this CPU", options.simd))?;
     match options.renderer.as_str() {
         "tiny-skia" => measure(options, TinySkia::new(options.size)),
-        "vello" => measure(options, Vello::new(options.size, 0)),
+        "vello" => measure(options, Vello::new(options.size, 0, level)),
         "vello-mt" => {
             let threads = vello_cpu::RenderSettings::default().num_threads;
-            measure(options, Vello::new(options.size, threads))
+            measure(options, Vello::new(options.size, threads, level))
         }
         other => match other.strip_prefix("vello-mt=").map(str::parse) {
-            Some(Ok(threads)) => measure(options, Vello::new(options.size, threads)),
+            Some(Ok(threads)) => measure(options, Vello::new(options.size, threads, level)),
             _ => Err(format!("unknown renderer {other}")),
         },
     }

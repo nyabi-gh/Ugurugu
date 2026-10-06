@@ -217,11 +217,11 @@ use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
 
 impl Vello {
     /// `threads` 0 renders on the calling thread only.
-    pub fn new(size: u32, threads: u16) -> Self {
+    pub fn new(size: u32, threads: u16, level: vello_cpu::Level) -> Self {
         let size = u16::try_from(size).expect("Vello CPU images are at most 65535 wide");
         let settings = vello_cpu::RenderSettings {
             num_threads: threads,
-            ..vello_cpu::RenderSettings::default()
+            level,
         };
         Self {
             context: vello_cpu::RenderContext::new_with(size, size, settings),
