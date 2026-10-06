@@ -610,7 +610,7 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 | M0 작업 | 상태 |
 |---|---|
-| 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 인코딩만 `libwebp`로 하는 안이 사용자 확인 대기 |
+| 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 내보내기 인코딩만 `libwebp`, 이미지 디코드는 `image-webp`로 확정 |
 | 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
 | 3~4일차 기준선 | 부분. C++ 입력→표시 p50 10.1~11.0 / p95 13.3~14.0ms(PresentMon 입력 추적 끔. 켜고 잰 이전 값 25/33ms는 폐기), stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
