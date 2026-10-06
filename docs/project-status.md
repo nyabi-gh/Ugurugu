@@ -612,16 +612,18 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 |---|---|
 | 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 내보내기 인코딩만 `libwebp`, 이미지 디코드는 `image-webp`로 확정 |
 | 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
-| 3~4일차 기준선 | 부분. C++ 입력→표시 p50 10.1~11.0 / p95 13.3~14.0ms(PresentMon 입력 추적 끔. 켜고 잰 이전 값 25/33ms는 폐기), stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
+| 3~4일차 기준선 | 부분. C++ 입력→표시(워밍업 후) p50 9.6~10.9 / p95 12.9~13.4ms. fixture ①~⑤ 생성기 완료, C++ 렌더 frame p50 ① 47~55 / ② 656~660 / ③ 4,605 / ④ 466~475 / ⑤ 951~967ms. GUI batch·pen-up·저장/열기·취소·RAM은 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
 | 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측. 워밍업 후 같은 표시 방식(Independent Flip)에서 입력→표시 p50 5.9~6.4 / p95 8.5~9.0ms로 C++(9.6~10.9 / 12.9~13.4ms)보다 약 4ms 빠르다. 이전의 "약 1ms 느림"은 측정 절차 탓이었다 |
 | 13일차 일부 (캔버스 표시) | 완료. 창 전체 swapchain 하나에 Vello CPU 캔버스를 그리고 그 위에 egui를 그린다(자식 창 기각, ADR은 m0-evidence 4절). 화면 확인 중 마우스 이동 복원 버그를 찾아 고쳤다 |
 | 10~11일차 렌더러 비교 | 측정 완료(`tools/render-bench`, 2048² 교대 3회). Vello CPU가 1스레드에서 래스터화 3.4배, 8스레드에서 약 24배 빠르고 메모리는 비슷하다. tiny-skia와의 차이는 가장자리 안티에일리어싱뿐이다. Vello CPU 채택, Vello GPU 보류로 확정. Vello GPU는 래스터화가 CPU 8스레드보다 5배 느려(전처리가 1스레드) 재생 경로에도 쓰지 않는다 |
-| 8~9, 12, 14~15일차 | 시작 전 |
+| 8~9일차 IME | 한국어 부분 완료. 조합·받침·한자 후보·Enter 누출·캔버스 단축키를 실제 IME로 자동 시험해 통과(캔버스 포커스 버그 수정). 일본어(IME 미설치), 배율별 후보창 위치, Narrator는 남음 |
+| 12, 14~15일차 | 시작 전 |
 
 다음 작업:
 
-1. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
-2. 한글·일본어 IME 실증(8~9일차).
+1. 일본어 IME와 배율별 후보창 위치 실증(일본어 IME 설치 필요).
+2. 남은 기준선 항목(GUI batch·pen-up·저장/열기·취소·RAM)을 외부 계측으로 측정한다.
+3. 12일차: 연산·선택·병합·fill 의미와 파일 스키마 ADR.
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
