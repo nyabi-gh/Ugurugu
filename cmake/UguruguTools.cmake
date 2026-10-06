@@ -189,6 +189,18 @@ target_link_libraries(
 ugurugu_target_defaults(ugurugu_engine_digest_probe)
 
 add_executable(
+    ugurugu_reference_export
+    EXCLUDE_FROM_ALL
+    tools/ReferenceExport.cpp
+)
+target_link_libraries(
+    ugurugu_reference_export
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_reference_export)
+
+add_executable(
     ugurugu_render_benchmark
     EXCLUDE_FROM_ALL
     tools/RenderBenchmark.cpp

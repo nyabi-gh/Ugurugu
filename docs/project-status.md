@@ -576,9 +576,9 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 
 | # | 단계 | 상태 |
 |---|---|---|
-| ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 구현, 로컬 확인 (브랜치 `rust/workspace-skeleton`). CI 결과 대기 |
-| ② | C++ seed·uuid 주입 지점 | 구현, Windows 확인 (브랜치 `ref/seed-uuid-injection`). CI 대기 |
-| ③ | C++ `ReferenceExport`(scene·geometry·frames·stabilize·dabs) | 계획 |
+| ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 완료. main `a128e55`(2026-10-06), Rust 잡 5개 녹색 |
+| ② | C++ seed·uuid 주입 지점 | 완료. main `ca51af1`(2026-10-06), PR CI 전 잡 녹색 |
+| ③ | C++ `ReferenceExport`(scene·geometry·frames·strokes·stabilize) | 구현, Windows 확인 (브랜치 `ref/reference-export`) |
 | ④ | 장면 행렬과 C++ 참조 결과 | 계획 |
 | ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
 | ⑥ | 허용치 기준선(C++ Windows vs macOS, macOS는 CI 러너) | 계획 |
@@ -598,6 +598,16 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - 바꾸지 않은 곳: C++ 웹 엔진(`src/wasm`, 동결), 복구 세션 id(문서 내용이 아님).
 - 회귀: [IdentityTests.cpp](../tests/IdentityTests.cpp) 6개(같은 seed → 같은 수열, seed 0의 첫 값 고정, v4 UUID 형식, id가 seed 수열을 밀지 않음, 중첩 복원, 컨트롤러로 획을 그리고 레이어를 복제한 결과의 id 재현).
 - 로컬(Windows 11, windows-release, 2026-10-05): CTest 12/12 통과, IdentityTests 6/6 통과. wasm 빌드는 CI `wasm` 잡으로 확인한다.
+
+①을 main에 넣기 전 main CI의 Clang-Tidy가 `CanvasWidgetPreview.cpp` warmup 루프의 `QFutureWatcher`를 누수로 보고하고 있었다(`61ab90a`부터, D27/D28 변경 뒤 분석 경로가 바뀜). 위젯을 부모로 두고 완료 시 `deleteLater()`하는 구조라 실제 누수는 아니며, 다른 watcher 자리와 같은 NOLINT 구역으로 표시했다(`68ff0b8`). 로컬 clang-tidy에서 수정 전 같은 오류, 수정 후 없음.
+
+**간헐 실패 — 웹 시나리오 01(recovery-and-png-export)**: CI `wasm` 잡의 브라우저 단계가 main push `61ab90a`·`a128e55`에서 같은 지점에서 실패했다(`98fa406`, PR #11·#12는 통과). 새로고침 뒤 복구 배너를 눌렀는데 30초 안에 그린 획의 픽셀 수와 같아지지 않는다. Rust 작업과 무관(웹 셸·엔진 변경 없음). 로컬(Windows, Chromium, 로컬 엔진)에서는 10/10 통과하고, CPU 6배 throttle, 그리기 전 2.5초 지연, 썸네일 대기 생략으로도 재현되지 않았다. 확인한 것: 테스트가 기다리는 "Recovery snapshot saved" 문구는 획 이전의 빈 문서 스냅샷에서도 이미 표시될 수 있어, 획이 저장됐다는 보장이 아니다(그리기 전 2.5초 지연 시 문구가 획 전에 이미 떠 있음). 그래도 로컬에서는 새로고침 때 숨김 이벤트 스냅샷이 획을 저장해 통과한다. 원인 확정 전이며, 다음은 CI에서 실패 시점의 복원된 픽셀 수·복구 기록(savedAt·크기)을 남기는 진단이다.
+
+③의 내용과 확인:
+
+- [tools/ReferenceExport.cpp](../tools/ReferenceExport.cpp), 타깃 `ugurugu_reference_export`(`EXCLUDE_FROM_ALL`). 명령: `scene`(모든 기본값과 레이어 override를 풀어 쓴 중립 장면 JSON, u64 seed는 문자열, 마스크·자산은 패딩 없는 행 base64), `geometry`(획·프레임별 `StrokeRenderer::prepare` 결과 JSONL: 점·압력·보이는 구간·굵기), `frames`(프레임 PNG, `--size`면 `NativeExact` 축소 렌더), `strokes`(paint 획 하나씩 투명 바탕에 렌더, 에어브러시 dab·스프레이 입자 비교용), `stabilize`(펜 기록 → 1€ 필터 출력), `all`. 모든 출력에 Qt 버전·OS·CPU를 담은 `manifest.json`.
+- 계획 §4.2의 `dabs <cases>`는 `strokes`로 대신했다. 획 하나를 따로 렌더하면 선·dab·입자가 모두 같은 방식으로 나오고, 경우 정의는 ④ 장면 행렬 문서가 맡는다. 획 샘플링 규칙(0.75px 간격, 끝점 압력)은 지금 `CanvasWidget` 안에 있어 `stabilize`에 들어 있지 않다. 1단계 I층 비교 전에 순수 함수로 꺼낸다.
+- 확인(Windows 11, Release, Qt 6.11.2, 2026-10-06): 레거시 fixture 3개를 두 번씩 내보내 결과가 바이트 동일. `frames` PNG에서 계산한 digest가 `LegacyRenderGoldenTests`의 Windows 값과 일치(animated 0·1, fill-hierarchy 0). 로컬 clang-tidy 경고 없음.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 
