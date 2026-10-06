@@ -30,23 +30,24 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClientRect, GetSystemMetrics, GetWindowThreadProcessId, IsWindowVisible,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_MAXIMIZE,
+    SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
 use windows::core::BOOL;
 
 const SESSION: &str = "UguruguLatencyProbe";
 
 const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
-                     [--steps N] [--radius FRACTION] [--window WxH] [--key LETTER] [--csv PATH]";
+                     [--steps N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH]";
 
 struct Options {
     exe: PathBuf,
     presentmon: PathBuf,
     steps: usize,
     radius: f64,
-    /// Outer window size in physical pixels, the same for every app measured.
-    window: [i32; 2],
+    /// Outer window size in physical pixels, the same for every app measured;
+    /// `None` maximizes the window, where Windows 11 draws no rounded corners.
+    window: Option<[i32; 2]>,
     /// A key pressed once before measuring, such as the C++ app's playback toggle.
     key: Option<u8>,
     csv: PathBuf,
@@ -57,7 +58,7 @@ fn parse() -> Option<Options> {
     let mut presentmon = None;
     let mut steps = 200;
     let mut radius = 0.12;
-    let mut window = [2560, 1600];
+    let mut window = Some([2560, 1600]);
     let mut key = None;
     let mut csv = std::env::temp_dir().join("latency-probe-presentmon.csv");
     let mut args = std::env::args().skip(1);
@@ -68,9 +69,10 @@ fn parse() -> Option<Options> {
             "--presentmon" => presentmon = Some(PathBuf::from(value)),
             "--steps" => steps = value.parse().ok()?,
             "--radius" => radius = value.parse().ok()?,
+            "--window" if value == "max" => window = None,
             "--window" => {
                 let (width, height) = value.split_once('x')?;
-                window = [width.parse().ok()?, height.parse().ok()?];
+                window = Some([width.parse().ok()?, height.parse().ok()?]);
             }
             "--key" => {
                 let letter = value.chars().next()?.to_ascii_uppercase();
@@ -373,20 +375,26 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
         })
         .ok_or("the app showed no window")?;
     std::thread::sleep(Duration::from_secs(2));
-    // SAFETY: valid window.
-    unsafe {
-        let _ = ShowWindow(hwnd, SW_RESTORE);
-        SetWindowPos(
-            hwnd,
-            None,
-            100,
-            100,
-            options.window[0],
-            options.window[1],
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        )
+    match options.window {
+        // SAFETY: valid window.
+        Some([width, height]) => unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            SetWindowPos(
+                hwnd,
+                None,
+                100,
+                100,
+                width,
+                height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
+        .map_err(|error| error.to_string())?,
+        // SAFETY: valid window.
+        None => unsafe {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        },
     }
-    .map_err(|error| error.to_string())?;
     // SAFETY: valid window.
     let _ = unsafe { SetForegroundWindow(hwnd) };
     std::thread::sleep(Duration::from_millis(1500));

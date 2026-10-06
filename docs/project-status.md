@@ -615,12 +615,13 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 3~4일차 기준선 | 부분. C++ 입력→표시 p50 10.1~11.0 / p95 13.3~14.0ms(PresentMon 입력 추적 끔. 켜고 잰 이전 값 25/33ms는 폐기), stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
 | 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측(PresentMon과 프레임 단위 교차 검증). Rust 실증 캔버스는 같은 도구로 입력→표시 p50 11.7~12.2 / p95 14.9~15.2ms. C++보다 약 1ms 느리며, 원인은 DWM 합성(Composed Flip) |
-| 8~12, 14~15일차 | 시작 전 |
+| 10~11일차 렌더러 비교 | 도구 완료(`tools/render-bench`). 512² 축소 실행에서 tiny-skia와 Vello CPU의 차이는 가장자리 안티에일리어싱뿐임을 확인. 2048² 시간·메모리 측정은 남음 |
+| 8~9, 12, 14~15일차 | 시작 전 |
 
 다음 작업:
 
-1. Rust swapchain이 Independent Flip(MPO)으로 승격되지 않는 원인을 찾는다. 다음 실험은 캔버스를 자식 창 swapchain으로 분리하는 것이다. 이 구조는 egui 팝업 airspace 문제가 따라오므로 결과를 보고 ADR로 정한다.
-2. tiny-skia와 Vello CPU를 같은 scene으로 비교하고, 결과를 presenter 위 캔버스 표시에 연결한다(10~11일차).
+1. Composed Flip 원인 측정. 가설은 Windows 11 둥근 모서리를 DWM이 합성으로 자르는 것이다. `UGURUGU_PRESENT=square|child`와 `latency-probe --window max`로 네 조건을 재고, 결과로 구조 ADR을 쓴다(선택지와 권고는 [m0-evidence 4절](rust/m0-evidence.md)).
+2. `render-bench` 2048² 전체 실행(tiny-skia, Vello 단일·다중 스레드, 교대 3회)으로 시간·메모리를 기록하고 렌더러를 정한다. 그 결과를 presenter 위 캔버스 표시에 연결한다.
 3. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
 4. 한글·일본어 IME 실증(8~9일차).
 

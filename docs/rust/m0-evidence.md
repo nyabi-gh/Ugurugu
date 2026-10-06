@@ -96,8 +96,61 @@ Rust 창 전체 swapchain(wgpu DX12, BGRA8, client 크기와 같음)은 측정 �
 - 버튼 없이 hover로 이동
 - wgpu `DxgiFromVisual`(DirectComposition)
 
-C++는 캔버스를 별도 자식 창(QRhi D3D11 swapchain)에 그린다. 다음 실험은 캔버스를 자식 창 swapchain으로 분리했을 때 승격되는지 확인하는 것이다. 이 구조는 egui 팝업이 캔버스 위로 그려지지 못하는 문제(airspace)를 함께 해결해야 하므로, 실험 결과를 보고 ADR에서 정한다.
+C++는 캔버스를 별도 자식 창(QRhi D3D11 swapchain)에 그린다.
+
+**가설: Windows 11의 둥근 창 모서리.** Rust swapchain은 client 영역 전체를 덮으므로 아래쪽 두 모서리가 둥글게 잘린다. DWM이 모서리를 잘라 내려면 swapchain을 직접 합성해야 하므로 오버레이 plane에 올릴 수 없다. C++ 캔버스 자식 창은 아래 상태 표시줄 위에서 끝나 모서리에 닿지 않는다. 위에서 바꿔 본 조건은 모두 모서리를 그대로 두었다. 최대화된 창은 모서리가 둥글지 않으므로, 이 가설이 맞으면 현재 구조도 최대화 상태에서는 승격된다.
+
+실험 장치(`b1fffaa` 이후, 아직 측정하지 않음):
+
+| `UGURUGU_PRESENT` | 구조 |
+|---|---|
+| (없음) | 창 전체 swapchain 하나 (현재) |
+| `square` | 같은 구조에 `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_DONOTROUND` |
+| `child` | 캔버스만 자식 창 swapchain. 자식 창은 hit test를 부모로 넘기므로(`HTTRANSPARENT`) 포인터 입력 경로는 그대로다. 두 swapchain의 frame-latency 대기 핸들을 한 번에 기다리고, 캔버스를 먼저 present한다 |
+
+`latency-probe`는 이제 swapchain별로 표시 방식과 지연을 따로 보고하고, `--window max`로 창을 최대화할 수 있다. 측정 순서(각 3회, C++와 교대, `misses` 0만 채택):
+
+1. 기본 구조 × 복원 창 2560×1600: 기존 결과 재현 확인
+2. 기본 구조 × `--window max`
+3. `square` × 복원 창
+4. `child` × 복원 창
+
+2·3이 Independent Flip이면 원인은 모서리 합성이다. 4만 승격되면 다른 조건(창 전체 크기, 비클라이언트 영역 인접 등)이 남는다.
+
+### 구조 선택지 (측정 뒤 ADR로 확정)
+
+| 구조 | 지연 | egui 팝업이 캔버스를 덮을 때 | 비용 |
+|---|---|---|---|
+| A. 창 전체 swapchain + 모서리 끔 | 모서리가 원인이면 C++와 같은 경로 | 문제 없음 (같은 swapchain) | 창 모서리가 각진다. 최대화 상태는 원래 각져 있다 |
+| B. 캔버스 자식 창 (C++ 방식) | 승격 가능성이 가장 높음 | 자식 창이 팝업을 가린다(airspace). 팝업이 캔버스와 겹치는 동안 캔버스를 부모 swapchain으로 옮겨 그리거나, 팝업을 별도 최상위 창으로 띄워야 한다 | 전자는 그동안만 합성 경로로 돌아가므로 단순하다. 후자는 egui가 팝업 단위 viewport를 지원하지 않아 메뉴·콤보·툴팁을 직접 창으로 띄워야 한다 |
+| C. DirectComposition 두 visual (캔버스 아래, UI 위) | UI visual이 알파로 위를 덮으므로 오버레이 승격은 underlay 지원 하드웨어에 한정 | 문제 없음 | 하드웨어 의존이 크고 검증 비용이 크다 |
+
+측정 전 권고: 2·3에서 승격되면 A를 택한다. airspace 문제가 아예 생기지 않고, 최대화 사용에서는 시각 차이도 없다. B만 승격되면 B와 "팝업이 겹칠 때만 부모 swapchain에 그림" 대체 경로를 택한다. 팝업이 열린 동안에는 펜 입력이 거의 없으므로, 그동안 합성 경로로 돌아가 약 1ms 늦어지는 것은 허용 범위다.
 
 ## 5. 아직 측정하지 않은 기준선 항목
 
 GUI 이벤트 batch, pen-up commit, 재생 fps(앱 내), 저장·열기, export 중 UI 반응, 취소, RAM. 앞의 세 항목과 취소는 2.2.13에 커밋된 계측 도구가 없으므로, 외부에서 재는 방법(WM_NULL ping, working set 샘플링, ETW)을 정한 뒤 측정한다. 유휴 상태 present 횟수는 1절에 기록했다.
+
+## 6. CPU 렌더러 비교 (10~11일차)
+
+도구: `tools/render-bench`(`6b3468c`). 같은 결정적 문서를 tiny-skia 0.12.0과 Vello CPU 0.3.0(`u8_pipeline`, 단일 스레드와 `multithreading`)으로 그린다. 외곽선은 도구가 한 번 만들어 두 렌더러에 같은 경로를 넘기므로, 차이는 래스터화와 합성에서만 생긴다.
+
+- 문서: 2048², 5레이어(Normal·Multiply·Screen·Overlay, Overlay 레이어를 바닥으로 하는 클리핑 그룹 1개), 2,000획 × 100점 = 200,000점. 획의 50%는 펜(일정 폭, 둥근 끝·이음), 30%는 필압(점마다 원 + 이웃 사이 사각형, non-zero 합집합), 20%는 에어브러시(방사형 그라디언트 dab). 모두 반투명이다.
+- 단계: 레이어 래스터화 30프레임(프레임마다 점을 ±2px 흔듦), 흰 배경 위 합성, 레이어 하나의 선택 변형(12° 회전·1.15배, bilinear) 10회, 실시간 획 한 칸(dirty rect 안에서만 그림) 500회.
+- 프로세스 하나에 렌더러 하나만 돌려 peak working set·private bytes를 렌더러별로 잰다. 각 단계 결과 이미지를 raw RGBA와 PNG로 남기고 `render-bench diff`로 비교한다.
+
+재현: `render-bench run --renderer tiny-skia|vello|vello-mt[=N] --out DIR`, `render-bench diff DIR/tiny-skia-composite.rgba DIR/vello-composite.rgba DIR/heat.png`.
+
+### 정확성 (512², 100획, 기능 확인용 축소 실행)
+
+| 비교 | 평균 채널 차 | 최대 | 차 > 2인 픽셀 | 차 > 8인 픽셀 |
+|---|---|---|---|---|
+| 합성 | 0.39 | 99 | 9.3% | 1.4% |
+| 선택 변형 | 0.27 | 130 | 4.1% | 0.8% |
+| 실시간 획 | 0.29 | 142 | 4.4% | 1.0% |
+
+Vello 단일 스레드와 다중 스레드 결과는 바이트 단위로 같다. tiny-skia와의 차이는 획 가장자리의 안티에일리어싱(tiny-skia는 scanline 수직 4배 supersampling, Vello는 면적 coverage)과 에어브러시 그라디언트 내부에 몰려 있고, 모양이 빠지거나 밀린 곳은 없다(차이 heatmap 확인). 어느 쪽이 C++ QPainter에 가까운지는 아직 비교하지 않았다. 2.2.13과의 비교는 같은 문서를 C++로 그리는 생성기가 있어야 한다.
+
+### 시간·메모리
+
+2048² 전체 실행은 아직 하지 않았다. 축소 실행 값은 참고만 한다: 래스터화 p50은 tiny-skia 21.6ms, Vello 6.4ms, Vello 4스레드 3.5ms이고, 합성은 5.1 / 3.9 / 1.2ms다. 실시간 획 한 칸은 tiny-skia 0.004ms, Vello 0.002ms인데, Vello 다중 스레드는 0.067ms로 작은 작업에서는 스레드 분배 비용이 더 크다.
