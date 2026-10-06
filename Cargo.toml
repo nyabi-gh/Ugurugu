@@ -19,6 +19,7 @@ tracing-appender = "=0.2.5"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 ugu-render = { path = "crates/ugu-render" }
 ugu-win = { path = "crates/ugu-win" }
+vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 # DX12 only: with Vulkan compiled in, wgpu would prefer a Vulkan adapter.
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "wgsl"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }

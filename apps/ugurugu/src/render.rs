@@ -13,6 +13,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use ugu_render::present::{self, Acquired, Presenter};
+use ugu_render::view::CanvasView;
 use ugu_win::clock::Ticks;
 use ugu_win::composition;
 use ugu_win::pointer::PointerEvent;
@@ -22,7 +23,7 @@ use winit::raw_window_handle::{
 };
 use winit::window::Window;
 
-use crate::canvas::ProbeCanvas;
+use crate::canvas::{self, ProbeCanvas};
 use crate::input::InputRouter;
 use crate::latency::LatencyLog;
 
@@ -66,7 +67,6 @@ impl CanvasSurface {
 struct ChildCanvas {
     hwnd: isize,
     presenter: Presenter,
-    renderer: egui_wgpu::Renderer,
     /// Where the window was last placed, in parent client physical pixels.
     placed: Option<[i32; 4]>,
 }
@@ -79,6 +79,7 @@ pub struct RenderThread {
     queue: wgpu::Queue,
     presenter: Presenter,
     egui_renderer: egui_wgpu::Renderer,
+    canvas_view: CanvasView,
     child: Option<ChildCanvas>,
     adapter_summary: String,
     router: InputRouter,
@@ -136,18 +137,18 @@ impl RenderThread {
             presenter.format(),
             egui_wgpu::RendererOptions::default(),
         );
+        let format = presenter.format();
+        let canvas_view = CanvasView::new(&device, format, canvas::PAPER);
         let child = match canvas_surface {
             Some(canvas) => {
                 let presenter = Presenter::new(canvas.surface, &adapter, &device, [1, 1])?;
-                let renderer = egui_wgpu::Renderer::new(
-                    &device,
-                    presenter.format(),
-                    egui_wgpu::RendererOptions::default(),
-                );
+                // One canvas pipeline serves both swap chains.
+                if presenter.format() != format {
+                    return Err("the canvas and window swap chains differ in format".to_owned());
+                }
                 Some(ChildCanvas {
                     hwnd: canvas.hwnd,
                     presenter,
-                    renderer,
                     placed: None,
                 })
             }
@@ -161,6 +162,7 @@ impl RenderThread {
             queue,
             presenter,
             egui_renderer,
+            canvas_view,
             child,
             adapter_summary,
             router: InputRouter::default(),
@@ -292,8 +294,7 @@ impl RenderThread {
 
     fn frame(&mut self) {
         let input = self.egui_state.take_egui_input(&self.window);
-        let in_child = self.child.is_some();
-        let mut child_canvas = None;
+        let mut canvas_area = [0; 4];
         let Self {
             adapter_summary,
             canvas,
@@ -315,18 +316,10 @@ impl RenderThread {
                     }
                 });
             });
-            egui::CentralPanel::default().show(ui, |ui| {
-                let (rect, shapes) = canvas.layout(ui);
-                if in_child {
-                    child_canvas = Some((rect, shapes));
-                } else {
-                    ui.painter_at(rect)
-                        .extend(shapes.into_iter().map(|mut shape| {
-                            shape.translate(rect.min.to_vec2());
-                            shape
-                        }));
-                }
-            });
+            // No panel fill: the canvas is drawn under egui.
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| canvas_area = canvas.layout(ui));
         });
         self.egui_state
             .handle_platform_output(&self.window, output.platform_output);
@@ -339,28 +332,26 @@ impl RenderThread {
         let pixels_per_point = output.pixels_per_point;
         let primitives = self.egui_ctx.tessellate(output.shapes, pixels_per_point);
         let textures = output.textures_delta;
-        let renderers = std::iter::once(&mut self.egui_renderer)
-            .chain(self.child.as_mut().map(|child| &mut child.renderer));
-        for renderer in renderers {
-            for (id, deltas) in &textures.set {
-                for delta in deltas {
-                    renderer.update_texture(&self.device, &self.queue, *id, delta);
-                }
+        for (id, deltas) in &textures.set {
+            for delta in deltas {
+                self.egui_renderer
+                    .update_texture(&self.device, &self.queue, *id, delta);
             }
         }
+        self.canvas_view
+            .update(&self.device, &self.queue, self.canvas.raster_mut());
+        let canvas_origin = [canvas_area[0].max(0) as u32, canvas_area[1].max(0) as u32];
 
         // The canvas goes first, so its present is the first one after input.
         let mut canvas_shown = true;
-        if let (Some(child), Some((rect, shapes))) = (self.child.as_mut(), child_canvas) {
-            let primitives =
-                child.layout(&self.device, &self.egui_ctx, rect, shapes, pixels_per_point);
+        if let Some(child) = self.child.as_mut() {
+            child.place(&self.device, canvas_area);
             match draw(
                 &self.device,
                 &self.queue,
                 &mut child.presenter,
-                &mut child.renderer,
-                &primitives,
-                pixels_per_point,
+                Some((&mut self.canvas_view, [0, 0])),
+                None,
             ) {
                 Some(frame) => present_input(
                     &self.queue,
@@ -372,13 +363,14 @@ impl RenderThread {
                 None => canvas_shown = false,
             }
         }
+        let in_child = self.child.is_some();
+        let parent_canvas = (!in_child).then_some((&mut self.canvas_view, canvas_origin));
         match draw(
             &self.device,
             &self.queue,
             &mut self.presenter,
-            &mut self.egui_renderer,
-            &primitives,
-            pixels_per_point,
+            parent_canvas,
+            Some((&mut self.egui_renderer, &primitives, pixels_per_point)),
         ) {
             Some(frame) if in_child => self.presenter.present(&self.queue, frame, None),
             Some(frame) => present_input(
@@ -395,12 +387,8 @@ impl RenderThread {
             self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT);
         }
 
-        let renderers = std::iter::once(&mut self.egui_renderer)
-            .chain(self.child.as_mut().map(|child| &mut child.renderer));
-        for renderer in renderers {
-            for id in &textures.free {
-                renderer.free_texture(id);
-            }
+        for id in &textures.free {
+            self.egui_renderer.free_texture(id);
         }
     }
 
@@ -419,76 +407,55 @@ impl RenderThread {
 }
 
 impl ChildCanvas {
-    /// Places the window over the canvas area and returns the canvas drawn
-    /// relative to the window. `shapes` are relative to `rect`, in points.
-    fn layout(
-        &mut self,
-        device: &wgpu::Device,
-        egui_ctx: &egui::Context,
-        rect: egui::Rect,
-        shapes: Vec<egui::Shape>,
-        pixels_per_point: f32,
-    ) -> Vec<egui::ClippedPrimitive> {
-        let edge = |value: f32| (value * pixels_per_point).round() as i32;
-        let placed = [
-            edge(rect.left()),
-            edge(rect.top()),
-            edge(rect.right()),
-            edge(rect.bottom()),
-        ];
-        let size = [
-            (placed[2] - placed[0]).max(1) as u32,
-            (placed[3] - placed[1]).max(1) as u32,
-        ];
-        if self.placed != Some(placed) {
-            composition::place_child(self.hwnd, placed);
-            self.presenter.resize(device, size);
-            self.placed = Some(placed);
+    /// Places the window over `area`, in parent client physical pixels.
+    fn place(&mut self, device: &wgpu::Device, area: [i32; 4]) {
+        if self.placed == Some(area) {
+            return;
         }
-        // The window snaps to whole pixels; keep the canvas where egui put it.
-        let offset = rect.min - egui::pos2(placed[0] as f32, placed[1] as f32) / pixels_per_point;
-        let clip_rect = egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(size[0] as f32, size[1] as f32) / pixels_per_point,
+        composition::place_child(self.hwnd, area);
+        self.presenter.resize(
+            device,
+            [
+                (area[2] - area[0]).max(1) as u32,
+                (area[3] - area[1]).max(1) as u32,
+            ],
         );
-        let clipped = shapes
-            .into_iter()
-            .map(|mut shape| {
-                shape.translate(offset);
-                egui::epaint::ClippedShape { clip_rect, shape }
-            })
-            .collect();
-        egui_ctx.tessellate(clipped, pixels_per_point)
+        self.placed = Some(area);
     }
 }
 
-/// Renders `primitives` into the next buffer of `presenter` and submits it.
-/// Returns `None` when there is no buffer to draw into now.
+/// Draws the canvas at an origin and then egui into the next buffer of
+/// `presenter`, and submits it. Returns `None` when there is no buffer to
+/// draw into now.
 fn draw(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     presenter: &mut Presenter,
-    renderer: &mut egui_wgpu::Renderer,
-    primitives: &[egui::ClippedPrimitive],
-    pixels_per_point: f32,
+    canvas: Option<(&mut CanvasView, [u32; 2])>,
+    egui: Option<(&mut egui_wgpu::Renderer, &[egui::ClippedPrimitive], f32)>,
 ) -> Option<wgpu::SurfaceTexture> {
     let frame = match presenter.acquire(device) {
         Acquired::Frame(frame) => frame,
         Acquired::Skip => return None,
     };
-    let screen = egui_wgpu::ScreenDescriptor {
-        size_in_pixels: presenter.size(),
-        pixels_per_point,
-    };
+    let size = presenter.size();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    let mut commands = renderer.update_buffers(device, queue, &mut encoder, primitives, &screen);
+    let mut commands = Vec::new();
+    let egui = egui.map(|(renderer, primitives, pixels_per_point)| {
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: size,
+            pixels_per_point,
+        };
+        commands = renderer.update_buffers(device, queue, &mut encoder, primitives, &screen);
+        (renderer, primitives, screen)
+    });
     let view = frame
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
     {
         let mut pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("egui"),
+                label: Some("frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     depth_slice: None,
@@ -504,7 +471,13 @@ fn draw(
                 multiview_mask: None,
             })
             .forget_lifetime();
-        renderer.render(&mut pass, primitives, &screen);
+        if let Some((canvas, origin)) = canvas {
+            canvas.draw(queue, &mut pass, origin, size);
+            pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
+        }
+        if let Some((renderer, primitives, screen)) = egui {
+            renderer.render(&mut pass, primitives, &screen);
+        }
     }
     commands.push(encoder.finish());
     queue.submit(commands);

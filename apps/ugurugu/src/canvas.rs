@@ -1,103 +1,143 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! M0 input probe canvas: shows raw strokes so pointer handling can be checked.
-//! Rendering here is a stand-in until the renderer is chosen.
+//! M0 probe canvas: raw pointer strokes drawn with the document renderer, so
+//! input handling and the display path can be checked end to end.
 
+use ugu_render::raster::{CanvasRaster, StrokeStyle};
 use ugu_win::pointer::{PointerKind, PointerSample};
 
 use crate::input::CanvasInput;
 
+/// The paper behind the strokes, opaque straight RGBA.
+pub const PAPER: [u8; 4] = [245, 245, 245, 255];
+
 struct Stroke {
-    kind: PointerKind,
-    /// Client physical pixels relative to the canvas origin.
-    points: Vec<[f64; 2]>,
+    style: StrokeStyle,
+    /// Physical pixels relative to the canvas origin.
+    points: Vec<[f32; 2]>,
 }
 
-#[derive(Default)]
+fn style(kind: PointerKind, pixels_per_point: f32) -> StrokeStyle {
+    StrokeStyle {
+        width: 2.0 * pixels_per_point,
+        color: match kind {
+            PointerKind::Pen => [20, 60, 160, 255],
+            _ => [20, 20, 20, 255],
+        },
+    }
+}
+
 pub struct ProbeCanvas {
     strokes: Vec<Stroke>,
     live: Option<Stroke>,
-    /// Canvas area of the last frame, in client physical pixels.
-    area: Option<[f64; 4]>,
+    raster: CanvasRaster,
+    /// Canvas area in client physical pixels: left, top, right, bottom.
+    area: Option<[i32; 4]>,
+    pixels_per_point: f32,
     sample_count: usize,
+}
+
+impl Default for ProbeCanvas {
+    fn default() -> Self {
+        Self {
+            strokes: Vec::new(),
+            live: None,
+            raster: CanvasRaster::new([1, 1]),
+            area: None,
+            pixels_per_point: 1.0,
+            sample_count: 0,
+        }
+    }
 }
 
 impl ProbeCanvas {
     pub fn contains(&self, position: [f64; 2]) -> bool {
         self.area.is_some_and(|[left, top, right, bottom]| {
-            (left..right).contains(&position[0]) && (top..bottom).contains(&position[1])
+            (f64::from(left)..f64::from(right)).contains(&position[0])
+                && (f64::from(top)..f64::from(bottom)).contains(&position[1])
         })
     }
 
     pub fn apply(&mut self, input: CanvasInput) {
-        let origin = self.area.map_or([0.0, 0.0], |area| [area[0], area[1]]);
+        let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
         let local = |sample: &PointerSample| {
             [
-                sample.position[0] - origin[0],
-                sample.position[1] - origin[1],
+                (sample.position[0] - f64::from(origin[0])) as f32,
+                (sample.position[1] - f64::from(origin[1])) as f32,
             ]
         };
         match input {
             CanvasInput::Begin(kind, sample) => {
                 self.sample_count += 1;
-                self.live = Some(Stroke {
-                    kind,
+                let stroke = Stroke {
+                    style: style(kind, self.pixels_per_point),
                     points: vec![local(&sample)],
-                });
+                };
+                self.raster.dot(stroke.points[0], stroke.style);
+                self.live = Some(stroke);
             }
-            CanvasInput::Extend(sample) => {
+            CanvasInput::Extend(sample) | CanvasInput::End(sample) => {
                 self.sample_count += 1;
                 if let Some(live) = self.live.as_mut() {
-                    live.points.push(local(&sample));
+                    let to = local(&sample);
+                    let from = *live.points.last().expect("a stroke starts with a point");
+                    self.raster.segment(from, to, live.style);
+                    live.points.push(to);
+                }
+                if matches!(input, CanvasInput::End(_)) {
+                    self.strokes.extend(self.live.take());
                 }
             }
-            CanvasInput::End(sample) => {
-                self.sample_count += 1;
-                if let Some(mut live) = self.live.take() {
-                    live.points.push(local(&sample));
-                    self.strokes.push(live);
+            CanvasInput::Cancel => {
+                if self.live.take().is_some() {
+                    self.redraw();
                 }
             }
-            CanvasInput::Cancel => self.live = None,
         }
     }
 
     pub fn clear(&mut self) {
         self.strokes.clear();
         self.live = None;
+        self.raster.clear();
     }
 
     pub fn sample_count(&self) -> usize {
         self.sample_count
     }
 
-    /// Takes the rest of `ui` and returns the canvas shapes relative to its
-    /// top-left corner, in points.
-    pub fn layout(&mut self, ui: &mut egui::Ui) -> (egui::Rect, Vec<egui::Shape>) {
+    pub fn raster_mut(&mut self) -> &mut CanvasRaster {
+        &mut self.raster
+    }
+
+    fn redraw(&mut self) {
+        let strokes = self.strokes.iter().chain(self.live.iter());
+        self.raster
+            .redraw(strokes.map(|stroke| (stroke.points.as_slice(), stroke.style)));
+    }
+
+    /// Takes the rest of `ui` and returns the canvas area in client physical
+    /// pixels, snapped to whole pixels so that canvas pixels map 1:1.
+    pub fn layout(&mut self, ui: &mut egui::Ui) -> [i32; 4] {
         let rect = ui.max_rect();
-        let ppp = ui.ctx().pixels_per_point() as f64;
-        self.area = Some([
-            rect.left() as f64 * ppp,
-            rect.top() as f64 * ppp,
-            rect.right() as f64 * ppp,
-            rect.bottom() as f64 * ppp,
-        ]);
-        let to_local =
-            |point: &[f64; 2]| egui::pos2((point[0] / ppp) as f32, (point[1] / ppp) as f32);
-        let mut shapes = vec![egui::Shape::rect_filled(
-            egui::Rect::from_min_size(egui::Pos2::ZERO, rect.size()),
-            0.0,
-            egui::Color32::from_gray(245),
-        )];
-        for stroke in self.strokes.iter().chain(self.live.iter()) {
-            let color = match stroke.kind {
-                PointerKind::Pen => egui::Color32::from_rgb(20, 60, 160),
-                _ => egui::Color32::from_gray(20),
-            };
-            let points: Vec<egui::Pos2> = stroke.points.iter().map(to_local).collect();
-            shapes.push(egui::Shape::line(points, egui::Stroke::new(2.0, color)));
+        self.pixels_per_point = ui.ctx().pixels_per_point();
+        let edge = |value: f32| (value * self.pixels_per_point).round() as i32;
+        let area = [
+            edge(rect.left()),
+            edge(rect.top()),
+            edge(rect.right()),
+            edge(rect.bottom()),
+        ];
+        let size = [
+            (area[2] - area[0]).max(1) as u32,
+            (area[3] - area[1]).max(1) as u32,
+        ];
+        self.area = Some(area);
+        if size != self.raster.size() {
+            self.raster.resize(size);
+            self.redraw();
         }
-        (rect, shapes)
+        area
     }
 }

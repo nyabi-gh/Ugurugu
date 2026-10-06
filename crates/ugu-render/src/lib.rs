@@ -4,3 +4,5 @@
 //! Rendering and presentation of the canvas.
 
 pub mod present;
+pub mod raster;
+pub mod view;
