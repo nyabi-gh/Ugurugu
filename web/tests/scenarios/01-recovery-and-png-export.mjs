@@ -12,6 +12,7 @@ import {
     isPlaying,
     recoveryRecords,
     waitForDocumentLoaded,
+    waitForRecoverySnapshot,
     waitForThumbnails,
 } from "../harness.mjs";
 
@@ -38,6 +39,9 @@ export default async function run({ browser, origin }) {
         "layer thumbnail rendered after load",
     );
 
+    // Snapshots skip an unchanged revision, so once the empty document's is
+    // written, any newer one holds the stroke.
+    const emptySnapshot = await waitForRecoverySnapshot(page);
     const strokePath = await drawStroke(page);
     const drawnPixels = await countBrushPixels(page);
     check(drawnPixels > 0, `stroke committed (${drawnPixels} px)`);
@@ -53,6 +57,7 @@ export default async function run({ browser, origin }) {
     );
     check(true, "layer thumbnail refreshed after the stroke");
 
+    await waitForRecoverySnapshot(page, emptySnapshot);
     await page.waitForFunction(
         () =>
             document

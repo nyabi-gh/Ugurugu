@@ -153,6 +153,26 @@ export function recoveryRecords(page) {
     );
 }
 
+// Waits until a recovery record saved later than `after` exists and returns
+// its savedAt. The autosave status line cannot answer this: it already reads
+// "Recovery snapshot saved" after a snapshot taken before the latest edit.
+export async function waitForRecoverySnapshot(page, after = -Infinity, timeout = 20000) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+        const latest = Math.max(
+            -Infinity,
+            ...(await recoveryRecords(page)).map((record) => record.savedAt),
+        );
+        if (latest > after) {
+            return latest;
+        }
+        if (Date.now() > deadline) {
+            throw new Error(`no recovery snapshot newer than ${after} within ${timeout} ms`);
+        }
+        await page.waitForTimeout(100);
+    }
+}
+
 // Writes a record the way a session that has since gone away left it.
 export function seedRecoveryRecord(page, key, record) {
     return page.evaluate(
