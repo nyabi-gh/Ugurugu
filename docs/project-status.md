@@ -622,8 +622,9 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 다음 작업:
 
-1. 일본어 IME 실증(설치 필요)과 125/200% 배율 확인(시스템 배율 변경 필요).
-2. 남은 기준선 항목(GUI batch·pen-up·저장/열기·취소·RAM)을 외부 계측으로 측정한다.
-3. 12일차: 연산·선택·병합·fill 의미와 파일 스키마 ADR.
+1. 일본어 IME 실증: 입력기는 설치됨. `tools/ime_probe.py ja`가 창의 입력 언어를 일본어로 전환하지 못했으므로 전환 확인부터 고친다. 이어서 125/200% 배율 확인(사용자 승인됨, 끝나면 150%로 복원).
+2. Rust CI: `ci.yml`은 PR과 main push에서만 돈다. `rust/m0`의 Rust Windows 잡을 돌리려면 draft PR이 필요하다(사용자 확인 필요).
+3. 남은 기준선 항목(GUI batch·pen-up·저장/열기·취소·RAM)을 외부 계측으로 측정한다.
+4. 12일차: 연산·선택·병합·fill 의미와 파일 스키마 ADR.
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
