@@ -29,9 +29,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClientRect, GetSystemMetrics, GetWindowThreadProcessId, IsWindowVisible,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_MAXIMIZE,
-    SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
+    EnumWindows, GA_ROOT, GetAncestor, GetClientRect, GetForegroundWindow, GetSystemMetrics,
+    GetWindowThreadProcessId, IsWindowVisible, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_MAXIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowPos, ShowWindow, WindowFromPoint,
 };
 use windows::core::BOOL;
 
@@ -194,7 +195,9 @@ fn send_mouse(flags: MOUSE_EVENT_FLAGS, position: Option<[i32; 2]>) {
         },
     };
     // SAFETY: one valid input structure.
-    unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
+    if unsafe { SendInput(&[input], size_of::<INPUT>() as i32) } != 1 {
+        panic!("SendInput was refused");
+    }
 }
 
 fn send_key(virtual_key: u8) {
@@ -398,6 +401,12 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
     // SAFETY: valid window.
     let _ = unsafe { SetForegroundWindow(hwnd) };
     std::thread::sleep(Duration::from_millis(1500));
+    // Input goes wherever the cursor is, so never press a button over
+    // another app.
+    // SAFETY: plain query.
+    if unsafe { GetForegroundWindow() } != hwnd {
+        return Err("the app did not come to the front; no input sent".into());
+    }
     if let Some(key) = options.key {
         send_key(key);
         std::thread::sleep(Duration::from_millis(500));
@@ -429,6 +438,13 @@ fn measure(options: &Options, pid: u32) -> Result<(Vec<i64>, i64), String> {
     let mut inputs = Vec::with_capacity(options.steps);
     send_mouse(MOUSEEVENTF_MOVE, Some(point(0)));
     std::thread::sleep(Duration::from_millis(200));
+    let [x, y] = point(0);
+    // SAFETY: plain queries.
+    let under = unsafe { GetAncestor(WindowFromPoint(POINT { x, y }), GA_ROOT) };
+    // SAFETY: plain query.
+    if under != hwnd || unsafe { GetForegroundWindow() } != hwnd {
+        return Err("the app is not under the cursor; no button pressed".into());
+    }
     send_mouse(MOUSEEVENTF_LEFTDOWN, None);
     std::thread::sleep(Duration::from_millis(300));
     for step in 1..=options.steps {
