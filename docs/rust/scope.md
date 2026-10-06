@@ -60,6 +60,17 @@
 | 접근성(Narrator·키보드 전용 조작) | 필수 | M5 | 확정 |
 | 업데이트 (Velopack, 새 app ID·채널) | 필수 | M6 | 확정 |
 
+## 3.1 렌더러 (2026-10-06 확정)
+
+| 항목 | 결정 |
+|---|---|
+| 문서 래스터화·합성 | **Vello CPU 0.3.0** (`u8_pipeline`). 실시간 획 한 칸은 1스레드 context, 재생·전체 다시 그리기는 다중 스레드 context. 같은 입력이면 스레드 수와 관계없이 바이트 단위로 같으므로 미리보기와 내보내기가 같은 경로를 쓴다 |
+| 화면 표시 | wgpu DX12. CPU 결과의 dirty rect만 텍스처로 올리고 표시·확대·오버레이만 GPU가 맡는다 |
+| Vello GPU | **보류.** 재생 성능이 부족하다고 측정되면 재생 경로에 한해 검토한다. GPU·드라이버마다 결과가 달라질 수 있어 내보내기 경로로는 쓰지 않는다 |
+| 제외 | tiny-skia(1스레드 래스터화가 Vello의 3.4배 느림), Vello compute(upstream 실험 단계), skia-safe(C++ 빌드 체인), Direct2D(COM·장치 손실 비용, GPU 결과 비결정성) |
+
+근거는 [m0-evidence.md](m0-evidence.md) 6절이다.
+
 ## 4. 제외
 
 구형 `.ugu`(schema 1~13)·`.wagle`·`.wobble`·`.wawa`·`.wwpreset` 읽기, 이전 설정·프리셋·복구본 이관, Qt 클립보드 형식, macOS·모바일·웹(WASM·Svelte), C++ 엔진 FFI. 구형 파일은 "지원하지 않는 형식" 판별만 한다.
