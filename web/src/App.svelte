@@ -85,6 +85,19 @@
 
     let meta = $state<DocumentMeta | null>(null);
     let layers = $state<LayerInfo[]>([]);
+    // The row the artist last clicked, until the engine confirms it. The panel
+    // shows it as active at once, so a button pressed before the reply acts on
+    // the layer that was clicked and not the one selected before it.
+    let pendingActiveLayer = $state<string | null>(null);
+    const panelLayers = $derived(
+        pendingActiveLayer !== null &&
+            layers.some((layer) => layer.id === pendingActiveLayer)
+            ? layers.map((layer) => ({
+                  ...layer,
+                  active: layer.id === pendingActiveLayer,
+              }))
+            : layers,
+    );
     let presets = $state<BrushPresetInfo[]>([]);
     let eraserPresets = $state<BrushPresetInfo[]>([]);
     let frameIndex = $state(0);
@@ -116,7 +129,7 @@
         !!textShape &&
             !textApplying &&
             !!meta &&
-            layers.some(
+            panelLayers.some(
                 (layer) =>
                     layer.active &&
                     !layer.group &&
@@ -661,7 +674,7 @@
 
     function applyText() {
         const shape = textShape;
-        const layerId = layers.find((layer) => layer.active)?.id;
+        const layerId = panelLayers.find((layer) => layer.active)?.id;
         if (!textReady || !shape || !layerId || tool !== "text") return;
         const draft = $state.snapshot(textDraft);
         const color = colorHex;
@@ -2118,7 +2131,7 @@
         <WobblePanel
             wobble={meta.wobble}
             frameCount={meta.frameCount}
-            layer={layers.find((layer) => layer.active)}
+            layer={panelLayers.find((layer) => layer.active)}
             onchange={wobbleChanged}
             onfollow={(id) => wobbleChanged(null, id)}
         />
@@ -2136,12 +2149,18 @@
 
 {#snippet layerPanel()}
     <LayerPanel
-        {layers}
+        layers={panelLayers}
         {thumbnails}
-        onactivate={(id) =>
+        onactivate={(id) => {
+            pendingActiveLayer = id;
             layerCommand(id, (frame, index) =>
-                engine.layerActivate(frame, index),
-            )}
+                engine.layerActivate(frame, index).finally(() => {
+                    if (pendingActiveLayer === id) {
+                        pendingActiveLayer = null;
+                    }
+                }),
+            );
+        }}
         onvisible={(id, visible) =>
             layerCommand(id, (frame, index) =>
                 engine.layerVisible(frame, index, visible),

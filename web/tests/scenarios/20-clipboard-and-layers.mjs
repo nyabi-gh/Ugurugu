@@ -6,6 +6,7 @@ import {
     countBrushPixels,
     dragBetween,
     installPixelCounter,
+    installWorkerDelay,
     waitForDocumentLoaded,
 } from "../harness.mjs";
 
@@ -16,6 +17,7 @@ export default async function run({ browser, origin }) {
     const context = await browser.newContext();
     const page = await context.newPage();
     await installPixelCounter(page);
+    await installWorkerDelay(page);
     await page.goto(origin);
     await waitForDocumentLoaded(page);
 
@@ -110,7 +112,12 @@ export default async function run({ browser, origin }) {
 
     // Clearing empties the active layer without removing the row. Grouping
     // moved the activation, so name the row that actually holds the stroke.
+    // The engine is slowed so Clear is pressed before it confirms the click:
+    // the clicked layer must be the one cleared, not the one selected before.
     await page.locator("#tool-brush").click();
+    await page.evaluate(() => {
+        window.__slowEngine = 300;
+    });
     const paintRows = page.locator("li .name:not(.group)");
     await paintRows.last().click();
     await page.waitForFunction(
@@ -130,6 +137,9 @@ export default async function run({ browser, origin }) {
         (await layerCount()) === rowsBeforeClear,
         "clear empties the layer and keeps the row",
     );
+    await page.evaluate(() => {
+        window.__slowEngine = 0;
+    });
 
     await context.close();
 }
