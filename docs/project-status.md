@@ -578,9 +578,9 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 |---|---|---|
 | ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 완료. main `a128e55`(2026-10-06), Rust 잡 5개 녹색 |
 | ② | C++ seed·uuid 주입 지점 | 완료. main `ca51af1`(2026-10-06), PR CI 전 잡 녹색 |
-| ③ | C++ `ReferenceExport`(scene·geometry·frames·strokes·stabilize) | 구현, Windows 확인 (브랜치 `ref/reference-export`) |
-| ④ | 장면 행렬과 C++ 참조 결과 | 구현, Windows 참조 생성 (브랜치 `ref/scene-matrix`). macOS 참조는 ⑥에서 |
-| ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
+| ③ | C++ `ReferenceExport`(scene·geometry·frames·strokes·stabilize) | 완료. main `27ca11a`(2026-10-06), PR CI 전 잡 녹색 |
+| ④ | 장면 행렬과 C++ 참조 결과 | 구현, Windows 참조 생성 (PR #15). macOS 참조는 ⑥에서 |
+| ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 구현, Windows 확인 (브랜치 `rust/reference-metrics`) |
 | ⑥ | 허용치 기준선(C++ Windows vs macOS, macOS는 CI 러너) | 계획 |
 | ⑦–⑨ | S3 파일 형식 → S1 래스터라이저 → S2 셸·펜 지연 | 계획 |
 
@@ -615,6 +615,17 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - [tools/reference_matrix.mjs](../tools/reference_matrix.mjs)가 장면을 다시 만들고 플랫폼별 C++ 참조(`frames 0,3,6,9`)를 [tests/reference](../tests/reference/README.md)에 쓴다. 사용자 결정(2026-10-06): 장면과 일부 프레임만 커밋한다. Windows 참조는 2,197파일, 7.0MB(PNG 4.3MB, geometry 1.1MB, 압축 scene.json 0.78MB, .ugu 0.76MB). macOS를 더하면 약 12MB로 예상한다.
 - `scene.json`은 들여쓰기 없이 쓴다(2.6MB → 0.78MB).
 - 확인(Windows 11, Release, 2026-10-06): 생성기를 두 번 돌린 결과와, 생성기 수정 전후 전체 참조가 바이트 동일. 145개 장면이 모두 다시 열린다. 프레임 0 접촉 시트를 눈으로 확인(섹션 경계가 아래 잉크를 지키는 것, 클립·블렌드·이미지·채우기·reframe·선택 변형). `motion-classic-broken-line-wide`는 넓은 끊김 때문에 프레임 0이 비어 있고 다른 프레임에 획이 있다. 로컬 clang-tidy 경고 없음.
+
+⑤의 내용과 확인:
+
+- [crates/ugu-reference](../crates/ugu-reference)(개발 전용, 배포물 아님): `ugu-reference compare <a> <b> --matrix … --out …`가 두 참조 export를 장면마다 비교한다. 의존성은 `png`, `serde`, `serde_json`(cargo-deny 통과).
+  - 프레임: 최대 채널 차, 평균 절대 차, 보이는 차(채널 > 8) 픽셀 비율.
+  - 획 하나씩(`strokes/`): 이진 IoU, 알파 가중 IoU, 평균 알파 차, 가장자리 거리(양방향 최근접, 평균·최대 px), 프레임마다 알파 무게중심 → 두 쪽 무게중심 거리와 프레임 사이 이동량 수열의 차(흔들림의 크기와 리듬).
+  - 기하(`geometry.jsonl`, M층): 점 위치·압력·굵기 최대 차, 점 개수·보이는 구간·유효성 불일치.
+  - 에어브러시: dab k겹의 캔버스 중심 잉크 불투명도(누적 곡선), dab 1개의 반경 알파 프로파일 최대 차.
+  - 장면마다 지표별 최악값(0 = 일치)을 모으고, 그룹별·전체 median·p95·max를 낸다. ⑥ 허용치는 이 분포에서 읽는다.
+  - `index.html` 뷰어: 두 쪽 프레임을 나란히 또는 겹쳐 재생, ×4 차이 이미지, 그룹 필터, 지표별 정렬.
+- 확인(Windows, 2026-10-06): 단위 테스트 8개(같은 이미지 → 전부 0, 2px 이동 원 → 가장자리 2px, 불투명도 차 → IoU 가중만 변화, 한쪽 빈 이미지, 무게중심·반경, 흰 바탕 잉크 역산). Windows 참조를 자기 자신과 비교 → 모든 지표 0. 모든 PNG를 오른쪽으로 1px 민 사본과 비교 → 무게중심 거리 median·max 1.000px, 가장자리 거리 median 1px(최대 15px는 캔버스 밖으로 밀려 잘린 스프레이 입자), 기하 0. 145장면 비교 1.7초(release). 브라우저에서 뷰어 표시·정렬·재생 확인. fmt·clippy `-D warnings`·cargo-deny·계층 검사 통과.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 

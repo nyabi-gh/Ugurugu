@@ -1,0 +1,17 @@
+[package]
+name = "ugu-reference"
+description = "Compares reference exports of the scene matrix by feel metrics (development only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+png = "0.18.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
