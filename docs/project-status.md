@@ -606,24 +606,25 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 계획은 [RUST_WINDOWS_PORT_PLAN.md](RUST_WINDOWS_PORT_PLAN.md), 범위·결정은 [rust/scope.md](rust/scope.md), 측정·실증 근거는 [rust/m0-evidence.md](rust/m0-evidence.md)에 둔다. 작업 브랜치는 `rust/m0`이다. 이 절은 진행 상태만 적는다.
 
-2026-10-06 기준:
+2026-10-07 기준:
 
 | M0 작업 | 상태 |
 |---|---|
 | 1일차 범위 고정 | 완료. 도킹은 3.0 포함으로 확정. Animated WebP는 내보내기 인코딩만 `libwebp`, 이미지 디코드는 `image-webp`로 확정 |
-| 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
-| 3~4일차 기준선 | 부분. C++ 입력→표시(워밍업 후) p50 9.6~10.9 / p95 12.9~13.4ms. fixture ①~⑤ 생성기 완료, C++ 렌더 frame p50 ① 47~55 / ② 656~660 / ③ 4,605 / ④ 466~475 / ⑤ 951~967ms. GUI batch·pen-up·저장/열기·취소·RAM은 남음 |
+| 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-core`·`ugu-render`·`ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡은 draft PR #18에서 처음 통과 |
+| 3~4일차 기준선 | 완료(재생 fps·export 중 UI 반응 제외). 입력→표시, fixture ①~⑤ 렌더에 더해 `tools/baseline_probe.py`로 UI 스레드 CPU·점유, 저장·열기, 취소, RAM을 밖에서 쟀다. 칸당 UI CPU p95 2.2~3.8ms·점유 p95 7.5~10.9ms, pen-up p95 18~21ms, 저장 20~286ms(작업자 스레드), 열기 118~561ms(UI 스레드 동기), 취소 p95 0.6~3.7s(프레임 경계에서만 확인), working set 1GiB 예산의 절반 아래. m0-evidence 5절 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
 | 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측. 워밍업 후 같은 표시 방식(Independent Flip)에서 입력→표시 p50 5.9~6.4 / p95 8.5~9.0ms로 C++(9.6~10.9 / 12.9~13.4ms)보다 약 4ms 빠르다. 이전의 "약 1ms 느림"은 측정 절차 탓이었다 |
 | 13일차 일부 (캔버스 표시) | 완료. 창 전체 swapchain 하나에 Vello CPU 캔버스를 그리고 그 위에 egui를 그린다(자식 창 기각, ADR은 m0-evidence 4절). 화면 확인 중 마우스 이동 복원 버그를 찾아 고쳤다 |
 | 10~11일차 렌더러 비교 | 측정 완료(`tools/render-bench`, 2048² 교대 3회). Vello CPU가 1스레드에서 래스터화 3.4배, 8스레드에서 약 24배 빠르고 메모리는 비슷하다. tiny-skia와의 차이는 가장자리 안티에일리어싱뿐이다. Vello CPU 채택, Vello GPU 보류로 확정. Vello GPU는 래스터화가 CPU 8스레드보다 5배 느려(전처리가 1스레드) 재생 경로에도 쓰지 않는다 |
 | 8~9일차 IME | 한국어·일본어 완료. 조합·받침·한자 후보, 로마자 변환·문절·후보창, Enter 누출, 캔버스 단축키를 실제 IME로 자동 시험해 100/125/150/200% 모두 통과. 캔버스 포커스 버그와 CJK fallback 글꼴 기준선 버그 수정. 일본어 첫 실패는 PC에 일본어 기본 입력 기능(사전)이 없었던 탓. Narrator와 후보창의 커서 위치 맞춤은 남음 |
-| 12, 14~15일차 | 시작 전 |
+| 12일차 ADR | 완료. 레이어 연산 enum·병합(isolated section, 불투명도·모션 차이 허용)·채우기(확정 coverage)·선택 의미와 `.ugu2` 스키마 1. `crates/ugu-core` 의미 시험 7개. [adr-operations-and-format.md](rust/adr-operations-and-format.md) |
+| 14~15일차 | 시작 전 |
 
 다음 작업:
 
-2. Rust CI: `ci.yml`은 PR과 main push에서만 돈다. `rust/m0`의 Rust Windows 잡을 돌리려면 draft PR이 필요하다(사용자 확인 필요).
-3. 남은 기준선 항목(GUI batch·pen-up·저장/열기·취소·RAM)을 외부 계측으로 측정한다.
-4. 12일차: 연산·선택·병합·fill 의미와 파일 스키마 ADR.
+1. 13~14일차: 4K·장치 손실·WARP/원격·오프라인 진입점 시험.
+2. 남은 기준선: 재생 fps(앱 내), export 중 UI 반응. 남은 IME: Narrator, 후보창을 커서 위치에 맞추기.
+3. 15일차: 기술 조합 결정, 버전 고정, M1 작업 분해.
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
