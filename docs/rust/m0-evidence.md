@@ -46,7 +46,22 @@ PresentMon은 wgpu DX12 앱의 present를 끝까지 추적하지 못했다. 아�
 
 같은 절차에서 C++(D3D11)은 182~184프레임이 모두 기록됐다. 연속 입력(약 2ms 간격)에서는 Rust도 110프레임이 기록돼, 띄엄띄엄한 present에서만 생기는 문제로 보인다.
 
-Rust 앱의 표시 지연은 직접 만들 presenter에서 DXGI 프레임 통계(`GetFrameStatistics`의 present 번호와 `SyncQPCTime`)로 잰다. presenter는 4절 때문에 어차피 직접 만들어야 한다.
+그래서 Rust 앱의 표시 지연은 `ugu_render::present::Presenter`가 DXGI 프레임 통계로 잰다. present 직후 `GetLastPresentCount`로 번호를 기억하고, 이후 `GetFrameStatistics`가 그 번호를 화면에 띄운 present로 보고하면 그 `SyncQPCTime`을 표시 시각으로 쓴다. 통계를 읽기 전에 다음 present로 교체된 present는 시각을 추정하지 않고 버린다.
+
+### Rust M0 presenter 결과
+
+C++와 같은 칸 패턴(나선 100칸, 15~40ms 무작위 간격, 2560×1600 창)을 SendInput으로 재현했다. 앱이 정상 종료할 때 남기는 자체 통계다(입력 샘플 102개, 표시 시각 확인 100~101프레임).
+
+| run | 입력→present 반환 p50 / p95 (ms) | 입력→표시 p50 / p95 / max (ms) |
+|---|---|---|
+| 1 | 1.93 / 3.51 | 10.24 / 14.57 / 23.21 |
+| 2 | 1.82 / 3.45 | 9.63 / 14.53 / 29.71 |
+| 3 | 2.02 / 4.16 | 10.34 / 14.36 / 29.16 |
+| 4 (리팩터링 뒤 재확인) | 1.82 / 3.85 | 10.15 / 14.23 / 23.02 |
+
+연속 이동(약 2ms 간격 약 500회) 시험에서는 4회 모두 입력 502~506개가 도착해 무손실이었다. 입력→표시는 p50 11.64~11.79ms, p95 13.06~13.28ms였고, 입력→present 반환은 p50 6.04~6.17ms였다. 이전 구조에서는 present 반환까지만 해도 p50 약 32ms였다.
+
+이 표시 시각은 C++ 기준선과 출처가 다르다(Rust는 DXGI 통계, C++는 PresentMon). 같은 실행을 두 방법으로 재는 교차 검증은 관리자 권한 세션에서 해야 하며, 아직 하지 않았다. 측정 시점의 세션이 관리자 권한이 아니었다. 이 Rust 화면은 egui 선 그리기뿐인 실증 캔버스이므로, 실제 렌더러를 넣은 뒤 다시 잰다.
 
 ## 2. 렌더 기준선 (C++)
 
@@ -69,11 +84,20 @@ digest는 세 round 모두 `30a14195fd945577`. 이 문서는 계획 10.2절 fixt
 5. **`SetCursorPos`는 pointer 프레임을 만들지 않는다.** 자동 시험은 실제 입력 스트림인 `SendInput`을 써야 한다.
 6. **egui-winit은 `RedrawRequested`에도 `repaint: true`를 돌려준다.** 이를 따라 다시 redraw를 요청하면 vsync마다 끝없이 그린다. 수정 전 Rust 앱은 유휴 상태에서도 16.66ms마다 present했고, 수정 후에는 유휴 5초 동안 0회다.
 
-## 4. 렌더 구조에 넘길 결정 사항
+## 4. 프레임 순서 결정 (presenter로 해결)
 
 연속 이동(약 2ms 간격) 중 앱 내부 지표(입력 시각 → present 반환)는 p50 약 32ms였다. Fifo 기본값, Fifo + frame latency 1, Mailbox 모두 같았고 Immediate만 0.6ms였다(tearing 때문에 제품 설정이 아님).
 
-원인은 순서다. 현재 루프는 입력을 모은 뒤 swapchain 획득에서 vsync를 기다리므로, 대기 동안의 입력이 다음 프레임으로 밀린다. 캔버스 표시 경로는 **획득(대기) → 최신 입력 수집 → 렌더 → present** 순서를 가져야 하고, 이벤트 스레드는 present를 기다리지 않아야 한다. egui-wgpu `Painter`는 획득을 내부에서 하므로 캔버스 표시에는 직접 관리하는 surface가 필요하다. 렌더러 비교(10~11일차)와 ADR에서 확정한다.
+원인은 순서다. 현재 루프는 입력을 모은 뒤 swapchain 획득에서 vsync를 기다리므로, 대기 동안의 입력이 다음 프레임으로 밀린다. 캔버스 표시 경로는 **획득(대기) → 최신 입력 수집 → 렌더 → present** 순서를 가져야 하고, 이벤트 스레드는 present를 기다리지 않아야 한다. egui-wgpu `Painter`는 획득을 내부에서 하므로 쓰지 않는다.
+
+구현 (`crates/ugu-render/src/present.rs`, `apps/ugurugu/src/render.rs`):
+
+- wgpu DX12 옵션 `Dx12UseFrameLatencyWaitableObject::DontWait`로 wgpu 내부 대기를 끈다. 앱이 `Surface::as_hal`의 frame-latency 핸들을 직접 기다린 뒤에 입력을 읽는다. 최대 frame latency는 1이다.
+- UI 스레드는 winit 루프와 포인터 subclass만 맡고, 창·포인터 이벤트를 채널로 렌더 스레드에 보낸다. 렌더 스레드가 GPU, egui, 캔버스를 소유한다.
+- 순서: 메시지 대기 → 대기 핸들 신호 → 그동안 쌓인 입력 다시 수집 → egui 실행과 tessellate → 획득(막히지 않음) → 렌더 → present.
+- winit은 UI 스레드 밖에서 창 핸들을 꺼내지 못하므로, wgpu instance와 surface는 UI 스레드에서 만들어 넘긴다.
+- DXGI는 swapchain 작업 중에 창 스레드로 메시지를 보낼 수 있다. 그래서 UI 스레드는 창이 살아 있는 동안 렌더 스레드를 막고 기다리지 않고, 렌더 스레드의 종료 통지(`EventLoopProxy`)를 받은 뒤에 끝낸다.
+- 표시 통계를 읽는 일만으로는 다시 그리지 않는다. 그러지 않으면 측정이 present를 늘린다.
 
 ## 5. 아직 측정하지 않은 기준선 항목
 

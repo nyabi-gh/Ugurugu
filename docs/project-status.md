@@ -614,12 +614,13 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 2일차 workspace·CI | 완료. `apps/ugurugu`, `crates/ugu-win`, `tools/latency-probe`. wgpu는 DX12만 빌드. CI `Rust Windows` 잡 추가(첫 실행은 push 후) |
 | 3~4일차 기준선 | 부분. C++ 입력→표시 p50 24.7~26.1 / p95 32.6~33.3ms, stress 2048² 렌더 4.6s/frame. GUI batch·pen-up·저장/열기·취소·RAM과 fixture ①②④⑤ 생성기는 남음 |
 | 5~7일차 입력 | 마우스로 부분 완료. `WM_POINTER` subclass와 coalesced 마우스 이동 복원(약 500/500). 펜 장치가 없어 필압·hover·barrel·WinTab은 미검증 |
-| 8~15일차 | 시작 전 |
+| 13일차 일부 (presenter) | 완료. 대기 → 최신 입력 → 렌더 → present, UI/렌더 스레드 분리, DXGI 통계 계측. Rust 실증 캔버스 입력→표시 p50 약 10ms / p95 약 14.5ms (C++ 기준선과 출처가 다르고, 관리자 권한 교차 검증은 남음) |
+| 8~12, 14~15일차 | 시작 전 |
 
 다음 작업:
 
-1. 직접 관리하는 캔버스 presenter를 만든다. 순서는 획득 대기 → 최신 입력 → 렌더 → present이고, DXGI frame statistics로 Rust 쪽 입력→표시를 계측한다. PresentMon은 wgpu DX12 present를 끝까지 추적하지 못한다.
-2. tiny-skia와 Vello CPU를 같은 scene으로 비교한다(10~11일차).
+1. tiny-skia와 Vello CPU를 같은 scene으로 비교하고, 결과를 presenter 위 캔버스 표시에 연결한다(10~11일차).
+2. 관리자 권한 세션에서 DXGI 통계와 PresentMon을 같은 실행으로 교차 검증한다.
 3. 남은 기준선 항목을 외부 계측으로 측정하고 fixture 생성기를 만든다.
 4. 한글·일본어 IME 실증(8~9일차).
 
