@@ -4,13 +4,15 @@
 
 분석 기준: **2.2.13 · `bfe80eb68c4abef0d8a5bb1b58124a8eda2bebe9`**
 
+검토: **2026-10-06**, 소스 수치·외부 버전 재대조 후 wgpu backend 선택·CTest 설명 정정, 기능표·의존 그래프·현재 앱 기준선·M0 일정 보완
+
 상태: **소스 분석 및 기술 조사에 근거한 제안. Rust 구현·Windows 실측은 아직 수행하지 않음.**
 
 ## 1. 권고와 범위
 
 **기존 C++ 엔진을 감싸는 방식 없이, Windows 데스크톱용 Rust 애플리케이션으로 재작성한다.** 제품의 핵심인 필압 드로잉과 우글거림, 편집·저장·내보내기를 새 모델로 구현한다. 기존 구현의 픽셀 결과·파일·설정·ABI 호환성은 유지하지 않는다.
 
-출발점으로 **egui + winit + wgpu + windows-rs**, CPU 기준 렌더러로 **tiny-skia**, 새 문서 컨테이너로 **ZIP + JSON manifest + binary assets**를 권고한다. UI·펜·렌더 조합은 첫 1~2주 실증을 통과한 뒤 확정한다. GPU는 처음부터 캔버스 표시를 맡고, 브러시와 합성 가속 범위는 실제 병목에 따라 정한다.
+출발점으로 **egui + winit + wgpu + windows-rs**, CPU 기준 렌더러로 **tiny-skia**, 새 문서 컨테이너로 **ZIP + JSON manifest + binary assets**를 권고한다. UI·펜·렌더 조합은 첫 2~3주(M0) 실증을 통과한 뒤 확정한다. GPU는 처음부터 캔버스 표시를 맡고, 브러시와 합성 가속 범위는 실제 병목에 따라 정한다.
 
 | 구분 | 결정 / 계획의 전제 |
 |---|---|
@@ -51,7 +53,7 @@ Windows 11을 권하는 근거는 유지보수 범위다. Windows 10 일반 지�
 
 현재 빌드는 C++23, CMake 3.31 이상, 데스크톱 Qt 6.10 이상을 요구한다. CI 배포 Qt는 6.11.1로 고정돼 있고, spdlog 1.16.0, libwebp 1.6.0, zlib 1.3.2, Windows Velopack C API 1.2.0 등이 연결된다. macOS에는 Sparkle·Objective-C++ 경로가 있다. [빌드 의존성](../cmake/UguruguDependencies.cmake), [압축](../cmake/UguruguCompression.cmake), [CI](../.github/workflows/ci.yml)
 
-테스트 등록에는 **12개 논리 스위트**가 있다. 문서에서 보이는 13/13은 패키지 smoke 등을 포함한 실행 기록이며 개별 테스트 13개라는 뜻이 아니다. 이번에는 C++ 빌드·CTest를 재실행하지 않았다. [테스트 등록](../cmake/UguruguTests.cmake), [테스트 엔트리](../tests/TestMain.cpp)
+테스트 등록에는 **12개 논리 스위트**가 있고, 각 스위트가 CTest 항목 하나다. 기존 문서의 13/13은 `release_notes` 스위트가 있던 시점의 실행 기록이며, 이 스위트는 `143931c`(2026-10-05)에서 제거됐다. `ugurugu_package_smoke`는 별도 실행 파일이고 CTest에 등록돼 있지 않다. 이번에는 C++ 빌드·CTest를 재실행하지 않았다. [테스트 등록](../cmake/UguruguTests.cmake), [테스트 엔트리](../tests/TestMain.cpp)
 
 ### 2.2 이 앱의 핵심 모델
 
@@ -99,7 +101,13 @@ Ugurugu는 일반적인 픽셀 버퍼 그림판도, SVG 편집기도 아니다. 
 | Classic·Smooth·Stepped·끊어진 선 | 기능 유지, 새 수학적 계약 | 기존 픽셀·seed 결과 호환은 제거. Classic은 새 느낌의 프리셋으로 정리 가능 |
 | 레이어·그룹·클리핑·4개 합성 모드 | 재설계 후 유지 | 병합·불투명도의 의미를 명확히 정의 |
 | 사각·타원·자유 선택·자동 선택·채우기·변형 | 재구현 | 비국소 연산·프레임 의미 때문에 최고 난도 |
+| 자동 선택의 참조 대상(현재 레이어·참조 레이어·보이는 전체 레이어) | 재구현 | 같은 클릭이라도 참조 범위에 따라 결과가 달라짐. 프레임 의미와 함께 명세 |
 | 이미지·문자 도구 | 재구현 | 자산·글꼴 윤곽·모션 계약 필요 |
+| 스포이드 | 재구현 | 표시 중 프레임·레이어 override까지 반영한 평가 결과에서 샘플링 |
+| 획 속성 편집 | 재구현 | 그린 뒤 폭·필압 등 속성을 바꾸는 편집. undo·모션 bounds 재계산 포함 |
+| 타임라인·프레임 스크러버 | 재구현 | 재생과 별개로 특정 프레임 표시·편집 기준을 정함 |
+| 색 기록·팔레트 | 새 UI로 유지 | 색 설정과 별개의 작업 상태. 새 설정 경로에 저장 |
+| 앱 자체 브러시 프리셋 저장·불러오기 | 새 형식으로 유지 | `.wwpreset` 가져오기 제거와 별개. 프리셋 기능 자체는 유지 |
 | undo/redo·트랜잭션 | 개념 유지, 타입으로 재구현 | 전체 문서 복제와 수동 실패 배관 제거 |
 | PNG/JPEG/GIF/animated WebP | 정식 릴리스 기능 목표 | 미리보기와 같은 평가 결과에서 출력 |
 | 저장·자동복구·업데이트 | 재구현 | 세션 identity·실패 보존·새 업데이트 채널 |
@@ -144,7 +152,7 @@ egui의 기본 글꼴만으로 한국어·일본어 UI를 완성할 수 없다. 
 |---|---|---|
 | UI·UI GPU draw | egui / egui-winit / egui-wgpu **0.36.2** | Windows IME·DPI·AccessKit 검증 |
 | 창·이벤트 루프 | winit **0.30.13** | HWND 접근·message hook 검증 |
-| 캔버스 GPU | wgpu **30.0.1**, DX12 우선 | Intel/AMD/NVIDIA, 장치 손실·복구 검증 |
+| 캔버스 GPU | wgpu **30.0.1**, DX12를 명시 선택 | Intel/AMD/NVIDIA, 장치 손실·복구 검증 |
 | Windows 통합 | `windows` / 필요 시 `windows-sys` | pen·clipboard·dialog·save adapter에 unsafe 격리 |
 | CPU 2D 기준 구현 | tiny-skia **0.12.0** | brush/mask/합성 fixture 통과, 타일 경계 정확성 |
 | 병렬 작업 | 한정된 worker pool, 필요 시 `rayon` | GUI에서 대기하지 않는 bounded queue |
@@ -155,7 +163,7 @@ egui의 기본 글꼴만으로 한국어·일본어 UI를 완성할 수 없다. 
 | 문서 텍스트 | Parley + Fontique + Skrifa 계열 | glyph shaping·fallback·outline 저장 검증 |
 | 배포 | Velopack Rust SDK + 고정한 `vpk` | 새 app ID·채널, 실제 N→N+1 설치 시험 |
 
-`egui-wgpu 0.36.2`의 manifest에서 `wgpu ^30.0`, `winit ^0.30.13` 의존을 확인했다. 무작정 각각의 최신 major를 섞는 것보다 이 조합을 기준으로 Cargo.lock을 확정하는 것이 낫다. egui 0.36.2 문서의 최소 Rust는 1.95.0이다. Rust 2024 edition과 선정한 stable toolchain을 고정하고 nightly 의존을 넣지 않는다. [egui-wgpu 의존성](https://docs.rs/crate/egui-wgpu/0.36.2), [wgpu 릴리스](https://docs.rs/crate/wgpu/30.0.1), [winit](https://docs.rs/winit/0.30.13/winit/), [egui](https://docs.rs/egui/0.36.2/egui/)
+`egui-wgpu 0.36.2`의 manifest에서 `wgpu ^30.0`, `winit ^0.30.13` 의존을 확인했다. 무작정 각각의 최신 major를 섞는 것보다 이 조합을 기준으로 Cargo.lock을 확정하는 것이 낫다. 예를 들어 winit 0.31은 조회 시점에 0.31.0-beta.3까지 나왔지만 egui 0.36.2는 0.30을 쓰므로 따로 올리지 않는다. egui 0.36.2 문서의 최소 Rust는 1.95.0이다. Rust 2024 edition과 선정한 stable toolchain을 고정하고 nightly 의존을 넣지 않는다. [egui-wgpu 의존성](https://docs.rs/crate/egui-wgpu/0.36.2), [wgpu 릴리스](https://docs.rs/crate/wgpu/30.0.1), [winit](https://docs.rs/winit/0.30.13/winit/), [egui](https://docs.rs/egui/0.36.2/egui/)
 
 Windows 전용 앱이어도 winit/wgpu 같은 공용 라이브러리를 사용하는 것은 문제없다. 제품의 macOS·모바일 코드와 지원 행렬을 만들지 않으면 된다. Cargo default feature를 검토해서 사용하지 않는 backend를 끄며, 기능 합산 때문에 전이 의존성이 다시 켜지는지도 `cargo tree -e features`로 확인한다.
 
@@ -171,13 +179,13 @@ Windows 전용 앱이어도 winit/wgpu 같은 공용 라이브러리를 사용�
 | **Direct2D / DirectWrite** | Windows 전용일 때 합리적 후보. COM 자원·장치 복구·UI 렌더 통합 비용까지 비교 |
 | **skia-safe** | 많은 기능을 제공하지만 C++ Skia와 빌드 체인이 남음. 이번 방향에서는 우선 제외 |
 
-Vello는 현재 upstream README에서 CPU·GPU·compute 3계열의 성숙도를 구분한다. 오래된 “Vello = compute renderer” 설명을 그대로 적용하면 안 된다. 이 설명은 **조회한 main 상태**이며 특정 배포 crate의 기능 보장은 아니다. [Vello 공식 설명](https://github.com/linebender/vello/blob/main/README.md)
+Vello는 현재 upstream README에서 CPU(`vello_cpu`)·GPU(`vello_gpu`, 이전 이름 `vello_hybrid`)·compute(`vello`, `research/` 아래) 3계열의 성숙도를 구분한다. README는 현재 전체 성숙도는 Vello CPU가 더 높고 Vello GPU는 앞으로 GPU 주력이 될 계열이라고 설명한다. 오래된 “Vello = compute renderer” 설명을 그대로 적용하면 안 된다. 이 설명은 **조회한 main 상태**이며 특정 배포 crate의 기능 보장은 아니다. [Vello 공식 설명](https://github.com/linebender/vello/blob/main/README.md)
 
 tiny-skia는 Rust CPU 래스터 라이브러리이며 글꼴 배치·리소스 캐시·ICC 처리는 앱이 따로 맡아야 한다. 따라서 단독으로 QPainter 전체를 대체하는 라이브러리로 보지 않는다. [tiny-skia](https://github.com/linebender/tiny-skia), [합성 API](https://docs.rs/tiny-skia/0.12.0/tiny_skia/enum.BlendMode.html)
 
 **선정 게이트:** 2048² 혼합 문서, 압력 변화·반투명 중첩, 4종 blend·clipping group, 선택 변형, 30프레임 재생을 같은 입력으로 비교한다. CPU/GPU 시간, peak RAM/VRAM, 장치 복구, 배포 의존성을 기록한다. 그래픽 라이브러리의 데모 FPS는 Ugurugu의 성능 근거로 사용하지 않는다.
 
-wgpu의 Windows 1차 경로는 DX12이며 현재 Qt D3D11과 요구 조건이 같지 않다. Vulkan은 별도 검증 후 대안으로 둘 수 있다. CPU 문서 렌더러가 있어도 egui-wgpu 화면 출력이 자동으로 소프트웨어 fallback되는 것은 아니다. 저사양·원격 세션을 지원하려면 WARP adapter 탐지/선택 및 실제 표시·지연 검증을 따로 통과해야 한다. 실패 시 명시적인 하드웨어 최소 조건이나 별도 표시 backend가 필요하다. [wgpu backends](https://docs.rs/wgpu/30.0.1/wgpu/struct.Backends.html), [WARP](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp)
+이 계획은 Windows 1차 경로를 DX12로 두며, 현재 Qt D3D11과 요구 조건이 같지 않다. **wgpu 기본값은 DX12 우선이 아니다.** wgpu 30의 기본 backend 집합은 Vulkan과 DX12를 모두 켜고, adapter를 Vulkan → Metal → DX12 순으로 모은 뒤 장치 종류로만 안정 정렬한다. egui-wgpu 기본값(`Backends::from_env()` 또는 `PRIMARY | GL`)도 같다. 따라서 같은 GPU가 두 backend에 보이면 Vulkan이 선택된다. DX12를 1차로 쓰려면 `Backends::DX12`를 명시하고, 진단용으로만 `WGPU_BACKEND` 환경 변수를 허용한다. Vulkan은 별도 검증 후 대안으로 둘 수 있다. CPU 문서 렌더러가 있어도 egui-wgpu 화면 출력이 자동으로 소프트웨어 fallback되는 것은 아니다. 저사양·원격 세션을 지원하려면 WARP adapter 탐지/선택 및 실제 표시·지연 검증을 따로 통과해야 한다. DX12 hal은 software adapter를 `DeviceType::Cpu`로 보고 `force_fallback_adapter`가 이를 고르지만, Vulkan이 켜져 있으면 Vulkan 쪽 CPU adapter가 먼저 잡힐 수 있으므로 WARP 시험도 backend를 DX12로 고정한다. 실패 시 명시적인 하드웨어 최소 조건이나 별도 표시 backend가 필요하다. [wgpu backends](https://docs.rs/wgpu/30.0.1/wgpu/struct.Backends.html), [wgpu adapter 순서](https://github.com/gfx-rs/wgpu/blob/v30.0.1/wgpu-core/src/instance.rs), [DX12 software adapter](https://github.com/gfx-rs/wgpu/blob/v30.0.1/wgpu-hal/src/dx12/adapter.rs), [WARP](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp)
 
 ## 5. 새 아키텍처
 
@@ -200,15 +208,17 @@ flowchart TD
   A[ugurugu 앱 / egui] --> S[ugu-session]
   A --> W[ugu-win]
   A --> R[ugu-render]
-  S --> C[ugu-core]
+  A --> C[ugu-core]
+  A --> I[ugu-io]
+  S --> C
   S --> R
-  S --> I[ugu-io]
+  S --> I
   R --> C
   I --> C
   W --> C
 ```
 
-화살표는 컴파일 의존이다. `core`는 egui·wgpu·Win32·파일 serializer에 의존하지 않는다. `io`가 문서 불변식을 소유하지 않는다. `render`는 디스크 codec을 직접 호출하지 않고, 상위에서 공급한 불변 asset view/서비스로 디코드된 자산을 받는다. `session`이 렌더 결과가 필요한 선택·채우기의 비동기 요청과 명령 커밋을 조정한다. Windows clipboard/dialog/atomic writer는 앱에서 session/io 경계에 주입한다.
+화살표는 컴파일 의존이다. Rust는 재노출(`pub use`)하지 않은 하위 crate의 타입을 직접 쓸 수 없으므로, 앱이 core 타입이나 io 진입점을 직접 쓰는 의존도 그린다. 앱 쪽에서 직접 의존을 줄이려면 session이 필요한 타입을 재노출하는 쪽을 택하고 그 결정을 ADR에 남긴다. `ugu-testkit`은 각 crate의 `dev-dependencies`로만 쓰며 제품 빌드 그래프에 들어가지 않는다. `core`는 egui·wgpu·Win32·파일 serializer에 의존하지 않는다. `io`가 문서 불변식을 소유하지 않는다. `render`는 디스크 codec을 직접 호출하지 않고, 상위에서 공급한 불변 asset view/서비스로 디코드된 자산을 받는다. `session`이 렌더 결과가 필요한 선택·채우기의 비동기 요청과 명령 커밋을 조정한다. Windows clipboard/dialog/atomic writer는 앱에서 session/io 경계에 주입한다.
 
 ### 5.2 문서와 렌더 연산을 구분
 
@@ -329,7 +339,9 @@ project.ugu2                 ZIP 컨테이너
   thumbnail.png              선택적 파생 데이터
 ```
 
-메타데이터 JSON 안에 큰 픽셀 payload를 base64로 넣지 않는다. 점 데이터도 큰 JSON 배열을 기본으로 하지 않는다. binary schema는 enum 메모리 레이아웃이나 Rust struct 덤프가 아니라 명시적 wire format으로 정의한다. 압축은 처음엔 ZIP의 Rust Deflate backend로 충분한지 측정하고, PNG를 중복 압축하지 않는 선택도 한다. [zip API](https://docs.rs/zip/latest/zip/)
+메타데이터 JSON 안에 큰 픽셀 payload를 base64로 넣지 않는다. 점 데이터도 큰 JSON 배열을 기본으로 하지 않는다. binary schema는 enum 메모리 레이아웃이나 Rust struct 덤프가 아니라 명시적 wire format으로 정의한다. 압축은 처음엔 ZIP의 Rust Deflate backend로 충분한지 측정하고, PNG를 중복 압축하지 않는 선택도 한다. `zip` 8.x의 기본 `deflate` feature는 순수 Rust인 `zlib-rs` backend를 켜므로 C zlib 없이 시작할 수 있다. [zip API](https://docs.rs/zip/latest/zip/)
+
+형식 비교의 기준값은 현재 `.ugu`다. stress 2048² 문서는 현재 형식으로 11.9MB이고 동기 저장 경로가 157ms를 쓴다고 기록돼 있다([project-status](project-status.md)). M1에서 같은 내용의 새 형식 파일 크기·저장·열기 시간을 같은 PC에서 측정해 이 값과 비교한다. 중단된 이전 Rust 작업에서도 ZIP 시제품 측정이 있었지만 원자료가 저장소에 남아 있지 않으므로 근거로 쓰지 않고 다시 측정한다.
 
 ZIP을 사용한다고 입력 제한이 해결되지는 않는다. entry 개수·중복 이름·압축/비압축 길이·누적 실제 해제량·이미지 pixel 수·깊이·좌표 유한성·연산 개수·참조 유효성을 제한한다. 경로를 디스크에 무작정 추출하지 않는다. manifest의 선언값만 믿지 않고 스트림 출력 자체를 제한한다. 지원하지 않는 required capability/schema/render revision은 명확히 거절한다.
 
@@ -349,7 +361,7 @@ ZIP을 사용한다고 입력 제한이 해결되지는 않는다. entry 개수�
 
 PNG/JPEG/GIF부터 Rust codec으로 구현하고 실제 결과를 다시 decode해서 확인한다. JPEG는 투명 배경이 없는 형식이므로 선택한 배경색으로 합성한다. GIF는 팔레트·투명 인덱스·disposal·delay 누적을 시험한다. 전체 60프레임 RGBA를 한 번에 쌓지 않고 소수 프레임만 큐에 둔다. 전역 팔레트가 필요하면 bounded sampling 또는 2-pass 전략을 택한다.
 
-**Animated WebP는 따로 결정해야 한다.** 조회한 `image-webp 0.2.4`의 encoder는 VP8L 무손실 정지 이미지 API다. 그것만 채택하고 animated WebP까지 완료했다고 할 수 없다. `webp-animation 0.10.0`은 animated encode/decode를 제공하지만 C `libwebp`를 감싼다. [image-webp encoder](https://docs.rs/image-webp/0.2.4/image_webp/struct.WebPEncoder.html), [webp-animation](https://docs.rs/webp-animation/0.10.0/webp_animation/)
+**Animated WebP는 따로 결정해야 한다.** 조회한 `image-webp 0.2.4`의 encoder는 VP8L 무손실 정지 이미지 API다. 그것만 채택하고 animated WebP까지 완료했다고 할 수 없다. `webp-animation 0.10.0`은 animated encode/decode를 제공하지만 `libwebp-sys2`를 통해 C `libwebp`를 감싼다. [image-webp encoder](https://docs.rs/image-webp/0.2.4/image_webp/struct.WebPEncoder.html), [webp-animation](https://docs.rs/webp-animation/0.10.0/webp_animation/)
 
 | 정책 | 결과 / 권고 |
 |---|---|
@@ -384,10 +396,12 @@ PNG/JPEG/GIF부터 Rust codec으로 구현하고 실제 결과를 다시 decode�
 
 M0에서 Windows PC·GPU·드라이버·펜·화면 주사율을 고정하고 아래 숫자의 적합성을 확인한다. 실패한 목표를 낮추어 완료 처리하려면 근거와 제품 범위 변경을 기록한다.
 
+**현재 C++ 앱이 비교 기준이다.** 아래 절대 목표만으로는 새 앱이 지금 2.2.13보다 느려도 통과할 수 있다. 예를 들어 이벤트→present p95 33ms는 60Hz에서 2프레임이다. M0에서 같은 PC·같은 fixture·같은 계측 지점으로 2.2.13(`ugurugu_render_benchmark`, 실제 D3D11 창 probe 등 기존 계측 도구 사용)을 먼저 측정해 기록한다. 각 항목의 통과 조건은 “절대 목표 충족 **그리고** 현재 앱 측정값보다 나쁘지 않음”으로 둔다. 현재 앱보다 나빠지는 항목을 받아들이려면 이유와 제품 판단을 따로 기록한다. 펜 디스플레이는 60Hz 외에 120Hz 이상 환경도 측정해 프레임 예산이 주사율에 따라 어떻게 달라지는지 남긴다.
+
 | 항목 | 초기 목표안 | 측정 조건 |
 |---|---|---|
 | GUI 이벤트 batch | p95 4ms 이하 | 2048² 표준 작업, Release, 입력 처리와 무거운 계산 분리 |
-| 이벤트→present | p95 33ms 이하 | 60Hz 기준. OS event 시각부터 present까지; 실제 pen→photon과 별도 |
+| 이벤트→present | p95 33ms 이하, 현재 앱 이하 | 60Hz 기준, 120Hz 이상 별도 기록. OS event 시각부터 present까지; 실제 pen→photon과 별도 |
 | live stroke / pen-up commit | p95 8ms 이하의 메인 스레드 점유 | 큰 획·긴 history도 별도 시나리오 |
 | 모션 재생 | 2048² 표준 문서 30fps | warmed/cold 분리, frame miss·UI 지연 기록 |
 | 저장·export UI 반응 | 파일 작업 중에도 편집/취소 UI 처리 | UI thread에서 serialize/encode/전체 render 없음 |
@@ -398,13 +412,15 @@ M0에서 Windows PC·GPU·드라이버·펜·화면 주사율을 고정하고 �
 
 fixture는 최소 5종으로 고정한다: ① 1024² 단순 획, ② 2048²·16레이어 혼합 작업, ③ 2,000획·200,000점, ④ 20,000개의 짧은 획·긴 undo, ⑤ 4096² 이미지·마스크·클리핑 그룹. 각 fixture에 animation frames, blend, asset bytes까지 manifest로 명시한다. 공개 가능한 새 생성 데이터를 사용하고 기존 비공개 사용자 문서가 있다고 가정하지 않는다.
 
+fixture는 새 형식으로 만들지만, 현재 앱과 비교할 수 있도록 같은 내용을 2.2.13에서도 재현하는 생성 절차(기존 `tools/StressDocumentGenerator.cpp`의 결정적 생성 방식 참고)를 함께 둔다. C++ 쪽 생성기는 비교 측정용 일회성 도구이며 새 제품의 호환 대상이 아니다.
+
 보고할 값은 p50/p95/max, frame miss, cold/warm, CPU/RAM/VRAM, decode·복사·업로드 bytes다. 실제 필기 지연은 실기기 및 고속 촬영 등으로 따로 평가한다. headless 벤치마크만으로 펜 반응성을 통과시키지 않는다.
 
 ### 10.3 CI와 패키지
 
 Windows x64 MSVC target에서 `cargo fmt`, `clippy`, unit/integration, headless renderer, 새 format roundtrip, 패키지 smoke를 실행한다. `Cargo.lock`, `rust-toolchain.toml`, Windows SDK·배포 도구 버전을 고정한다. `cargo audit`/`cargo deny` 등으로 advisory·license·불필요한 중복 의존을 확인하되 전부 Rust라는 주장 대신 실제 feature graph와 배포 파일을 남긴다.
 
-Velopack은 Rust 공식 SDK가 있으므로 현재 C API DLL을 유지할 필요가 없다. `VelopackApp` 초기화 순서와 `vpk` packaging을 Rust 진입점 기준으로 작성한다. `vpk`는 별도 .NET 기반 빌드 도구이며 앱 런타임 전체가 .NET 앱이 되는 것은 아니다. 문서의 예시 버전 `0.0`을 복사하지 않고 SDK·CLI 호환 조합을 고정한다. [Rust 가이드](https://docs.velopack.io/getting-started/rust), [Velopack 도구 구성](https://docs.velopack.io/contributing/compiling)
+Velopack은 Rust 공식 SDK가 있으므로 현재 C API DLL을 유지할 필요가 없다. `VelopackApp` 초기화 순서와 `vpk` packaging을 Rust 진입점 기준으로 작성한다. `vpk`는 별도 .NET 기반 빌드 도구이며 앱 런타임 전체가 .NET 앱이 되는 것은 아니다. 문서의 예시 버전 `0.0`을 복사하지 않고 SDK·CLI 호환 조합을 고정한다. 조회 시점 최신은 `velopack` crate·`vpk` 모두 1.2.161이며, `vpk`는 .NET 8 SDK를 요구한다. [Rust 가이드](https://docs.velopack.io/getting-started/rust), [Velopack 도구 구성](https://docs.velopack.io/contributing/compiling)
 
 파일 호환이 끊기는 새 제품을 기존 stable feed에 곧바로 덮어씌우지 않는다. 초기에는 새 app ID·설정 경로·복구 경로·업데이트 채널과 새 확장자 연결을 사용한다. C++ 앱의 installed state를 해석하거나 이전 파일을 자동 업그레이드하는 코드는 쓰지 않는다. 정식 출시 시 기존 다운로드 안내의 전환은 제품 정책으로 따로 처리한다.
 
@@ -416,7 +432,7 @@ Velopack은 Rust 공식 SDK가 있으므로 현재 C API DLL을 유지할 필요
 
 | 단계 | 예상 작업량 | 결과물 | 종료 조건 |
 |---|---|---|---|
-| **M0 기술 실증·명세** | 1~2주 | UI/pen/GPU/text PoC, 기능표, ADR, bench fixture | 실제 Windows 펜·IME·DPI 입력 성공, 렌더 후보·의존성 결정 |
+| **M0 기술 실증·명세** | 2~3주 | UI/pen/GPU/text PoC, 기능표, ADR, bench fixture, 현재 앱 기준선 | 실제 Windows 펜·IME·DPI 입력 성공, 렌더 후보·의존성 결정, 2.2.13 측정값 기록 |
 | **M1 도메인·새 저장** | 2~3주 | core 모델·명령·undo·ZIP reader/writer·headless 도구 | roundtrip·거부 입력·macro 원자성·save failure 검증 |
 | **M2 첫 드로잉 완주** | 3~4주 | 펜/지우개·보정·기본 레이어·모션·저장·PNG | 그리기→모션→저장→재열기→PNG가 Rust만으로 동작 |
 | **M3 렌더·스케줄러 완성** | 4~6주 | 타일·캐시·프리뷰 우선순위·그룹/합성·필요 GPU 가속 | 동일 render plan 규약, 표준 문서 목표·device loss 통과 |
@@ -424,22 +440,25 @@ Velopack은 Rust 공식 SDK가 있으므로 현재 C API DLL을 유지할 필요
 | **M5 제품 UI·복구·출력** | 3~5주 | GIF/WebP, KR/EN/JP, 단축키·도킹·터치, 복구·설정 | 긴 작업 세션·강제 종료·export·IME/접근성 통과 |
 | **M6 배포·실기기 수용** | 3~4주 | 서명된 Windows 설치물·업데이트·진단·문서 | 깨끗한 PC 설치 및 N→N+1, 지원 펜/GPU 행렬, 레거시 의존 0 |
 
-직렬 합계는 **21~32인주**, 통합·성능·장치 문제의 여유 20~30%를 포함하면 **약 25~42인주(전담 1명 기준 대략 6~10개월)**다. 새로운 엔진의 기능을 모두 갖춘 정식판 기준이다. M2까지의 **6~9주**는 제한된 드로잉 알파이며 전체 대체 완료가 아니다. Rust 학습, pure-Rust WebP 자체 구현, 광범위한 WinTab 장치 지원, 고급 색 관리가 추가되면 다시 산정한다.
+직렬 합계는 **22~33인주**, 통합·성능·장치 문제의 여유 20~30%를 포함하면 **약 26~43인주(전담 1명 기준 대략 6~10개월)**다. 새로운 엔진의 기능을 모두 갖춘 정식판 기준이다. M2까지의 **7~10주**는 제한된 드로잉 알파이며 전체 대체 완료가 아니다. Rust 학습, pure-Rust WebP 자체 구현, 광범위한 WinTab 장치 지원, 고급 색 관리가 추가되면 다시 산정한다.
 
 단계 간 의존은 `M0 → M1 → M2 → M3 → M4 → M5 → M6`다. 파일 포맷의 실제 roundtrip은 UI 완성보다 먼저 검증하고, 펜·IME 실증은 도메인 대량 구현보다 먼저 끝낸다. M4까지 기능을 모두 쌓은 뒤 renderer를 바꾸는 일정을 피한다.
 
-### 첫 10일의 구체적 순서
+### M0의 구체적 순서 (약 15작업일)
 
-| 순서 | 작업 | 남길 증거 |
+| 작업일 | 작업 | 남길 증거 |
 |---|---|---|
 | 1 | 사용자 범위를 feature checklist로 고정, Windows 11 x64·WebP·WinTab·도킹의 정책 초안 작성 | `scope.md`, 기능별 필수/후반/제외 표 |
 | 2 | 독립 Rust workspace, toolchain/lock, Windows CI·artifact 생성 | 새 PC에서 C++/Qt 없이 빌드되는 exe |
-| 3~4 | winit+egui+wgpu 단일 창, Pointer history 수집·실시간 획 표시 | 펜 trace, mouse 중복 없음, DPI 이동 영상·로그 |
-| 5 | 한글/일본어 IME와 CJK 글꼴·focus·단축키 실증 | 재현 절차·결과표, 실패 시 iced 비교 결정 |
-| 6~7 | tiny-skia/Vello 후보의 대표 scene 비교, blend·mask·tile·display 평가 | 동일 fixture의 이미지 diff와 시간·메모리 |
-| 8 | 새 연산·선택·병합·fill 의미와 파일 스키마 ADR | 작고 실행 가능한 의미 테스트 |
-| 9 | 4K·장치 손실·WARP/원격·오프라인 진입점 시험 | 지원할 GPU 조건과 fallback의 실제 결과 |
-| 10 | 기술 조합 결정, 버전 고정, M1 작업을 작은 변경 단위로 분해 | 채택/기각 근거, 조정된 일정·위험표 |
+| 3~4 | 측정 PC·펜·모니터 고정, 비교 fixture 생성 절차, 현재 2.2.13 기준선 측정 | 10.2절 항목별 현재 앱 p50/p95/max·RAM, 측정 절차 |
+| 5~7 | winit+egui+wgpu(DX12 명시) 단일 창, Pointer history 수집·실시간 획 표시 | 펜 trace, mouse 중복 없음, DPI 이동 영상·로그 |
+| 8~9 | 한글/일본어 IME와 CJK 글꼴·focus·단축키 실증 | 재현 절차·결과표, 실패 시 iced 비교 결정 |
+| 10~11 | tiny-skia/Vello 후보의 대표 scene 비교, blend·mask·tile·display 평가 | 동일 fixture의 이미지 diff와 시간·메모리 |
+| 12 | 새 연산·선택·병합·fill 의미와 파일 스키마 ADR | 작고 실행 가능한 의미 테스트 |
+| 13~14 | 4K·장치 손실·WARP/원격·오프라인 진입점 시험 | 지원할 GPU 조건과 fallback의 실제 결과 |
+| 15 | 기술 조합 결정, 버전 고정, M1 작업을 작은 변경 단위로 분해 | 채택/기각 근거, 조정된 일정·위험표 |
+
+8~9일차에 egui IME가 실패해 iced를 같은 범위로 비교하면 M0가 3주를 넘을 수 있다. 이 경우 일정을 조정해 기록하고 M1을 앞당겨 시작하지 않는다.
 
 이 일정은 실기기가 이미 준비됐을 때의 작업일 예시다. 첫 단계에서 펜/IME가 실패하면 UI framework 선택을 바꾸고, render 선택이 실패하면 M1의 도메인 경계를 유지한 채 후보를 교체한다. 시연 가능한 창 하나만으로 M0를 통과시키지 않는다.
 
