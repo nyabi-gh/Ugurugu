@@ -579,7 +579,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 | ① | 워크스페이스 골격 + Rust CI 잡(보고 전용) + cargo-deny | 완료. main `a128e55`(2026-10-06), Rust 잡 5개 녹색 |
 | ② | C++ seed·uuid 주입 지점 | 완료. main `ca51af1`(2026-10-06), PR CI 전 잡 녹색 |
 | ③ | C++ `ReferenceExport`(scene·geometry·frames·strokes·stabilize) | 구현, Windows 확인 (브랜치 `ref/reference-export`) |
-| ④ | 장면 행렬과 C++ 참조 결과 | 계획 |
+| ④ | 장면 행렬과 C++ 참조 결과 | 구현, Windows 참조 생성 (브랜치 `ref/scene-matrix`). macOS 참조는 ⑥에서 |
 | ⑤ | `ugu-reference` 느낌 지표 계산기 + 나란히 비교 뷰어 | 계획 |
 | ⑥ | 허용치 기준선(C++ Windows vs macOS, macOS는 CI 러너) | 계획 |
 | ⑦–⑨ | S3 파일 형식 → S1 래스터라이저 → S2 셸·펜 지연 | 계획 |
@@ -608,6 +608,13 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 - [tools/ReferenceExport.cpp](../tools/ReferenceExport.cpp), 타깃 `ugurugu_reference_export`(`EXCLUDE_FROM_ALL`). 명령: `scene`(모든 기본값과 레이어 override를 풀어 쓴 중립 장면 JSON, u64 seed는 문자열, 마스크·자산은 패딩 없는 행 base64), `geometry`(획·프레임별 `StrokeRenderer::prepare` 결과 JSONL: 점·압력·보이는 구간·굵기), `frames`(프레임 PNG, `--size`면 `NativeExact` 축소 렌더), `strokes`(paint 획 하나씩 투명 바탕에 렌더, 에어브러시 dab·스프레이 입자 비교용), `stabilize`(펜 기록 → 1€ 필터 출력), `all`. 모든 출력에 Qt 버전·OS·CPU를 담은 `manifest.json`.
 - 계획 §4.2의 `dabs <cases>`는 `strokes`로 대신했다. 획 하나를 따로 렌더하면 선·dab·입자가 모두 같은 방식으로 나오고, 경우 정의는 ④ 장면 행렬 문서가 맡는다. 획 샘플링 규칙(0.75px 간격, 끝점 압력)은 지금 `CanvasWidget` 안에 있어 `stabilize`에 들어 있지 않다. 1단계 I층 비교 전에 순수 함수로 꺼낸다.
 - 확인(Windows 11, Release, Qt 6.11.2, 2026-10-06): 레거시 fixture 3개를 두 번씩 내보내 결과가 바이트 동일. `frames` PNG에서 계산한 digest가 `LegacyRenderGoldenTests`의 Windows 값과 일치(animated 0·1, fill-hierarchy 0). 로컬 clang-tidy 경고 없음.
+
+④의 내용과 확인:
+
+- [tools/ReferenceScenes.cpp](../tools/ReferenceScenes.cpp)(`ugurugu_reference_scenes`)가 160×120·12프레임 장면 145개를 `DocumentController`로 만든다. 장면 이름에서 얻은 seed로 `Identity::DeterministicScope`를 열어 id·seed가 고정된다. 구성: 브러시 프리셋 17종 × 필압 4종(일정·증가·감소·떨림) 68, 선 엔진 프리셋 AA 켬 8, 모션 3종 × 흔들림 0.8·1.6·4 9 + 변형 7종(끊어진 선 2, 무작위성, 느슨한 연결, 디테일 4·24, 포즈 3) × 3 21, 에어브러시 4종 × dab 1·2·4·8·16겹 20, 지우개 3종 × 필압 2 6, 레이어·연산 13(클립, 불투명도, 그룹 불투명도, 블렌드 4종, 레이어 우글거림 override, 병합으로 생긴 섹션 경계, reframe, 픽셀 선택 변형, 이미지, 채우기).
+- [tools/reference_matrix.mjs](../tools/reference_matrix.mjs)가 장면을 다시 만들고 플랫폼별 C++ 참조(`frames 0,3,6,9`)를 [tests/reference](../tests/reference/README.md)에 쓴다. 사용자 결정(2026-10-06): 장면과 일부 프레임만 커밋한다. Windows 참조는 2,197파일, 7.0MB(PNG 4.3MB, geometry 1.1MB, 압축 scene.json 0.78MB, .ugu 0.76MB). macOS를 더하면 약 12MB로 예상한다.
+- `scene.json`은 들여쓰기 없이 쓴다(2.6MB → 0.78MB).
+- 확인(Windows 11, Release, 2026-10-06): 생성기를 두 번 돌린 결과와, 생성기 수정 전후 전체 참조가 바이트 동일. 145개 장면이 모두 다시 열린다. 프레임 0 접촉 시트를 눈으로 확인(섹션 경계가 아래 잉크를 지키는 것, 클립·블렌드·이미지·채우기·reframe·선택 변형). `motion-classic-broken-line-wide`는 넓은 끊김 때문에 프레임 0이 비어 있고 다른 프레임에 획이 있다. 로컬 clang-tidy 경고 없음.
 
 버전 2.2.11/2.2.12에 어느 범위를 넣을지는 이 문서에서 확정하지 않는다. 변경량과 회귀 위험을 확인한 뒤 배포 단위를 정한다.
 

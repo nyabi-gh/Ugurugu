@@ -430,7 +430,7 @@ bool hasPreparedGeometry(const Stroke &stroke)
 bool exportScene(const Document &document, const QDir &output)
 {
     return writeFile(output.filePath(QStringLiteral("scene.json")),
-        QJsonDocument(sceneJson(document)).toJson(QJsonDocument::Indented));
+        QJsonDocument(sceneJson(document)).toJson(QJsonDocument::Compact));
 }
 
 bool exportGeometry(

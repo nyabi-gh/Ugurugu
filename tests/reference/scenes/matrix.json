@@ -1,0 +1,859 @@
+{
+    "canvasSize": [
+        160,
+        120
+    ],
+    "format": "ugurugu-reference-matrix",
+    "frames": 12,
+    "scenes": [
+        {
+            "group": "brush",
+            "name": "brush-ink-pen-constant",
+            "preset": "ink-pen",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-ink-pen-rising",
+            "preset": "ink-pen",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-ink-pen-falling",
+            "preset": "ink-pen",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-ink-pen-tremor",
+            "preset": "ink-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-g-pen-constant",
+            "preset": "g-pen",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-g-pen-rising",
+            "preset": "g-pen",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-g-pen-falling",
+            "preset": "g-pen",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-g-pen-tremor",
+            "preset": "g-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-round-pen-constant",
+            "preset": "round-pen",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-round-pen-rising",
+            "preset": "round-pen",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-round-pen-falling",
+            "preset": "round-pen",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-round-pen-tremor",
+            "preset": "round-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-monoline-constant",
+            "preset": "monoline",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-monoline-rising",
+            "preset": "monoline",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-monoline-falling",
+            "preset": "monoline",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-monoline-tremor",
+            "preset": "monoline",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-bold-ink-constant",
+            "preset": "bold-ink",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-bold-ink-rising",
+            "preset": "bold-ink",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-bold-ink-falling",
+            "preset": "bold-ink",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-bold-ink-tremor",
+            "preset": "bold-ink",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-opaque-marker-constant",
+            "preset": "opaque-marker",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-opaque-marker-rising",
+            "preset": "opaque-marker",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-opaque-marker-falling",
+            "preset": "opaque-marker",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-opaque-marker-tremor",
+            "preset": "opaque-marker",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-transparent-marker-constant",
+            "preset": "transparent-marker",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-transparent-marker-rising",
+            "preset": "transparent-marker",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-transparent-marker-falling",
+            "preset": "transparent-marker",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-transparent-marker-tremor",
+            "preset": "transparent-marker",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-highlighter-constant",
+            "preset": "highlighter",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-highlighter-rising",
+            "preset": "highlighter",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-highlighter-falling",
+            "preset": "highlighter",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-highlighter-tremor",
+            "preset": "highlighter",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-soft-airbrush-constant",
+            "preset": "soft-airbrush",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-soft-airbrush-rising",
+            "preset": "soft-airbrush",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-soft-airbrush-falling",
+            "preset": "soft-airbrush",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-soft-airbrush-tremor",
+            "preset": "soft-airbrush",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-hard-airbrush-constant",
+            "preset": "hard-airbrush",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-hard-airbrush-rising",
+            "preset": "hard-airbrush",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-hard-airbrush-falling",
+            "preset": "hard-airbrush",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-hard-airbrush-tremor",
+            "preset": "hard-airbrush",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dense-airbrush-constant",
+            "preset": "dense-airbrush",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dense-airbrush-rising",
+            "preset": "dense-airbrush",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dense-airbrush-falling",
+            "preset": "dense-airbrush",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dense-airbrush-tremor",
+            "preset": "dense-airbrush",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-fine-mist-constant",
+            "preset": "fine-mist",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-fine-mist-rising",
+            "preset": "fine-mist",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-fine-mist-falling",
+            "preset": "fine-mist",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-fine-mist-tremor",
+            "preset": "fine-mist",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-pixel-spray-constant",
+            "preset": "pixel-spray",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-pixel-spray-rising",
+            "preset": "pixel-spray",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-pixel-spray-falling",
+            "preset": "pixel-spray",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-pixel-spray-tremor",
+            "preset": "pixel-spray",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-rough-spray-constant",
+            "preset": "rough-spray",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-rough-spray-rising",
+            "preset": "rough-spray",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-rough-spray-falling",
+            "preset": "rough-spray",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-rough-spray-tremor",
+            "preset": "rough-spray",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dust-spray-constant",
+            "preset": "dust-spray",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dust-spray-rising",
+            "preset": "dust-spray",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dust-spray-falling",
+            "preset": "dust-spray",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-dust-spray-tremor",
+            "preset": "dust-spray",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-droplet-spray-constant",
+            "preset": "droplet-spray",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-droplet-spray-rising",
+            "preset": "droplet-spray",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-droplet-spray-falling",
+            "preset": "droplet-spray",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-droplet-spray-tremor",
+            "preset": "droplet-spray",
+            "pressure": "tremor"
+        },
+        {
+            "group": "brush",
+            "name": "brush-wobble-spray-constant",
+            "preset": "wobble-spray",
+            "pressure": "constant"
+        },
+        {
+            "group": "brush",
+            "name": "brush-wobble-spray-rising",
+            "preset": "wobble-spray",
+            "pressure": "rising"
+        },
+        {
+            "group": "brush",
+            "name": "brush-wobble-spray-falling",
+            "preset": "wobble-spray",
+            "pressure": "falling"
+        },
+        {
+            "group": "brush",
+            "name": "brush-wobble-spray-tremor",
+            "preset": "wobble-spray",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-ink-pen",
+            "preset": "ink-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-g-pen",
+            "preset": "g-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-round-pen",
+            "preset": "round-pen",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-monoline",
+            "preset": "monoline",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-bold-ink",
+            "preset": "bold-ink",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-opaque-marker",
+            "preset": "opaque-marker",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-transparent-marker",
+            "preset": "transparent-marker",
+            "pressure": "tremor"
+        },
+        {
+            "group": "antialiased",
+            "name": "antialiased-highlighter",
+            "preset": "highlighter",
+            "pressure": "tremor"
+        },
+        {
+            "amount": 0.8,
+            "group": "motion",
+            "name": "motion-classic-0.8",
+            "style": "classic"
+        },
+        {
+            "amount": 1.6,
+            "group": "motion",
+            "name": "motion-classic-1.6",
+            "style": "classic"
+        },
+        {
+            "amount": 4,
+            "group": "motion",
+            "name": "motion-classic-4",
+            "style": "classic"
+        },
+        {
+            "amount": 0.8,
+            "group": "motion",
+            "name": "motion-smooth-0.8",
+            "style": "smooth"
+        },
+        {
+            "amount": 1.6,
+            "group": "motion",
+            "name": "motion-smooth-1.6",
+            "style": "smooth"
+        },
+        {
+            "amount": 4,
+            "group": "motion",
+            "name": "motion-smooth-4",
+            "style": "smooth"
+        },
+        {
+            "amount": 0.8,
+            "group": "motion",
+            "name": "motion-stepped-0.8",
+            "style": "stepped"
+        },
+        {
+            "amount": 1.6,
+            "group": "motion",
+            "name": "motion-stepped-1.6",
+            "style": "stepped"
+        },
+        {
+            "amount": 4,
+            "group": "motion",
+            "name": "motion-stepped-4",
+            "style": "stepped"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-broken-line",
+            "style": "classic",
+            "variant": "broken-line"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-broken-line-wide",
+            "style": "classic",
+            "variant": "broken-line-wide"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-randomness",
+            "style": "classic",
+            "variant": "randomness"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-loosely-linked",
+            "style": "classic",
+            "variant": "loosely-linked"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-coarse-detail",
+            "style": "classic",
+            "variant": "coarse-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-fine-detail",
+            "style": "classic",
+            "variant": "fine-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-classic-three-poses",
+            "style": "classic",
+            "variant": "three-poses"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-broken-line",
+            "style": "smooth",
+            "variant": "broken-line"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-broken-line-wide",
+            "style": "smooth",
+            "variant": "broken-line-wide"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-randomness",
+            "style": "smooth",
+            "variant": "randomness"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-loosely-linked",
+            "style": "smooth",
+            "variant": "loosely-linked"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-coarse-detail",
+            "style": "smooth",
+            "variant": "coarse-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-fine-detail",
+            "style": "smooth",
+            "variant": "fine-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-smooth-three-poses",
+            "style": "smooth",
+            "variant": "three-poses"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-broken-line",
+            "style": "stepped",
+            "variant": "broken-line"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-broken-line-wide",
+            "style": "stepped",
+            "variant": "broken-line-wide"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-randomness",
+            "style": "stepped",
+            "variant": "randomness"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-loosely-linked",
+            "style": "stepped",
+            "variant": "loosely-linked"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-coarse-detail",
+            "style": "stepped",
+            "variant": "coarse-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-fine-detail",
+            "style": "stepped",
+            "variant": "fine-detail"
+        },
+        {
+            "group": "motion",
+            "name": "motion-stepped-three-poses",
+            "style": "stepped",
+            "variant": "three-poses"
+        },
+        {
+            "dabs": 1,
+            "group": "accumulation",
+            "name": "accumulation-soft-airbrush-01",
+            "preset": "soft-airbrush"
+        },
+        {
+            "dabs": 2,
+            "group": "accumulation",
+            "name": "accumulation-soft-airbrush-02",
+            "preset": "soft-airbrush"
+        },
+        {
+            "dabs": 4,
+            "group": "accumulation",
+            "name": "accumulation-soft-airbrush-04",
+            "preset": "soft-airbrush"
+        },
+        {
+            "dabs": 8,
+            "group": "accumulation",
+            "name": "accumulation-soft-airbrush-08",
+            "preset": "soft-airbrush"
+        },
+        {
+            "dabs": 16,
+            "group": "accumulation",
+            "name": "accumulation-soft-airbrush-16",
+            "preset": "soft-airbrush"
+        },
+        {
+            "dabs": 1,
+            "group": "accumulation",
+            "name": "accumulation-hard-airbrush-01",
+            "preset": "hard-airbrush"
+        },
+        {
+            "dabs": 2,
+            "group": "accumulation",
+            "name": "accumulation-hard-airbrush-02",
+            "preset": "hard-airbrush"
+        },
+        {
+            "dabs": 4,
+            "group": "accumulation",
+            "name": "accumulation-hard-airbrush-04",
+            "preset": "hard-airbrush"
+        },
+        {
+            "dabs": 8,
+            "group": "accumulation",
+            "name": "accumulation-hard-airbrush-08",
+            "preset": "hard-airbrush"
+        },
+        {
+            "dabs": 16,
+            "group": "accumulation",
+            "name": "accumulation-hard-airbrush-16",
+            "preset": "hard-airbrush"
+        },
+        {
+            "dabs": 1,
+            "group": "accumulation",
+            "name": "accumulation-dense-airbrush-01",
+            "preset": "dense-airbrush"
+        },
+        {
+            "dabs": 2,
+            "group": "accumulation",
+            "name": "accumulation-dense-airbrush-02",
+            "preset": "dense-airbrush"
+        },
+        {
+            "dabs": 4,
+            "group": "accumulation",
+            "name": "accumulation-dense-airbrush-04",
+            "preset": "dense-airbrush"
+        },
+        {
+            "dabs": 8,
+            "group": "accumulation",
+            "name": "accumulation-dense-airbrush-08",
+            "preset": "dense-airbrush"
+        },
+        {
+            "dabs": 16,
+            "group": "accumulation",
+            "name": "accumulation-dense-airbrush-16",
+            "preset": "dense-airbrush"
+        },
+        {
+            "dabs": 1,
+            "group": "accumulation",
+            "name": "accumulation-fine-mist-01",
+            "preset": "fine-mist"
+        },
+        {
+            "dabs": 2,
+            "group": "accumulation",
+            "name": "accumulation-fine-mist-02",
+            "preset": "fine-mist"
+        },
+        {
+            "dabs": 4,
+            "group": "accumulation",
+            "name": "accumulation-fine-mist-04",
+            "preset": "fine-mist"
+        },
+        {
+            "dabs": 8,
+            "group": "accumulation",
+            "name": "accumulation-fine-mist-08",
+            "preset": "fine-mist"
+        },
+        {
+            "dabs": 16,
+            "group": "accumulation",
+            "name": "accumulation-fine-mist-16",
+            "preset": "fine-mist"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-hard-eraser-constant",
+            "preset": "hard-eraser",
+            "pressure": "constant"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-hard-eraser-tremor",
+            "preset": "hard-eraser",
+            "pressure": "tremor"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-soft-eraser-constant",
+            "preset": "soft-eraser",
+            "pressure": "constant"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-soft-eraser-tremor",
+            "preset": "soft-eraser",
+            "pressure": "tremor"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-kneaded-eraser-constant",
+            "preset": "kneaded-eraser",
+            "pressure": "constant"
+        },
+        {
+            "group": "eraser",
+            "name": "eraser-kneaded-eraser-tremor",
+            "preset": "kneaded-eraser",
+            "pressure": "tremor"
+        },
+        {
+            "group": "layer",
+            "name": "layer-clip"
+        },
+        {
+            "group": "layer",
+            "name": "layer-opacity"
+        },
+        {
+            "group": "layer",
+            "name": "layer-group-opacity"
+        },
+        {
+            "blend": "normal",
+            "group": "layer",
+            "name": "layer-blend-normal"
+        },
+        {
+            "blend": "multiply",
+            "group": "layer",
+            "name": "layer-blend-multiply"
+        },
+        {
+            "blend": "screen",
+            "group": "layer",
+            "name": "layer-blend-screen"
+        },
+        {
+            "blend": "overlay",
+            "group": "layer",
+            "name": "layer-blend-overlay"
+        },
+        {
+            "group": "layer",
+            "name": "layer-wobble-override"
+        },
+        {
+            "group": "layer",
+            "name": "layer-merged-sections"
+        },
+        {
+            "group": "operation",
+            "name": "operation-reframe"
+        },
+        {
+            "group": "operation",
+            "name": "operation-selection-transform"
+        },
+        {
+            "group": "operation",
+            "name": "operation-image"
+        },
+        {
+            "group": "operation",
+            "name": "operation-fill"
+        }
+    ],
+    "version": 1
+}

@@ -1,0 +1,11 @@
+{
+    "command": "all",
+    "cpu": "x86_64",
+    "format": "ugurugu-reference-export",
+    "frames": "0,3,6,9",
+    "input": "brush-round-pen-falling.ugu",
+    "os": "Windows 11 Version 26H2",
+    "pngAlpha": "straight",
+    "qt": "6.11.2",
+    "version": 1
+}

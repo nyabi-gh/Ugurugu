@@ -201,6 +201,18 @@ target_link_libraries(
 ugurugu_target_defaults(ugurugu_reference_export)
 
 add_executable(
+    ugurugu_reference_scenes
+    EXCLUDE_FROM_ALL
+    tools/ReferenceScenes.cpp
+)
+target_link_libraries(
+    ugurugu_reference_scenes
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_reference_scenes)
+
+add_executable(
     ugurugu_render_benchmark
     EXCLUDE_FROM_ALL
     tools/RenderBenchmark.cpp
