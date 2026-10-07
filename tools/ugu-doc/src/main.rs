@@ -9,11 +9,14 @@
 //!   from a different random sequence.
 //! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file.
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
-//! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame. Brushes
-//!   and blend modes this build cannot draw yet are drawn as pens and Normal,
-//!   which keeps the amount of work close and says so.
-//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: the same change, saved, so the
-//!   app can open a fixture to measure with.
+//! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame, by
+//!   stage, on separate layer surfaces and as editing splits, with the peak
+//!   working set. Other brushes are drawn as pens, and what M4 adds is left
+//!   out; groups and blend modes not drawn yet are lifted out and made
+//!   Normal, which keeps the amount of work close and says so.
+//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
+//!   out what M4 adds, keeping groups, blend modes and clipping, so the app
+//!   can open a fixture to measure with.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -157,40 +160,116 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes brushes and blend modes this build cannot draw yet pens and
-/// Normal, and says how many it changed.
-fn as_pens(document: &mut Document) -> Result<(), String> {
-    use ugu_render::document::check;
-
-    let Err(unsupported) = check(document) else {
-        return Ok(());
-    };
+/// Makes every brush a pen and drops what M4 adds (fills, images, selections
+/// and stroke clips), keeping layers, groups, blend modes and clipping.
+fn to_pens(document: &mut Document) {
     let mut changed = 0;
-    for layer in &mut document.layers {
-        if let LayerKind::Paint(paint) = &mut layer.kind
-            && (paint.blend != Blend::Normal || paint.clip_to_below)
-        {
-            paint.blend = Blend::Normal;
-            paint.clip_to_below = false;
-            changed += 1;
-        }
-    }
     for stroke in document.store.strokes.values_mut() {
         if stroke.brush.engine != BrushEngine::Line {
             stroke.brush.engine = BrushEngine::Line;
             changed += 1;
         }
     }
+    let mut dropped = 0;
+    each_paint(&mut document.layers, &mut |paint| {
+        strip(&mut paint.ops, &mut dropped);
+    });
+    document.store.masks.clear();
+    document.store.assets.clear();
+    if changed + dropped > 0 {
+        println!("{changed} brushes made pens, {dropped} fills, images or selections dropped");
+    }
+}
+
+fn strip(ops: &mut Vec<Op>, dropped: &mut usize) {
+    let before = ops.len();
+    ops.retain(|op| {
+        !matches!(
+            op,
+            Op::Fill { .. }
+                | Op::PlaceImage { .. }
+                | Op::TransformSelection { .. }
+                | Op::ClearSelection { .. }
+        )
+    });
+    *dropped += before - ops.len();
+    for op in ops {
+        match op {
+            Op::Paint { clip, .. } | Op::Erase { clip, .. } => {
+                *dropped += usize::from(clip.take().is_some());
+            }
+            Op::Isolated(section) => strip(&mut section.ops, dropped),
+            _ => {}
+        }
+    }
+}
+
+fn each_paint(layers: &mut [Layer], visit: &mut impl FnMut(&mut PaintLayer)) {
+    for layer in layers {
+        match &mut layer.kind {
+            LayerKind::Paint(paint) => visit(paint),
+            LayerKind::Group(group) => each_paint(&mut group.children, visit),
+        }
+    }
+}
+
+/// Lifts layers out of groups and makes them Normal and unclipped, which the
+/// renderer can draw until it draws groups (M3-3). The work stays close.
+fn flatten(document: &mut Document) -> Result<(), String> {
+    use ugu_render::document::check;
+
+    let Err(unsupported) = check(document) else {
+        return Ok(());
+    };
+    fn lift(layers: Vec<Layer>, into: &mut Vec<Layer>) {
+        for mut layer in layers {
+            match layer.kind {
+                LayerKind::Group(group) => lift(group.children, into),
+                LayerKind::Paint(ref mut paint) => {
+                    paint.blend = Blend::Normal;
+                    paint.clip_to_below = false;
+                    into.push(layer);
+                }
+            }
+        }
+    }
+    let mut flat = Vec::new();
+    lift(std::mem::take(&mut document.layers), &mut flat);
+    document.layers = flat;
     check(document).map_err(|left| format!("cannot draw {unsupported} or {left} yet"))?;
-    println!("drawn approximately: {changed} brushes or blend modes made pens or Normal");
+    println!("drawn approximately: groups lifted out, blend modes and clipping made Normal");
     Ok(())
 }
 
 fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
     let mut document = open(from)?;
-    as_pens(&mut document)?;
+    to_pens(&mut document);
+    document.validate().map_err(|error| error.to_string())?;
     save(&document, to)?;
     info(to)
+}
+
+fn peak_working_set_mib() -> f64 {
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut counters = PROCESS_MEMORY_COUNTERS {
+        cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: valid out pointer of the stated size for this process.
+    let _ = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
+    counters.PeakWorkingSetSize as f64 / (1024.0 * 1024.0)
+}
+
+fn percentiles(times: &mut [f64]) -> String {
+    times.sort_by(f64::total_cmp);
+    format!(
+        "n={} p50={:.1} p95={:.1} max={:.1} ms",
+        times.len(),
+        times[times.len() / 2],
+        times[times.len() * 95 / 100],
+        times[times.len() - 1]
+    )
 }
 
 /// Draws every frame once to warm up, then twice more, and prints the
@@ -199,11 +278,13 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
     use ugu_render::document::{DocumentRenderer, Purpose};
 
     let mut document = open(path)?;
-    as_pens(&mut document)?;
+    to_pens(&mut document);
+    flatten(&mut document)?;
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
     let mut times = Vec::new();
+    let mut stages = [Vec::new(), Vec::new(), Vec::new()];
     let mut first = 0.0;
     for round in 0..3 {
         for frame in 0..i64::from(document.frames) {
@@ -214,9 +295,28 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
                 first = ms;
             } else if round > 0 {
                 times.push(ms);
+                let timings = renderer.timings();
+                for (stage, time) in
+                    stages
+                        .iter_mut()
+                        .zip([timings.outlines, timings.encode, timings.rasterize])
+                {
+                    stage.push(time.as_secs_f64() * 1000.0);
+                }
             }
         }
     }
+    let [outlines, encode, rasterize] = &mut stages;
+    println!("  outlines  {}", percentiles(outlines));
+    println!("  encode    {}", percentiles(encode));
+    println!("  rasterize {}", percentiles(rasterize));
+    let whole_peak = peak_working_set_mib();
+    separate_layers(&document, threads, &pixmap)?;
+    splits(&document, threads);
+    println!(
+        "peak working set: {whole_peak:.0} MiB after whole frames, {:.0} MiB in the end",
+        peak_working_set_mib()
+    );
     // The part of a frame spent making stroke outlines on one thread.
     let started = Instant::now();
     let mut samples_total = 0;
@@ -266,15 +366,114 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
          outlines {:.1} ms ({elements} path elements)",
         started.elapsed().as_secs_f64() * 1000.0
     );
-    times.sort_by(f64::total_cmp);
     println!(
-        "{threads} threads: first frame {first:.1} ms, then per frame n={} p50={:.1} ms p95={:.1} ms max={:.1} ms",
-        times.len(),
-        times[times.len() / 2],
-        times[times.len() * 95 / 100],
-        times[times.len() - 1]
+        "{threads} threads: first frame {first:.1} ms, then per frame {}",
+        percentiles(&mut times)
     );
     Ok(())
+}
+
+/// Draws each layer on its own surface and puts the surfaces together, the
+/// shape M3 gives every render, and compares it with one Vello scene.
+fn separate_layers(
+    document: &Document,
+    threads: u16,
+    whole: &vello_cpu::Pixmap,
+) -> Result<(), String> {
+    use ugu_render::compose::src_over;
+    use ugu_render::document::{DocumentRenderer, Purpose};
+
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut renderer = DocumentRenderer::new(threads);
+    let mut surfaces: Vec<(vello_cpu::Pixmap, u8)> = Vec::new();
+    let mut single = document.clone();
+    single.background = Rgba8([0, 0, 0, 0]);
+    let mut layers_ms = Vec::new();
+    let mut composite_ms = Vec::new();
+    let mut out = vello_cpu::Pixmap::new(width, height);
+    for frame in 0..i64::from(document.frames) {
+        let started = Instant::now();
+        surfaces.clear();
+        for layer in document.layers.iter().filter(|layer| layer.visible) {
+            let LayerKind::Paint(paint) = &layer.kind else {
+                return Err("groups are drawn from M3-3 on".to_owned());
+            };
+            let mut own = layer.clone();
+            if let LayerKind::Paint(paint) = &mut own.kind {
+                paint.opacity = 1.0;
+            }
+            single.layers = vec![own];
+            let mut surface = vello_cpu::Pixmap::new(width, height);
+            renderer.render(&single, frame, Purpose::Display, &mut surface);
+            let opacity = (paint.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+            surfaces.push((surface, opacity));
+        }
+        layers_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+
+        let started = Instant::now();
+        let Rgba8(background) = document.background;
+        let background = ugu_render::compose::premultiplied(background);
+        let rows = usize::from(height).div_ceil(usize::from(threads.max(1)));
+        let row_bytes = usize::from(width) * 4;
+        std::thread::scope(|scope| {
+            for (band, target) in out
+                .data_as_u8_slice_mut()
+                .chunks_mut(rows * row_bytes)
+                .enumerate()
+            {
+                let surfaces = &surfaces;
+                scope.spawn(move || {
+                    let start = band * rows * row_bytes;
+                    for (at, pixel) in target.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                        pixel.copy_from_slice(&background);
+                        let from = start + at * 4;
+                        for (surface, opacity) in surfaces {
+                            let source: [u8; 4] = surface.data_as_u8_slice()[from..from + 4]
+                                .try_into()
+                                .expect("4 bytes");
+                            if source[3] == 0 {
+                                continue;
+                            }
+                            let faded = source.map(|value| {
+                                ((u16::from(value) * u16::from(*opacity) + 255) >> 8) as u8
+                            });
+                            src_over(pixel, &faded);
+                        }
+                    }
+                });
+            }
+        });
+        composite_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    let most = out
+        .data_as_u8_slice()
+        .iter()
+        .zip(whole.data_as_u8_slice())
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    println!(
+        "separate surfaces ({} layers): render {}, composite {}; last frame differs from one scene by up to {most}",
+        surfaces.len(),
+        percentiles(&mut layers_ms),
+        percentiles(&mut composite_ms)
+    );
+    Ok(())
+}
+
+/// Times the M2 editing split around each top-level layer, frame 0.
+fn splits(document: &Document, threads: u16) {
+    let mut renderer = ugu_render::document::DocumentRenderer::new(threads);
+    let mut times = Vec::new();
+    for layer in &document.layers {
+        let started = Instant::now();
+        if renderer.split(document, layer.id, 0).is_some() {
+            times.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    if !times.is_empty() {
+        println!("split per layer: {}", percentiles(&mut times));
+    }
 }
 
 /// The same generator as tools/FixtureGenerator.cpp.

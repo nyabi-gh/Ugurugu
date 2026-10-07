@@ -112,6 +112,16 @@ pub struct DocumentRenderer {
     resources: Resources,
     /// Threads that make stroke outlines, which Vello then draws in order.
     threads: usize,
+    timings: Timings,
+}
+
+/// Where the last render spent its time.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Timings {
+    pub outlines: std::time::Duration,
+    /// Handing paths to Vello, up to and including its flush.
+    pub encode: std::time::Duration,
+    pub rasterize: std::time::Duration,
 }
 
 /// One thing to draw, in document order.
@@ -145,7 +155,12 @@ impl DocumentRenderer {
             ),
             resources: Resources::new(),
             threads: usize::from(threads.max(1)),
+            timings: Timings::default(),
         }
+    }
+
+    pub fn timings(&self) -> Timings {
+        self.timings
     }
 
     /// Draws `frame` of a document that passed `check` into `pixmap`, which
@@ -199,7 +214,9 @@ impl DocumentRenderer {
                 steps.push(Step::Pop);
             }
         }
+        let started = std::time::Instant::now();
         let outlines = self.outlines(&steps, frame);
+        let outlined = started.elapsed();
 
         self.context.reset_and_resize(width, height);
         if let Some(Rgba8([r, g, b, a])) = background {
@@ -223,8 +240,14 @@ impl DocumentRenderer {
             }
         }
         self.context.flush();
+        let encoded = started.elapsed();
         self.context
             .render_with(pixmap, &mut self.resources, RasterizerSettings::default());
+        self.timings = Timings {
+            outlines: outlined,
+            encode: encoded - outlined,
+            rasterize: started.elapsed() - encoded,
+        };
     }
 
     /// The outline of each `Step::Draw`, in order, made on the worker

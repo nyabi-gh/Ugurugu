@@ -3467,6 +3467,7 @@ dependencies = [
  "ugu-render",
  "ugu-win",
  "vello_cpu 0.3.0",
+ "windows",
 ]
 
 [[package]]
