@@ -82,12 +82,19 @@ pub struct ImeProbe {
 impl ImeProbe {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         ui.heading("IME");
-        let line = ui.add(egui::TextEdit::singleline(&mut self.line).id_salt("ime-line"));
-        let text = ui.add(
-            egui::TextEdit::multiline(&mut self.text)
-                .id_salt("ime-text")
-                .desired_rows(4),
-        );
+        // Labelled so that screen readers name the fields.
+        let line_label = ui.label("Line");
+        let line = ui
+            .add(egui::TextEdit::singleline(&mut self.line).id_salt("ime-line"))
+            .labelled_by(line_label.id);
+        let text_label = ui.label("Text");
+        let text = ui
+            .add(
+                egui::TextEdit::multiline(&mut self.text)
+                    .id_salt("ime-text")
+                    .desired_rows(4),
+            )
+            .labelled_by(text_label.id);
         let rects = [line.rect, text.rect];
         if self.logged_rects != Some(rects) {
             let ppp = ui.ctx().pixels_per_point();

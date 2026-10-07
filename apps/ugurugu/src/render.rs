@@ -27,6 +27,9 @@ use crate::latency::LatencyLog;
 pub enum ToRender {
     Window(WindowEvent),
     Pointer(Vec<PointerEvent>),
+    /// A screen reader connected (`true`) or left.
+    Accessibility(bool),
+    AccessibilityAction(egui::accesskit::ActionRequest),
     Shutdown,
 }
 
@@ -40,12 +43,38 @@ const FRAME_WAIT_LIMIT: Duration = Duration::from_millis(100);
 /// handle, so this asks it and waits for the answer.
 pub type SurfaceSource = Box<dyn Fn() -> Result<wgpu::Surface<'static>, String> + Send>;
 
+/// egui-winit's input state on its way to the render thread. With the
+/// `accesskit` feature it can hold an AccessKit adapter, which is not `Send`.
+/// This app keeps the adapter on the UI thread instead, so the state's own
+/// adapter slot stays empty and nothing in it is tied to the UI thread.
+pub struct EguiState(egui_winit::State);
+
+impl EguiState {
+    pub fn new(state: egui_winit::State) -> Self {
+        assert!(
+            state.accesskit.is_none(),
+            "the AccessKit adapter belongs to the UI thread"
+        );
+        Self(state)
+    }
+}
+
+// SAFETY: the only part that is not `Send`, the AccessKit adapter, is absent
+// (checked in `new`) and never set: the render thread does not call
+// `init_accesskit`.
+unsafe impl Send for EguiState {}
+
+/// Hands egui's accessibility tree updates to the UI thread, which owns the
+/// UI Automation provider.
+pub type TreeSink = Box<dyn Fn(egui::accesskit::TreeUpdate) + Send>;
+
 pub struct RenderThread {
     window: Arc<Window>,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     instance: wgpu::Instance,
     surface_source: SurfaceSource,
+    tree_sink: TreeSink,
     adapter_choice: AdapterChoice,
     display: Display,
     /// `UGURUGU_DIAGNOSTICS=1` enables test-only keys.
@@ -118,8 +147,9 @@ impl RenderThread {
         window: Arc<Window>,
         instance: wgpu::Instance,
         surface_source: SurfaceSource,
+        tree_sink: TreeSink,
         egui_ctx: egui::Context,
-        egui_state: egui_winit::State,
+        EguiState(egui_state): EguiState,
     ) -> Result<Self, String> {
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
@@ -136,6 +166,7 @@ impl RenderThread {
             egui_state,
             instance,
             surface_source,
+            tree_sink,
             adapter_choice,
             display,
             diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
@@ -262,6 +293,18 @@ impl RenderThread {
     fn apply(&mut self, message: ToRender) -> bool {
         match message {
             ToRender::Shutdown => return false,
+            ToRender::Accessibility(active) => {
+                if active {
+                    self.egui_ctx.enable_accesskit();
+                } else {
+                    self.egui_ctx.disable_accesskit();
+                }
+                self.needs_frame = true;
+            }
+            ToRender::AccessibilityAction(request) => {
+                self.egui_state.on_accesskit_action_request(request);
+                self.needs_frame = true;
+            }
             ToRender::Pointer(events) => {
                 let pixels_per_point = egui_winit::pixels_per_point(&self.egui_ctx, &self.window);
                 let modifiers = self.egui_ctx.input(|input| input.modifiers);
@@ -341,6 +384,7 @@ impl RenderThread {
                     }
                     if ui.button("Clear").clicked() {
                         canvas.clear();
+                        tracing::info!("canvas cleared");
                     }
                 });
             });
@@ -350,8 +394,12 @@ impl RenderThread {
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| canvas_area = canvas.layout(ui));
         });
+        let mut platform_output = output.platform_output;
+        if let Some(update) = platform_output.accesskit_update.take() {
+            (self.tree_sink)(update);
+        }
         self.egui_state
-            .handle_platform_output(&self.window, output.platform_output);
+            .handle_platform_output(&self.window, platform_output);
         if remove_device {
             tracing::warn!("removing the GPU device for a recovery test");
             if let Err(error) = self.display.gpu.remove_for_test() {

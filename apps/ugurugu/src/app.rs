@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 
+use egui_winit::accesskit_winit;
 use ugu_win::pointer::PointerInput;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -18,13 +19,23 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
-use crate::render::{RenderThread, SurfaceSource, ToRender};
+use crate::render::{EguiState, RenderThread, SurfaceSource, ToRender, TreeSink};
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
     RenderStopped(Option<String>),
     /// The render thread needs a new surface for the window.
     NeedSurface(Sender<Result<wgpu::Surface<'static>, String>>),
+    /// A screen reader connected, left, or asked for an action.
+    Accessibility(accesskit_winit::Event),
+    /// egui's accessibility tree changed.
+    AccessibilityTree(egui::accesskit::TreeUpdate),
+}
+
+impl From<accesskit_winit::Event> for UiEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Accessibility(event)
+    }
 }
 
 pub struct App {
@@ -34,8 +45,13 @@ pub struct App {
 }
 
 struct Session {
-    // Dropped first: the subclass must go before the window it is attached to.
+    // Dropped in this order, the reverse of installing: the pointer subclass
+    // (comctl32) sits on top of AccessKit's, which replaces the window
+    // procedure directly, and both go before the window.
     pointer: PointerInput,
+    /// UI Automation provider; it must live on the thread that owns the
+    /// window, so egui's tree updates are sent here from the render thread.
+    accessibility: accesskit_winit::Adapter,
     window: Arc<Window>,
     instance: wgpu::Instance,
     to_render: Sender<ToRender>,
@@ -73,27 +89,32 @@ impl Session {
     ) -> Result<Self, String> {
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
-            .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 1000.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 1000.0))
+            // AccessKit must be attached before the window is first shown.
+            .with_visible(false);
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
                 .map_err(|error| format!("cannot create the window: {error}"))?,
         );
+        let accessibility =
+            accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy.clone());
         // SAFETY: the window is alive and owned by this thread, and `Session`
         // drops the subclass before the window.
         let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
+        window.set_visible(true);
 
         let egui_ctx = egui::Context::default();
         crate::ime_probe::install_cjk_fonts(&egui_ctx);
-        let egui_state = egui_winit::State::new(
+        let egui_state = EguiState::new(egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
             event_loop,
             Some(window.scale_factor() as f32),
             window.theme(),
             None,
-        );
+        ));
         let instance = RenderThread::create_instance();
         let render_instance = instance.clone();
         let surface_proxy = proxy.clone();
@@ -106,6 +127,10 @@ impl Session {
                 .recv()
                 .map_err(|_| "the window closed before it had a new surface".to_owned())?
         });
+        let tree_proxy = proxy.clone();
+        let tree_sink: TreeSink = Box::new(move |update| {
+            let _ = tree_proxy.send_event(UiEvent::AccessibilityTree(update));
+        });
         let (to_render, messages) = mpsc::channel();
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
@@ -115,6 +140,7 @@ impl Session {
                     render_window,
                     render_instance,
                     surface_source,
+                    tree_sink,
                     egui_ctx,
                     egui_state,
                 )
@@ -126,6 +152,7 @@ impl Session {
 
         Ok(Self {
             pointer,
+            accessibility,
             window,
             instance,
             to_render,
@@ -176,6 +203,29 @@ impl ApplicationHandler<UiEvent> for App {
                         &session.instance,
                         &session.window,
                     ));
+                }
+                return;
+            }
+            UiEvent::Accessibility(event) => {
+                if let Some(session) = self.session.as_ref() {
+                    let message = match event.window_event {
+                        accesskit_winit::WindowEvent::InitialTreeRequested => {
+                            ToRender::Accessibility(true)
+                        }
+                        accesskit_winit::WindowEvent::AccessibilityDeactivated => {
+                            ToRender::Accessibility(false)
+                        }
+                        accesskit_winit::WindowEvent::ActionRequested(request) => {
+                            ToRender::AccessibilityAction(request)
+                        }
+                    };
+                    let _ = session.to_render.send(message);
+                }
+                return;
+            }
+            UiEvent::AccessibilityTree(update) => {
+                if let Some(session) = self.session.as_mut() {
+                    session.accessibility.update_if_active(|| update);
                 }
                 return;
             }
