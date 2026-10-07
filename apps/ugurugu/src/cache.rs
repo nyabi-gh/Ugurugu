@@ -142,7 +142,16 @@ impl CacheWorker {
                             .exports
                             .push_front(job);
                     }
-                    worker.queue.lock().expect("queue lock").running = None;
+                    let mut queue = worker.queue.lock().expect("queue lock");
+                    queue.running = None;
+                    let idle = queue.split.is_none()
+                        && queue.frames.is_empty()
+                        && queue.exports.is_empty();
+                    drop(queue);
+                    // Measured free: drawing allocates it again at no cost.
+                    if idle {
+                        renderer.release_scratch();
+                    }
                 }
             })
             .expect("cannot start the canvas cache thread");

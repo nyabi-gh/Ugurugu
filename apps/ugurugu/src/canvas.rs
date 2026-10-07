@@ -56,8 +56,9 @@ struct Playback {
     shrink: u32,
     /// How many frames fit in the budget; 0 before it is worked out.
     ahead: u32,
-    /// The frame on screen and how much smaller it is.
-    shown: Option<(u32, Arc<Pixmap>, u32)>,
+    /// The frame on screen and how much smaller it is; at first the edited
+    /// image, so that its pixels go once the next frame is shown.
+    shown: (Arc<Pixmap>, u32),
     /// The first frame of the frames asked for, which run as far as the
     /// budget allows.
     window: Option<u32>,
@@ -79,7 +80,11 @@ pub struct Canvas {
     cache: CacheWorker,
     split: Option<(Key, Split)>,
     requested: Option<Key>,
+    /// The edited image; empty from playback until the next split.
     display: Pixmap,
+    /// The frame playback stopped on and how much smaller it is, shown
+    /// until the split of that frame arrives.
+    held: Option<(Arc<Pixmap>, u32)>,
     /// Display pixels not yet uploaded.
     upload: Option<PixelRect>,
     stamp: Stamp,
@@ -127,6 +132,7 @@ impl Canvas {
             split: None,
             requested: None,
             display: Pixmap::new(width, height),
+            held: None,
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             stamp: Stamp::default(),
             interaction: Interaction::Idle,
@@ -155,9 +161,10 @@ impl Canvas {
         self.split = None;
         self.requested = None;
         self.display = Pixmap::new(width, height);
-        self.upload_all();
+        self.held = None;
         self.interaction = Interaction::Idle;
         self.playback = None;
+        self.upload_all();
         self.snapshot = None;
         self.placed = false;
         if let Some(area) = self.area {
@@ -298,6 +305,7 @@ impl Canvas {
                     return;
                 }
                 self.requested = None;
+                self.held = None;
                 self.display = display;
                 self.split = Some((key, split));
                 self.upload_all();
@@ -328,11 +336,21 @@ impl Canvas {
 
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
-        if self.playback.take().is_some() {
+        if let Some(playback) = self.playback.take() {
+            self.held = Some(playback.shown);
             self.upload_all();
             return;
         }
         self.edit(|_| ());
+        // Stopping asks for a split of the frame it stops on. Until then the
+        // old one's layer surfaces would only keep the renderer from reusing
+        // them for playback.
+        self.split = None;
+        self.requested = None;
+        let shown = self.held.take().unwrap_or_else(|| {
+            let display = std::mem::replace(&mut self.display, Pixmap::new(1, 1));
+            (Arc::new(display), 1)
+        });
         tracing::debug!("playback started");
         self.playback = Some(Playback {
             next: self.session.frame() + 1,
@@ -341,7 +359,7 @@ impl Canvas {
             version: self.version(),
             shrink: preview_shrink(self.scale),
             ahead: 0,
-            shown: None,
+            shown,
             window: None,
         });
     }
@@ -374,7 +392,7 @@ impl Canvas {
         if now >= playback.due
             && let Some(pixels) = playback.frames.get(&cycle)
         {
-            playback.shown = Some((cycle, pixels.clone(), shrink));
+            playback.shown = (pixels.clone(), shrink);
             playback.next += 1;
             // Keep the cadence unless a wait for rendering put it behind.
             playback.due = if now - playback.due < period {
@@ -607,7 +625,8 @@ impl Canvas {
 
     /// Marks the whole display for upload, as a new GPU device needs.
     pub fn upload_all(&mut self) {
-        let [width, height] = [self.display.width(), self.display.height()];
+        let shown = self.display();
+        let [width, height] = [shown.width(), shown.height()];
         self.upload = Some([0, 0, u32::from(width), u32::from(height)]);
     }
 
@@ -616,27 +635,26 @@ impl Canvas {
         self.upload.take()
     }
 
-    /// What the canvas shows: the playback frame, or the edited image.
+    /// What the canvas shows: the playback frame, the frame playback
+    /// stopped on, or the edited image.
     pub fn display(&self) -> &Pixmap {
-        match self
-            .playback
-            .as_ref()
-            .and_then(|playback| playback.shown.as_ref())
-        {
-            Some((_, pixels, _)) => pixels,
-            None => &self.display,
-        }
+        self.shown().0
+    }
+
+    /// The pixels shown and how much smaller than the canvas they are.
+    fn shown(&self) -> (&Pixmap, u32) {
+        let frame = match &self.playback {
+            Some(playback) => Some(&playback.shown),
+            None => self.held.as_ref(),
+        };
+        frame.map_or((&self.display, 1), |(pixels, shrink)| (pixels, *shrink))
     }
 
     /// Where the document is drawn, in client physical pixels.
     pub fn placement(&self) -> Placement {
         let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
         // A playback frame drawn smaller has fewer pixels to spread out.
-        let shrink = self
-            .playback
-            .as_ref()
-            .and_then(|playback| playback.shown.as_ref())
-            .map_or(1, |(_, _, shrink)| *shrink);
+        let shrink = self.shown().1;
         Placement {
             offset: [
                 (f64::from(origin[0]) + self.offset[0]) as f32,
@@ -695,9 +713,45 @@ fn last_stroke(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn playback_frames_keep_a_pixel_for_every_screen_pixel() {
         let shrinks = [1.5, 1.0, 0.6, 0.5, 0.3, 0.25, 0.2, 0.05].map(super::preview_shrink);
         assert_eq!(shrinks, [1, 1, 1, 2, 2, 4, 4, 8]);
+    }
+
+    #[test]
+    fn a_playback_frame_drawn_smaller_is_uploaded_whole_and_no_more() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.scale = 0.5;
+        canvas.toggle_playback();
+        canvas.take_upload();
+        let mut now = Instant::now();
+        while canvas.display().width() != 160 {
+            canvas.tick(now);
+            now += Duration::from_millis(500);
+            if let Ok(rendered) = renders.recv_timeout(Duration::from_secs(10)) {
+                canvas.adopt(rendered);
+            }
+        }
+        assert_eq!(canvas.take_upload(), Some([0, 0, 160, 100]));
+
+        // Stopped, the frame stays until the split of it arrives.
+        canvas.toggle_playback();
+        assert_eq!(canvas.display().width(), 160);
+        assert_eq!(canvas.placement().scale, 1.0);
+        canvas.sync();
+        while canvas.split.is_none() {
+            let rendered = renders
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the split renders");
+            canvas.adopt(rendered);
+        }
+        assert_eq!(canvas.display().width(), 320);
+        assert_eq!(canvas.placement().scale, 0.5);
     }
 }

@@ -508,6 +508,10 @@ fn splits(document: &Document, threads: u16) {
             continue;
         };
         let wobble = paint.wobble.unwrap_or(history.document().wobble).amount;
+        // As the app does whenever its worker runs out of work, to time it.
+        if std::env::var_os("UGU_RELEASE_SCRATCH").is_some() {
+            renderer.release_scratch();
+        }
         let started = Instant::now();
         let mut split = renderer
             .split(

@@ -113,6 +113,8 @@ pub struct DocumentRenderer {
     /// once.
     singles: Vec<Raster>,
     level: vello_cpu::Level,
+    /// What `main` was made with; 0 draws on the calling thread.
+    main_threads: u16,
     threads: usize,
     /// The paint layers' own surfaces of the last render, kept for reuse.
     cache: HashMap<LayerId, Cached>,
@@ -212,6 +214,7 @@ impl DocumentRenderer {
             main: Raster::new(level, threads),
             singles: Vec::new(),
             level,
+            main_threads: threads,
             threads: usize::from(threads.max(1)),
             cache: HashMap::new(),
             drawn: 0,
@@ -220,6 +223,13 @@ impl DocumentRenderer {
             tile_edge: TILE_EDGE,
             timings: Timings::default(),
         }
+    }
+
+    /// Lets go of Vello's working memory, which keeps the size of the
+    /// largest layer drawn; the next render allocates it again.
+    pub fn release_scratch(&mut self) {
+        self.main = Raster::new(self.level, self.main_threads);
+        self.singles.clear();
     }
 
     pub fn timings(&self) -> Timings {
