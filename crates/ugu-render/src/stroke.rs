@@ -225,8 +225,18 @@ pub fn displaced_at(samples: &[Sample], index: usize, pen: &Pen, frame: u32) -> 
 /// The stroke's outline on `frame`, to fill with the non-zero rule; `None`
 /// without samples.
 pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
+    let mut path = BezPath::new();
+    outline_into(samples, pen, frame, &mut path);
+    (!samples.is_empty()).then_some(path)
+}
+
+/// `outline` into `path`, replacing what it held and keeping its memory, so
+/// that frame after frame of outlines need not allocate; left empty without
+/// samples.
+pub fn outline_into(samples: &[Sample], pen: &Pen, frame: u32, path: &mut BezPath) {
+    path.truncate(0);
     if samples.is_empty() {
-        return None;
+        return;
     }
     let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
     let radii: Vec<f64> = samples
@@ -235,7 +245,6 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
         .collect();
     let centers = displaced(samples, pen, frame);
     let side = |a: usize, b: usize| left_by_band(centers[a], centers[b], [radii[a], radii[b]]);
-    let mut path = BezPath::new();
     let mut halves = Vec::new();
     let mut start = 0;
     while start < samples.len() {
@@ -251,15 +260,9 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
             halves.push([Some(behind), None]);
             end += 1;
         }
-        run(
-            &mut path,
-            &centers[start..=end],
-            &radii[start..=end],
-            &halves,
-        );
+        run(path, &centers[start..=end], &radii[start..=end], &halves);
         start = end + 1;
     }
-    Some(path)
 }
 
 /// How the edges meet at a circle between two bands, on the right (from

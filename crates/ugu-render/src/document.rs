@@ -182,6 +182,9 @@ struct Raster {
     context: RenderContext,
     resources: Resources,
     threads: usize,
+    /// The outlines of the last layer drawn, one per stroke, refilled for
+    /// the next so that their memory is not given back and taken again.
+    paths: Vec<BezPath>,
 }
 
 /// Bytes the layers' own surfaces may take by default: half of the working
@@ -562,6 +565,7 @@ impl Raster {
             ),
             resources: Resources::new(),
             threads: usize::from(threads.max(1)),
+            paths: Vec::new(),
         }
     }
 
@@ -605,7 +609,8 @@ impl Raster {
     ) -> Timings {
         let [width, height] = [pixmap.width(), pixmap.height()];
         let started = std::time::Instant::now();
-        let outlines = self.outlines(steps, frame, detail);
+        let mut paths = std::mem::take(&mut self.paths);
+        self.outlines(steps, frame, detail, &mut paths);
         let outlined = started.elapsed();
 
         self.context.reset_and_resize(width, height);
@@ -613,7 +618,7 @@ impl Raster {
             Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
                 * Affine::scale(1.0 / f64::from(shrink)),
         );
-        let mut outlines = outlines.into_iter();
+        let mut outlines = paths.iter();
         for step in steps {
             match step {
                 Step::Push(opacity) => {
@@ -622,12 +627,14 @@ impl Raster {
                 }
                 Step::Pop => self.context.pop_layer(),
                 Step::Draw { stroke, erase, .. } => {
-                    if let Some(path) = outlines.next().flatten() {
-                        self.draw(stroke, *erase, &path);
+                    let path = outlines.next().expect("one outline per stroke");
+                    if !path.is_empty() {
+                        self.draw(stroke, *erase, path);
                     }
                 }
             }
         }
+        self.paths = paths;
         self.context.flush();
         let encoded = started.elapsed();
         self.context
@@ -640,9 +647,9 @@ impl Raster {
         }
     }
 
-    /// The outline of each `Step::Draw`, in order, made on the worker
-    /// threads in contiguous runs.
-    fn outlines(&self, steps: &[Step<'_>], frame: u32, detail: u32) -> Vec<Option<BezPath>> {
+    /// The outline of each `Step::Draw` into `paths`, in order (empty
+    /// without samples), made on the worker threads in contiguous runs.
+    fn outlines(&self, steps: &[Step<'_>], frame: u32, detail: u32, paths: &mut Vec<BezPath>) {
         let draws: Vec<(&Stroke, &Pen)> = steps
             .iter()
             .filter_map(|step| match step {
@@ -650,26 +657,29 @@ impl Raster {
                 _ => None,
             })
             .collect();
-        let make = |(stroke, pen): &(&Stroke, &Pen)| {
+        paths.resize_with(draws.len(), BezPath::new);
+        let make = |(stroke, pen): &(&Stroke, &Pen), path: &mut BezPath| {
             let spacing =
                 stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
             let samples = Resampler::whole(&stroke.points, spacing);
-            stroke::outline(&samples, pen, frame)
+            stroke::outline_into(&samples, pen, frame, path);
         };
         let run = draws.len().div_ceil(self.threads).max(1);
         if self.threads == 1 || draws.len() < 2 {
-            return draws.iter().map(make).collect();
+            for (draw, path) in draws.iter().zip(paths.iter_mut()) {
+                make(draw, path);
+            }
+            return;
         }
         std::thread::scope(|scope| {
-            let workers: Vec<_> = draws
-                .chunks(run)
-                .map(|chunk| scope.spawn(move || chunk.iter().map(make).collect::<Vec<_>>()))
-                .collect();
-            workers
-                .into_iter()
-                .flat_map(|worker| worker.join().expect("outline worker panicked"))
-                .collect()
-        })
+            for (chunk, paths) in draws.chunks(run).zip(paths.chunks_mut(run)) {
+                scope.spawn(move || {
+                    for (draw, path) in chunk.iter().zip(paths) {
+                        make(draw, path);
+                    }
+                });
+            }
+        });
     }
 
     fn draw(&mut self, stroke: &Stroke, erase: bool, path: &BezPath) {

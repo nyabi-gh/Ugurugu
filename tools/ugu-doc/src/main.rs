@@ -24,6 +24,8 @@
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
 //! - `ugu-doc stop <file.ugu2>`: times how long a frame render on 8 threads
 //!   takes to end once it is told to stop, at points spread over the render.
+//! - `ugu-doc layers <file.ugu2> <threads>`: times each layer drawn alone on
+//!   one thread and how long that many threads take to draw them all.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -36,7 +38,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | many <operations> <layers> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | stop <file.ugu2>";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | stop <file.ugu2> | layers <file.ugu2> <threads>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -63,6 +65,10 @@ fn main() -> ExitCode {
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["stop", file] => stop(Path::new(file)),
+        ["layers", file, threads] => threads
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|threads| layers(Path::new(file), threads)),
         ["render", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -467,6 +473,109 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     println!(
         "{threads} threads: first frame {first:.1} ms, then per frame {}",
         percentiles(&mut times)
+    );
+    Ok(())
+}
+
+/// Each layer's own drawing time on one thread (p50 over every frame of two
+/// rounds), and how long `threads` threads would take to draw them all when
+/// they take layers in document order, as the renderer does, or the most
+/// expensive first.
+fn layers(path: &Path, threads: usize) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::plan::RenderPlan;
+
+    fn keep_only(layers: &mut [Layer], keep: ugu_core::document::LayerId) {
+        for layer in layers {
+            match &mut layer.kind {
+                LayerKind::Paint(paint) => {
+                    paint.clip_to_below = false;
+                    if layer.id != keep {
+                        paint.ops.clear();
+                    }
+                }
+                LayerKind::Group(group) => keep_only(&mut group.children, keep),
+            }
+        }
+    }
+
+    let mut document = open(path)?;
+    to_pens(&mut document);
+    let plan = RenderPlan::new(&document, Purpose::Display);
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    let mut costs = Vec::new();
+    for (id, _) in &plan.layers {
+        let mut alone = document.clone();
+        keep_only(&mut alone.layers, *id);
+        let alone_plan = RenderPlan::new(&alone, Purpose::Display);
+        let mut renderer = DocumentRenderer::new(0);
+        let mut stages = [Vec::new(), Vec::new(), Vec::new()];
+        for round in 0..3 {
+            for frame in 0..i64::from(alone.frames) {
+                renderer.render_scaled(&alone, &alone_plan, frame, None, 1, &mut pixmap);
+                if round > 0 {
+                    let timings = renderer.timings();
+                    for (stage, time) in
+                        stages
+                            .iter_mut()
+                            .zip([timings.outlines, timings.encode, timings.rasterize])
+                    {
+                        stage.push(time.as_secs_f64() * 1000.0);
+                    }
+                }
+            }
+        }
+        let median = |times: &mut Vec<f64>| {
+            times.sort_by(f64::total_cmp);
+            times[times.len() / 2]
+        };
+        let [outlines, encode, rasterize] = stages.each_mut().map(median);
+        let name = document.layer(*id).map_or("", |layer| layer.name.as_str());
+        let strokes = match document.layer(*id).map(|layer| &layer.kind) {
+            Some(LayerKind::Paint(paint)) => paint.ops.len(),
+            _ => 0,
+        };
+        let total = outlines + encode + rasterize;
+        let painted = renderer.surface(*id).map_or(0, |surface| {
+            (0..alone.canvas[1])
+                .map(|y| {
+                    surface
+                        .row(y, 0, alone.canvas[0])
+                        .map(|(_, part)| part.iter().filter(|pixel| pixel[3] != 0).count())
+                        .sum::<usize>()
+                })
+                .sum()
+        });
+        let share = painted as f64 * 100.0 / f64::from(alone.canvas[0] * alone.canvas[1]);
+        println!(
+            "{:>3} {name:<24} ops {strokes:>5}  outlines {outlines:>5.1}  encode {encode:>5.1}  \
+             rasterize {rasterize:>5.1}  total {total:>5.1} ms  painted {share:>4.1}%",
+            id.0
+        );
+        costs.push(total);
+    }
+    let finish = |order: &[f64]| {
+        let mut free = vec![0.0f64; threads];
+        for cost in order {
+            let earliest = free
+                .iter_mut()
+                .min_by(|a, b| a.total_cmp(b))
+                .expect("at least one thread");
+            *earliest += cost;
+        }
+        free.into_iter().fold(0.0, f64::max)
+    };
+    let mut largest_first = costs.clone();
+    largest_first.sort_by(|a, b| b.total_cmp(a));
+    let sum: f64 = costs.iter().sum();
+    println!(
+        "sum {sum:.1} ms, largest {:.1} ms, {threads} threads: document order {:.1} ms, \
+         largest first {:.1} ms, even split {:.1} ms",
+        largest_first[0],
+        finish(&costs),
+        finish(&largest_first),
+        sum / threads as f64
     );
     Ok(())
 }
