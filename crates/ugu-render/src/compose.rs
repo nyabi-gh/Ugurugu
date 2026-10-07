@@ -479,6 +479,55 @@ mod tests {
                 }]
             })
             .unwrap();
+        // The selection moved half a pixel on the first layer, and an image
+        // placed turned over it.
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, 6, 4);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let pixels: Vec<u8> = (0..24u8)
+            .flat_map(|index| [index * 10, 255 - index * 10, 90, 150 + index * 4])
+            .collect();
+        writer.write_image_data(&pixels).unwrap();
+        writer.finish().unwrap();
+        let asset = ugu_core::ops::AssetId([7; 32]);
+        history
+            .edit("Move and place", |document| {
+                let index = match document.layer(first).map(|layer| &layer.kind) {
+                    Some(LayerKind::Paint(paint)) => paint.ops.len(),
+                    _ => unreachable!(),
+                };
+                let moved = ugu_core::ops::Op::TransformSelection {
+                    mask,
+                    transform: ugu_core::ops::Affine([1.0, 0.0, 12.5, 0.0, 1.0, -6.0]),
+                    sampling: ugu_core::ops::Sampling::Smooth,
+                    keep_source: false,
+                };
+                let placed = ugu_core::ops::Op::PlaceImage {
+                    asset,
+                    transform: ugu_core::ops::Affine([0.0, -3.0, 70.0, 3.0, 0.0, 30.0]),
+                    sampling: ugu_core::ops::Sampling::Smooth,
+                };
+                let image = ugu_core::store::Asset {
+                    size: [6, 4],
+                    png: png.as_slice().into(),
+                };
+                vec![
+                    Change::InsertAsset(asset, image),
+                    Change::InsertOp {
+                        layer: first,
+                        index,
+                        op: moved,
+                    },
+                    Change::InsertOp {
+                        layer: first,
+                        index: index + 1,
+                        op: placed,
+                    },
+                ]
+            })
+            .unwrap();
         let set = |history: &mut History, id, update: &dyn Fn(&mut ugu_core::ops::PaintLayer)| {
             history
                 .edit("Set", |document| {

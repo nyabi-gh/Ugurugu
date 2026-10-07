@@ -96,12 +96,20 @@ impl Rect {
 struct World {
     strokes: HashMap<StrokeId, (Rect, [f32; 4])>,
     masks: HashMap<MaskId, Rect>,
+    /// Each image's width and premultiplied pixels, row by row.
+    images: HashMap<AssetId, (i32, Vec<[f32; 4]>)>,
 }
 
 impl World {
     fn stroke(&mut self, rect: [i32; 4], color: [f32; 4]) -> StrokeId {
         let id = StrokeId(self.strokes.len() as u32);
         self.strokes.insert(id, (Rect(rect), color));
+        id
+    }
+
+    fn image(&mut self, width: i32, pixels: Vec<[f32; 4]>) -> AssetId {
+        let id = AssetId([self.images.len() as u8; 32]);
+        self.images.insert(id, (width, pixels));
         id
     }
 
@@ -168,7 +176,20 @@ impl World {
                         }
                     }
                 }
-                Op::PlaceImage { .. } => unreachable!("not used by these tests"),
+                // Placed by whole pixels, over what is there; it does not
+                // move with motion.
+                Op::PlaceImage {
+                    asset, transform, ..
+                } => {
+                    let [1.0, 0.0, dx, 0.0, 1.0, dy] = transform.0 else {
+                        unreachable!("these tests only translate by whole pixels")
+                    };
+                    let (width, pixels) = &self.images[asset];
+                    for (index, pixel) in pixels.iter().enumerate() {
+                        let (x, y) = (index as i32 % width, index as i32 / width);
+                        surface.over(x + dx as i32, y + dy as i32, *pixel);
+                    }
+                }
                 Op::TransformSelection {
                     mask,
                     transform,
@@ -532,6 +553,34 @@ fn a_fill_replaces_what_it_covers_and_goes_behind_its_edge() {
     assert_eq!(
         [lone.at(0, 0), lone.at(3, 0), lone.at(4, 0)],
         [green, green, CLEAR]
+    );
+}
+
+#[test]
+fn an_image_goes_over_what_came_before_and_under_what_follows() {
+    let mut world = World::default();
+    let under = world.stroke([0, 0, 4, 1], RED);
+    let over = world.stroke([3, 0, 4, 1], BLUE);
+    let half = [0.0, 0.5, 0.0, 0.5];
+    let image = world.image(2, vec![GREEN, half]);
+    let placed = Op::PlaceImage {
+        asset: image,
+        transform: Affine::translation(1.0, 0.0),
+        sampling: Sampling::Nearest,
+    };
+    let mut ops = layer(vec![paint(under), placed, paint(over)], [5, 1]);
+    ops.wobble = Some(Wobble::classic(1.0));
+    let even = world.layer(&ops, 0);
+    let odd = world.layer(&ops, 1);
+    let red_under_half = [0.5, 0.5, 0.0, 1.0];
+    assert_eq!(
+        [even.at(0, 0), even.at(1, 0), even.at(2, 0), even.at(3, 0)],
+        [RED, GREEN, red_under_half, BLUE]
+    );
+    // The strokes moved; the image stayed where it was placed.
+    assert_eq!(
+        [odd.at(1, 0), odd.at(2, 0), odd.at(4, 0)],
+        [GREEN, red_under_half, BLUE]
     );
 }
 

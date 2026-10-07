@@ -7,6 +7,7 @@ pub mod compose;
 pub mod composite;
 pub mod document;
 pub mod gpu;
+pub mod image;
 pub mod live;
 pub mod mask;
 pub mod plan;

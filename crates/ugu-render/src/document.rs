@@ -16,12 +16,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{MaskId, Op, PaintLayer, Wobble};
+use ugu_core::ops::{self, AssetId, MaskId, Op, PaintLayer, Sampling, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Store, Stroke};
 use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::{Affine, BezPath};
-use vello_cpu::peniko::{BlendMode, Compose, Mix};
-use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
+use vello_cpu::kurbo::{Affine, BezPath, Point, Rect};
+use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
+use vello_cpu::{
+    Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources,
+};
 
 use crate::compose::premultiplied;
 use crate::composite::{self, Source};
@@ -34,9 +36,6 @@ use crate::tile::TiledSurface;
 /// Content this build cannot draw yet, and the milestone that adds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unsupported {
-    /// Images and moved selections (M4).
-    Image,
-    Selection,
     /// Crops and resizes (M4).
     CanvasChange,
     /// Airbrush and spray (M4).
@@ -46,8 +45,6 @@ pub enum Unsupported {
 impl std::fmt::Display for Unsupported {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Image => "images",
-            Self::Selection => "moved selections",
             Self::CanvasChange => "canvas crops or resizes",
             Self::Brush => "airbrush or spray strokes",
         })
@@ -81,9 +78,10 @@ fn check_ops(ops: &[Op], store: &Store) -> Result<(), Unsupported> {
                     return Err(Unsupported::Brush);
                 }
             }
-            Op::Fill { .. } | Op::ClearSelection { .. } => {}
-            Op::PlaceImage { .. } => return Err(Unsupported::Image),
-            Op::TransformSelection { .. } => return Err(Unsupported::Selection),
+            Op::Fill { .. }
+            | Op::ClearSelection { .. }
+            | Op::PlaceImage { .. }
+            | Op::TransformSelection { .. } => {}
             Op::Crop { .. } | Op::Resample { .. } => return Err(Unsupported::CanvasChange),
             Op::Isolated(section) => check_ops(&section.ops, store)?,
         }
@@ -123,7 +121,7 @@ pub struct DocumentRenderer {
     /// `set_detail`.
     detail: u32,
     timings: Timings,
-    masks: MaskCache,
+    masks: DrawCache,
 }
 
 /// Full detail for `DocumentRenderer::set_detail`.
@@ -179,7 +177,7 @@ struct Frame<'a> {
     frame: u32,
     shrink: u32,
     detail: u32,
-    masks: &'a MaskCache,
+    masks: &'a DrawCache,
 }
 
 /// A Vello context and the threads that make stroke outlines for it.
@@ -227,6 +225,27 @@ enum Step<'a> {
     Clear {
         ready: Arc<Ready>,
     },
+    /// Draws `image` placed by `transform`, in document pixels.
+    Image {
+        image: Arc<Pixmap>,
+        transform: Affine,
+        quality: ImageQuality,
+    },
+    /// Cuts what is drawn so far within the mask, clears it unless
+    /// `keep_source`, and draws it moved by `transform` on top. It needs the
+    /// pixels drawn so far, so drawing stops and starts again here.
+    Move {
+        ready: Arc<Ready>,
+        transform: Affine,
+        quality: ImageQuality,
+        keep_source: bool,
+    },
+    /// An isolated section that moves a selection, drawn on its own and
+    /// then put over what is there at `opacity`.
+    Section {
+        steps: Vec<Step<'a>>,
+        opacity: f32,
+    },
 }
 
 impl DocumentRenderer {
@@ -250,7 +269,7 @@ impl DocumentRenderer {
             tile_edge: TILE_EDGE,
             detail: FULL_DETAIL,
             timings: Timings::default(),
-            masks: MaskCache::default(),
+            masks: DrawCache::default(),
         }
     }
 
@@ -613,13 +632,14 @@ impl Raster {
     ) -> Timings {
         let Frame {
             document,
-            frame,
             shrink,
-            detail,
             masks,
+            ..
         } = *at;
         let steps = layer_steps(document, paint, masks);
-        let (span, reached) = reach(step_bounds(&steps), shrink, surface);
+        let mut bounds = Vec::new();
+        step_bounds(&steps, &mut bounds);
+        let (span, reached) = reach(bounds.into_iter(), shrink, surface);
         let reused = surface.clear();
         if span[0] >= span[2] {
             return Timings::default();
@@ -629,7 +649,7 @@ impl Raster {
             Some(pixmap) if [pixmap.width(), pixmap.height()] == extent => pixmap,
             _ => Pixmap::new(extent[0], extent[1]),
         };
-        let timings = self.draw_steps(&steps, frame, shrink, detail, origin, &mut pixmap);
+        let timings = self.draw_steps(&steps, at, origin, &mut pixmap);
         surface.set(span, pixmap, reached);
         timings
     }
@@ -639,73 +659,193 @@ impl Raster {
     fn draw_steps(
         &mut self,
         steps: &[Step<'_>],
-        frame: u32,
-        shrink: u32,
-        detail: u32,
+        at: &Frame<'_>,
         origin: [u32; 2],
         pixmap: &mut Pixmap,
     ) -> Timings {
+        let Frame {
+            frame,
+            shrink,
+            detail,
+            masks: cache,
+            ..
+        } = *at;
         let [width, height] = [pixmap.width(), pixmap.height()];
+        let base = Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
+            * Affine::scale(1.0 / f64::from(shrink));
+        let mut timings = Timings::default();
+        // Sections that move selections are drawn first, each on its own.
+        let mut sections = Vec::new();
+        for step in steps {
+            if let Step::Section { steps, .. } = step {
+                let mut section = Pixmap::new(width, height);
+                timings += self.draw_steps(steps, at, origin, &mut section);
+                sections.push(Arc::new(section));
+            }
+        }
+        let mut sections = sections.into_iter();
+
         let started = std::time::Instant::now();
         let mut paths = std::mem::take(&mut self.paths);
         self.outlines(steps, frame, detail, &mut paths);
-        let outlined = started.elapsed();
-
-        self.context.reset_and_resize(width, height);
-        self.context.set_transform(
-            Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
-                * Affine::scale(1.0 / f64::from(shrink)),
-        );
+        timings.outlines += started.elapsed();
         let mut outlines = paths.iter();
-        for step in steps {
-            match step {
-                Step::Push(opacity) => {
-                    self.context
-                        .push_layer(None, None, Some(*opacity), None, None);
-                }
-                Step::Pop => self.context.pop_layer(),
-                Step::Draw {
-                    stroke,
-                    erase,
-                    clip,
-                    ..
-                } => {
-                    let path = outlines.next().expect("one outline per stroke");
-                    if !path.is_empty() {
-                        self.draw(stroke, *erase, path, clip.as_ref().map(|clip| &clip.area));
-                    }
-                }
-                Step::Fill {
-                    color: [r, g, b, a],
-                    ready,
-                } => {
-                    let color = AlphaColor::from_rgba8(*r, *g, *b, *a);
-                    self.take_away(&ready.area);
-                    self.context.set_paint(color);
-                    self.context.fill_path(&ready.area);
-                    if let Some(fringe) = &ready.fringe {
-                        let behind = BlendMode::new(Mix::Normal, Compose::DestOver);
-                        self.context
-                            .push_layer(None, Some(behind), None, None, None);
-                        self.context.set_paint(color);
-                        self.context.fill_path(fringe);
-                        self.context.pop_layer();
-                    }
-                }
-                Step::Clear { ready } => self.take_away(&ready.area),
+
+        // A run after a moved selection draws over what the run before drew,
+        // so two buffers take turns instead of copying: one drawn into, the
+        // other drawn from. The one left over is kept for the next layer.
+        let mut target = std::mem::replace(pixmap, Pixmap::new(1, 1));
+        let mut free = cache
+            .take_spare()
+            .filter(|spare| [spare.width(), spare.height()] == [width, height]);
+        // What is drawn before the step that starts each run, and what the
+        // run before that drew from.
+        let mut so_far: Option<Arc<Pixmap>> = None;
+        let mut drawn_from: Option<Arc<Pixmap>> = None;
+        let mut rest = steps;
+        loop {
+            let started = std::time::Instant::now();
+            // Vello lets go of the previous scene's images here.
+            self.context.reset_and_resize(width, height);
+            if let Some(used) = drawn_from.take() {
+                free = Arc::try_unwrap(used).ok().or(free);
             }
+            if let Some(so_far) = &so_far {
+                self.context.set_transform(Affine::IDENTITY);
+                self.put_image(so_far, ImageQuality::Low);
+            }
+            self.context.set_transform(base);
+            let mut taken = 0;
+            for step in rest {
+                if taken > 0 && matches!(step, Step::Move { .. }) {
+                    break;
+                }
+                taken += 1;
+                match step {
+                    Step::Push(opacity) => {
+                        self.context
+                            .push_layer(None, None, Some(*opacity), None, None);
+                    }
+                    Step::Pop => self.context.pop_layer(),
+                    Step::Draw {
+                        stroke,
+                        erase,
+                        clip,
+                        ..
+                    } => {
+                        let path = outlines.next().expect("one outline per stroke");
+                        if !path.is_empty() {
+                            self.draw(stroke, *erase, path, clip.as_ref().map(|clip| &clip.area));
+                        }
+                    }
+                    Step::Fill {
+                        color: [r, g, b, a],
+                        ready,
+                    } => {
+                        let color = AlphaColor::from_rgba8(*r, *g, *b, *a);
+                        self.take_away(&ready.area);
+                        self.context.set_paint(color);
+                        self.context.fill_path(&ready.area);
+                        if let Some(fringe) = &ready.fringe {
+                            let behind = BlendMode::new(Mix::Normal, Compose::DestOver);
+                            self.context
+                                .push_layer(None, Some(behind), None, None, None);
+                            self.context.set_paint(color);
+                            self.context.fill_path(fringe);
+                            self.context.pop_layer();
+                        }
+                    }
+                    Step::Clear { ready } => self.take_away(&ready.area),
+                    Step::Image {
+                        image,
+                        transform,
+                        quality,
+                    } => {
+                        self.context.set_transform(base * *transform);
+                        self.put_image(image, *quality);
+                        self.context.set_transform(base);
+                    }
+                    Step::Move {
+                        ready,
+                        transform,
+                        quality,
+                        keep_source,
+                    } => {
+                        // Nothing is drawn before it, so nothing moves.
+                        let Some(source) = &so_far else {
+                            continue;
+                        };
+                        if !keep_source {
+                            self.take_away(&ready.area);
+                        }
+                        let moved = base * *transform;
+                        self.context.set_transform(moved);
+                        self.context
+                            .push_layer(Some(&ready.area), None, None, None, None);
+                        self.context.set_transform(moved * base.inverse());
+                        self.put_image(source, *quality);
+                        self.context.pop_layer();
+                        self.context.set_transform(base);
+                    }
+                    Step::Section { opacity, .. } => {
+                        let section = sections.next().expect("drawn above");
+                        self.context.set_transform(Affine::IDENTITY);
+                        self.context
+                            .push_layer(None, None, Some(*opacity), None, None);
+                        self.put_image(&section, ImageQuality::Low);
+                        self.context.pop_layer();
+                        self.context.set_transform(base);
+                    }
+                }
+            }
+            self.context.flush();
+            let encoded = started.elapsed();
+            self.context.render_with(
+                &mut target,
+                &mut self.resources,
+                RasterizerSettings::default(),
+            );
+            timings.encode += encoded;
+            timings.rasterize += started.elapsed() - encoded;
+            rest = &rest[taken..];
+            if rest.is_empty() {
+                break;
+            }
+            let next = free.take().unwrap_or_else(|| Pixmap::new(width, height));
+            drawn_from = so_far.replace(Arc::new(std::mem::replace(&mut target, next)));
+        }
+        *pixmap = target;
+        if so_far.is_some() {
+            self.context.reset_and_resize(width, height);
+            let left = [so_far, drawn_from].into_iter().flatten();
+            free = left
+                .filter_map(|used| Arc::try_unwrap(used).ok())
+                .next_back()
+                .or(free);
+        }
+        if let Some(free) = free {
+            cache.keep_spare(free);
         }
         self.paths = paths;
-        self.context.flush();
-        let encoded = started.elapsed();
-        self.context
-            .render_with(pixmap, &mut self.resources, RasterizerSettings::default());
-        Timings {
-            outlines: outlined,
-            encode: encoded - outlined,
-            rasterize: started.elapsed() - encoded,
-            composite: std::time::Duration::ZERO,
-        }
+        timings
+    }
+
+    /// Fills `image`'s rectangle in the current transform with its pixels.
+    fn put_image(&mut self, image: &Arc<Pixmap>, quality: ImageQuality) {
+        let size = Rect::new(
+            0.0,
+            0.0,
+            f64::from(image.width()),
+            f64::from(image.height()),
+        );
+        self.context.set_paint(Image {
+            image: ImageSource::Pixmap(image.clone()),
+            sampler: ImageSampler {
+                quality,
+                ..ImageSampler::default()
+            },
+        });
+        self.context.fill_rect(&size);
     }
 
     /// The outline of each `Step::Draw` into `paths`, in order (empty
@@ -782,7 +922,7 @@ impl Raster {
 }
 
 /// What drawing `paint` takes, in order.
-fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &MaskCache) -> Vec<Step<'a>> {
+fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &DrawCache) -> Vec<Step<'a>> {
     let mut steps = Vec::new();
     collect(
         &paint.ops,
@@ -793,6 +933,41 @@ fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &MaskCache
         &mut steps,
     );
     steps
+}
+
+/// `transform` of the document as Vello's.
+fn affine(transform: ops::Affine) -> Affine {
+    let [a, b, c, d, e, f] = transform.0;
+    Affine::new([a, d, b, e, c, f])
+}
+
+/// How a moved selection or placed image is sampled. Like 2.2.13, smooth
+/// sampling is dropped where every pixel lands on a whole pixel: turns by a
+/// quarter, flips and whole-pixel moves.
+fn quality(sampling: Sampling, transform: ops::Affine) -> ImageQuality {
+    let [a, b, c, d, e, f] = transform.0;
+    let unit = |value: f64| value.abs() == 1.0;
+    let square = (unit(a) && b == 0.0 && d == 0.0 && unit(e))
+        || (a == 0.0 && unit(b) && unit(d) && e == 0.0);
+    match sampling {
+        Sampling::Nearest => ImageQuality::Low,
+        Sampling::Smooth if square && c.fract() == 0.0 && f.fract() == 0.0 => ImageQuality::Low,
+        Sampling::Smooth => ImageQuality::Medium,
+    }
+}
+
+/// The bounds of `bounds` (left, top, right, bottom) moved by `transform`.
+fn moved_bounds(bounds: [f64; 4], transform: Affine) -> [f64; 4] {
+    let [left, top, right, bottom] = bounds;
+    let corners = [(left, top), (right, top), (left, bottom), (right, bottom)]
+        .map(|(x, y)| transform * Point::new(x, y));
+    let (xs, ys) = (corners.map(|point| point.x), corners.map(|point| point.y));
+    [
+        xs.into_iter().fold(f64::INFINITY, f64::min),
+        ys.into_iter().fold(f64::INFINITY, f64::min),
+        xs.into_iter().fold(f64::NEG_INFINITY, f64::max),
+        ys.into_iter().fold(f64::NEG_INFINITY, f64::max),
+    ]
 }
 
 fn pen(stroke: &Stroke, wobble: Wobble) -> Pen {
@@ -806,17 +981,40 @@ fn pen(stroke: &Stroke, wobble: Wobble) -> Pen {
 
 /// Where the steps that add pixels reach, in document pixels. Erasing and
 /// clearing only take away.
-fn step_bounds<'s>(steps: &'s [Step<'_>]) -> impl Iterator<Item = [f64; 4]> + 's {
-    steps.iter().filter_map(|step| match step {
-        Step::Draw {
-            stroke,
-            pen,
-            erase: false,
-            ..
-        } => Some(stroke::bounds(&stroke.points, pen)),
-        Step::Fill { ready, .. } => ready.bounds.map(|bounds| bounds.map(f64::from)),
-        _ => None,
-    })
+fn step_bounds(steps: &[Step<'_>], out: &mut Vec<[f64; 4]>) {
+    for step in steps {
+        match step {
+            Step::Draw {
+                stroke,
+                pen,
+                erase: false,
+                ..
+            } => out.push(stroke::bounds(&stroke.points, pen)),
+            Step::Fill { ready, .. } => {
+                out.extend(ready.bounds.map(|bounds| bounds.map(f64::from)))
+            }
+            Step::Image {
+                image, transform, ..
+            } => out.push(moved_bounds(
+                [
+                    0.0,
+                    0.0,
+                    f64::from(image.width()),
+                    f64::from(image.height()),
+                ],
+                *transform,
+            )),
+            Step::Move {
+                ready, transform, ..
+            } => out.extend(
+                ready
+                    .bounds
+                    .map(|bounds| moved_bounds(bounds.map(f64::from), *transform)),
+            ),
+            Step::Section { steps, .. } => step_bounds(steps, out),
+            _ => {}
+        }
+    }
 }
 
 /// Where `ops` may add pixels, from stroke bounds and mask bounds alone,
@@ -863,6 +1061,28 @@ fn op_bounds(
                 }
                 if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
                     out.push(bounds.map(f64::from));
+                }
+            }
+            Op::PlaceImage {
+                asset, transform, ..
+            } => {
+                if let Some(asset) = store.assets.get(asset) {
+                    let size = asset.size.map(f64::from);
+                    out.push(moved_bounds(
+                        [0.0, 0.0, size[0], size[1]],
+                        affine(*transform),
+                    ));
+                }
+            }
+            Op::TransformSelection {
+                mask, transform, ..
+            } => {
+                if let Some(mask) = store.masks.get(mask) {
+                    let [left, top, width, height] = mask.bounds.map(f64::from);
+                    out.push(moved_bounds(
+                        [left, top, left + width, top + height],
+                        affine(*transform),
+                    ));
                 }
             }
             Op::Isolated(section) => op_bounds(
@@ -984,16 +1204,28 @@ struct Prepared {
 /// bits into a path costs milliseconds for a canvas-sized mask, and stored
 /// masks never change.
 #[derive(Default)]
-pub(crate) struct MaskCache {
+pub(crate) struct DrawCache {
     prepared: std::sync::Mutex<HashMap<MaskKey, Prepared>>,
+    /// Decoded assets and the render each was last used in; `None` when an
+    /// asset cannot be decoded, which validation should have kept out.
+    images: std::sync::Mutex<HashMap<AssetId, Decoded>>,
+    /// One buffer left over from drawing a layer that moves a selection,
+    /// for the next such layer, whichever thread draws it.
+    spare: std::sync::Mutex<Option<Pixmap>>,
     render: u64,
+}
+
+struct Decoded {
+    image: Option<Arc<Pixmap>>,
+    /// The render it was last used in.
+    used: u64,
 }
 
 fn mask_key(mask: &Mask) -> (usize, [i32; 4]) {
     (mask.bits.as_ptr() as usize, mask.bounds)
 }
 
-impl MaskCache {
+impl DrawCache {
     fn get(&self, key: MaskKey, bits: &[&Mask], make: impl FnOnce() -> Ready) -> Arc<Ready> {
         let lock = || self.prepared.lock().expect("no panic while holding it");
         if let Some(prepared) = lock().get_mut(&key) {
@@ -1058,6 +1290,37 @@ impl MaskCache {
         })
     }
 
+    /// `asset`'s pixels; an asset never changes once stored, so its id names
+    /// them.
+    fn image(&self, id: AssetId, asset: &ugu_core::store::Asset) -> Option<Arc<Pixmap>> {
+        let lock = || self.images.lock().expect("no panic while holding it");
+        if let Some(decoded) = lock().get_mut(&id) {
+            decoded.used = self.render;
+            return decoded.image.clone();
+        }
+        let image = match crate::image::decode(asset) {
+            Ok(pixmap) => Some(Arc::new(pixmap)),
+            Err(error) => {
+                tracing::warn!(%error, "an image is left out");
+                None
+            }
+        };
+        let decoded = Decoded {
+            image: image.clone(),
+            used: self.render,
+        };
+        lock().insert(id, decoded);
+        image
+    }
+
+    fn take_spare(&self) -> Option<Pixmap> {
+        self.spare.lock().expect("no panic while holding it").take()
+    }
+
+    fn keep_spare(&self, pixmap: Pixmap) {
+        *self.spare.lock().expect("no panic while holding it") = Some(pixmap);
+    }
+
     /// Starts a render, letting go of what the one before did not use.
     fn next_render(&mut self) {
         self.render += 1;
@@ -1066,13 +1329,26 @@ impl MaskCache {
             .get_mut()
             .expect("no panic while holding it")
             .retain(|_, prepared| prepared.used + 1 >= render);
+        self.images
+            .get_mut()
+            .expect("no panic while holding it")
+            .retain(|_, decoded| decoded.used + 1 >= render);
     }
+}
+
+/// Whether `ops` move a selection, inside sections too.
+fn moves_selection(ops: &[Op]) -> bool {
+    ops.iter().any(|op| match op {
+        Op::TransformSelection { .. } => true,
+        Op::Isolated(section) => moves_selection(&section.ops),
+        _ => false,
+    })
 }
 
 fn collect<'a>(
     ops: &[Op],
     store: &'a Store,
-    masks: &MaskCache,
+    masks: &DrawCache,
     document_wobble: Wobble,
     wobble: Wobble,
     steps: &mut Vec<Step<'a>>,
@@ -1122,17 +1398,63 @@ fn collect<'a>(
                     steps.push(Step::Clear { ready });
                 }
             }
+            Op::PlaceImage {
+                asset,
+                transform,
+                sampling,
+            } => {
+                let image = store
+                    .assets
+                    .get(asset)
+                    .and_then(|stored| masks.image(*asset, stored));
+                if let Some(image) = image {
+                    steps.push(Step::Image {
+                        image,
+                        transform: affine(*transform),
+                        quality: quality(*sampling, *transform),
+                    });
+                }
+            }
+            Op::TransformSelection {
+                mask,
+                transform,
+                sampling,
+                keep_source,
+            } => {
+                let Some(mask) = store.masks.get(mask) else {
+                    continue;
+                };
+                let ready = masks.area(mask);
+                if ready.bounds.is_some() {
+                    steps.push(Step::Move {
+                        ready,
+                        transform: affine(*transform),
+                        quality: quality(*sampling, *transform),
+                        keep_source: *keep_source,
+                    });
+                }
+            }
             Op::Isolated(section) => {
-                steps.push(Step::Push(section.opacity));
-                collect(
-                    &section.ops,
-                    store,
-                    masks,
-                    document_wobble,
-                    section.wobble.unwrap_or(document_wobble),
-                    steps,
-                );
-                steps.push(Step::Pop);
+                let wobble = section.wobble.unwrap_or(document_wobble);
+                if moves_selection(&section.ops) {
+                    let mut inner = Vec::new();
+                    collect(
+                        &section.ops,
+                        store,
+                        masks,
+                        document_wobble,
+                        wobble,
+                        &mut inner,
+                    );
+                    steps.push(Step::Section {
+                        steps: inner,
+                        opacity: section.opacity,
+                    });
+                } else {
+                    steps.push(Step::Push(section.opacity));
+                    collect(&section.ops, store, masks, document_wobble, wobble, steps);
+                    steps.push(Step::Pop);
+                }
             }
             // `check` refuses documents with anything else.
             _ => {}
@@ -1410,34 +1732,51 @@ mod tests {
             antialias: false,
             clip: Some(mask),
         };
-        paint_layer(&mut document).ops = vec![
-            fill.clone(),
-            Op::ClearSelection { mask },
-            Op::Isolated(Box::new(Section {
-                ops: vec![Op::TransformSelection {
-                    mask,
-                    transform: ugu_core::ops::Affine::IDENTITY,
-                    sampling: ugu_core::ops::Sampling::Nearest,
-                    keep_source: false,
-                }],
-                opacity: 1.0,
-                wobble: None,
-            })),
-        ];
-        assert_eq!(check(&document), Err(Unsupported::Selection));
         let image = Op::PlaceImage {
             asset: ugu_core::ops::AssetId([0; 32]),
             transform: ugu_core::ops::Affine::IDENTITY,
             sampling: ugu_core::ops::Sampling::Smooth,
         };
+        let moved = Op::TransformSelection {
+            mask,
+            transform: ugu_core::ops::Affine::IDENTITY,
+            sampling: ugu_core::ops::Sampling::Nearest,
+            keep_source: false,
+        };
+        paint_layer(&mut document).ops = vec![
+            fill.clone(),
+            Op::ClearSelection { mask },
+            image,
+            moved.clone(),
+        ];
+        assert_eq!(check(&document), Ok(()));
+        let resized = Op::Isolated(Box::new(Section {
+            ops: vec![
+                moved,
+                Op::Resample {
+                    size: [48, 24],
+                    sampling: ugu_core::ops::Sampling::Smooth,
+                },
+            ],
+            opacity: 1.0,
+            wobble: None,
+        }));
         document.layers = vec![tree_group(
             10,
             Blend::Overlay,
-            vec![tree_layer(1, vec![fill, image], |paint| {
+            vec![tree_layer(1, vec![fill, resized], |paint| {
                 paint.clip_to_below = true
             })],
         )];
-        assert_eq!(check(&document), Err(Unsupported::Image));
+        assert_eq!(check(&document), Err(Unsupported::CanvasChange));
+        let spray = line(&mut document, 0.0, 10.0, 5.0, RED, true);
+        document.store.strokes.get_mut(&spray).unwrap().brush.engine = BrushEngine::Spray;
+        document.layers = vec![tree_group(
+            10,
+            Blend::Overlay,
+            vec![tree_layer(1, painting(spray), |_| {})],
+        )];
+        assert_eq!(check(&document), Err(Unsupported::Brush));
         document.layers = vec![tree_group(
             10,
             Blend::Overlay,
@@ -1773,6 +2112,300 @@ mod tests {
         }
     }
 
+    /// Adds an image whose straight-alpha pixel at x, y is `pixel(x, y)`.
+    fn add_image(
+        document: &mut Document,
+        size: [u32; 2],
+        pixel: impl Fn(u32, u32) -> [u8; 4],
+    ) -> ugu_core::ops::AssetId {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, size[0], size[1]);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let data: Vec<u8> = (0..size[1])
+            .flat_map(|y| (0..size[0]).map(move |x| (x, y)))
+            .flat_map(|(x, y)| pixel(x, y))
+            .collect();
+        writer.write_image_data(&data).unwrap();
+        writer.finish().unwrap();
+        let id = ugu_core::ops::AssetId([document.store.assets.len() as u8 + 1; 32]);
+        let asset = ugu_core::store::Asset {
+            size,
+            png: Arc::from(bytes),
+        };
+        document.store.assets.insert(id, asset);
+        id
+    }
+
+    fn paint(stroke: StrokeId) -> Op {
+        Op::Paint { stroke, clip: None }
+    }
+
+    fn moved(
+        mask: ugu_core::ops::MaskId,
+        transform: [f64; 6],
+        sampling: ugu_core::ops::Sampling,
+        keep_source: bool,
+    ) -> Op {
+        Op::TransformSelection {
+            mask,
+            transform: ugu_core::ops::Affine(transform),
+            sampling,
+            keep_source,
+        }
+    }
+
+    /// `source` over `target`, premultiplied, as Vello rounds it to within a
+    /// level.
+    fn over(source: [u8; 4], target: [u8; 4]) -> [u8; 4] {
+        let keep = 255 - u16::from(source[3]);
+        std::array::from_fn(|c| source[c] + ((u16::from(target[c]) * keep + 127) / 255) as u8)
+    }
+
+    fn near(got: [u8; 4], expected: [u8; 4]) -> bool {
+        (0..4).all(|c| got[c].abs_diff(expected[c]) <= 1)
+    }
+
+    #[test]
+    fn drawing_again_from_the_pixels_so_far_changes_nothing() {
+        for antialias in [true, false] {
+            let mut document = document();
+            let red = line(
+                &mut document,
+                8.0,
+                88.0,
+                24.0,
+                [220, 30, 30, 150],
+                antialias,
+            );
+            let blue = line(&mut document, 20.0, 76.0, 20.0, BLUE, antialias);
+            // A corner nothing is drawn in, moved onto itself.
+            let corner = add_mask(&mut document, [90, 0, 6, 4], |_, _| true);
+            let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            let nearest = ugu_core::ops::Sampling::Nearest;
+            let plain = with_ops(&document, vec![paint(red), paint(blue)]);
+            let broken = with_ops(
+                &document,
+                vec![
+                    paint(red),
+                    moved(corner, identity, nearest, true),
+                    paint(blue),
+                ],
+            );
+            for frame in [0, 3] {
+                assert!(
+                    render(&broken, frame, 0).data_as_u8_slice()
+                        == render(&plain, frame, 0).data_as_u8_slice(),
+                    "antialias {antialias}, frame {frame}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_moved_selection_moves_each_frames_own_result() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let blue = line(&mut document, 30.0, 60.0, 30.0, [30, 30, 220, 160], true);
+        let mask = add_mask(&mut document, [20, 10, 40, 30], |x, y| {
+            (x - 40) * (x - 40) + (y - 24) * (y - 24) < 150
+        });
+        let bits = document.store.masks[&mask].clone();
+        let smooth = ugu_core::ops::Sampling::Smooth;
+        let still = with_ops(&document, vec![paint(red), paint(blue)]);
+        // Whole-pixel moves and a quarter turn about (40, 24): each pixel
+        // lands on a whole pixel, so smooth sampling is not used.
+        let cases = [
+            ([1.0, 0.0, 17.0, 0.0, 1.0, 9.0], false),
+            ([1.0, 0.0, -25.0, 0.0, 1.0, 3.0], true),
+            ([0.0, -1.0, 64.0, 1.0, 0.0, -16.0], false),
+        ];
+        for (transform, keep_source) in cases {
+            let [a, b, c, d, e, f] = transform;
+            let det = a * e - b * d;
+            let back = |x: f64, y: f64| {
+                let (x, y) = (x - c, y - f);
+                ((e * x - b * y) / det, (a * y - d * x) / det)
+            };
+            let moving = with_ops(
+                &document,
+                vec![
+                    paint(red),
+                    paint(blue),
+                    moved(mask, transform, smooth, keep_source),
+                ],
+            );
+            let mut frames = Vec::new();
+            for frame in [0, 3] {
+                let before = render(&still, frame, 0);
+                let got = render(&moving, frame, 0);
+                for y in 0..got.height() {
+                    for x in 0..got.width() {
+                        let (cx, cy) = (i32::from(x), i32::from(y));
+                        let base = if !keep_source && bits.contains(cx, cy) {
+                            [0; 4]
+                        } else {
+                            at(&before, x, y)
+                        };
+                        let (sx, sy) = back(f64::from(x) + 0.5, f64::from(y) + 0.5);
+                        let (sx, sy) = (sx.floor() as i32, sy.floor() as i32);
+                        let inside = (0..i32::from(got.width())).contains(&sx)
+                            && (0..i32::from(got.height())).contains(&sy);
+                        let source = if inside && bits.contains(sx, sy) {
+                            at(&before, sx as u16, sy as u16)
+                        } else {
+                            [0; 4]
+                        };
+                        let expected = over(source, base);
+                        let pixel = at(&got, x, y);
+                        assert!(
+                            near(pixel, expected),
+                            "{transform:?} frame {frame} at {x}, {y}: {pixel:?} against {expected:?}"
+                        );
+                    }
+                }
+                frames.push(got);
+            }
+            // The strokes moved between the frames, and so did what was cut.
+            assert!(max_difference(&frames[0], &frames[1]) > 0);
+        }
+    }
+
+    #[test]
+    fn an_image_is_placed_over_what_came_before() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, [220, 30, 30, 200], true);
+        let image = add_image(&mut document, [20, 10], |x, y| {
+            let alpha = if (x + y) % 3 == 0 { 255 } else { 120 };
+            [(x * 12) as u8, (y * 25) as u8, 100, alpha]
+        });
+        let decoded = crate::image::decode(&document.store.assets[&image]).unwrap();
+        let placed = Op::PlaceImage {
+            asset: image,
+            transform: ugu_core::ops::Affine::translation(30.0, 18.0),
+            sampling: ugu_core::ops::Sampling::Smooth,
+        };
+        for frame in [2, 5] {
+            let before = render(&with_ops(&document, vec![paint(red)]), frame, 0);
+            let got = render(
+                &with_ops(&document, vec![paint(red), placed.clone()]),
+                frame,
+                0,
+            );
+            for y in 0..got.height() {
+                for x in 0..got.width() {
+                    let below = at(&before, x, y);
+                    let pixel = at(&got, x, y);
+                    if (30..50).contains(&x) && (18..28).contains(&y) {
+                        let expected = over(at(&decoded, x - 30, y - 18), below);
+                        assert!(near(pixel, expected), "at {x}, {y}");
+                    } else {
+                        assert_eq!(pixel, below, "outside at {x}, {y}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A stroke, a placed image moved half a pixel, a merged section that
+    /// moves a selection, and a moved selection taken far outside where
+    /// anything was drawn.
+    fn moved_work() -> Document {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let blue = line(&mut document, 30.0, 60.0, 14.0, [30, 30, 220, 160], true);
+        let mask = add_mask(&mut document, [20, 4, 50, 40], |x, y| {
+            (x - 40) * (x - 40) + (y - 20) * (y - 20) < 220
+        });
+        let image = add_image(&mut document, [16, 12], |x, y| {
+            [(x * 15) as u8, 200, (y * 20) as u8, 230]
+        });
+        let section = Op::Isolated(Box::new(Section {
+            ops: vec![
+                paint(blue),
+                moved(
+                    mask,
+                    [1.0, 0.0, 9.5, 0.0, 1.0, 4.25],
+                    ugu_core::ops::Sampling::Smooth,
+                    false,
+                ),
+            ],
+            opacity: 0.6,
+            wobble: None,
+        }));
+        with_ops(
+            &document,
+            vec![
+                paint(red),
+                Op::PlaceImage {
+                    asset: image,
+                    transform: ugu_core::ops::Affine([0.8, 0.3, 50.5, -0.3, 0.8, 10.0]),
+                    sampling: ugu_core::ops::Sampling::Smooth,
+                },
+                section,
+                moved(
+                    mask,
+                    [1.0, 0.0, 40.0, 0.0, 1.0, 20.0],
+                    ugu_core::ops::Sampling::Nearest,
+                    true,
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_merged_section_that_moves_a_selection_draws_as_its_own_layer_would() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let blue = line(&mut document, 30.0, 60.0, 22.0, [30, 30, 220, 160], true);
+        let mask = add_mask(&mut document, [20, 10, 40, 30], |x, y| {
+            (x - 40) * (x - 40) + (y - 24) * (y - 24) < 150
+        });
+        let inner = vec![
+            paint(blue),
+            moved(
+                mask,
+                [1.0, 0.0, 10.0, 0.0, 1.0, 4.0],
+                ugu_core::ops::Sampling::Nearest,
+                false,
+            ),
+        ];
+        let merged = with_ops(
+            &document,
+            vec![
+                paint(red),
+                Op::Isolated(Box::new(Section {
+                    ops: inner.clone(),
+                    opacity: 0.6,
+                    wobble: None,
+                })),
+            ],
+        );
+        let mut below = paint_layer(&mut document).clone();
+        below.ops = vec![paint(red)];
+        let mut above = below.clone();
+        above.ops = inner;
+        above.opacity = 0.6;
+        let apart = with_layers(&document, &[below, above]);
+        for frame in [0, 3] {
+            let most = max_difference(&render(&merged, frame, 0), &render(&apart, frame, 0));
+            assert!(most <= 1, "frame {frame} differs by {most}");
+        }
+    }
+
+    #[test]
+    fn moved_selections_and_images_draw_alike_everywhere() {
+        let document = moved_work();
+        for frame in [0, 5] {
+            let single = render(&document, frame, 0);
+            assert!(render(&document, frame, 8).data_as_u8_slice() == single.data_as_u8_slice());
+            for edge in [16, 64, 4096] {
+                assert!(max_difference(&render_tiled(&document, frame, edge, 8), &single) <= 1);
+            }
+        }
+    }
+
     fn render_tiled(document: &Document, frame: i64, edge: u32, threads: u16) -> Pixmap {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixmap = Pixmap::new(width, height);
@@ -1931,6 +2564,7 @@ mod tests {
             (with_layers(&base, &[below, above]), 3.0),
             (many_layers(), 20.0),
             (masked_work().0, 3.0),
+            (moved_work(), 3.0),
         ];
         for (document, limit) in cases {
             let plan = RenderPlan::new(&document, Purpose::Display);

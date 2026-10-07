@@ -15,11 +15,11 @@
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
-//!   drawn as pens and images and moved selections are left out, which
-//!   keeps the amount of work close and says so.
+//!   drawn as pens and crops and resizes are left out, which keeps the amount
+//!   of work close and says so.
 //! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
-//!   out images and moved selections, keeping groups, blend modes, clipping,
-//!   fills and clears, so the app can open a fixture to measure with.
+//!   out crops and resizes, keeping everything else, so the app can open a
+//!   fixture to measure with.
 //! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
 //! - `ugu-doc fills <in.ugu2> <out.ugu2>`: adds a large clipped fill and a
@@ -223,8 +223,7 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
 }
 
 /// Makes every brush a pen and drops what the renderer cannot draw yet
-/// (images and moved selections), keeping fills, clears, stroke clips,
-/// layers, groups, blend modes and clipping.
+/// (crops and resizes), keeping everything else.
 fn to_pens(document: &mut Document) {
     let mut changed = 0;
     for stroke in document.store.strokes.values_mut() {
@@ -234,34 +233,46 @@ fn to_pens(document: &mut Document) {
         }
     }
     let mut dropped = 0;
-    let mut masks = std::collections::HashSet::new();
+    let mut used = Used::default();
     each_paint(&mut document.layers, &mut |paint| {
-        strip(&mut paint.ops, &mut dropped, &mut masks);
+        strip(&mut paint.ops, &mut dropped, &mut used);
     });
-    document.store.masks.retain(|id, _| masks.contains(id));
-    document.store.assets.clear();
+    document.store.masks.retain(|id, _| used.masks.contains(id));
+    document
+        .store
+        .assets
+        .retain(|id, _| used.assets.contains(id));
     if changed + dropped > 0 {
-        println!("{changed} brushes made pens, {dropped} images or moved selections dropped");
+        println!("{changed} brushes made pens, {dropped} crops or resizes dropped");
     }
 }
 
-/// Drops images and moved selections from `ops` and gathers the masks the
-/// rest use.
-fn strip(ops: &mut Vec<Op>, dropped: &mut usize, masks: &mut std::collections::HashSet<MaskId>) {
+/// The masks and images operations use.
+#[derive(Default)]
+struct Used {
+    masks: std::collections::HashSet<MaskId>,
+    assets: std::collections::HashSet<AssetId>,
+}
+
+/// Drops crops and resizes from `ops` and gathers what the rest use.
+fn strip(ops: &mut Vec<Op>, dropped: &mut usize, used: &mut Used) {
     let before = ops.len();
-    ops.retain(|op| !matches!(op, Op::PlaceImage { .. } | Op::TransformSelection { .. }));
+    ops.retain(|op| !matches!(op, Op::Crop { .. } | Op::Resample { .. }));
     *dropped += before - ops.len();
     for op in ops {
         match op {
-            Op::Paint { clip, .. } | Op::Erase { clip, .. } => masks.extend(*clip),
+            Op::Paint { clip, .. } | Op::Erase { clip, .. } => used.masks.extend(*clip),
             Op::Fill { coverage, clip, .. } => {
-                masks.insert(*coverage);
-                masks.extend(*clip);
+                used.masks.insert(*coverage);
+                used.masks.extend(*clip);
             }
-            Op::ClearSelection { mask } => {
-                masks.insert(*mask);
+            Op::ClearSelection { mask } | Op::TransformSelection { mask, .. } => {
+                used.masks.insert(*mask);
             }
-            Op::Isolated(section) => strip(&mut section.ops, dropped, masks),
+            Op::PlaceImage { asset, .. } => {
+                used.assets.insert(*asset);
+            }
+            Op::Isolated(section) => strip(&mut section.ops, dropped, used),
             _ => {}
         }
     }
