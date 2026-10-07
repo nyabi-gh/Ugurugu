@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+pollster.workspace = true
 tracing.workspace = true
 vello_cpu.workspace = true
 wgpu.workspace = true
@@ -15,5 +16,3 @@ windows.workspace = true
 [lints]
 workspace = true
 
-[dev-dependencies]
-pollster.workspace = true

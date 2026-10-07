@@ -18,11 +18,13 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
-use crate::render::{RenderThread, ToRender};
+use crate::render::{RenderThread, SurfaceSource, ToRender};
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
     RenderStopped(Option<String>),
+    /// The render thread needs a new surface for the window.
+    NeedSurface(Sender<Result<wgpu::Surface<'static>, String>>),
 }
 
 pub struct App {
@@ -34,7 +36,8 @@ pub struct App {
 struct Session {
     // Dropped first: the subclass must go before the window it is attached to.
     pointer: PointerInput,
-    _window: Arc<Window>,
+    window: Arc<Window>,
+    instance: wgpu::Instance,
     to_render: Sender<ToRender>,
     render_thread: Option<JoinHandle<()>>,
 }
@@ -91,32 +94,40 @@ impl Session {
             window.theme(),
             None,
         );
-        let (instance, surface) = RenderThread::create_surface(&window)?;
+        let instance = RenderThread::create_instance();
+        let render_instance = instance.clone();
+        let surface_proxy = proxy.clone();
+        let surface_source: SurfaceSource = Box::new(move || {
+            let (reply, answer) = mpsc::channel();
+            surface_proxy
+                .send_event(UiEvent::NeedSurface(reply))
+                .map_err(|_| "the window is closing".to_owned())?;
+            answer
+                .recv()
+                .map_err(|_| "the window closed before it had a new surface".to_owned())?
+        });
         let (to_render, messages) = mpsc::channel();
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
             .spawn(move || {
-                let error = match RenderThread::create(
+                let error = RenderThread::create(
                     render_window,
-                    &instance,
-                    surface,
+                    render_instance,
+                    surface_source,
                     egui_ctx,
                     egui_state,
-                ) {
-                    Ok(render) => {
-                        render.run(&messages);
-                        None
-                    }
-                    Err(error) => Some(error),
-                };
+                )
+                .and_then(|render| render.run(&messages))
+                .err();
                 let _ = proxy.send_event(UiEvent::RenderStopped(error));
             })
             .map_err(|error| format!("cannot start the render thread: {error}"))?;
 
         Ok(Self {
             pointer,
-            _window: window,
+            window,
+            instance,
             to_render,
             render_thread: Some(render_thread),
         })
@@ -158,7 +169,18 @@ impl ApplicationHandler<UiEvent> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UiEvent) {
-        let UiEvent::RenderStopped(error) = event;
+        let error = match event {
+            UiEvent::NeedSurface(reply) => {
+                if let Some(session) = self.session.as_ref() {
+                    let _ = reply.send(RenderThread::create_surface(
+                        &session.instance,
+                        &session.window,
+                    ));
+                }
+                return;
+            }
+            UiEvent::RenderStopped(error) => error,
+        };
         if let Some(mut session) = self.session.take() {
             if let Some(thread) = session.render_thread.take() {
                 // The thread already finished; this only collects it.

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use ugu_render::gpu::{AdapterChoice, Gpu};
 use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::CanvasView;
 use ugu_win::clock::Ticks;
@@ -35,16 +36,20 @@ const IDLE_WAKE: Duration = Duration::from_secs(1);
 const DISPLAY_POLL: Duration = Duration::from_millis(2);
 const FRAME_WAIT_LIMIT: Duration = Duration::from_millis(100);
 
+/// Makes a new surface for the window. Only the UI thread may read the window
+/// handle, so this asks it and waits for the answer.
+pub type SurfaceSource = Box<dyn Fn() -> Result<wgpu::Surface<'static>, String> + Send>;
+
 pub struct RenderThread {
     window: Arc<Window>,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    presenter: Presenter,
-    egui_renderer: egui_wgpu::Renderer,
-    canvas_view: CanvasView,
-    adapter_summary: String,
+    instance: wgpu::Instance,
+    surface_source: SurfaceSource,
+    adapter_choice: AdapterChoice,
+    display: Display,
+    /// `UGURUGU_DIAGNOSTICS=1` enables test-only keys.
+    diagnostics: bool,
     router: InputRouter,
     canvas: ProbeCanvas,
     ime: ImeProbe,
@@ -54,63 +59,86 @@ pub struct RenderThread {
     repaint_at: Option<Instant>,
 }
 
+/// Everything made with one GPU device, replaced together when it is lost.
+/// The canvas raster and egui's state live on the CPU and survive.
+struct Display {
+    gpu: Gpu,
+    presenter: Presenter,
+    egui_renderer: egui_wgpu::Renderer,
+    canvas_view: CanvasView,
+}
+
+impl Display {
+    fn open(
+        instance: &wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        choice: AdapterChoice,
+        size: [u32; 2],
+    ) -> Result<Self, String> {
+        let gpu = Gpu::open(instance, &surface, choice)?;
+        let presenter = Presenter::new(surface, &gpu.adapter, &gpu.device, size)?;
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &gpu.device,
+            presenter.format(),
+            egui_wgpu::RendererOptions::default(),
+        );
+        let canvas_view = CanvasView::new(&gpu.device, presenter.format(), canvas::PAPER);
+        Ok(Self {
+            gpu,
+            presenter,
+            egui_renderer,
+            canvas_view,
+        })
+    }
+}
+
 impl RenderThread {
-    /// The surface is created on the UI thread, the only thread winit lets
-    /// read the window handle.
-    pub fn create_surface(
-        window: &Arc<Window>,
-    ) -> Result<(wgpu::Instance, wgpu::Surface<'static>), String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    pub fn create_instance() -> wgpu::Instance {
+        wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12,
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             backend_options: ugu_render::present::backend_options(),
             display: None,
-        });
-        let surface = instance
+        })
+    }
+
+    /// Called on the UI thread, the only thread winit lets read the window
+    /// handle.
+    pub fn create_surface(
+        instance: &wgpu::Instance,
+        window: &Arc<Window>,
+    ) -> Result<wgpu::Surface<'static>, String> {
+        instance
             .create_surface(window.clone())
-            .map_err(|error| format!("cannot create the window surface: {error}"))?;
-        Ok((instance, surface))
+            .map_err(|error| format!("cannot create the window surface: {error}"))
     }
 
     pub fn create(
         window: Arc<Window>,
-        instance: &wgpu::Instance,
-        surface: wgpu::Surface<'static>,
+        instance: wgpu::Instance,
+        surface_source: SurfaceSource,
         egui_ctx: egui::Context,
         egui_state: egui_winit::State,
     ) -> Result<Self, String> {
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-            apply_limit_buckets: false,
-        }))
-        .map_err(|error| format!("no DX12 adapter can show the window: {error}"))?;
-        let adapter_summary = egui_wgpu::adapter_info_summary(&adapter.get_info());
-        tracing::info!(adapter = %adapter_summary, "selected GPU adapter");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|error| format!("cannot open the DX12 device: {error}"))?;
-
+        let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
-        let presenter = Presenter::new(surface, &adapter, &device, [size.width, size.height])?;
-        let egui_renderer = egui_wgpu::Renderer::new(
-            &device,
-            presenter.format(),
-            egui_wgpu::RendererOptions::default(),
-        );
-        let canvas_view = CanvasView::new(&device, presenter.format(), canvas::PAPER);
+        let surface = surface_source()?;
+        let display = Display::open(
+            &instance,
+            surface,
+            adapter_choice,
+            [size.width, size.height],
+        )?;
         Ok(Self {
             window,
             egui_ctx,
             egui_state,
-            device,
-            queue,
-            presenter,
-            egui_renderer,
-            canvas_view,
-            adapter_summary,
+            instance,
+            surface_source,
+            adapter_choice,
+            display,
+            diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
             router: InputRouter::default(),
             canvas: ProbeCanvas::default(),
             ime: ImeProbe::default(),
@@ -121,8 +149,55 @@ impl RenderThread {
         })
     }
 
-    pub fn run(mut self, messages: &Receiver<ToRender>) {
+    /// Replaces everything made with a lost device. The next frame shows what
+    /// was there, because the canvas raster and egui's state are on the CPU.
+    fn recover(mut self) -> Result<Self, String> {
+        let started = Instant::now();
+        let size = self.window.inner_size();
+        // The old swap chain still holds the window and cannot be moved to a
+        // new device, so it goes before the window gets a new one.
+        drop(self.display);
+        let dropped = started.elapsed();
+        let surface = (self.surface_source)()?;
+        let surfaced = started.elapsed();
+        self.display = Display::open(
+            &self.instance,
+            surface,
+            self.adapter_choice,
+            [size.width, size.height],
+        )?;
+        // egui sends only changes to its font atlas, so the new device gets
+        // the whole atlas once.
+        let atlas = self.egui_ctx.fonts(|fonts| fonts.image());
+        let options = self
+            .egui_ctx
+            .tex_manager()
+            .read()
+            .meta(egui::TextureId::default())
+            .map(|meta| meta.options)
+            .unwrap_or_default();
+        self.display.egui_renderer.update_texture(
+            &self.display.gpu.device,
+            &self.display.gpu.queue,
+            egui::TextureId::default(),
+            &egui::epaint::ImageDelta::full(atlas, options),
+        );
+        self.needs_frame = true;
+        let ms = |elapsed: Duration| elapsed.as_secs_f64() * 1000.0;
+        tracing::info!(
+            drop_ms = ms(dropped),
+            surface_ms = ms(surfaced - dropped),
+            total_ms = ms(started.elapsed()),
+            "GPU device replaced"
+        );
+        Ok(self)
+    }
+
+    pub fn run(mut self, messages: &Receiver<ToRender>) -> Result<(), String> {
         loop {
+            if self.display.gpu.check_removed() {
+                self = self.recover()?;
+            }
             let first = if self.needs_frame {
                 messages.try_recv().map_err(|error| match error {
                     std::sync::mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout,
@@ -146,7 +221,7 @@ impl RenderThread {
             if self.repaint_at.is_some_and(|at| at <= Instant::now()) {
                 self.needs_frame = true;
             }
-            if self.needs_frame && self.presenter.wait_for_frame(FRAME_WAIT_LIMIT) {
+            if self.needs_frame && self.display.presenter.wait_for_frame(FRAME_WAIT_LIMIT) {
                 if !self.apply_queued(messages) {
                     break;
                 }
@@ -160,6 +235,7 @@ impl RenderThread {
         if let Some(summary) = self.present_latency.summary() {
             tracing::info!(%summary, samples = self.canvas.sample_count(), "input to present-return latency");
         }
+        Ok(())
     }
 
     fn wake_timeout(&self) -> Duration {
@@ -167,7 +243,7 @@ impl RenderThread {
         if let Some(at) = self.repaint_at {
             timeout = timeout.min(at.saturating_duration_since(Instant::now()));
         }
-        if self.presenter.has_pending_display_times() {
+        if self.display.presenter.has_pending_display_times() {
             timeout = timeout.min(DISPLAY_POLL);
         }
         timeout
@@ -211,8 +287,9 @@ impl RenderThread {
             ToRender::Window(WindowEvent::RedrawRequested) => self.needs_frame = true,
             ToRender::Window(event) => {
                 if let WindowEvent::Resized(size) = &event {
-                    self.presenter
-                        .resize(&self.device, [size.width, size.height]);
+                    self.display
+                        .presenter
+                        .resize(&self.display.gpu.device, [size.width, size.height]);
                     self.needs_frame = true;
                 }
                 if self
@@ -231,17 +308,30 @@ impl RenderThread {
         let input = self.egui_state.take_egui_input(&self.window);
         let mut canvas_area = [0; 4];
         let Self {
-            adapter_summary,
+            display,
             canvas,
             display_latency,
             ime,
+            diagnostics,
             ..
         } = self;
+        let adapter_summary = &display.gpu.summary;
+        let software = display.gpu.is_software();
+        let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
             ime.count_canvas_shortcuts(ui.ctx());
+            remove_device =
+                *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    if software {
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            "No usable GPU: drawing with the slow software display",
+                        );
+                        ui.separator();
+                    }
                     ui.label(adapter_summary.as_str());
                     ui.separator();
                     ui.label(format!("samples {}", canvas.sample_count()));
@@ -262,6 +352,12 @@ impl RenderThread {
         });
         self.egui_state
             .handle_platform_output(&self.window, output.platform_output);
+        if remove_device {
+            tracing::warn!("removing the GPU device for a recovery test");
+            if let Err(error) = self.display.gpu.remove_for_test() {
+                tracing::error!(error, "cannot remove the GPU device");
+            }
+        }
         self.repaint_at = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -271,46 +367,62 @@ impl RenderThread {
         let pixels_per_point = output.pixels_per_point;
         let primitives = self.egui_ctx.tessellate(output.shapes, pixels_per_point);
         let textures = output.textures_delta;
-        for (id, deltas) in &textures.set {
-            for delta in deltas {
-                self.egui_renderer
-                    .update_texture(&self.device, &self.queue, *id, delta);
-            }
-        }
-        self.canvas_view
-            .update(&self.device, &self.queue, self.canvas.raster_mut());
-        let canvas_origin = [canvas_area[0].max(0) as u32, canvas_area[1].max(0) as u32];
-
-        match draw(
-            &self.device,
-            &self.queue,
-            &mut self.presenter,
-            &mut self.canvas_view,
-            canvas_origin,
-            &mut self.egui_renderer,
-            &primitives,
-            pixels_per_point,
-        ) {
-            Some(frame) => {
-                let oldest_input = self.router.take_oldest_unpresented();
-                self.presenter
-                    .present(&self.queue, frame, oldest_input.map(|ticks| ticks.0));
-                if let Some(oldest_input) = oldest_input {
-                    self.present_latency
-                        .record(Ticks::now().seconds_since(oldest_input));
+        // egui-wgpu panics instead of returning an error when a buffer cannot
+        // be made on a lost device, and a device can be lost at any point in
+        // the frame. Such a panic is caught only when the device is lost; the
+        // whole display is then replaced, so nothing half-updated is reused.
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let Display {
+                gpu,
+                presenter,
+                egui_renderer,
+                canvas_view,
+            } = &mut self.display;
+            for (id, deltas) in &textures.set {
+                for delta in deltas {
+                    egui_renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
                 }
             }
-            // The input stays marked unpresented and is drawn next time.
-            None => self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT),
-        }
+            canvas_view.update(&gpu.device, &gpu.queue, self.canvas.raster_mut());
+            let canvas_origin = [canvas_area[0].max(0) as u32, canvas_area[1].max(0) as u32];
 
-        for id in &textures.free {
-            self.egui_renderer.free_texture(id);
+            match draw(
+                &gpu.device,
+                &gpu.queue,
+                presenter,
+                canvas_view,
+                canvas_origin,
+                egui_renderer,
+                &primitives,
+                pixels_per_point,
+            ) {
+                Some(frame) => {
+                    let oldest_input = self.router.take_oldest_unpresented();
+                    presenter.present(&gpu.queue, frame, oldest_input.map(|ticks| ticks.0));
+                    if let Some(oldest_input) = oldest_input {
+                        self.present_latency
+                            .record(Ticks::now().seconds_since(oldest_input));
+                    }
+                }
+                // The input stays marked unpresented and is drawn next time.
+                None => self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT),
+            }
+
+            for id in &textures.free {
+                egui_renderer.free_texture(id);
+            }
+        }));
+        if let Err(panic) = drawn {
+            if !self.display.gpu.check_removed() {
+                std::panic::resume_unwind(panic);
+            }
+            tracing::warn!("frame abandoned on the lost GPU device");
+            self.needs_frame = true;
         }
     }
 
     fn collect_display_times(&mut self) {
-        for displayed in self.presenter.take_display_times() {
+        for displayed in self.display.presenter.take_display_times() {
             tracing::trace!(
                 input_qpc = displayed.input_qpc,
                 present_qpc = displayed.present_qpc,
