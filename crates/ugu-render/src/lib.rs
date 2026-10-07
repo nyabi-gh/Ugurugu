@@ -7,6 +7,7 @@ pub mod compose;
 pub mod document;
 pub mod gpu;
 pub mod live;
+pub mod plan;
 pub mod present;
 pub mod raster;
 pub mod stroke;
