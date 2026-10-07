@@ -219,11 +219,13 @@ impl Session {
 
     pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
         self.live = None;
-        let layer = match self.document().layer(self.layer) {
-            Some(layer) if matches!(layer.kind, LayerKind::Paint(_)) => layer,
-            _ => return Err(StrokeRefused::NoLayer),
-        };
-        if !layer.visible {
+        if !matches!(
+            self.document().layer(self.layer).map(|layer| &layer.kind),
+            Some(LayerKind::Paint(_))
+        ) {
+            return Err(StrokeRefused::NoLayer);
+        }
+        if !shown(&self.document().layers, self.layer) {
             return Err(StrokeRefused::HiddenLayer);
         }
         let settings = *self.settings();
@@ -435,12 +437,21 @@ impl Session {
     }
 }
 
+/// Whether `id` and every group holding it are visible.
+fn shown(layers: &[Layer], id: LayerId) -> bool {
+    layers.iter().any(|layer| {
+        layer.visible
+            && (layer.id == id
+                || matches!(&layer.kind, LayerKind::Group(group) if shown(&group.children, id)))
+    })
+}
+
+/// The paint layer drawn last, inside groups too.
 fn top_paint_layer(layers: &[Layer]) -> Option<LayerId> {
-    layers
-        .iter()
-        .rev()
-        .find(|layer| matches!(layer.kind, LayerKind::Paint(_)))
-        .map(|layer| layer.id)
+    layers.iter().rev().find_map(|layer| match &layer.kind {
+        LayerKind::Paint(_) => Some(layer.id),
+        LayerKind::Group(group) => top_paint_layer(&group.children),
+    })
 }
 
 fn clamp_position(position: [f64; 2]) -> [f64; 2] {

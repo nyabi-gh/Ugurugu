@@ -442,7 +442,6 @@ mod tests {
     use std::sync::mpsc::{Receiver, channel};
     use std::time::Duration;
     use ugu_core::document::LayerKind;
-    use ugu_core::ops::Blend;
     use ugu_session::Session;
 
     fn setup() -> (Files, Canvas, Receiver<FileEvent>) {
@@ -521,10 +520,29 @@ mod tests {
         document.frames = 12;
         let good = folder.join("good.ugu2");
         ugu_io::save::save(&document, [7; 16], &good, &ugu_win::file::replace_file).unwrap();
-        if let LayerKind::Paint(paint) = &mut document.layers[0].kind {
-            paint.blend = Blend::Multiply;
-        }
-        let unsupported = folder.join("multiply.ugu2");
+        let airbrush = ugu_core::store::Stroke {
+            points: vec![ugu_core::store::Point {
+                x: 4.0,
+                y: 4.0,
+                pressure: 1.0,
+            }]
+            .into(),
+            color: ugu_core::ops::Rgba8([0, 0, 0, 255]),
+            width: 6.0,
+            brush: ugu_core::store::Brush {
+                engine: ugu_core::store::BrushEngine::Airbrush,
+                opacity: 1.0,
+                hardness: 0.5,
+                antialias: true,
+                size_dynamics: 0.8,
+                wobble_scale: 1.0,
+            },
+            seed: 1,
+        };
+        let layer = document.layers[0].id;
+        let changes = ugu_core::command::draw(&document, layer, airbrush, false, None);
+        ugu_core::edit::commit(&mut document, changes).unwrap();
+        let unsupported = folder.join("airbrush.ugu2");
         ugu_io::save::save(
             &document,
             [8; 16],

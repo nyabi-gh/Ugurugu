@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The canvas split around the layer being drawn on, so a stroke changes one
-//! surface and the shown image is put back together only where it changed.
+//! The canvas while it is edited: the frame's render plan and every layer's
+//! own surface, kept so that a stroke changes one surface and the shown
+//! image is put together again only where it changed, by the same
+//! compositor as a full render.
 //!
-//! `below` holds the background and every shown layer under the current one,
-//! `surface` the current layer's own pixels before its opacity, and `above`
-//! the shown layers over it on transparent. Pixel arithmetic follows Vello's
-//! u8 pipeline (`(a·b + 255) >> 8` for a normalised product), so a stroke
-//! added to `surface` is within one level of what a full render of that layer
-//! gives; the caches are made again from full renders whenever the frame or
-//! the layers change.
+//! Pixel arithmetic follows Vello's u8 pipeline (`(a·b + 255) >> 8` for a
+//! normalised product), so a stroke added to a surface is within one level
+//! of what drawing that layer again gives.
 
-use ugu_core::document::{Document, LayerId, LayerKind};
+use std::sync::Arc;
+
+use ugu_core::document::{Document, LayerId};
+use ugu_core::history::LayerRevisions;
 use ugu_core::store::Stroke;
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
-use crate::document::DocumentRenderer;
+use crate::composite::{self, Overlay};
+use crate::document::{DocumentRenderer, Purpose};
 use crate::live::LiveStroke;
+use crate::plan::RenderPlan;
 use crate::raster::{PixelRect, document_level};
 use crate::stroke::{self, Pen, Resampler};
+use crate::tile::TiledSurface;
 
 /// `a·b/255` as Vello's u8 pipeline rounds it.
 fn mul(a: u8, b: u8) -> u8 {
@@ -78,79 +82,98 @@ pub struct Split {
     pub layer: LayerId,
     /// The frame within the cycle.
     pub frame: u32,
-    pub opacity: f32,
-    pub visible: bool,
-    pub below: Pixmap,
-    pub surface: Pixmap,
-    pub above: Pixmap,
+    pub plan: RenderPlan,
+    /// Premultiplied.
+    pub background: [u8; 4],
+    /// One per layer of the plan, in its order.
+    pub surfaces: Vec<Arc<TiledSurface>>,
 }
 
-impl DocumentRenderer {
-    /// Splits `frame` around `layer`, a top-level paint layer. `None` when
-    /// there is no such layer.
-    pub fn split(&mut self, document: &Document, layer: LayerId, frame: i64) -> Option<Split> {
-        let index = document.layers.iter().position(|each| each.id == layer)?;
-        let current = &document.layers[index];
-        let LayerKind::Paint(paint) = &current.kind else {
-            return None;
-        };
-        let [width, height] = document.canvas.map(|edge| edge as u16);
-        let mut below = Pixmap::new(width, height);
-        let mut surface = Pixmap::new(width, height);
-        let mut above = Pixmap::new(width, height);
-        let frame = ugu_core::motion::frame_in_cycle(frame, document.frames);
-        let shown = |each: &&ugu_core::document::Layer| each.visible;
-        self.render_layers(
-            document,
-            frame,
-            true,
-            document.layers[..index].iter().filter(shown),
-            &mut below,
-        );
-        self.render_surface(document, paint, frame, &mut surface);
-        self.render_layers(
-            document,
-            frame,
-            false,
-            document.layers[index + 1..].iter().filter(shown),
-            &mut above,
-        );
-        Some(Split {
-            layer,
-            frame,
-            opacity: paint.opacity,
-            visible: current.visible,
-            below,
-            surface,
-            above,
-        })
+impl Split {
+    /// Where the edited layer is among the plan's layers; `None` when it is
+    /// not shown.
+    pub fn index(&self) -> Option<usize> {
+        self.plan
+            .layers
+            .iter()
+            .position(|(id, _)| *id == self.layer)
+    }
+
+    /// Adds a committed stroke to the edited layer as drawing it again would:
+    /// painted over, or erased from, what is there. Returns the pixels it
+    /// changed.
+    pub fn stamp(
+        &mut self,
+        stamp: &mut Stamp,
+        stroke: &Stroke,
+        erase: bool,
+        wobble: f32,
+    ) -> Option<PixelRect> {
+        let index = self.index()?;
+        let surface = Arc::make_mut(&mut self.surfaces[index]);
+        stamp.apply_stroke(surface, stroke, erase, wobble, self.frame)
     }
 }
 
-/// Puts the shown image back together within `rect`, drawing `live` (a
-/// stroke being drawn, `None` for none) on the surface first.
+impl DocumentRenderer {
+    /// Draws `frame` into `display`, which must have the canvas size, and
+    /// keeps what it was made from for editing `layer`. With `revisions`,
+    /// layers drawn before are reused.
+    pub fn split(
+        &mut self,
+        document: &Document,
+        layer: LayerId,
+        frame: i64,
+        revisions: Option<&LayerRevisions>,
+        display: &mut Pixmap,
+    ) -> Split {
+        let plan = RenderPlan::new(document, Purpose::Display);
+        self.render_plan(document, &plan, frame, revisions, display);
+        let surfaces = plan
+            .layers
+            .iter()
+            .map(|(id, _)| self.surface(*id).expect("just drawn"))
+            .collect();
+        // The edited layer's pixels change in place from now on, so this
+        // renderer does not keep a share of them.
+        self.forget(layer);
+        Split {
+            layer,
+            frame: ugu_core::motion::frame_in_cycle(frame, document.frames),
+            plan,
+            background: premultiplied(document.background.0),
+            surfaces,
+        }
+    }
+}
+
+/// Puts the shown image together within `rect`, drawing `live` (a stroke
+/// being drawn, `None` for none) on the edited layer first.
 pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out: &mut Pixmap) {
-    let width = usize::from(out.width());
-    let opacity = (split.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let [left, top, right, bottom] = rect.map(|value| value as usize);
-    let below = split.below.data_as_u8_slice();
-    let surface = split.surface.data_as_u8_slice();
-    let above = split.above.data_as_u8_slice();
-    let out = out.data_as_u8_slice_mut();
-    for y in top..bottom {
-        for x in left..right {
-            let at = (y * width + x) * 4;
-            let mut pixel: [u8; 4] = below[at..at + 4].try_into().expect("4 bytes");
-            if split.visible {
-                let mut layer: [u8; 4] = surface[at..at + 4].try_into().expect("4 bytes");
-                if let Some(live) = live {
-                    live.apply(x, y, &mut layer);
-                }
-                let faded = layer.map(|value| mul(value, opacity));
-                src_over(&mut pixel, &faded);
-            }
-            src_over(&mut pixel, &above[at..at + 4]);
-            out[at..at + 4].copy_from_slice(&pixel);
+    let surfaces: Vec<Option<&TiledSurface>> = split
+        .surfaces
+        .iter()
+        .map(|surface| Some(&**surface))
+        .collect();
+    let background = Some(split.background);
+    match (live, split.index()) {
+        (Some(live), Some(layer)) => {
+            let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| live.apply(x, y, pixel);
+            let overlay = Overlay {
+                layer,
+                apply: &apply,
+            };
+            composite::evaluate_with(&split.plan, background, &surfaces, rect, out, &overlay);
+        }
+        _ => {
+            let [left, top, right, bottom] = rect;
+            // Thread start-up outweighs the work below about this many pixels.
+            let threads = if (right - left) * (bottom - top) > 65_536 {
+                std::thread::available_parallelism().map_or(1, |count| count.get().min(8))
+            } else {
+                1
+            };
+            composite::evaluate(&split.plan, background, &surfaces, rect, out, threads);
         }
     }
 }
@@ -178,11 +201,12 @@ impl Default for Stamp {
 }
 
 impl Stamp {
-    /// Adds a committed stroke to `surface` as a full render would: painted
-    /// over, or erased from, what is there. Returns the pixels it changed.
+    /// Adds a committed stroke to `surface` as drawing the layer again would:
+    /// painted over, or erased from, what is there. Returns the pixels it
+    /// changed.
     pub fn apply_stroke(
         &mut self,
-        surface: &mut Pixmap,
+        surface: &mut TiledSurface,
         stroke: &Stroke,
         erase: bool,
         wobble: f32,
@@ -194,7 +218,7 @@ impl Stamp {
             seed: stroke.seed,
             wobble: f64::from(wobble) * f64::from(stroke.brush.wobble_scale),
         };
-        let rect = clamp(stroke::bounds(&stroke.points, &pen), surface)?;
+        let rect = clamp(stroke::bounds(&stroke.points, &pen), surface.size())?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
         let path = stroke::outline(&samples, &pen, frame)?;
         let coverage = self.draw(rect, |context| {
@@ -203,7 +227,23 @@ impl Stamp {
             context.fill_path(&path);
         });
         let color = premultiplied(stroke_color(stroke, erase));
-        blend_coverage(surface, &coverage, rect, color, erase);
+        surface.ensure(rect);
+        let coverage_width = usize::from(coverage.width());
+        let source = coverage.data_as_u8_slice();
+        for (y, line) in surface.rows_mut(rect) {
+            let from = (y - rect[1]) as usize * coverage_width;
+            for (x, target) in line.iter_mut().enumerate() {
+                let cover = source[(from + x) * 4 + 3];
+                if cover == 0 {
+                    continue;
+                }
+                if erase {
+                    self::erase(target, color, cover);
+                } else {
+                    paint(target, color, cover);
+                }
+            }
+        }
         Some(rect)
     }
 
@@ -226,10 +266,10 @@ impl Stamp {
     }
 }
 
-/// The whole pixels `bounds` (left, top, right, bottom) touches on `pixmap`,
-/// with one more each way for antialiasing.
-pub fn clamp([left, top, right, bottom]: [f64; 4], pixmap: &Pixmap) -> Option<PixelRect> {
-    let size = [f64::from(pixmap.width()), f64::from(pixmap.height())];
+/// The whole pixels `bounds` (left, top, right, bottom) touches on a canvas
+/// of `size`, with one more each way for antialiasing.
+pub fn clamp([left, top, right, bottom]: [f64; 4], size: [u32; 2]) -> Option<PixelRect> {
+    let size = size.map(f64::from);
     let rect = [
         (left.floor() - 1.0).clamp(0.0, size[0]) as u32,
         (top.floor() - 1.0).clamp(0.0, size[1]) as u32,
@@ -251,79 +291,13 @@ pub fn stroke_color(stroke: &Stroke, erase: bool) -> [u8; 4] {
     [r, g, b, alpha]
 }
 
-/// Paints premultiplied `color`, or erases, through `coverage` (alpha of a
-/// pixmap covering `rect`) onto `surface`.
-fn blend_coverage(
-    surface: &mut Pixmap,
-    coverage: &Pixmap,
-    rect: PixelRect,
-    color: [u8; 4],
-    erase_it: bool,
-) {
-    let width = usize::from(surface.width());
-    let coverage_width = usize::from(coverage.width());
-    let [left, top, right, bottom] = rect.map(|value| value as usize);
-    let target = surface.data_as_u8_slice_mut();
-    let source = coverage.data_as_u8_slice();
-    for y in top..bottom {
-        for x in left..right {
-            let cover = source[((y - top) * coverage_width + x - left) * 4 + 3];
-            if cover == 0 {
-                continue;
-            }
-            let to = (y * width + x) * 4;
-            if erase_it {
-                erase(&mut target[to..to + 4], color, cover);
-            } else {
-                paint(&mut target[to..to + 4], color, cover);
-            }
-        }
-    }
-}
-
-impl DocumentRenderer {
-    /// The current layer's own pixels, without its opacity.
-    fn render_surface(
-        &mut self,
-        document: &Document,
-        paint: &ugu_core::ops::PaintLayer,
-        frame: u32,
-        pixmap: &mut Pixmap,
-    ) {
-        self.render_ops(document, frame, None, &[(paint, None)], pixmap);
-    }
-
-    fn render_layers<'a>(
-        &mut self,
-        document: &'a Document,
-        frame: u32,
-        background: bool,
-        layers: impl Iterator<Item = &'a ugu_core::document::Layer>,
-        pixmap: &mut Pixmap,
-    ) {
-        let layers: Vec<_> = layers
-            .filter_map(|layer| match &layer.kind {
-                LayerKind::Paint(paint) => Some((paint, Some(paint.opacity))),
-                LayerKind::Group(_) => None,
-            })
-            .collect();
-        self.render_ops(
-            document,
-            frame,
-            background.then_some(document.background),
-            &layers,
-            pixmap,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Purpose;
-    use std::sync::Arc;
     use ugu_core::command;
-    use ugu_core::ops::{Rgba8, Wobble};
+    use ugu_core::document::LayerKind;
+    use ugu_core::history::History;
+    use ugu_core::ops::{Blend, Rgba8, Wobble};
     use ugu_core::store::{Brush, BrushEngine, Point};
 
     fn stroke(from: [f32; 2], to: [f32; 2], color: [u8; 4], seed: u64) -> Stroke {
@@ -354,30 +328,43 @@ mod tests {
         }
     }
 
-    /// Three layers with strokes and an eraser, the middle one translucent.
-    fn document() -> Document {
+    /// Layers with strokes and an eraser: a translucent Multiply layer, a
+    /// layer clipped to it, and a Screen group holding the top layer.
+    fn history() -> History {
         let mut document = Document::new([120, 80]);
         document.background = Rgba8([250, 245, 235, 255]);
         document.wobble = Wobble::classic(2.0);
-        let first = document.layers[0].id;
-        let changes = command::draw(
-            &document,
+        let mut history = History::new(document, false);
+        let first = LayerId(1);
+        let draw = |history: &mut History, layer, stroke, erase| {
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, layer, stroke, erase, None)
+                })
+                .unwrap();
+        };
+        draw(
+            &mut history,
             first,
             stroke([5.0, 10.0], [110.0, 60.0], [200, 40, 40, 255], 1),
             false,
-            None,
         );
-        ugu_core::edit::commit(&mut document, changes).unwrap();
-        for (index, color) in [[40, 160, 60, 200], [30, 60, 200, 255]]
+        for (index, color) in [[40, 160, 60, 200], [30, 60, 200, 255], [200, 200, 30, 255]]
             .into_iter()
             .enumerate()
         {
-            let (id, changes) =
-                command::add_paint_layer(&document, None, index + 1, format!("{index}"));
-            ugu_core::edit::commit(&mut document, changes).unwrap();
-            let changes = command::draw(
-                &document,
-                id,
+            let mut added = LayerId(0);
+            history
+                .edit("Add", |document| {
+                    let (id, changes) =
+                        command::add_paint_layer(document, None, index + 1, format!("{index}"));
+                    added = id;
+                    changes
+                })
+                .unwrap();
+            draw(
+                &mut history,
+                added,
                 stroke(
                     [10.0, 70.0 - index as f32 * 20.0],
                     [115.0, 15.0],
@@ -385,27 +372,54 @@ mod tests {
                     10 + index as u64,
                 ),
                 false,
-                None,
             );
-            ugu_core::edit::commit(&mut document, changes).unwrap();
         }
-        let middle = document.layers[1].id;
-        let changes = command::draw(
-            &document,
+        let [_, middle, clipped, top] =
+            [0, 1, 2, 3].map(|index| history.document().layers[index].id);
+        draw(
+            &mut history,
             middle,
             stroke([60.0, 0.0], [60.0, 80.0], [0, 0, 0, 255], 99),
             true,
-            None,
         );
-        ugu_core::edit::commit(&mut document, changes).unwrap();
-        let changes = command::update_layer(&document, middle, |layer| {
-            if let LayerKind::Paint(paint) = &mut layer.kind {
-                paint.opacity = 0.6;
-            }
-        })
-        .unwrap();
-        ugu_core::edit::commit(&mut document, changes).unwrap();
-        document
+        let set = |history: &mut History, id, update: &dyn Fn(&mut ugu_core::ops::PaintLayer)| {
+            history
+                .edit("Set", |document| {
+                    command::update_layer(document, id, |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            update(paint);
+                        }
+                    })
+                    .unwrap()
+                })
+                .unwrap();
+        };
+        set(&mut history, middle, &|paint| {
+            paint.opacity = 0.6;
+            paint.blend = Blend::Multiply;
+        });
+        set(&mut history, clipped, &|paint| paint.clip_to_below = true);
+        let mut group = history.document().layer(top).unwrap().clone();
+        group.id = LayerId(50);
+        group.kind = LayerKind::Group(ugu_core::document::Group {
+            opacity: 0.9,
+            blend: Blend::Screen,
+            clip_to_below: false,
+            children: vec![history.document().layer(top).unwrap().clone()],
+        });
+        history
+            .edit("Group", |_| {
+                vec![
+                    ugu_core::edit::Change::RemoveLayer(top),
+                    ugu_core::edit::Change::InsertLayer {
+                        parent: None,
+                        index: 3,
+                        layer: group,
+                    },
+                ]
+            })
+            .unwrap();
+        history
     }
 
     fn render(document: &Document, frame: i64) -> Pixmap {
@@ -414,60 +428,75 @@ mod tests {
         pixmap
     }
 
-    fn surface(document: &Document, layer: LayerId, frame: i64) -> Pixmap {
-        DocumentRenderer::new(0)
-            .split(document, layer, frame)
+    fn split(history: &History, layer: LayerId, frame: i64) -> (Split, Pixmap) {
+        let mut display = Pixmap::new(120, 80);
+        let split = DocumentRenderer::new(0).split(
+            history.document(),
+            layer,
+            frame,
+            Some(history.layer_revisions()),
+            &mut display,
+        );
+        (split, display)
+    }
+
+    fn max_difference(a: &Pixmap, b: &Pixmap) -> u8 {
+        a.data_as_u8_slice()
+            .iter()
+            .zip(b.data_as_u8_slice())
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
             .unwrap()
-            .surface
+    }
+
+    fn paint_layers(history: &History) -> Vec<LayerId> {
+        RenderPlan::new(history.document(), Purpose::Display)
+            .layers
+            .iter()
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     #[test]
     fn the_split_puts_back_the_full_frame() {
-        let document = document();
-        for layer in document.layers.iter().map(|layer| layer.id) {
-            let split = DocumentRenderer::new(0).split(&document, layer, 3).unwrap();
+        let history = history();
+        let full = render(history.document(), 3);
+        let layers = paint_layers(&history);
+        assert_eq!(layers.len(), 4);
+        for layer in layers {
+            let (split, display) = split(&history, layer, 3);
+            assert!(display.data_as_u8_slice() == full.data_as_u8_slice());
             let mut shown = Pixmap::new(120, 80);
             composite(&split, None, [0, 0, 120, 80], &mut shown);
-            let full = render(&document, 3);
-            let most = shown
-                .data_as_u8_slice()
-                .iter()
-                .zip(full.data_as_u8_slice())
-                .map(|(a, b)| a.abs_diff(*b))
-                .max()
-                .unwrap();
-            // Layers above are put together before going over, which rounds
-            // differently from one at a time.
-            assert!(most <= 2, "layer {layer:?} differs by {most}");
+            assert!(
+                shown.data_as_u8_slice() == full.data_as_u8_slice(),
+                "layer {layer:?}"
+            );
         }
     }
 
     #[test]
-    fn a_committed_stroke_added_to_the_surface_is_within_a_level_of_a_full_render() {
-        let mut document = document();
-        let layer = document.layers[1].id;
-        for (erase, seed) in [(false, 500), (true, 501), (false, 502)] {
-            let mut surface = surface(&document, layer, 4);
-            let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
-            let wobble = document.wobble.amount;
-            Stamp::default()
-                .apply_stroke(&mut surface, &new, erase, wobble, 4)
-                .unwrap();
-            let changes = command::draw(&document, layer, new, erase, None);
-            ugu_core::edit::commit(&mut document, changes).unwrap();
-            let expected = surface_of(&document, layer, 4);
-            let most = surface
-                .data_as_u8_slice()
-                .iter()
-                .zip(expected.data_as_u8_slice())
-                .map(|(a, b)| a.abs_diff(*b))
-                .max()
-                .unwrap();
-            assert!(most <= 1, "erase {erase}: differs by {most}");
+    fn a_committed_stroke_stamped_on_any_layer_is_within_a_level_of_a_full_render() {
+        let mut history = history();
+        for layer in paint_layers(&history) {
+            for (erase, seed) in [(false, 500), (true, 501)] {
+                let (mut split, _) = split(&history, layer, 4);
+                let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
+                let wobble = history.document().wobble.amount;
+                let rect = split
+                    .stamp(&mut Stamp::default(), &new, erase, wobble)
+                    .unwrap();
+                let mut shown = Pixmap::new(120, 80);
+                composite(&split, None, [0, 0, 120, 80], &mut shown);
+                history
+                    .edit("Draw", |document| {
+                        command::draw(document, layer, new, erase, None)
+                    })
+                    .unwrap();
+                let most = max_difference(&shown, &render(history.document(), 4));
+                assert!(most <= 1, "{layer:?} erase {erase}: differs by {most}");
+                assert!(rect[2] > rect[0]);
+            }
         }
-    }
-
-    fn surface_of(document: &Document, layer: LayerId, frame: i64) -> Pixmap {
-        surface(document, layer, frame)
     }
 }

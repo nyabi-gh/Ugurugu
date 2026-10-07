@@ -404,19 +404,76 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     Ok(())
 }
 
-/// Times the M2 editing split around each top-level layer, frame 0.
+/// Times the editing split on frame 0: the first one, which draws every
+/// layer, and one per shown layer after a stroke on it, which draws that
+/// layer only. Each layer then takes a stroke at pen-up, timed as the app
+/// shows it: added to the layer's surface and put together where it changed.
 fn splits(document: &Document, threads: u16) {
-    let mut renderer = ugu_render::document::DocumentRenderer::new(threads);
-    let mut times = Vec::new();
-    for layer in &document.layers {
+    use ugu_core::history::History;
+    use ugu_render::compose::{Stamp, composite};
+    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::plan::RenderPlan;
+
+    let mut history = History::new(document.clone(), true);
+    let layers: Vec<LayerId> = RenderPlan::new(document, Purpose::Display)
+        .layers
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut display = vello_cpu::Pixmap::new(width, height);
+    let mut renderer = DocumentRenderer::new(threads);
+    let started = Instant::now();
+    renderer.split(
+        history.document(),
+        layers[0],
+        0,
+        Some(history.layer_revisions()),
+        &mut display,
+    );
+    let first = started.elapsed().as_secs_f64() * 1000.0;
+    let mut stamp = Stamp::default();
+    let (mut later, mut pen_ups) = (Vec::new(), Vec::new());
+    for layer in layers {
+        let Some(LayerKind::Paint(paint)) =
+            history.document().layer(layer).map(|layer| &layer.kind)
+        else {
+            continue;
+        };
+        let Some(stroke) = paint.ops.iter().find_map(|op| match op {
+            Op::Paint { stroke, .. } => history.document().store.strokes.get(stroke).cloned(),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let wobble = paint.wobble.unwrap_or(history.document().wobble).amount;
         let started = Instant::now();
-        if renderer.split(document, layer.id, 0).is_some() {
-            times.push(started.elapsed().as_secs_f64() * 1000.0);
+        let mut split = renderer.split(
+            history.document(),
+            layer,
+            0,
+            Some(history.layer_revisions()),
+            &mut display,
+        );
+        later.push(started.elapsed().as_secs_f64() * 1000.0);
+        let started = Instant::now();
+        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble) {
+            composite(&split, None, rect, &mut display);
         }
+        pen_ups.push(started.elapsed().as_secs_f64() * 1000.0);
+        // Refused at the operation limit, which leaves the next split as it is.
+        history
+            .edit("Draw", |document| {
+                ugu_core::command::draw(document, layer, stroke, false, None)
+            })
+            .ok();
     }
-    if !times.is_empty() {
-        println!("split per layer: {}", percentiles(&mut times));
-    }
+    println!("first split: {first:.1} ms");
+    println!("split after a stroke: {}", percentiles(&mut later));
+    println!(
+        "pen-up (stamp and composite): {}",
+        percentiles(&mut pen_ups)
+    );
 }
 
 /// The same generator as tools/FixtureGenerator.cpp.

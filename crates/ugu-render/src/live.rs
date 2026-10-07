@@ -79,7 +79,7 @@ impl LiveStroke {
                 self.settled..fixed,
                 self.settled.saturating_sub(1)..fixed.saturating_sub(1),
             );
-            if let Some(rect) = clamp(pieces.bounds, &self.coverage) {
+            if let Some(rect) = clamp(pieces.bounds, self.size()) {
                 let piece = self.draw(rect, &pieces.path);
                 add_coverage(&mut self.coverage, &piece, rect);
                 dirty = Some(rect);
@@ -95,7 +95,7 @@ impl LiveStroke {
             self.settled..samples.len(),
             self.settled.saturating_sub(1)..samples.len() - 1,
         );
-        if let Some(rect) = clamp(pieces.bounds, &self.coverage) {
+        if let Some(rect) = clamp(pieces.bounds, self.size()) {
             let piece = self.draw(rect, &pieces.path);
             let mut tail = copy(&self.coverage, rect);
             add_coverage(
@@ -138,6 +138,10 @@ impl LiveStroke {
     }
 
     /// Draws the stroke on a layer pixel at `x`, `y`.
+    fn size(&self) -> [u32; 2] {
+        [self.coverage.width(), self.coverage.height()].map(u32::from)
+    }
+
     pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
         let cover = self.cover(x, y);
         if cover == 0 {

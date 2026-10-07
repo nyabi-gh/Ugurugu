@@ -267,7 +267,8 @@ impl Canvas {
         if self.split.as_ref().map(|(shown, _)| *shown) != Some(key) && self.requested != Some(key)
         {
             let document = self.snapshot();
-            self.cache.request(key, document);
+            let layers = Arc::new(self.session.layer_revisions().clone());
+            self.cache.request(key, document, layers);
             self.requested = Some(key);
         }
     }
@@ -526,13 +527,7 @@ impl Canvas {
             Some((key, split)) if *key == before && after.layer == before.layer => {
                 last_stroke(document, after.layer).and_then(|(stroke, erase)| {
                     let wobble = wobble_of(document, after.layer);
-                    let changed = self.stamp.apply_stroke(
-                        &mut split.surface,
-                        stroke,
-                        erase,
-                        wobble,
-                        after.frame,
-                    );
+                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble);
                     *key = after;
                     changed
                 })

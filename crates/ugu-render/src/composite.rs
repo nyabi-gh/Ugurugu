@@ -136,6 +136,7 @@ pub fn evaluate(
                 [left, right],
                 y,
                 levels,
+                None,
             );
             line.copy_from_slice(&levels[0].row);
         }
@@ -167,6 +168,49 @@ pub fn evaluate(
     });
 }
 
+/// Something drawn on one layer's pixels as they are put together, such as
+/// a stroke being drawn.
+pub struct Overlay<'a> {
+    /// The layer's place in the plan's layers.
+    pub layer: usize,
+    /// Changes the layer's pixel at `x`, `y`.
+    pub apply: &'a dyn Fn(usize, usize, &mut Pixel),
+}
+
+/// `evaluate` on the calling thread, with `overlay` on its layer.
+pub fn evaluate_with(
+    plan: &RenderPlan,
+    background: Option<Pixel>,
+    surfaces: &[Option<&TiledSurface>],
+    rect: PixelRect,
+    out: &mut Pixmap,
+    overlay: &Overlay<'_>,
+) {
+    assert_eq!(surfaces.len(), plan.layers.len());
+    let width = usize::from(out.width());
+    let [left, top, right, bottom] = rect.map(|value| value as usize);
+    if left >= right || top >= bottom {
+        return;
+    }
+    let needed = bases_needed(&plan.steps);
+    let mut levels = Vec::new();
+    let pixels = out.data_as_u8_slice_mut().as_chunks_mut::<4>().0;
+    for y in top..bottom {
+        evaluate_row(
+            plan,
+            &needed,
+            background,
+            surfaces,
+            [left, right],
+            y,
+            &mut levels,
+            Some(overlay),
+        );
+        pixels[y * width + left..y * width + right].copy_from_slice(&levels[0].row);
+    }
+}
+
+#[expect(clippy::too_many_arguments, reason = "one row's inputs, used once")]
 fn evaluate_row(
     plan: &RenderPlan,
     needed: &[bool],
@@ -175,6 +219,7 @@ fn evaluate_row(
     [left, right]: [usize; 2],
     y: usize,
     levels: &mut Vec<Level>,
+    overlay: Option<&Overlay<'_>>,
 ) {
     let span = right - left;
     let mut depth = 0;
@@ -200,13 +245,26 @@ fn evaluate_row(
             }
             Step::Paint(_, composite) => {
                 let surface = surfaces[layer];
-                layer += 1;
                 let parts = surface.into_iter().flat_map(|surface| {
                     surface
                         .row(y as u32, left as u32, right as u32)
                         .map(|(x, part)| (x as usize - left, part))
                 });
-                put(&mut levels[depth], parts, *composite, needed[index], span);
+                match overlay.filter(|overlay| overlay.layer == layer) {
+                    Some(overlay) => {
+                        let mut row = vec![[0; 4]; span];
+                        for (start, part) in parts {
+                            row[start..start + part.len()].copy_from_slice(part);
+                        }
+                        for (offset, pixel) in row.iter_mut().enumerate() {
+                            (overlay.apply)(left + offset, y, pixel);
+                        }
+                        let whole = std::iter::once((0, row.as_slice()));
+                        put(&mut levels[depth], whole, *composite, needed[index], span);
+                    }
+                    None => put(&mut levels[depth], parts, *composite, needed[index], span),
+                }
+                layer += 1;
             }
             Step::End(_, composite) => {
                 depth -= 1;

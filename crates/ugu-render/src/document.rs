@@ -10,11 +10,12 @@
 //! Only what M2 can draw is accepted; `check` names the rest.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
+use ugu_core::ops::{Op, PaintLayer, Rgba8, Wobble};
 use ugu_core::store::{BrushEngine, Store, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::{Affine, BezPath, Rect};
@@ -31,11 +32,6 @@ use crate::tile::TiledSurface;
 /// Content this build cannot draw yet, and the milestone that adds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unsupported {
-    /// Groups and clipping (M3).
-    Group,
-    /// Blend modes other than Normal (M3).
-    Blend,
-    Clipping,
     /// Fills, images, selections and their clips (M4).
     Fill,
     Image,
@@ -49,9 +45,6 @@ pub enum Unsupported {
 impl std::fmt::Display for Unsupported {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Group => "layer groups",
-            Self::Blend => "blend modes other than Normal",
-            Self::Clipping => "clipping layers",
             Self::Fill => "fills",
             Self::Image => "images",
             Self::Selection => "selections",
@@ -63,17 +56,15 @@ impl std::fmt::Display for Unsupported {
 
 /// Whether this build can draw `document`.
 pub fn check(document: &Document) -> Result<(), Unsupported> {
-    for layer in &document.layers {
-        let LayerKind::Paint(paint) = &layer.kind else {
-            return Err(Unsupported::Group);
-        };
-        if paint.blend != Blend::Normal {
-            return Err(Unsupported::Blend);
+    check_layers(&document.layers, &document.store)
+}
+
+fn check_layers(layers: &[ugu_core::document::Layer], store: &Store) -> Result<(), Unsupported> {
+    for layer in layers {
+        match &layer.kind {
+            LayerKind::Paint(paint) => check_ops(&paint.ops, store)?,
+            LayerKind::Group(group) => check_layers(&group.children, store)?,
         }
-        if paint.clip_to_below {
-            return Err(Unsupported::Clipping);
-        }
-        check_ops(&paint.ops, &document.store)?;
     }
     Ok(())
 }
@@ -136,8 +127,18 @@ struct Cached {
     revision: Option<u64>,
     /// The frame within the cycle, or `None` for a layer that does not move.
     frame: Option<u32>,
-    surface: TiledSurface,
+    surface: Arc<TiledSurface>,
 }
+
+/// A layer to draw: its id, operations, revision, frame (`None` when it does
+/// not move) and the surface to draw on.
+type Work<'a> = (
+    LayerId,
+    &'a PaintLayer,
+    Option<u64>,
+    Option<u32>,
+    TiledSurface,
+);
 
 /// Where the last render spent its time. With layers drawn at once, the
 /// layer stages add up the time of every thread.
@@ -224,6 +225,16 @@ impl DocumentRenderer {
         self.drawn
     }
 
+    /// The surface of `layer` from the last render.
+    pub fn surface(&self, layer: LayerId) -> Option<Arc<TiledSurface>> {
+        self.cache.get(&layer).map(|cached| cached.surface.clone())
+    }
+
+    /// Lets go of the surface of `layer`, so it is drawn again next time.
+    pub fn forget(&mut self, layer: LayerId) {
+        self.cache.remove(&layer);
+    }
+
     /// Draws `frame` of a document that passed `check` into `pixmap`, which
     /// must have the canvas size, as premultiplied RGBA8.
     pub fn render(
@@ -269,36 +280,36 @@ impl DocumentRenderer {
             let Some(LayerKind::Paint(paint)) = document.layer(*id).map(|layer| &layer.kind) else {
                 panic!("the plan was made from another document");
             };
-            let surface = self.cache.remove(id).map_or_else(
-                || TiledSurface::new(document.canvas, edge),
-                |cached| cached.surface,
-            );
-            let cached = Cached {
-                revision,
-                frame: at,
-                surface,
-            };
-            work.push((*id, paint, cached));
+            // A surface still shared elsewhere is left to its other owner.
+            let surface = self
+                .cache
+                .remove(id)
+                .and_then(|cached| Arc::try_unwrap(cached.surface).ok())
+                .unwrap_or_else(|| TiledSurface::new(document.canvas, edge));
+            work.push((*id, paint, revision, at, surface));
         }
         self.drawn = work.len();
         self.timings = Timings::default();
         if work.len() >= self.threads && self.threads > 1 {
             self.draw_at_once(document, &mut work, frame);
         } else {
-            for (_, paint, cached) in &mut work {
-                self.timings += self
-                    .main
-                    .draw_layer(document, frame, paint, &mut cached.surface);
+            for (_, paint, _, _, surface) in &mut work {
+                self.timings += self.main.draw_layer(document, frame, paint, surface);
             }
         }
-        for (id, _, cached) in work {
+        for (id, _, revision, frame, surface) in work {
+            let cached = Cached {
+                revision,
+                frame,
+                surface: Arc::new(surface),
+            };
             self.cache.insert(id, cached);
         }
         let started = std::time::Instant::now();
         let surfaces: Vec<Option<&TiledSurface>> = plan
             .layers
             .iter()
-            .map(|(id, _)| self.cache.get(id).map(|cached| &cached.surface))
+            .map(|(id, _)| self.cache.get(id).map(|cached| &*cached.surface))
             .collect();
         let background = premultiplied(document.background.0);
         let rect = [0, 0, u32::from(width), u32::from(height)];
@@ -315,17 +326,12 @@ impl DocumentRenderer {
 
     /// Draws each layer on one thread, as many layers at once as there are
     /// threads.
-    fn draw_at_once(
-        &mut self,
-        document: &Document,
-        work: &mut [(LayerId, &PaintLayer, Cached)],
-        frame: u32,
-    ) {
+    fn draw_at_once(&mut self, document: &Document, work: &mut [Work<'_>], frame: u32) {
         while self.singles.len() < self.threads {
             self.singles.push(Raster::new(self.level, 0));
         }
         let next = std::sync::atomic::AtomicUsize::new(0);
-        let slots: Vec<std::sync::Mutex<&mut (LayerId, &PaintLayer, Cached)>> =
+        let slots: Vec<std::sync::Mutex<&mut Work<'_>>> =
             work.iter_mut().map(std::sync::Mutex::new).collect();
         let timings = std::thread::scope(|scope| {
             let workers: Vec<_> = self
@@ -341,9 +347,8 @@ impl DocumentRenderer {
                                 return timings;
                             };
                             let mut slot = slot.lock().expect("one worker per layer");
-                            let (_, paint, cached) = &mut **slot;
-                            timings +=
-                                raster.draw_layer(document, frame, paint, &mut cached.surface);
+                            let (_, paint, _, _, surface) = &mut **slot;
+                            timings += raster.draw_layer(document, frame, paint, surface);
                         }
                     })
                 })
@@ -357,22 +362,6 @@ impl DocumentRenderer {
                 })
         });
         self.timings += timings;
-    }
-
-    /// Draws `layers` over `background` (transparent without one). A layer
-    /// with an opacity is its own surface; one without draws straight on the
-    /// target, which is how a layer's own pixels are made.
-    pub(crate) fn render_ops(
-        &mut self,
-        document: &Document,
-        frame: u32,
-        background: Option<Rgba8>,
-        layers: &[(&PaintLayer, Option<f32>)],
-        pixmap: &mut Pixmap,
-    ) {
-        self.timings = self
-            .main
-            .draw_ops(document, frame, background, layers, pixmap);
     }
 }
 
@@ -390,35 +379,6 @@ impl Raster {
             resources: Resources::new(),
             threads: usize::from(threads.max(1)),
         }
-    }
-
-    fn draw_ops(
-        &mut self,
-        document: &Document,
-        frame: u32,
-        background: Option<Rgba8>,
-        layers: &[(&PaintLayer, Option<f32>)],
-        pixmap: &mut Pixmap,
-    ) -> Timings {
-        let [width, height] = document.canvas.map(|edge| edge as u16);
-        assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
-        let mut steps = Vec::new();
-        for (paint, opacity) in layers {
-            if let Some(opacity) = opacity {
-                steps.push(Step::Push(*opacity));
-            }
-            collect(
-                &paint.ops,
-                &document.store,
-                document.wobble,
-                paint.wobble.unwrap_or(document.wobble),
-                &mut steps,
-            );
-            if opacity.is_some() {
-                steps.push(Step::Pop);
-            }
-        }
-        self.draw_steps(&steps, frame, background, [0, 0], pixmap)
     }
 
     /// Draws a paint layer's own pixels into the tiles its strokes reach.
@@ -641,7 +601,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use ugu_core::document::{Layer, LayerId};
-    use ugu_core::ops::{Section, StrokeId, merge_down};
+    use ugu_core::ops::{Blend, Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
 
     const RED: [u8; 4] = [220, 30, 30, 255];
@@ -907,9 +867,26 @@ mod tests {
             wobble: None,
         }))];
         assert_eq!(check(&document), Err(Unsupported::Selection));
-        paint_layer(&mut document).ops.clear();
-        paint_layer(&mut document).blend = Blend::Multiply;
-        assert_eq!(check(&document), Err(Unsupported::Blend));
+        let fill = Op::Fill {
+            coverage: ugu_core::ops::MaskId(0),
+            color: Rgba8([0, 0, 0, 255]),
+            antialias: false,
+            clip: None,
+        };
+        document.layers = vec![tree_group(
+            10,
+            Blend::Overlay,
+            vec![tree_layer(1, vec![fill], |paint| {
+                paint.clip_to_below = true
+            })],
+        )];
+        assert_eq!(check(&document), Err(Unsupported::Fill));
+        document.layers = vec![tree_group(
+            10,
+            Blend::Overlay,
+            vec![tree_layer(1, vec![], |_| {})],
+        )];
+        assert_eq!(check(&document), Ok(()));
     }
 
     fn tree_layer(id: u32, ops: Vec<Op>, update: impl FnOnce(&mut PaintLayer)) -> Layer {

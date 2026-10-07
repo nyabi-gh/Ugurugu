@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
-use ugu_render::compose::{Split, composite};
+use ugu_render::compose::Split;
 use ugu_render::document::{DocumentRenderer, Purpose};
 use ugu_render::plan::RenderPlan;
 use vello_cpu::Pixmap;
@@ -52,7 +52,7 @@ pub enum Rendered {
 
 #[derive(Default)]
 struct Queue {
-    split: Option<(Key, Arc<Document>)>,
+    split: Option<(Key, Arc<Document>, Arc<LayerRevisions>)>,
     frames: VecDeque<(Version, u32, Arc<Document>, Arc<LayerRevisions>)>,
     stop: bool,
 }
@@ -63,7 +63,7 @@ pub struct CacheWorker {
 }
 
 enum Job {
-    Split(Key, Arc<Document>),
+    Split(Key, Arc<Document>, Arc<LayerRevisions>),
     Frame(Version, u32, Arc<Document>, Arc<LayerRevisions>),
 }
 
@@ -82,18 +82,14 @@ impl CacheWorker {
                 while let Some(job) = next(&shared) {
                     let started = Instant::now();
                     match job {
-                        Job::Split(key, document) => {
-                            let Some(split) =
-                                renderer.split(&document, key.layer, i64::from(key.frame))
-                            else {
-                                continue;
-                            };
+                        Job::Split(key, document, layers) => {
                             let [width, height] = document.canvas.map(|edge| edge as u16);
                             let mut display = Pixmap::new(width, height);
-                            composite(
-                                &split,
-                                None,
-                                [0, 0, u32::from(width), u32::from(height)],
+                            let split = renderer.split(
+                                &document,
+                                key.layer,
+                                i64::from(key.frame),
+                                Some(&layers),
                                 &mut display,
                             );
                             tracing::debug!(
@@ -139,9 +135,9 @@ impl CacheWorker {
         }
     }
 
-    pub fn request(&self, key: Key, document: Arc<Document>) {
+    pub fn request(&self, key: Key, document: Arc<Document>, layers: Arc<LayerRevisions>) {
         let (lock, wake) = &*self.queue;
-        lock.lock().expect("queue lock").split = Some((key, document));
+        lock.lock().expect("queue lock").split = Some((key, document, layers));
         wake.notify_one();
     }
 
@@ -172,8 +168,8 @@ fn next(queue: &(Mutex<Queue>, Condvar)) -> Option<Job> {
         if queue.stop {
             return None;
         }
-        if let Some((key, document)) = queue.split.take() {
-            return Some(Job::Split(key, document));
+        if let Some((key, document, layers)) = queue.split.take() {
+            return Some(Job::Split(key, document, layers));
         }
         if let Some((version, frame, document, layers)) = queue.frames.pop_front() {
             return Some(Job::Frame(version, frame, document, layers));

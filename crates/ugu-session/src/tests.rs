@@ -136,6 +136,35 @@ fn a_hidden_or_missing_layer_refuses_to_draw() {
 }
 
 #[test]
+fn a_layer_in_a_hidden_group_refuses_to_draw() {
+    let mut document = Document::new([64, 64]);
+    let inner = document.layers.remove(0);
+    document.layers.push(ugu_core::document::Layer {
+        id: LayerId(10),
+        name: "Group".to_owned(),
+        visible: false,
+        reference: false,
+        kind: LayerKind::Group(ugu_core::document::Group {
+            opacity: 1.0,
+            blend: ugu_core::ops::Blend::Normal,
+            clip_to_below: false,
+            children: vec![inner],
+        }),
+    });
+    // The layer inside the group is current from the start.
+    let mut session = Session::new(document, true);
+    assert_eq!(session.current_layer(), LayerId(1));
+    assert_eq!(
+        session.begin_stroke(at(1.0, 1.0, 0.0)),
+        Err(StrokeRefused::HiddenLayer)
+    );
+    session
+        .update_layer(LayerId(10), "Show group", |layer| layer.visible = true)
+        .unwrap();
+    assert_eq!(session.begin_stroke(at(1.0, 1.0, 0.0)), Ok(()));
+}
+
+#[test]
 fn the_eraser_commits_an_erase_operation() {
     let mut session = session();
     draw(&mut session, 10.0, 60.0);
