@@ -3,6 +3,7 @@
 
 //! Rendering and presentation of the canvas.
 
+pub mod compose;
 pub mod document;
 pub mod gpu;
 pub mod present;

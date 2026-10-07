@@ -11,7 +11,7 @@
 
 use ugu_core::document::{Document, LayerKind};
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{Blend, Op, Wobble};
+use ugu_core::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
 use ugu_core::store::{BrushEngine, Store, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::{BezPath, Rect};
@@ -152,19 +152,37 @@ impl DocumentRenderer {
         purpose: Purpose,
         pixmap: &mut Pixmap,
     ) {
+        let layers: Vec<_> = document
+            .layers
+            .iter()
+            .filter(|layer| layer.visible && !(purpose == Purpose::Export && layer.reference))
+            .filter_map(|layer| match &layer.kind {
+                LayerKind::Paint(paint) => Some((paint, Some(paint.opacity))),
+                LayerKind::Group(_) => None,
+            })
+            .collect();
+        let frame = frame_in_cycle(frame, document.frames);
+        self.render_ops(document, frame, Some(document.background), &layers, pixmap);
+    }
+
+    /// Draws `layers` over `background` (transparent without one). A layer
+    /// with an opacity is its own surface; one without draws straight on the
+    /// target, which is how a layer's own pixels are made.
+    pub(crate) fn render_ops(
+        &mut self,
+        document: &Document,
+        frame: u32,
+        background: Option<Rgba8>,
+        layers: &[(&PaintLayer, Option<f32>)],
+        pixmap: &mut Pixmap,
+    ) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
-        let frame = frame_in_cycle(frame, document.frames);
-
         let mut steps = Vec::new();
-        for layer in &document.layers {
-            if !layer.visible || (purpose == Purpose::Export && layer.reference) {
-                continue;
+        for (paint, opacity) in layers {
+            if let Some(opacity) = opacity {
+                steps.push(Step::Push(*opacity));
             }
-            let LayerKind::Paint(paint) = &layer.kind else {
-                continue;
-            };
-            steps.push(Step::Push(paint.opacity));
             collect(
                 &paint.ops,
                 &document.store,
@@ -172,15 +190,18 @@ impl DocumentRenderer {
                 paint.wobble.unwrap_or(document.wobble),
                 &mut steps,
             );
-            steps.push(Step::Pop);
+            if opacity.is_some() {
+                steps.push(Step::Pop);
+            }
         }
         let outlines = self.outlines(&steps, frame);
 
         self.context.reset_and_resize(width, height);
-        let [r, g, b, a] = document.background.0;
-        self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
-        self.context
-            .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+        if let Some(Rgba8([r, g, b, a])) = background {
+            self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
+            self.context
+                .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+        }
         let mut outlines = outlines.into_iter();
         for step in &steps {
             match step {
@@ -197,8 +218,6 @@ impl DocumentRenderer {
             }
         }
         self.context.flush();
-        // Clear first: the layers above draw over it.
-        pixmap.data_as_u8_slice_mut().fill(0);
         self.context
             .render_with(pixmap, &mut self.resources, RasterizerSettings::default());
     }
@@ -300,7 +319,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use ugu_core::document::LayerId;
-    use ugu_core::ops::{PaintLayer, Rgba8, Section, StrokeId, merge_down};
+    use ugu_core::ops::{Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
 
     const RED: [u8; 4] = [220, 30, 30, 255];
