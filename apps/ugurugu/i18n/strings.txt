@@ -71,6 +71,7 @@ wobble-layer | ugurugu::WobbleDock | Active layer
 wobble-follow | ugurugu::WobbleDock | Follow drawing settings
 wobble-follow-tip | ugurugu::WobbleDock | Remove this layer's override and use the whole drawing settings.
 wobble | ugurugu::WobblePopoverPanel | WOBBLE
+wobble-scope | - | Wobble applies to | 우글거림 적용 대상 | ゆらぎの適用先
 wobble-preview | ugurugu::WobblePreview | Wobble preview
 wobble-preview-tip | ugurugu::WobblePreview | Live preview of the wobble strength
 

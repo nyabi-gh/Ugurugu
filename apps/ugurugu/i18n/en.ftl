@@ -73,6 +73,7 @@ wobble-layer = Active layer
 wobble-follow = Follow drawing settings
 wobble-follow-tip = Remove this layer's override and use the whole drawing settings.
 wobble = WOBBLE
+wobble-scope = Wobble applies to
 wobble-preview = Wobble preview
 wobble-preview-tip = Live preview of the wobble strength
 

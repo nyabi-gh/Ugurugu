@@ -211,7 +211,8 @@ pub fn slider(
     response
 }
 
-/// A number field without arrows: type a value, or drag sideways.
+/// A number field without arrows: type a value, or drag sideways. `name`
+/// is what screen readers call it.
 pub fn number(
     ui: &mut Ui,
     value: &mut f32,
@@ -219,26 +220,35 @@ pub fn number(
     suffix: &str,
     decimals: usize,
     width: f32,
+    name: &str,
 ) -> Response {
-    ui.scope(|ui| {
-        let widgets = &mut ui.visuals_mut().widgets;
-        widgets.inactive.weak_bg_fill = theme::BASE;
-        widgets.inactive.bg_fill = theme::BASE;
-        widgets.hovered.weak_bg_fill = theme::CONTROL;
-        widgets.hovered.bg_fill = theme::CONTROL;
-        widgets.active.weak_bg_fill = theme::BASE;
-        widgets.active.bg_fill = theme::BASE;
-        ui.add_sized(
-            [width, 26.0],
-            egui::DragValue::new(value)
-                .range(range)
-                .suffix(suffix)
-                .max_decimals(decimals)
-                .min_decimals(decimals)
-                .speed(0.2),
-        )
-    })
-    .inner
+    let response = ui
+        .scope(|ui| {
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.inactive.weak_bg_fill = theme::BASE;
+            widgets.inactive.bg_fill = theme::BASE;
+            widgets.hovered.weak_bg_fill = theme::CONTROL;
+            widgets.hovered.bg_fill = theme::CONTROL;
+            widgets.active.weak_bg_fill = theme::BASE;
+            widgets.active.bg_fill = theme::BASE;
+            ui.add_sized(
+                [width, 26.0],
+                egui::DragValue::new(value)
+                    .range(range)
+                    .suffix(suffix)
+                    .max_decimals(decimals)
+                    .min_decimals(decimals)
+                    .speed(0.2),
+            )
+        })
+        .inner;
+    let shown = f64::from(*value);
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::drag_value(true, shown);
+        info.label = Some(name.to_owned());
+        info
+    });
+    response
 }
 
 /// A square check box, amber with a dark tick when checked, followed by

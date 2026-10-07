@@ -73,6 +73,7 @@ wobble-layer = 編集中のレイヤー
 wobble-follow = 全体の設定に従う
 wobble-follow-tip = このレイヤーの個別設定を解除し、全体の設定を使用します。
 wobble = ウォブル
+wobble-scope = ゆらぎの適用先
 wobble-preview = ウォブルプレビュー
 wobble-preview-tip = 現在のウォブルの強さをリアルタイムで表示します
 

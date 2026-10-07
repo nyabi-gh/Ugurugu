@@ -3,7 +3,7 @@
 
 # Checks what the Rust M0 app exposes to UI Automation, the interface Narrator
 # and other screen readers use (docs/rust/m0-evidence.md section 7): prints the
-# tree, types into the first text field (the layer name) and presses the Add
+# tree, renames the top layer with F2 from its focused row and presses the Add
 # layer button through InvokePattern. Runs in Windows PowerShell 5.1, which
 # has the .NET UI Automation client.
 #
@@ -15,6 +15,8 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 New-Item -ItemType Directory -Force $Out | Out-Null
 $log = Join-Path $Out 'app.log'
 $env:UGURUGU_LOG = 'info'
+# Elements are found by their English names.
+$env:UGURUGU_LANGUAGE = 'en'
 $app = Start-Process -FilePath $Exe -PassThru -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Out 'stderr.log')
 
 function Get-Tree($root) {
@@ -53,29 +55,45 @@ try {
     if ($window -eq $null) { throw 'no window' }
     # The first query only asks the app for its tree; it arrives with the next frame.
     $tree = Get-Tree $window
-    for ($i = 0; $i -lt 30 -and ($tree | Where-Object Type -eq 'Edit').Count -eq 0; $i++) {
+    for ($i = 0; $i -lt 30 -and ($tree | Where-Object Name -eq 'Add layer').Count -eq 0; $i++) {
         Start-Sleep -Milliseconds 200
         $tree = Get-Tree $window
     }
     $tree | ForEach-Object { ('  ' * $_.Depth) + $_.Type + ' "' + $_.Name + '"' } | Set-Content -Encoding utf8 (Join-Path $Out 'tree.txt')
     "elements: $($tree.Count)"
     $tree | Group-Object Type | Sort-Object Count -Descending | ForEach-Object { "  $($_.Name): $($_.Count)" }
+    # Controls a screen reader would announce without a name.
+    $unnamed = @($tree | Where-Object { $_.Name -eq '' -and $_.Type -in 'Button', 'CheckBox', 'ComboBox', 'Spinner', 'Slider', 'Edit' })
+    "unnamed controls: $($unnamed.Count)" + $(if ($unnamed) { ' (' + (($unnamed | ForEach-Object Type) -join ', ') + ')' })
 
-    # egui text fields take focus and keys but not ValuePattern.SetValue, so
-    # this focuses the field through UI Automation and types, as a screen
-    # reader user would.
-    $edit = ($tree | Where-Object Type -eq 'Edit' | Select-Object -First 1).Element
-    if ($edit -ne $null) {
-        Add-Type -AssemblyName System.Windows.Forms
-        $edit.SetFocus()
+    # A layer is renamed in its row, as in 2.2.13: focus the row through UI
+    # Automation, press F2, type and press Enter, as a keyboard user would.
+    # egui text fields take keys but not ValuePattern.SetValue.
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type 'using System; using System.Runtime.InteropServices; public static class Front { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'
+    $layers = [array]::IndexOf(@($tree | ForEach-Object Name), 'Layers')
+    # Rows are the buttons that toggle (selected), unlike the dock's close button.
+    $row = ($tree | Select-Object -Skip $layers | Where-Object {
+        $_.Type -eq 'Button' -and $_.Element.GetSupportedPatterns() -contains [System.Windows.Automation.TogglePattern]::Pattern
+    } | Select-Object -First 1).Element
+    if ($row -ne $null) {
+        $before = $row.Current.Name
+        $row.SetFocus()
         Start-Sleep -Milliseconds 300
-        [System.Windows.Forms.SendKeys]::SendWait('uia')
-        Start-Sleep -Milliseconds 500
-        $value = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        "edit '$($edit.Current.Name)' value after typing: '$($value.Current.Value)'"
-    } else { 'no Edit element' }
+        # SendKeys types into whatever is in front.
+        if ([Front]::GetForegroundWindow() -ne $app.MainWindowHandle) { throw 'the app is not in front' }
+        [System.Windows.Forms.SendKeys]::SendWait('{F2}')
+        Start-Sleep -Milliseconds 300
+        $edit = (Get-Tree $window | Where-Object Type -eq 'Edit' | Select-Object -First 1).Element
+        if ($edit -eq $null) { "no rename field after F2 on '$before'" } else {
+            if ([Front]::GetForegroundWindow() -ne $app.MainWindowHandle) { throw 'the app is not in front' }
+            [System.Windows.Forms.SendKeys]::SendWait('^auia{ENTER}')
+            Start-Sleep -Milliseconds 500
+            $renamed = Get-Tree $window | Where-Object { $_.Type -eq 'Button' -and $_.Name -eq 'uia' }
+            "row '$before' after F2, typing and Enter: " + $(if ($renamed) { "renamed to 'uia'" } else { 'not renamed' })
+        }
+    } else { 'no layer row' }
 
-    # Moving focus away commits the typed name.
     $add = ($tree | Where-Object { $_.Type -eq 'Button' -and $_.Name -eq 'Add layer' } | Select-Object -First 1).Element
     if ($add -ne $null) {
         $add.SetFocus()

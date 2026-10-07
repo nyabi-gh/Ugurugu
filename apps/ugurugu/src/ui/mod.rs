@@ -351,7 +351,7 @@ fn slider_row(
     ui.horizontal(|ui| {
         widgets::field_label(ui, label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let field = widgets::number(ui, value, range.clone(), suffix, decimals, 64.0);
+            let field = widgets::number(ui, value, range.clone(), suffix, decimals, 64.0, name);
             let width = ui.available_width().max(40.0);
             let slider = widgets::slider(ui, value, range, name, width);
             slider.union(field)
@@ -435,6 +435,10 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             ui.add_enabled_ui(layer_wobble.is_some(), |ui| {
                 ui.selectable_value(&mut panels.wobble_layer, true, scope(true));
             });
+        })
+        .response
+        .widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, tr("wobble-scope"))
         });
     let on_layer = panels.wobble_layer && layer_wobble.is_some();
     let amount = match layer_wobble {
@@ -464,7 +468,8 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             let preview = wobble_preview(ui, value, ui.ctx().input(|input| input.time));
             preview.on_hover_text(tr("wobble-preview-tip"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let field = widgets::number(ui, &mut value, min..=max, " px", 1, 64.0);
+                let field =
+                    widgets::number(ui, &mut value, min..=max, " px", 1, 64.0, tr("wobble"));
                 let width = ui.available_width().max(40.0);
                 widgets::slider(ui, &mut value, min..=max, tr("wobble"), width).union(field)
             })
@@ -574,8 +579,16 @@ pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         let document = canvas.session().document();
         let (frames, fps, wobble) = (document.frames, document.frames_per_second, document.wobble);
         let mut frame = frame_in_cycle(canvas.session().frame(), frames) as f32 + 1.0;
-        let field = widgets::number(ui, &mut frame, 1.0..=frames as f32, "", 0, 46.0)
-            .on_hover_text(tr("frame-current"));
+        let field = widgets::number(
+            ui,
+            &mut frame,
+            1.0..=frames as f32,
+            "",
+            0,
+            46.0,
+            tr("frame-current"),
+        )
+        .on_hover_text(tr("frame-current"));
         if field.changed() {
             if canvas.is_playing() {
                 canvas.toggle_playback();
@@ -585,8 +598,9 @@ pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         ui.label(egui::RichText::new("/").color(theme::MUTED));
         let (mut count, mut speed) = panels.animation.unwrap_or((frames as f32, fps));
         let (low, high) = (*limits::FRAMES.start() as f32, *limits::FRAMES.end() as f32);
-        let count_field = widgets::number(ui, &mut count, low..=high, "", 0, 46.0)
-            .on_hover_text(tr("frame-count"));
+        let count_field =
+            widgets::number(ui, &mut count, low..=high, "", 0, 46.0, tr("frame-count"))
+                .on_hover_text(tr("frame-count"));
 
         let right = 46.0 + 30.0 + 90.0 + 30.0;
         let width = (ui.available_width() - right).max(160.0);
@@ -607,8 +621,8 @@ pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
             *limits::FRAMES_PER_SECOND.start(),
             *limits::FRAMES_PER_SECOND.end(),
         );
-        let speed_field =
-            widgets::number(ui, &mut speed, low..=high, "", 0, 46.0).on_hover_text(tr("fps-tip"));
+        let speed_field = widgets::number(ui, &mut speed, low..=high, "", 0, 46.0, tr("fps-name"))
+            .on_hover_text(tr("fps-tip"));
         let edited = count_field.changed() || speed_field.changed();
         if edited {
             panels.animation = Some((count, speed));
@@ -741,8 +755,16 @@ pub fn status_bar(
                 *ZOOM_RANGE.start() as f32 * 100.0,
                 *ZOOM_RANGE.end() as f32 * 100.0,
             );
-            let field = widgets::number(ui, &mut percent, low..=high, "%", 0, 72.0)
-                .on_hover_text(tr("canvas-zoom-percent"));
+            let field = widgets::number(
+                ui,
+                &mut percent,
+                low..=high,
+                "%",
+                0,
+                72.0,
+                tr("canvas-zoom-percent"),
+            )
+            .on_hover_text(tr("canvas-zoom-percent"));
             if field.changed() {
                 canvas.zoom_to(f64::from(percent) / 100.0);
             }

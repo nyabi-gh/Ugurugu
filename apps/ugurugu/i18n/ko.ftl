@@ -73,6 +73,7 @@ wobble-layer = 활성 레이어
 wobble-follow = 전체 그림 설정 따르기
 wobble-follow-tip = 이 레이어의 개별 설정을 제거하고 전체 그림 설정을 사용합니다.
 wobble = 우글거림
+wobble-scope = 우글거림 적용 대상
 wobble-preview = 우글거림 미리보기
 wobble-preview-tip = 현재 우글거림 강도를 실시간으로 보여줍니다
 
