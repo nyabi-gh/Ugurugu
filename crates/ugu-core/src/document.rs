@@ -8,6 +8,7 @@
 //! canvas each paint layer ends on.
 
 use crate::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
+use crate::store::{Store, StoreError};
 
 /// Limits a document must stay within. The same as 2.2.13's, plus the depth
 /// of isolated sections that merging creates.
@@ -37,6 +38,7 @@ pub struct Document {
     pub wobble: Wobble,
     /// Bottom first.
     pub layers: Vec<Layer>,
+    pub store: Store,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +82,9 @@ pub enum DocumentError {
     TooManyOperations(usize),
     /// An isolated section is nested too deeply or changes the canvas.
     Section(LayerId),
+    /// An operation refers to a stroke, mask or image that is not stored.
+    MissingData(LayerId),
+    Store(StoreError),
 }
 
 impl std::fmt::Display for DocumentError {
@@ -101,6 +106,8 @@ impl std::fmt::Display for DocumentError {
             }
             Self::TooManyOperations(count) => write!(f, "{count} operations is over the limit"),
             Self::Section(id) => write!(f, "layer {} has an invalid isolated section", id.0),
+            Self::MissingData(id) => write!(f, "layer {} refers to data that is not stored", id.0),
+            Self::Store(error) => error.fmt(f),
         }
     }
 }
@@ -130,6 +137,7 @@ impl Document {
                     initial_size: canvas,
                 }),
             }],
+            store: Store::default(),
         }
     }
 
@@ -148,8 +156,10 @@ impl Document {
             return Err(DocumentError::FramesPerSecond(self.frames_per_second));
         }
         check_wobble(self.wobble)?;
+        self.store.validate().map_err(DocumentError::Store)?;
         let mut walk = Walk {
             canvas: self.canvas,
+            store: &self.store,
             ids: std::collections::HashSet::new(),
             operations: 0,
         };
@@ -178,13 +188,14 @@ fn check_opacity(id: LayerId, opacity: f32) -> Result<(), DocumentError> {
     }
 }
 
-struct Walk {
+struct Walk<'a> {
     canvas: [u32; 2],
+    store: &'a Store,
     ids: std::collections::HashSet<LayerId>,
     operations: usize,
 }
 
-impl Walk {
+impl Walk<'_> {
     fn layers(&mut self, layers: &[Layer], depth: usize) -> Result<(), DocumentError> {
         for layer in layers {
             if depth > limits::LAYER_DEPTH {
@@ -247,6 +258,24 @@ impl Walk {
             return Err(DocumentError::TooManyOperations(self.operations));
         }
         for op in ops {
+            let stored = match op {
+                Op::Paint { stroke, clip } | Op::Erase { stroke, clip } => {
+                    self.store.strokes.contains_key(stroke)
+                        && clip.is_none_or(|mask| self.store.masks.contains_key(&mask))
+                }
+                Op::Fill { coverage, clip, .. } => {
+                    self.store.masks.contains_key(coverage)
+                        && clip.is_none_or(|mask| self.store.masks.contains_key(&mask))
+                }
+                Op::PlaceImage { asset, .. } => self.store.assets.contains_key(asset),
+                Op::TransformSelection { mask, .. } | Op::ClearSelection { mask } => {
+                    self.store.masks.contains_key(mask)
+                }
+                Op::Crop { .. } | Op::Resample { .. } | Op::Isolated(_) => true,
+            };
+            if !stored {
+                return Err(DocumentError::MissingData(id));
+            }
             if let Op::Isolated(section) = op {
                 let canvas_change = section
                     .ops
@@ -269,7 +298,8 @@ impl Walk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::{Sampling, Section, StrokeId};
+    use crate::ops::{MaskId, Sampling, Section, StrokeId};
+    use crate::store::{Brush, BrushEngine, Point, Stroke};
 
     fn paint_layer(id: u32, ops: Vec<Op>, size: [u32; 2]) -> Layer {
         Layer {
@@ -402,6 +432,56 @@ mod tests {
         assert_eq!(document.validate(), Ok(()));
     }
 
+    fn store_with_stroke() -> Store {
+        let mut store = Store::default();
+        store.strokes.insert(
+            StrokeId(0),
+            Stroke {
+                points: vec![Point {
+                    x: 1.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                }]
+                .into(),
+                color: Rgba8([0, 0, 0, 255]),
+                width: 6.0,
+                brush: Brush {
+                    engine: BrushEngine::Line,
+                    opacity: 1.0,
+                    hardness: 1.0,
+                    antialias: false,
+                },
+                seed: 1,
+            },
+        );
+        store
+    }
+
+    #[test]
+    fn operations_must_refer_to_stored_data() {
+        let mut document = Document::new([64, 64]);
+        let paint = Op::Paint {
+            stroke: StrokeId(0),
+            clip: None,
+        };
+        document.layers = vec![paint_layer(1, vec![paint.clone()], [64, 64])];
+        assert_eq!(
+            document.validate(),
+            Err(DocumentError::MissingData(LayerId(1)))
+        );
+        document.store = store_with_stroke();
+        assert_eq!(document.validate(), Ok(()));
+        let clipped = Op::Paint {
+            stroke: StrokeId(0),
+            clip: Some(MaskId(3)),
+        };
+        document.layers = vec![paint_layer(1, vec![clipped], [64, 64])];
+        assert_eq!(
+            document.validate(),
+            Err(DocumentError::MissingData(LayerId(1)))
+        );
+    }
+
     #[test]
     fn operations_are_counted_inside_sections() {
         let paint = Op::Paint {
@@ -414,6 +494,7 @@ mod tests {
             wobble: None,
         }));
         let mut document = Document::new([64, 64]);
+        document.store = store_with_stroke();
         document.layers = vec![paint_layer(1, vec![section], [64, 64])];
         assert_eq!(
             document.validate(),

@@ -7,6 +7,7 @@
 
 pub mod document;
 pub mod ops;
+pub mod store;
 
 #[cfg(test)]
 mod semantics;
