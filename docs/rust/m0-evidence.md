@@ -358,6 +358,8 @@ SSE4.2는 1스레드 래스터화가 약 3% 느리고 합성은 오히려 25~35%
 
 3. **fallback 글꼴의 글자가 기준선 위로 떴다.** "私は学生です"에서 맑은 고딕에 없는 "学"만 Yu Gothic으로 그려지면서 약 4.7pt 위에 그려져, 칸 위쪽에 걸려 잘려 보였다. epaint는 다른 글꼴의 글리프를 섞을 때 행 높이 차이의 절반만큼 세로 가운데를 맞추는데, 행 높이에 line gap이 포함되므로 line gap이 큰 Yu Gothic은 위로 올라간다(glyph atlas의 비트맵은 정상이었다). 앱 시작 시 epaint의 배치로 기본 글꼴과 각 fallback 글꼴의 기준선 차이를 재서 `FontTweak::y_offset_factor`에 넣는다(Yu Gothic +0.279, 맑은 고딕 −0.066). 맑은 고딕의 한글도 그동안 약 0.9pt 아래로 처져 있었다. 제품이 글꼴을 번들해도 같은 방식으로 맞춘다.
 
+4. **후보창이 커서가 아니라 텍스트 칸 전체 아래에 떴다.** egui-winit이 IME에 피할 영역으로 칸 전체(`ime.rect`)를 넘기기 때문이다. Windows 앱은 후보창을 커서 바로 아래에 띄우고, 캔버스 위 문자 도구도 그래야 한다. `handle_platform_output` 직전에 그 영역을 커서 영역(`ime.cursor_rect`)으로 바꾼다. 한국어 한자 후보와 일본어 변환 후보가 모두 조합 중인 글자 바로 아래에 뜨고, 입력 결과는 같다.
+
 ### 접근성 (UI Automation, 2026-10-07)
 
 Narrator 같은 화면 낭독기는 UI Automation(UIA)으로 앱을 읽는다. egui-winit의 AccessKit을 켜고, `tools/uia_probe.ps1`(Windows PowerShell 5.1의 .NET UIA 클라이언트)로 트리를 읽고 조작했다.
@@ -373,7 +375,6 @@ Narrator 같은 화면 낭독기는 UI Automation(UIA)으로 앱을 읽는다. e
 ### 남은 것
 
 - Narrator를 실제로 켜고 듣는 시험은 사용자가 있을 때 한다.
-- 후보창이 커서 바로 아래가 아니라 TextEdit 영역 아래에 붙는다. 사용에는 지장이 없지만 문자 도구(캔버스 위 입력)에서는 커서 위치에 맞춰야 한다.
 
 ## 8. 4K·장치 손실·WARP·오프라인 (13~14일차, 2026-10-07)
 
