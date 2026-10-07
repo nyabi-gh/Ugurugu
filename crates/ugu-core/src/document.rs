@@ -141,7 +141,16 @@ impl Document {
         }
     }
 
+    /// Checks everything, every stored point included; for a document just
+    /// read.
     pub fn validate(&self) -> Result<(), DocumentError> {
+        self.store.validate().map_err(DocumentError::Store)?;
+        self.check_structure()
+    }
+
+    /// Checks settings, the layer tree, operations, references and store
+    /// totals, but not each stored item, which edits check as they add them.
+    pub fn check_structure(&self) -> Result<(), DocumentError> {
         if !self
             .canvas
             .iter()
@@ -156,7 +165,7 @@ impl Document {
             return Err(DocumentError::FramesPerSecond(self.frames_per_second));
         }
         check_wobble(self.wobble)?;
-        self.store.validate().map_err(DocumentError::Store)?;
+        self.store.check_totals().map_err(DocumentError::Store)?;
         let mut walk = Walk {
             canvas: self.canvas,
             store: &self.store,

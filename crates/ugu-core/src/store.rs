@@ -134,42 +134,30 @@ impl Store {
         (points * 12 + masks + assets) as u64
     }
 
+    /// Checks every item and the totals; for a document just read.
     pub fn validate(&self) -> Result<(), StoreError> {
-        let mut points = 0;
         for (&id, stroke) in &self.strokes {
-            if stroke.points.is_empty() || stroke.points.len() > limits::POINTS_PER_STROKE {
-                return Err(StoreError::StrokePoints(id));
-            }
-            points += stroke.points.len();
-            let in_range = |value: f32| value.abs() <= limits::COORDINATE;
-            if !stroke.points.iter().all(|point| {
-                in_range(point.x) && in_range(point.y) && (0.0..=1.0).contains(&point.pressure)
-            }) {
-                return Err(StoreError::StrokePoint(id));
-            }
-            let unit = 0.0..=1.0;
-            if !limits::STROKE_WIDTH.contains(&stroke.width)
-                || !unit.contains(&stroke.brush.opacity)
-                || !unit.contains(&stroke.brush.hardness)
-            {
-                return Err(StoreError::StrokeWidth(id));
-            }
-        }
-        if points > limits::POINTS {
-            return Err(StoreError::TooManyPoints(points));
+            check_stroke(id, stroke)?;
         }
         for (&id, mask) in &self.masks {
-            let [_, _, width, height] = mask.bounds;
-            let expected = (height.max(0) as usize).checked_mul(Mask::row_bytes(width));
-            if width <= 0 || height <= 0 || expected != Some(mask.bits.len()) {
-                return Err(StoreError::MaskSize(id));
-            }
+            check_mask(id, mask)?;
         }
         for (&id, asset) in &self.assets {
-            let pixels = u64::from(asset.size[0]) * u64::from(asset.size[1]);
-            if pixels == 0 || pixels > limits::ASSET_PIXELS || asset.png.is_empty() {
-                return Err(StoreError::AssetSize(id));
-            }
+            check_asset(id, asset)?;
+        }
+        self.check_totals()
+    }
+
+    /// Checks the totals only, for a store whose items were checked as they
+    /// were added.
+    pub fn check_totals(&self) -> Result<(), StoreError> {
+        let points: usize = self
+            .strokes
+            .values()
+            .map(|stroke| stroke.points.len())
+            .sum();
+        if points > limits::POINTS {
+            return Err(StoreError::TooManyPoints(points));
         }
         let bytes = self.bytes();
         if bytes > limits::BYTES {
@@ -177,6 +165,43 @@ impl Store {
         }
         Ok(())
     }
+}
+
+pub fn check_stroke(id: StrokeId, stroke: &Stroke) -> Result<(), StoreError> {
+    if stroke.points.is_empty() || stroke.points.len() > limits::POINTS_PER_STROKE {
+        return Err(StoreError::StrokePoints(id));
+    }
+    let in_range = |value: f32| value.abs() <= limits::COORDINATE;
+    if !stroke.points.iter().all(|point| {
+        in_range(point.x) && in_range(point.y) && (0.0..=1.0).contains(&point.pressure)
+    }) {
+        return Err(StoreError::StrokePoint(id));
+    }
+    let unit = 0.0..=1.0;
+    if !limits::STROKE_WIDTH.contains(&stroke.width)
+        || !unit.contains(&stroke.brush.opacity)
+        || !unit.contains(&stroke.brush.hardness)
+    {
+        return Err(StoreError::StrokeWidth(id));
+    }
+    Ok(())
+}
+
+pub fn check_mask(id: MaskId, mask: &Mask) -> Result<(), StoreError> {
+    let [_, _, width, height] = mask.bounds;
+    let expected = (height.max(0) as usize).checked_mul(Mask::row_bytes(width));
+    if width <= 0 || height <= 0 || expected != Some(mask.bits.len()) {
+        return Err(StoreError::MaskSize(id));
+    }
+    Ok(())
+}
+
+pub fn check_asset(id: AssetId, asset: &Asset) -> Result<(), StoreError> {
+    let pixels = u64::from(asset.size[0]) * u64::from(asset.size[1]);
+    if pixels == 0 || pixels > limits::ASSET_PIXELS || asset.png.is_empty() {
+        return Err(StoreError::AssetSize(id));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
