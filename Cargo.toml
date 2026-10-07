@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["apps/*", "crates/*", "tools/latency-probe", "tools/render-bench"]
+members = ["apps/*", "crates/*", "tools/latency-probe", "tools/render-bench", "tools/ugu-doc"]
 
 [workspace.package]
 version = "3.0.0-dev"
@@ -13,6 +13,7 @@ publish = false
 egui = "=0.36.2"
 egui-winit = { version = "=0.36.2", default-features = false, features = ["accesskit", "clipboard"] }
 egui-wgpu = { version = "=0.36.2", default-features = false, features = ["winit"] }
+png = "=0.18.1"
 pollster = "=1.0.1"
 proptest = "=1.11.0"
 serde = { version = "=1.0.229", features = ["derive"] }

@@ -3457,6 +3457,17 @@ name = "ugu-core"
 version = "3.0.0-dev"
 
 [[package]]
+name = "ugu-doc"
+version = "3.0.0-dev"
+dependencies = [
+ "png",
+ "sha2",
+ "ugu-core",
+ "ugu-io",
+ "ugu-win",
+]
+
+[[package]]
 name = "ugu-io"
 version = "3.0.0-dev"
 dependencies = [
