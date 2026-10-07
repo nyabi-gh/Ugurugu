@@ -602,7 +602,7 @@ PNG/JPG 정확 렌더, GIF 순차 공급·취소, WebP encoder 내부 peak, alph
 
 root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기여 절차, SECURITY/THIRD_PARTY_NOTICES는 정책·고지, release-notes는 버전별 불변 이력이다. 이 성격이 다른 문서들은 통합 검토에 복사하거나 삭제하지 않는다.
 
-## 11. Rust 3.0 재작성 — M0 진행 중
+## 11. Rust 3.0 재작성 — M0 완료(펜 제외), M1 준비
 
 계획은 [RUST_WINDOWS_PORT_PLAN.md](RUST_WINDOWS_PORT_PLAN.md), 범위·결정은 [rust/scope.md](rust/scope.md), 측정·실증 근거는 [rust/m0-evidence.md](rust/m0-evidence.md)에 둔다. 작업 브랜치는 `rust/m0`이다. 이 절은 진행 상태만 적는다.
 
@@ -620,10 +620,11 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 8~9일차 IME·접근성 | 완료. 한국어·일본어 IME를 100/125/150/200%에서 자동 시험해 통과(캔버스 포커스·CJK fallback 기준선 버그 수정). AccessKit으로 UI Automation 트리 노출(텍스트 칸·버튼, 포커스·입력·Invoke 동작). IME 후보창을 커서 바로 아래로 옮김. egui TextEdit는 SetValue 미지원. Narrator 청취 검증은 범위에서 뺌(사용자 결정) |
 | 12일차 ADR | 완료. 레이어 연산 enum·병합(isolated section, 불투명도·모션 차이 허용)·채우기(확정 coverage)·선택 의미와 `.ugu2` 스키마 1. `crates/ugu-core` 의미 시험 7개. [adr-operations-and-format.md](rust/adr-operations-and-format.md) |
 | 13~14일차 | 완료. 장치 손실 복구(RemoveDevice로 3회 시험, 캔버스 보존, 0.4~0.9초), WARP fallback과 안내, 4K 최대화 창 입력→표시 p50 5.8 / p95 8.9ms(2560 창과 같음), WARP는 p50 59~76ms, 오프라인 진입점 확인. 실제 TDR은 M3, RDP는 M6. m0-evidence 8절 |
-| 15일차 | 시작 전 |
+| 15일차 마무리 | 완료. 기술 조합·버전 고정 정책·M0 종료 조건 대비·위험표·M1 분해(10단계). 펜만 미충족으로 M6 전 gate에 이월. [m0-close.md](rust/m0-close.md) |
 
 다음 작업:
 
-1. 15일차: 기술 조합 결정, 버전 고정, M1 작업을 작은 변경 단위로 분해.
+1. M1 도메인·새 저장: [m0-close.md](rust/m0-close.md) 5절의 M1-1부터 순서대로. 브랜치 방식은 사용자 확인 필요(같은 문서 6절).
+2. 펜 장치를 확보하면 펜 경로 실증(M6 전 필수 gate).
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
