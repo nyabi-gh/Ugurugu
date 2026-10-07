@@ -7,7 +7,8 @@
 //! Dialogs run on threads of their own; reading and writing run in order on
 //! one file thread, so a later save never finishes before an earlier one to
 //! the same file. A save writes the snapshot taken when it started, and the
-//! document counts as saved only in that state.
+//! document counts as saved only in that state. A PNG export renders the
+//! frame shown when it started, on the file thread.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use std::sync::mpsc::{Sender, channel};
 
 use ugu_core::document::Document;
 use ugu_core::history::StateId;
+use ugu_render::document::{DocumentRenderer, Purpose as RenderPurpose};
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
@@ -22,6 +24,10 @@ use crate::canvas::Canvas;
 const DOCUMENT_TYPE: FileType = FileType {
     name: "Ugurugu document",
     extension: "ugu2",
+};
+const PNG_TYPE: FileType = FileType {
+    name: "PNG image",
+    extension: "png",
 };
 /// 2.2.13's new document.
 const NEW_CANVAS: [u32; 2] = [1024, 768];
@@ -36,12 +42,14 @@ pub enum FileEvent {
         state: StateId,
         result: Result<(), String>,
     },
+    Exported(PathBuf, Result<(), String>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
     Open,
     SaveAs,
+    ExportPng,
 }
 
 /// What waits for unsaved changes to be dealt with.
@@ -60,6 +68,11 @@ enum Job {
         state: StateId,
     },
     Open(PathBuf),
+    Export {
+        document: Arc<Document>,
+        frame: i64,
+        path: PathBuf,
+    },
 }
 
 pub struct Files {
@@ -200,9 +213,13 @@ impl Files {
         self.busy_dialog = true;
         let owner = self.owner;
         let events = self.events.clone();
-        let (file_type, save_name) = match dialog {
-            Dialog::Save { name } => (DOCUMENT_TYPE, Some(name.to_owned())),
-            Dialog::Open => (DOCUMENT_TYPE, None),
+        let file_type = match purpose {
+            Purpose::ExportPng => PNG_TYPE,
+            Purpose::Open | Purpose::SaveAs => DOCUMENT_TYPE,
+        };
+        let save_name = match dialog {
+            Dialog::Save { name } => Some(name.to_owned()),
+            Dialog::Open => None,
         };
         std::thread::Builder::new()
             .name("file dialog".to_owned())
@@ -219,6 +236,20 @@ impl Files {
                 events(FileEvent::Picked(purpose, path));
             })
             .expect("cannot start the dialog thread");
+    }
+
+    pub fn export_png(&mut self) {
+        let name = format!("{}.{}", self.display_name(), PNG_TYPE.extension);
+        self.pick(Purpose::ExportPng, Dialog::Save { name: &name });
+    }
+
+    fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        self.message = Some(format!("Exporting {}...", path.display()));
+        let _ = self.to_worker.send(Job::Export {
+            document: canvas.snapshot_now(),
+            frame: canvas.session().frame(),
+            path,
+        });
     }
 
     fn start_save(&mut self, path: PathBuf, canvas: &mut Canvas) {
@@ -244,6 +275,7 @@ impl Files {
                 match purpose {
                     Purpose::Open => self.open_path(path),
                     Purpose::SaveAs => self.start_save(path, canvas),
+                    Purpose::ExportPng => self.start_export(path, canvas),
                 }
             }
             FileEvent::Opened(path, result) => match result {
@@ -263,6 +295,12 @@ impl Files {
                 },
                 Err(error) => self.message = Some(format!("{}: {error}", path.display())),
             },
+            FileEvent::Exported(path, result) => {
+                self.message = Some(match result {
+                    Ok(()) => format!("Exported {}", path.display()),
+                    Err(error) => format!("Not exported: {error}"),
+                });
+            }
             FileEvent::Saved {
                 path,
                 state,
@@ -349,6 +387,20 @@ fn run(job: Job) -> FileEvent {
                 result,
             }
         }
+        Job::Export {
+            document,
+            frame,
+            path,
+        } => {
+            let started = std::time::Instant::now();
+            let result = export(&document, frame, &path);
+            tracing::info!(
+                ms = started.elapsed().as_secs_f64() * 1000.0,
+                ok = result.is_ok(),
+                "frame exported"
+            );
+            FileEvent::Exported(path, result)
+        }
         Job::Open(path) => {
             let started = std::time::Instant::now();
             let result = std::fs::File::open(&path)
@@ -365,6 +417,23 @@ fn run(job: Job) -> FileEvent {
             FileEvent::Opened(path, result)
         }
     }
+}
+
+/// Renders `frame` without reference layers at the document's size.
+fn export(document: &Document, frame: i64, path: &Path) -> Result<(), String> {
+    let [width, height] = document.canvas;
+    let mut pixmap = vello_cpu::Pixmap::new(width as u16, height as u16);
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |count| count.get().saturating_sub(1))
+        .min(8) as u16;
+    DocumentRenderer::new(threads).render(document, frame, RenderPurpose::Export, &mut pixmap);
+    ugu_io::image::export_png(
+        pixmap.data_as_u8_slice(),
+        [width, height],
+        path,
+        &ugu_win::file::replace_file,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -475,6 +544,85 @@ mod tests {
         assert!(!canvas.session().is_dirty());
         assert_eq!(files.path, Some(good));
         assert_eq!(files.id, [7; 16]);
+    }
+
+    #[test]
+    fn an_exported_png_is_the_rendered_frame_without_reference_layers() {
+        use std::sync::Arc as Shared;
+        use ugu_core::ops::{Op, Rgba8, StrokeId, Wobble};
+        use ugu_core::store::{Brush, BrushEngine, Point, Stroke};
+
+        let mut document = Document::new([64, 40]);
+        document.background = Rgba8([0, 0, 0, 0]);
+        document.wobble = Wobble::classic(3.0);
+        let points: Vec<Point> = (0..20)
+            .map(|step| Point {
+                x: 4.0 + step as f32 * 3.0,
+                y: 20.0 + (step as f32 * 0.5).sin() * 8.0,
+                pressure: 0.6,
+            })
+            .collect();
+        document.store.strokes.insert(
+            StrokeId(0),
+            Stroke {
+                points: Shared::from(points),
+                color: Rgba8([200, 60, 20, 160]),
+                width: 7.0,
+                brush: Brush {
+                    engine: BrushEngine::Line,
+                    opacity: 1.0,
+                    hardness: 1.0,
+                    antialias: true,
+                    size_dynamics: 0.8,
+                    wobble_scale: 1.0,
+                },
+                seed: 9,
+            },
+        );
+        if let LayerKind::Paint(paint) = &mut document.layers[0].kind {
+            paint.ops.push(Op::Paint {
+                stroke: StrokeId(0),
+                clip: None,
+            });
+        }
+        // The same stroke again on a reference layer, which the canvas shows
+        // and an export leaves out.
+        let mut reference = document.layers[0].clone();
+        reference.id = ugu_core::document::LayerId(2);
+        reference.reference = true;
+        document.layers.push(reference);
+
+        let path = folder("export").join("frame.png");
+        export(&document, 5, &path).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let mut decoder = png::Decoder::new(std::io::BufReader::new(file))
+            .read_info()
+            .unwrap();
+        let mut decoded = vec![0; decoder.output_buffer_size().unwrap()];
+        decoder.next_frame(&mut decoded).unwrap();
+
+        let mut expected = vello_cpu::Pixmap::new(64, 40);
+        DocumentRenderer::new(0).render(&document, 5, RenderPurpose::Export, &mut expected);
+        let straight: Vec<u8> = expected
+            .data_as_u8_slice()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|&pixel| ugu_io::image::unpremultiply(pixel))
+            .collect();
+        assert!(decoded == straight);
+        let mut shown = vello_cpu::Pixmap::new(64, 40);
+        DocumentRenderer::new(0).render(&document, 5, RenderPurpose::Display, &mut shown);
+        assert!(shown.data_as_u8_slice() != expected.data_as_u8_slice());
+        // One translucent stroke, not two over each other.
+        assert!(
+            decoded
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[3] == 160)
+        );
+        assert!(decoded.as_chunks::<4>().0.contains(&[0; 4]));
     }
 
     #[test]

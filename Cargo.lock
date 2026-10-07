@@ -3473,6 +3473,7 @@ dependencies = [
 name = "ugu-io"
 version = "3.0.0-dev"
 dependencies = [
+ "png",
  "proptest",
  "serde",
  "serde_json",
@@ -3516,6 +3517,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "png",
  "pollster",
  "tracing",
  "tracing-appender",

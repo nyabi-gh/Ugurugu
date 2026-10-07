@@ -67,25 +67,36 @@ fn save_through<W: Write + Seek>(
     replace: Replace<'_>,
     wrap: impl FnOnce(File) -> io::Result<W>,
 ) -> Result<(), SaveError> {
+    replace_with(target, replace, |file, temporary| {
+        let out =
+            write(document, document_id, BufWriter::new(wrap(file)?)).map_err(SaveError::Write)?;
+        out.into_inner()
+            .map_err(|error| SaveError::Write(WriteError::Io(error.into_error())))?;
+        let entries = zip::ZipArchive::new(File::open(temporary)?)
+            .map_err(|error| SaveError::Check(error.to_string()))?
+            .len();
+        if entries < 2 {
+            return Err(SaveError::Check(format!("{entries} entries")));
+        }
+        Ok(())
+    })
+}
+
+/// Makes a new file next to `target` with `fill`, which gets it and its
+/// path, flushes it to disk and puts it in place of `target`. On any failure
+/// the new file is removed and `target` stays as it was.
+pub fn replace_with(
+    target: &Path,
+    replace: Replace<'_>,
+    fill: impl FnOnce(File, &Path) -> Result<(), SaveError>,
+) -> Result<(), SaveError> {
     let temporary = temporary_path(target);
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temporary)?;
     let result = (|| {
-        let entries = {
-            let out = write(document, document_id, BufWriter::new(wrap(file)?))
-                .map_err(SaveError::Write)?;
-            out.into_inner()
-                .map_err(|error| SaveError::Write(WriteError::Io(error.into_error())))?;
-            let file = File::open(&temporary)?;
-            zip::ZipArchive::new(file)
-                .map_err(|error| SaveError::Check(error.to_string()))?
-                .len()
-        };
-        if entries < 2 {
-            return Err(SaveError::Check(format!("{entries} entries")));
-        }
+        fill(file, &temporary)?;
         // Flush through any cache to the disk before the old file is given up.
         OpenOptions::new()
             .write(true)

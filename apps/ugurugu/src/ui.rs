@@ -82,6 +82,9 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files) {
     if pressed(command, egui::Key::S) {
         files.save(canvas);
     }
+    if pressed(command_shift, egui::Key::E) {
+        files.export_png();
+    }
 }
 
 fn report_bool(result: Result<bool, EditError>) {
@@ -103,6 +106,9 @@ pub fn tools(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files) {
         }
         if ui.button("Save as").clicked() {
             files.save_as();
+        }
+        if ui.button("Export PNG").clicked() {
+            files.export_png();
         }
         ui.separator();
 

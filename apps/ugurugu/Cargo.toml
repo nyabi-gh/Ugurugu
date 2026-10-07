@@ -23,5 +23,8 @@ vello_cpu.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
+[dev-dependencies]
+png.workspace = true
+
 [lints]
 workspace = true
