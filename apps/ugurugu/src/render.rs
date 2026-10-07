@@ -25,6 +25,7 @@ use crate::files::{Action, FileEvent, Files};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
+use crate::theme;
 use crate::ui::{self, Panels};
 
 pub enum ToRender {
@@ -435,56 +436,128 @@ impl RenderThread {
         let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
-            ui::shortcuts(ui.ctx(), canvas, files);
+            ui::shortcuts(ui.ctx(), canvas, files, panels);
             files.confirm(ui.ctx(), canvas);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
-            egui::Panel::top("tools").show(ui, |ui| ui::tools(ui, canvas, files));
-            egui::Panel::bottom("timeline").show(ui, |ui| panels.timeline(ui, canvas));
-            egui::Panel::bottom("status").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if software {
-                        ui.colored_label(
-                            ui.visuals().warn_fg_color,
-                            "No usable GPU: drawing with the slow software display",
-                        );
-                        ui.separator();
-                    }
-                    ui.label(format!("{:.0}%", canvas.scale() * 100.0));
-                    if let Some(notice) = canvas.notice() {
-                        ui.separator();
-                        ui.colored_label(ui.visuals().warn_fg_color, notice);
-                    }
-                    if let Some(message) = files.message() {
-                        ui.separator();
-                        ui.label(message);
-                    }
-                    if *diagnostics {
-                        ui.separator();
-                        ui.label(adapter_summary.as_str());
-                        ui.separator();
-                        ui.label(format!("samples {}", canvas.sample_count()));
-                        if let Some(summary) = display_latency.summary() {
-                            ui.separator();
-                            ui.label(format!("input to display {summary}"));
-                        }
-                    }
-                });
-            });
-            egui::Panel::right("layers")
-                .resizable(true)
-                .default_size(240.0)
+            let bar = |fill, x, y| {
+                egui::Frame::new()
+                    .fill(fill)
+                    .inner_margin(egui::Margin::symmetric(x, y))
+            };
+            let dock = egui::Frame::new()
+                .fill(theme::PANEL)
+                .inner_margin(egui::Margin::same(8));
+            egui::Panel::top("menu")
+                .frame(bar(theme::CHROME, 6, 2))
+                .show_separator_line(false)
+                .show(ui, |ui| ui::menu_bar(ui, canvas, files, panels));
+            egui::Panel::top("quick access")
+                .frame(bar(theme::CHROME, 10, 5))
+                .show(ui, |ui| ui::quick_access(ui, canvas, panels));
+            egui::Panel::bottom("status")
+                .frame(bar(theme::STATUS, 8, 2))
+                .show_separator_line(false)
                 .show(ui, |ui| {
-                    panels.layers(ui, canvas);
+                    let warning =
+                        software.then_some("No usable GPU: drawing with the slow software display");
+                    let message = warning
+                        .or(canvas.notice())
+                        .map(|text| (text, true))
+                        .or(files.message().map(|text| (text, false)));
+                    let message = message.map(|(text, warn)| (text.to_owned(), warn));
+                    let pointer = panels.pointer;
+                    ui::status_bar(
+                        ui,
+                        canvas,
+                        message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
+                        pointer,
+                    );
                     if *diagnostics {
-                        ui.separator();
-                        ime.show(ui);
+                        ui.horizontal(|ui| {
+                            ui.label(adapter_summary.as_str());
+                            ui.separator();
+                            ui.label(format!("samples {}", canvas.sample_count()));
+                            if let Some(summary) = display_latency.summary() {
+                                ui.separator();
+                                ui.label(format!("input to display {summary}"));
+                            }
+                        });
                     }
                 });
+            egui::Panel::left("tool rail")
+                .resizable(false)
+                .exact_size(48.0)
+                .frame(bar(theme::CHROME, 4, 8))
+                .show(ui, |ui| ui::rail(ui, canvas));
+            if panels.shown.tool_settings || panels.shown.color {
+                egui::Panel::left("tool settings")
+                    .resizable(true)
+                    .default_size(260.0)
+                    .size_range(150.0..=460.0)
+                    .frame(dock)
+                    .show(ui, |ui| {
+                        if panels.shown.tool_settings {
+                            ui::tool_settings(ui, canvas, panels);
+                            ui.separator();
+                        }
+                        if panels.shown.color {
+                            ui::color(ui, canvas, panels);
+                        }
+                    });
+            }
+            let shown = panels.shown;
+            if shown.wobble || shown.layers || *diagnostics {
+                egui::Panel::right("docks")
+                    .resizable(true)
+                    .default_size(300.0)
+                    .size_range(150.0..=460.0)
+                    .frame(dock)
+                    .show(ui, |ui| {
+                        if shown.wobble {
+                            ui::wobble(ui, canvas, panels);
+                            ui.separator();
+                        }
+                        if *diagnostics {
+                            ime.show(ui);
+                            ui.separator();
+                        }
+                        if shown.layers {
+                            ui::layers(ui, canvas, panels);
+                        }
+                    });
+            }
+            if panels.shown.animation_bar {
+                egui::Panel::bottom("animation bar")
+                    .frame(
+                        egui::Frame::new()
+                            .fill(theme::CHROME)
+                            .inner_margin(egui::Margin {
+                                left: 12,
+                                right: 14,
+                                top: 9,
+                                bottom: 9,
+                            }),
+                    )
+                    .show(ui, |ui| ui::animation_bar(ui, canvas, panels));
+            }
             // No panel fill: the canvas is drawn under egui.
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ui, |ui| canvas_area = canvas.layout(ui));
+                .show(ui, |ui| {
+                    canvas_area = canvas.layout(ui);
+                    let ppp = f64::from(ui.ctx().pixels_per_point());
+                    let area = ui.max_rect();
+                    panels.pointer = ui
+                        .input(|input| input.pointer.hover_pos())
+                        .filter(|pointer| area.contains(*pointer))
+                        .map(|pointer| {
+                            canvas.document_point([
+                                f64::from(pointer.x) * ppp,
+                                f64::from(pointer.y) * ppp,
+                            ])
+                        });
+                });
         });
         let mut platform_output = output.platform_output;
         if let Some(update) = platform_output.accesskit_update.take() {

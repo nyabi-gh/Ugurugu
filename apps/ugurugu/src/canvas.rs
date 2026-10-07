@@ -33,9 +33,9 @@ use crate::cache::{CacheWorker, Key, Rendered, Renders, Snapshot, Version};
 use crate::input::{CanvasInput, Gesture};
 
 /// Shown around the document, opaque straight RGBA.
-pub const WORKSPACE: [u8; 4] = [64, 66, 70, 255];
+pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
 const ZOOM_STEP: f64 = 1.25;
-const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
 /// Memory for the layers' own surfaces and the playback frames rendered
 /// ahead together. Frames beyond it are rendered when they come up.
 const RENDER_BUDGET: usize = 768 * 1024 * 1024;
@@ -199,6 +199,17 @@ impl Canvas {
             let middle = [f64::from(left + right) / 2.0, f64::from(top + bottom) / 2.0];
             self.zoom(middle, notches);
         }
+    }
+
+    /// Zooms to `scale` around the middle of the canvas area.
+    pub fn zoom_to(&mut self, scale: f64) {
+        let notches = (scale / self.scale).ln() / ZOOM_STEP.ln();
+        self.zoom_in_place(notches as f32);
+    }
+
+    /// The document point under `position`, in client physical pixels.
+    pub fn document_point(&self, position: [f64; 2]) -> [f64; 2] {
+        self.to_document(position)
     }
 
     /// Shows the whole document, at most at 100%.

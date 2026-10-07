@@ -1,0 +1,126 @@
+# key | Qt context in 2.2.13 | English source [| args=...]
+# tools/ts_to_ftl.py turns this into en.ftl, ko.ftl and ja.ftl.
+
+# Menus
+menu-file | ugurugu::MainWindow | &File
+menu-edit | ugurugu::MainWindow | &Edit
+menu-view | ugurugu::MainWindow | &View
+menu-tools | ugurugu::MainWindow | &Tools
+menu-window | ugurugu::MainWindow | &Window
+file-new | ugurugu::MainWindow | &New
+file-open | ugurugu::MainWindow | &Open…
+file-save | ugurugu::MainWindow | &Save
+file-save-as | ugurugu::MainWindow | Save &As…
+file-export-frame | ugurugu::MainWindow | Export current frame as &image…
+file-quit | ugurugu::MainWindow | &Quit
+edit-undo | ugurugu::MainWindow | &Undo
+edit-redo | ugurugu::MainWindow | &Redo
+view-zoom-in | ugurugu::MainWindow | Zoom &in
+view-zoom-out | ugurugu::MainWindow | Zoom &out
+view-actual-pixels | ugurugu::MainWindow | Actual &pixels
+view-fit | ugurugu::MainWindow | &Fit canvas
+view-animate | ugurugu::MainWindow | &Animate preview
+window-animation-bar | ugurugu::MainWindow | Show &animation bar
+window-reset-layout | ugurugu::MainWindow | Reset panel layout
+tool-brush | ugurugu::MainWindow | Brush
+tool-eraser | ugurugu::MainWindow | Eraser
+tools-rail | ugurugu::MainWindow | Tools
+quick-access | ugurugu::MainWindow | Quick access
+panels | ugurugu::MainWindow | Panels
+panels-tip | ugurugu::MainWindow | Open and close panels
+
+# Status bar and window
+status-ready | ugurugu::MainWindow | Ready
+status-pointer | ugurugu::MainWindow | x %1  y %2 | args=x,y
+canvas-zoom | ugurugu::MainWindow | Canvas zoom
+canvas-zoom-percent | ugurugu::MainWindow | Canvas zoom percentage
+fit | ugurugu::MainWindow | Fit
+fit-tip | ugurugu::MainWindow | Fit the whole canvas in the window
+untitled | ugurugu::MainWindow | Untitled
+unsaved-title | ugurugu::MainWindow | Unsaved changes
+unsaved-text | ugurugu::MainWindow | The document has unsaved changes.
+unsaved-save | ugurugu::MainWindow | Save (S)
+unsaved-discard | ugurugu::MainWindow | Don't Save (N)
+unsaved-cancel | ugurugu::MainWindow | Cancel (ESC)
+
+# Dock title bars
+dock-collapse | PaletteDockTitleBar | Collapse
+dock-close | PaletteDockTitleBar | Close panel
+dock-expand-area | PaletteDockTitleBar | Expand panel dock
+dock-collapse-area | PaletteDockTitleBar | Collapse panel dock
+dock-handle | PaletteDockTitleBar | %1 panel drag handle | args=panel
+
+# Tool settings
+tool-settings | ugurugu::ToolDock | Tool settings
+size | ugurugu::BrushSizeRow | SIZE
+brush-size | ugurugu::BrushSizeRow | Brush size
+eraser-size | ugurugu::BrushSizeRow | Eraser size
+pen-pressure | ugurugu::TabletPressureRow | PEN PRESSURE
+pen-pressure-use | ugurugu::TabletPressureRow | Use tablet pressure
+pen-pressure-tip | ugurugu::TabletPressureRow | Vary stroke size and opacity with tablet pressure
+stabilization | ugurugu::StrokeStabilizationRow | STABILIZATION
+stabilization-name | ugurugu::StrokeStabilizationRow | Stroke stabilization
+antialiasing | ugurugu::BrushPopoverPanel | ANTI-ALIASING
+antialiasing-name | ugurugu::BrushPopoverPanel | Anti-aliasing
+antialiasing-tip | ugurugu::BrushPopoverPanel | Smooth stroke edges
+
+# Wobble
+wobble-dock | ugurugu::WobbleDock | Wobble
+wobble-whole | ugurugu::WobbleDock | Whole drawing
+wobble-layer | ugurugu::WobbleDock | Active layer
+wobble-follow | ugurugu::WobbleDock | Follow drawing settings
+wobble-follow-tip | ugurugu::WobbleDock | Remove this layer's override and use the whole drawing settings.
+wobble | ugurugu::WobblePopoverPanel | WOBBLE
+wobble-preview | ugurugu::WobblePreview | Wobble preview
+wobble-preview-tip | ugurugu::WobblePreview | Live preview of the wobble strength
+
+# Colour
+color-dock | ugurugu::ColorDock | Color
+color-current | ugurugu::ColorDock | Current color
+
+# Layers
+layers | ugurugu::LayerDock | Layers
+layer-add | ugurugu::LayerDock | Add layer
+layer-add-group | ugurugu::LayerDock | Add group containing the selected layer
+layer-ungroup | - | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除
+layer-merge | ugurugu::LayerDock | Merge with layer below
+layer-delete | ugurugu::LayerDock | Delete layer
+layer-up | ugurugu::LayerDock | Move layer up
+layer-down | ugurugu::LayerDock | Move layer down
+layer-move | ugurugu::LayerDock | Move layer
+merge-select-paint | ugurugu::LayerDock | Select a paint layer to merge
+merge-no-paint-below | ugurugu::LayerDock | No paint layer is directly below
+merge-properties | ugurugu::LayerDock | Both layers must use matching safe properties, and no clipping layer may rest on this one
+merge-canvas-change | ugurugu::LayerDock | This layer resizes the canvas or erased merged artwork, so merging would change the picture
+merge-epoch | ugurugu::LayerDock | The layers use incompatible canvas histories
+merge-limit | ugurugu::LayerDock | The merged layer would exceed the stroke limit
+blend-mode | ugurugu::LayerDock | BLEND MODE
+blend-mode-name | ugurugu::LayerDock | Layer blend mode
+blend-normal | ugurugu::LayerDock | Normal
+blend-multiply | ugurugu::LayerDock | Multiply
+blend-screen | ugurugu::LayerDock | Screen
+blend-overlay | ugurugu::LayerDock | Overlay
+percent | ugurugu::LayerDock | %1% | args=value
+opacity | ugurugu::LayerDock | OPACITY
+group | ugurugu::LayerDock | GROUP
+group-parent | ugurugu::LayerDock | Parent layer group
+group-none | ugurugu::LayerDock | No group
+clip | ugurugu::LayerDock | Clip to layer below
+clip-tip | ugurugu::LayerDock | Limit this layer to the opacity of the base layer below it
+reference | ugurugu::LayerDock | Reference layer
+reference-tip | ugurugu::LayerDock | Use this layer when a selection tool references marked layers
+layer-visible | ugurugu::LayerDock | Layer is visible
+layer-hidden | ugurugu::LayerDock | Layer is hidden
+
+# Animation bar
+play-tip | ugurugu::TimelineBar | Play preview (P)
+play | ugurugu::TimelineBar | Play preview
+frame-current | ugurugu::TimelineBar | Current frame
+frame-count | ugurugu::TimelineBar | Animation frames
+fps | ugurugu::TimelineBar | FPS
+fps-tip | ugurugu::TimelineBar | Playback speed (frames per second)
+fps-name | ugurugu::TimelineBar | Playback speed
+bar-hide | ugurugu::TimelineBar | Hide
+bar-hide-tip | ugurugu::TimelineBar | Hide animation bar (Ctrl+T)
+scrubber | ugurugu::FrameScrubber | Frame scrubber
+scrubber-frame | ugurugu::FrameScrubber | Frame %1 of %2 | args=frame,count

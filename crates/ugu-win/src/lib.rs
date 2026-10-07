@@ -6,4 +6,5 @@
 pub mod clock;
 pub mod dialog;
 pub mod file;
+pub mod locale;
 pub mod pointer;

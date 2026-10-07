@@ -7,11 +7,15 @@ mod app;
 mod cache;
 mod canvas;
 mod files;
+mod i18n;
+mod icons;
 mod ime_probe;
 mod input;
 mod latency;
 mod render;
+mod theme;
 mod ui;
+mod widgets;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;

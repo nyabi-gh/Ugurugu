@@ -106,7 +106,7 @@ impl Session {
         window.set_visible(true);
 
         let egui_ctx = egui::Context::default();
-        crate::ime_probe::install_cjk_fonts(&egui_ctx);
+        crate::theme::apply(&egui_ctx);
         let egui_state = EguiState::new(egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,

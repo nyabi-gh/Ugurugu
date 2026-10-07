@@ -380,6 +380,18 @@ impl Session {
         self.history.edit("Move layer", |_| changes)
     }
 
+    /// Moves `id` to `index` in `parent` (`None` for the top level),
+    /// counted after it is taken out.
+    pub fn move_layer_to(
+        &mut self,
+        id: LayerId,
+        parent: Option<LayerId>,
+        index: usize,
+    ) -> Result<Outcome, EditError> {
+        let changes = command::move_layer(self.document(), id, parent, index)?;
+        self.history.edit("Move layer", |_| changes)
+    }
+
     /// Puts the current layer in a new group in its place.
     pub fn add_group(&mut self) -> Result<Outcome, EditError> {
         let name = (1..)
