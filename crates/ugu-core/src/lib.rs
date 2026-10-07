@@ -8,6 +8,7 @@
 pub mod command;
 pub mod document;
 pub mod edit;
+pub mod history;
 pub mod ops;
 pub mod store;
 
