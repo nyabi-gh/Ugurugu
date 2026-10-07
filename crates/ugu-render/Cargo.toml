@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 pollster.workspace = true
 tracing.workspace = true
+ugu-core.workspace = true
 vello_cpu.workspace = true
 wgpu.workspace = true
 windows.workspace = true

@@ -6,4 +6,5 @@
 pub mod gpu;
 pub mod present;
 pub mod raster;
+pub mod stroke;
 pub mod view;
