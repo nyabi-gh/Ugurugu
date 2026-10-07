@@ -271,13 +271,15 @@ fn parse_points(bytes: &[u8]) -> Option<Vec<Point>> {
     if data.len() != count.checked_mul(12)? {
         return None;
     }
-    let float = |chunk: &[u8]| f32::from_le_bytes(chunk.try_into().unwrap_or_default());
+    let (points, _) = data.as_chunks::<12>();
     Some(
-        data.chunks_exact(12)
-            .map(|point| Point {
-                x: float(&point[0..4]),
-                y: float(&point[4..8]),
-                pressure: float(&point[8..12]),
+        points
+            .iter()
+            .map(|point| {
+                let [x, y, pressure] = [0, 4, 8].map(|at| {
+                    f32::from_le_bytes([point[at], point[at + 1], point[at + 2], point[at + 3]])
+                });
+                Point { x, y, pressure }
             })
             .collect(),
     )
