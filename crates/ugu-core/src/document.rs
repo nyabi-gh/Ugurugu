@@ -122,7 +122,7 @@ impl Document {
             background: Rgba8([255, 255, 255, 255]),
             frames: 30,
             frames_per_second: 25.0,
-            wobble: Wobble { amount: 1.6 },
+            wobble: Wobble::classic(1.6),
             layers: vec![Layer {
                 id: LayerId(1),
                 name: "Layer 1".to_owned(),
@@ -368,7 +368,7 @@ mod tests {
             Err(DocumentError::FramesPerSecond(_))
         ));
         let wobble = Document {
-            wobble: Wobble { amount: 12.5 },
+            wobble: Wobble::classic(12.5),
             ..base
         };
         assert_eq!(wobble.validate(), Err(DocumentError::Wobble(12.5)));
@@ -459,6 +459,8 @@ mod tests {
                     opacity: 1.0,
                     hardness: 1.0,
                     antialias: false,
+                    size_dynamics: 0.8,
+                    wobble_scale: 1.0,
                 },
                 seed: 1,
             },

@@ -39,6 +39,8 @@ pub(crate) fn stroke(x: f32, seed: u64) -> Stroke {
             opacity: 0.75,
             hardness: 0.5,
             antialias: true,
+            size_dynamics: 0.8,
+            wobble_scale: 1.0,
         },
         seed,
     }
@@ -102,7 +104,7 @@ pub(crate) fn sample() -> Document {
                 clip: None,
             }],
             opacity: 0.5,
-            wobble: Some(Wobble { amount: 2.0 }),
+            wobble: Some(Wobble::classic(2.0)),
         })),
         Op::Crop {
             offset: [-2, 3],

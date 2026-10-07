@@ -257,6 +257,8 @@ fn make_stroke(seed: u64, canvas: [u32; 2], shape: Shape) -> Stroke {
             opacity: 1.0,
             hardness: 1.0,
             antialias: false,
+            size_dynamics: 0.8,
+            wobble_scale: 1.0,
         },
         seed: stroke_seed,
     }

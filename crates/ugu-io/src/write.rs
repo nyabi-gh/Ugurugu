@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::io::{Seek, Write};
 
 use ugu_core::document::{Document, Layer, LayerKind};
-use ugu_core::ops::{AssetId, Blend, MaskId, Op, Sampling, StrokeId, Wobble};
+use ugu_core::ops::{AssetId, Blend, MaskId, MotionStyle, Op, Sampling, StrokeId, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Point};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
@@ -91,6 +91,8 @@ pub fn write<W: Write + Seek>(
                         opacity: stroke.brush.opacity,
                         hardness: stroke.brush.hardness,
                         antialias: stroke.brush.antialias,
+                        size_dynamics: stroke.brush.size_dynamics,
+                        wobble_scale: stroke.brush.wobble_scale,
                     },
                     seed: format!("{:016x}", stroke.seed),
                 }
@@ -218,6 +220,9 @@ impl Used {
 fn wobble(wobble: Wobble) -> WobbleDto {
     WobbleDto {
         amount: wobble.amount,
+        style: match wobble.style {
+            MotionStyle::Classic => MotionStyleDto::Classic,
+        },
     }
 }
 

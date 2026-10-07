@@ -247,6 +247,8 @@ mod tests {
                 opacity: 1.0,
                 hardness: 1.0,
                 antialias: false,
+                size_dynamics: 0.8,
+                wobble_scale: 1.0,
             },
             seed: 1,
         }

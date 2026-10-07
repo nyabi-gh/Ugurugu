@@ -40,11 +40,27 @@ impl Affine {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgba8(pub [u8; 4]);
 
-/// How much and how a layer's or section's strokes move. M2 adds the motion
-/// style fields; M0 needs only the override to exist.
+/// How strokes move from frame to frame; `crate::motion` evaluates it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MotionStyle {
+    /// Every frame is its own pose.
+    Classic,
+}
+
+/// How much and how a layer's or section's strokes move.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wobble {
     pub amount: f32,
+    pub style: MotionStyle,
+}
+
+impl Wobble {
+    pub const fn classic(amount: f32) -> Self {
+        Self {
+            amount,
+            style: MotionStyle::Classic,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

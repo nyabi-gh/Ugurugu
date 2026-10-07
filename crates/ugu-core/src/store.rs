@@ -16,6 +16,7 @@ pub mod limits {
     /// Stored coordinates, in document pixels.
     pub const COORDINATE: f32 = 32_767.0;
     pub const STROKE_WIDTH: std::ops::RangeInclusive<f32> = 0.25..=512.0;
+    pub const WOBBLE_SCALE: std::ops::RangeInclusive<f32> = 0.0..=2.0;
     pub const ASSET_PIXELS: u64 = 4096 * 4096;
     /// Everything the store holds, as stored.
     pub const BYTES: u64 = 128 * 1024 * 1024;
@@ -36,13 +37,19 @@ pub enum BrushEngine {
     Spray,
 }
 
-/// The brush a stroke was drawn with. M2 settles the full set of fields.
+/// The brush a stroke was drawn with. M4 adds the airbrush and spray
+/// fields.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Brush {
     pub engine: BrushEngine,
     pub opacity: f32,
     pub hardness: f32,
     pub antialias: bool,
+    /// How much pressure narrows the stroke: the width is scaled by
+    /// `1 - size_dynamics + pressure * size_dynamics`.
+    pub size_dynamics: f32,
+    /// Multiplies the layer's wobble amount for this stroke.
+    pub wobble_scale: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -181,6 +188,8 @@ pub fn check_stroke(id: StrokeId, stroke: &Stroke) -> Result<(), StoreError> {
     if !limits::STROKE_WIDTH.contains(&stroke.width)
         || !unit.contains(&stroke.brush.opacity)
         || !unit.contains(&stroke.brush.hardness)
+        || !unit.contains(&stroke.brush.size_dynamics)
+        || !limits::WOBBLE_SCALE.contains(&stroke.brush.wobble_scale)
     {
         return Err(StoreError::StrokeWidth(id));
     }
@@ -218,6 +227,8 @@ mod tests {
                 opacity: 1.0,
                 hardness: 1.0,
                 antialias: false,
+                size_dynamics: 0.8,
+                wobble_scale: 1.0,
             },
             seed: 7,
         }

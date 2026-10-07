@@ -15,7 +15,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use ugu_core::document::{Document, DocumentError, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{
-    Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, Section, StrokeId, Wobble,
+    Affine, AssetId, Blend, MaskId, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
+    StrokeId, Wobble,
 };
 use ugu_core::store::{self, Asset, Brush, BrushEngine, Mask, Point, Store, Stroke};
 use zip::ZipArchive;
@@ -255,6 +256,8 @@ impl<R: Read + Seek> Entries<R> {
                     opacity: stroke.brush.opacity,
                     hardness: stroke.brush.hardness,
                     antialias: stroke.brush.antialias,
+                    size_dynamics: stroke.brush.size_dynamics,
+                    wobble_scale: stroke.brush.wobble_scale,
                 },
                 seed: u64::from_be_bytes(seed),
             };
@@ -386,7 +389,12 @@ fn parse_masks(bytes: &[u8]) -> Option<BTreeMap<u32, Mask>> {
 }
 
 fn wobble(dto: &WobbleDto) -> Wobble {
-    Wobble { amount: dto.amount }
+    Wobble {
+        amount: dto.amount,
+        style: match dto.style {
+            MotionStyleDto::Classic => MotionStyle::Classic,
+        },
+    }
 }
 
 fn blend(dto: BlendDto) -> Blend {

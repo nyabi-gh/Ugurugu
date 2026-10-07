@@ -59,6 +59,13 @@ pub struct DocumentDto {
 #[serde(deny_unknown_fields)]
 pub struct WobbleDto {
     pub amount: f32,
+    pub style: MotionStyleDto,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionStyleDto {
+    Classic,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -175,6 +182,8 @@ pub struct BrushDto {
     pub opacity: f32,
     pub hardness: f32,
     pub antialias: bool,
+    pub size_dynamics: f32,
+    pub wobble_scale: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

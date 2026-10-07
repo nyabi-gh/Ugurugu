@@ -11,8 +11,8 @@
 use crate::ops::*;
 use std::collections::HashMap;
 
-const DOCUMENT_WOBBLE: Wobble = Wobble { amount: 1.0 };
-const STILL: Wobble = Wobble { amount: 0.0 };
+const DOCUMENT_WOBBLE: Wobble = Wobble::classic(1.0);
+const STILL: Wobble = Wobble::classic(0.0);
 const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
@@ -273,7 +273,7 @@ fn merging_keeps_every_frame_and_each_eraser_in_its_own_layer() {
     below.wobble = None;
     let mut above = layer(vec![paint(upper_line), erase(upper_eraser)], [6, 3]);
     above.opacity = 0.75;
-    above.wobble = Some(Wobble { amount: 2.0 });
+    above.wobble = Some(Wobble::classic(2.0));
 
     let merged = merge_down(&below, &above).unwrap();
     for frame in 0..4 {
@@ -352,7 +352,7 @@ fn a_selection_transform_moves_each_frames_own_result() {
         ],
         [6, 3],
     );
-    moved.wobble = Some(Wobble { amount: 1.0 });
+    moved.wobble = Some(Wobble::classic(1.0));
     let even = world.layer(&moved, 0);
     let odd = world.layer(&moved, 1);
     // Frame 1's stroke sits one pixel right, and the moved copy follows it
@@ -382,7 +382,7 @@ fn a_fill_keeps_its_coverage_while_lines_move() {
         clip: None,
     };
     let mut filled = layer(vec![fill, paint(outline)], [4, 3]);
-    filled.wobble = Some(Wobble { amount: 1.0 });
+    filled.wobble = Some(Wobble::classic(1.0));
     let even = world.layer(&filled, 0);
     let odd = world.layer(&filled, 1);
     assert_eq!(
