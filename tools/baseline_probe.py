@@ -7,6 +7,11 @@ pen-up, save, open, export cancel, and memory.
 
 Usage: python baseline_probe.py <stroke|save|open|cancel|memory|playback|export>
        <app.exe> <fixture.ugu> <output-dir> [--repeat N] [--presentmon PATH]
+       [--thread NAME] [--no-play-key]
+
+--thread measures the thread with that name instead of the window's: the
+3.0 app handles input and draws on its "render" thread. --no-play-key leaves
+P alone, which starts playback in 3.0 rather than stopping it.
 
 UI thread work is the thread's CPU cycles (QueryThreadCycleTime) from one
 input to the next, so it counts everything the thread did for that input,
@@ -160,11 +165,43 @@ def wait_for(condition, timeout, what):
     raise SystemExit(f"timed out waiting for {what}")
 
 
-class UiThread:
-    """CPU cycles of the window's thread, converted with a calibrated rate."""
+class THREADENTRY32(ctypes.Structure):
+    _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("th32ThreadID", wt.DWORD),
+                ("th32OwnerProcessID", wt.DWORD), ("tpBasePri", wt.LONG), ("tpDeltaPri", wt.LONG),
+                ("dwFlags", wt.DWORD)]
 
-    def __init__(self, hwnd):
-        thread_id = user32.GetWindowThreadProcessId(hwnd, None)
+
+def thread_named(pid, name):
+    """The id of `pid`'s thread whose description is `name`."""
+    kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x4, 0)
+    entry = THREADENTRY32(dwSize=ctypes.sizeof(THREADENTRY32))
+    found = None
+    more = kernel32.Thread32First(ctypes.c_void_p(snapshot), ctypes.byref(entry))
+    while more and found is None:
+        if entry.th32OwnerProcessID == pid:
+            handle = kernel32.OpenThread(0x0800, False, entry.th32ThreadID)
+            text = ctypes.c_wchar_p()
+            if handle and kernel32.GetThreadDescription(ctypes.c_void_p(handle), ctypes.byref(text)) >= 0:
+                if text.value == name:
+                    found = entry.th32ThreadID
+                kernel32.LocalFree(text)
+            if handle:
+                kernel32.CloseHandle(ctypes.c_void_p(handle))
+        more = kernel32.Thread32Next(ctypes.c_void_p(snapshot), ctypes.byref(entry))
+    kernel32.CloseHandle(ctypes.c_void_p(snapshot))
+    if found is None:
+        raise SystemExit(f"no thread named {name!r}")
+    return found
+
+
+class UiThread:
+    """CPU cycles of the window's thread, or of the thread named `name`,
+    converted with a calibrated rate."""
+
+    def __init__(self, hwnd, name=None):
+        thread_id = (thread_named(window_pid(hwnd), name) if name
+                     else user32.GetWindowThreadProcessId(hwnd, None))
         self.handle = kernel32.OpenThread(0x0800, False, thread_id)
         if not self.handle:
             raise SystemExit("cannot open the UI thread")
@@ -237,7 +274,7 @@ def calibrate():
 
 
 class App:
-    def __init__(self, exe, fixture, out, play_key=True, settle=True):
+    def __init__(self, exe, fixture, out, play_key=True, settle=True, thread=None):
         self.out = out
         self.document = os.path.join(out, "document" + os.path.splitext(fixture)[1])
         shutil.copyfile(fixture, self.document)
@@ -259,7 +296,7 @@ class App:
         user32.SetForegroundWindow(self.hwnd)
         time.sleep(0.5)
         self.check_front()
-        self.thread = UiThread(self.hwnd)
+        self.thread = UiThread(self.hwnd, thread)
         self.idle_cpu_ms_per_s = math.nan
         if not settle:
             return
@@ -282,8 +319,9 @@ class App:
         return times
 
     def main_window(self):
+        # 2.2.13 titles "name — Ugurugu", 3.0 "name - Ugurugu".
         windows = [hwnd for hwnd in visible_windows(self.process.pid) if " — " in window_text(hwnd)
-                   or window_text(hwnd).startswith("Ugurugu")]
+                   or window_text(hwnd).startswith("Ugurugu") or window_text(hwnd).endswith(" - Ugurugu")]
         return windows[0] if windows else None
 
     def check_front(self):
@@ -675,6 +713,8 @@ def main():
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--play-seconds", type=float, default=60.0)
     parser.add_argument("--presentmon")
+    parser.add_argument("--thread", help="measure the thread with this name, not the window's")
+    parser.add_argument("--no-play-key", action="store_true", help="do not press P at the start")
     parser.add_argument("--document-fps", type=float, default=25.0)
     parser.add_argument("--warm-after", type=float, default=40.0,
                         help="seconds after which playback counts as warm")
@@ -691,9 +731,10 @@ def main():
                                               args.play_seconds + 30)
             app.playback_started = qpc()
             app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out),
-                         play_key=False, settle=False)
+                         play_key=False, settle=False, thread=args.thread)
         else:
-            app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out))
+            app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out),
+                         play_key=not args.no_play_key, thread=args.thread)
         measure = {"stroke": measure_strokes, "save": measure_save, "open": measure_open,
                    "cancel": measure_cancel, "memory": measure_memory, "playback": measure_playback,
                    "export": measure_export}[args.mode]

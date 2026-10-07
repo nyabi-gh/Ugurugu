@@ -351,12 +351,20 @@ fn percentiles(times: &mut [f64]) -> String {
 
 /// Draws every frame once to warm up, then twice more, and prints the
 /// first frame's time and p50 and max per frame of the later rounds.
+/// `UGU_SHRINK` (2, 4, 8) draws the frames smaller, as playback does.
 fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
-    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::document::{DocumentRenderer, Purpose, scaled_size};
+    use ugu_render::plan::RenderPlan;
 
     let mut document = open(path)?;
     to_pens(&mut document);
-    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let shrink = std::env::var("UGU_SHRINK")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|shrink| shrink.is_power_of_two())
+        .unwrap_or(1);
+    let plan = RenderPlan::new(&document, Purpose::Display);
+    let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
     set_budget(&mut renderer);
@@ -369,7 +377,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     for round in 0..3 {
         for frame in 0..i64::from(document.frames) {
             let started = Instant::now();
-            renderer.render(&document, frame, Purpose::Display, &mut pixmap);
+            renderer.render_scaled(&document, &plan, frame, None, shrink, &mut pixmap);
             let ms = started.elapsed().as_secs_f64() * 1000.0;
             if round == 0 && frame == 0 {
                 first = ms;
