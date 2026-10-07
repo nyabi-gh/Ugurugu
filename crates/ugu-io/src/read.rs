@@ -36,6 +36,8 @@ pub enum ReadError {
     Io(std::io::Error),
     /// Not a ZIP file, or a broken one.
     NotAnArchive(String),
+    /// A file from Ugurugu 2.x or earlier, which 3.0 does not open.
+    Legacy(Legacy),
     /// Made by a newer version: an unknown schema, render revision or
     /// required feature.
     Newer(String),
@@ -51,6 +53,10 @@ impl std::fmt::Display for ReadError {
         match self {
             Self::Io(error) => write!(f, "cannot read the file: {error}"),
             Self::NotAnArchive(reason) => write!(f, "not a Ugurugu document: {reason}"),
+            Self::Legacy(kind) => write!(
+                f,
+                "{kind:?} files from Ugurugu 2.x or earlier cannot be opened"
+            ),
             Self::Newer(what) => write!(f, "made by a newer version of Ugurugu ({what})"),
             Self::Corrupt(reason) => write!(f, "the document is damaged: {reason}"),
             Self::TooLarge(what) => write!(f, "the document is too large: {what}"),
@@ -65,8 +71,35 @@ fn corrupt(reason: impl Into<String>) -> ReadError {
     ReadError::Corrupt(reason.into())
 }
 
+/// Formats of earlier versions, recognised only to say so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Legacy {
+    /// JSON: `.ugu`, `.wagle`, `.wobble`, web `.wawa` and `.wwpreset`.
+    Json,
+    /// Native `.wawa`.
+    Wawa,
+}
+
+/// Recognises an earlier format from the first bytes of a file.
+pub fn legacy(start: &[u8]) -> Option<Legacy> {
+    let text = start.strip_prefix(b"\xef\xbb\xbf").unwrap_or(start);
+    if text.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{') {
+        return Some(Legacy::Json);
+    }
+    // A .NET length-prefixed string: length 4, then the magic.
+    start.starts_with(b"\x04WAWA").then_some(Legacy::Wawa)
+}
+
 /// Reads a document and its id.
-pub fn read<R: Read + Seek>(input: R) -> Result<(Document, [u8; 16]), ReadError> {
+pub fn read<R: Read + Seek>(mut input: R) -> Result<(Document, [u8; 16]), ReadError> {
+    let mut start = [0u8; 64];
+    let length = read_up_to(&mut input, &mut start).map_err(ReadError::Io)?;
+    input.rewind().map_err(ReadError::Io)?;
+    if !start.starts_with(b"PK")
+        && let Some(kind) = legacy(&start[..length])
+    {
+        return Err(ReadError::Legacy(kind));
+    }
     let archive =
         ZipArchive::new(input).map_err(|error| ReadError::NotAnArchive(error.to_string()))?;
     if archive.len() > limits::ENTRIES {
@@ -118,6 +151,17 @@ pub fn read<R: Read + Seek>(input: R) -> Result<(Document, [u8; 16]), ReadError>
     };
     document.validate().map_err(ReadError::Invalid)?;
     Ok((document, id))
+}
+
+fn read_up_to(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match input.read(&mut buffer[filled..])? {
+            0 => break,
+            count => filled += count,
+        }
+    }
+    Ok(filled)
 }
 
 struct Entries<R> {

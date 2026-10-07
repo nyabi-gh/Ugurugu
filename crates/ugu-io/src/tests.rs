@@ -409,3 +409,29 @@ proptest::proptest! {
         }
     }
 }
+
+#[test]
+fn files_of_earlier_versions_are_recognised() {
+    use crate::read::Legacy;
+    // How a 2.2.13 .ugu begins.
+    let old_ugu = b"{\r\n    \"schemaVersion\": 1,\r\n    \"algorithmVersion\": 1,".to_vec();
+    assert!(matches!(
+        read_bytes(old_ugu),
+        Err(ReadError::Legacy(Legacy::Json))
+    ));
+    let bom = b"\xef\xbb\xbf  {\"name\": \"preset\"}".to_vec();
+    assert!(matches!(
+        read_bytes(bom),
+        Err(ReadError::Legacy(Legacy::Json))
+    ));
+    let mut wawa = b"\x04WAWA".to_vec();
+    wawa.extend_from_slice(&10i32.to_le_bytes());
+    assert!(matches!(
+        read_bytes(wawa),
+        Err(ReadError::Legacy(Legacy::Wawa))
+    ));
+    assert!(matches!(
+        read_bytes(b"GIF89a".to_vec()),
+        Err(ReadError::NotAnArchive(_))
+    ));
+}
