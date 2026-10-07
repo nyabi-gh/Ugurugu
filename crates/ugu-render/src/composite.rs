@@ -15,8 +15,9 @@ use vello_cpu::Pixmap;
 use crate::compose::src_over;
 use crate::plan::{Composite, RenderPlan, Step};
 use crate::raster::PixelRect;
+use crate::tile::TiledSurface;
 
-type Pixel = [u8; 4];
+use crate::tile::Pixel;
 
 /// `a·b/255` as Vello's u8 pipeline rounds it.
 fn mul(a: u8, b: u8) -> u8 {
@@ -100,13 +101,16 @@ fn bases_needed(steps: &[Step]) -> Vec<bool> {
     needed
 }
 
+/// Rows a thread puts together at a time.
+const STRIPE: usize = 16;
+
 /// Puts `surfaces` (one per paint layer of `plan`, in plan order; `None` is
 /// transparent) together over `background` within `rect` of `out`, on up to
 /// `threads` threads.
 pub fn evaluate(
     plan: &RenderPlan,
     background: Option<Pixel>,
-    surfaces: &[Option<&Pixmap>],
+    surfaces: &[Option<&TiledSurface>],
     rect: PixelRect,
     out: &mut Pixmap,
     threads: usize,
@@ -118,11 +122,9 @@ pub fn evaluate(
         return;
     }
     let needed = bases_needed(&plan.steps);
-    let rows = (bottom - top).div_ceil(threads.max(1));
     let row_bytes = width * 4;
     let data = &mut out.data_as_u8_slice_mut()[top * row_bytes..bottom * row_bytes];
-    let band = |first: usize, target: &mut [u8]| {
-        let mut levels: Vec<Level> = Vec::new();
+    let stripe = |first: usize, target: &mut [u8], levels: &mut Vec<Level>| {
         for (offset, line) in target.chunks_mut(row_bytes).enumerate() {
             let y = first + offset;
             let line = &mut line.as_chunks_mut::<4>().0[left..right];
@@ -133,19 +135,34 @@ pub fn evaluate(
                 surfaces,
                 [left, right],
                 y,
-                &mut levels,
+                levels,
             );
             line.copy_from_slice(&levels[0].row);
         }
     };
-    if threads <= 1 || bottom - top < 2 {
-        band(top, data);
+    if threads <= 1 || bottom - top <= STRIPE {
+        stripe(top, data, &mut Vec::new());
         return;
     }
+    let stripes: Vec<std::sync::Mutex<&mut [u8]>> = data
+        .chunks_mut(STRIPE * row_bytes)
+        .map(std::sync::Mutex::new)
+        .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|scope| {
-        for (index, chunk) in data.chunks_mut(rows * row_bytes).enumerate() {
-            let band = &band;
-            scope.spawn(move || band(top + index * rows, chunk));
+        for _ in 0..threads.min(stripes.len()) {
+            let (stripe, stripes, next) = (&stripe, &stripes, &next);
+            scope.spawn(move || {
+                let mut levels = Vec::new();
+                loop {
+                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(target) = stripes.get(index) else {
+                        return;
+                    };
+                    let mut target = target.lock().expect("one thread per stripe");
+                    stripe(top + index * STRIPE, &mut target, &mut levels);
+                }
+            });
         }
     });
 }
@@ -154,7 +171,7 @@ fn evaluate_row(
     plan: &RenderPlan,
     needed: &[bool],
     background: Option<Pixel>,
-    surfaces: &[Option<&Pixmap>],
+    surfaces: &[Option<&TiledSurface>],
     [left, right]: [usize; 2],
     y: usize,
     levels: &mut Vec<Level>,
@@ -184,68 +201,65 @@ fn evaluate_row(
             Step::Paint(_, composite) => {
                 let surface = surfaces[layer];
                 layer += 1;
-                let empty = [[0; 4]; 0];
-                let source = match surface {
-                    Some(surface) => {
-                        let from = (y * usize::from(surface.width()) + left) * 4;
-                        surface.data_as_u8_slice()[from..from + span * 4]
-                            .as_chunks::<4>()
-                            .0
-                    }
-                    None => &empty[..],
-                };
-                put(&mut levels[depth], source, *composite, needed[index], span);
+                let parts = surface.into_iter().flat_map(|surface| {
+                    surface
+                        .row(y as u32, left as u32, right as u32)
+                        .map(|(x, part)| (x as usize - left, part))
+                });
+                put(&mut levels[depth], parts, *composite, needed[index], span);
             }
             Step::End(_, composite) => {
                 depth -= 1;
                 let (lower, upper) = levels.split_at_mut(depth + 1);
-                put(
-                    &mut lower[depth],
-                    &upper[0].row,
-                    *composite,
-                    needed[index],
-                    span,
-                );
+                let parts = std::iter::once((0, upper[0].row.as_slice()));
+                put(&mut lower[depth], parts, *composite, needed[index], span);
             }
         }
     }
 }
 
-/// Puts `source` (empty for a transparent surface) over `level`.
-fn put(level: &mut Level, source: &[Pixel], composite: Composite, keep: bool, span: usize) {
+/// Puts `parts` of a surface (where each starts in the span, and its
+/// pixels; transparent elsewhere) over `level`.
+fn put<'a>(
+    level: &mut Level,
+    parts: impl Iterator<Item = (usize, &'a [Pixel])>,
+    composite: Composite,
+    keep: bool,
+    span: usize,
+) {
     let opacity = opacity_level(composite.opacity);
     let base = if composite.clipped {
         level.base.take()
     } else {
         None
     };
-    for (at, target) in level.row.iter_mut().enumerate() {
-        let Some(&pixel) = source.get(at) else {
-            break;
-        };
-        if pixel[3] == 0 {
-            continue;
+    let mut kept = (keep && !composite.clipped).then(|| vec![[0; 4]; span]);
+    for (start, part) in parts {
+        if let Some(kept) = kept.as_mut() {
+            kept[start..start + part.len()].copy_from_slice(part);
         }
-        let mut pixel = pixel;
-        if let Some((base, base_opacity)) = &base {
-            let cover = mul(base[at][3], *base_opacity);
-            pixel = pixel.map(|value| mul(value, cover));
+        let targets = &mut level.row[start..start + part.len()];
+        for (offset, (target, &pixel)) in targets.iter_mut().zip(part).enumerate() {
+            if pixel[3] == 0 {
+                continue;
+            }
+            let mut pixel = pixel;
+            if let Some((base, base_opacity)) = &base {
+                let cover = mul(base[start + offset][3], *base_opacity);
+                pixel = pixel.map(|value| mul(value, cover));
+            }
+            blend(
+                composite.blend,
+                target,
+                pixel.map(|value| mul(value, opacity)),
+            );
         }
-        blend(
-            composite.blend,
-            target,
-            pixel.map(|value| mul(value, opacity)),
-        );
     }
-    if composite.clipped {
-        level.base = base;
-    } else if keep {
-        let mut kept = vec![[0; 4]; span];
-        kept[..source.len()].copy_from_slice(source);
-        level.base = Some((kept, opacity));
+    level.base = if composite.clipped {
+        base
     } else {
-        level.base = None;
-    }
+        kept.map(|kept| (kept, opacity))
+    };
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
 use ugu_core::store::{BrushEngine, Store, Stroke};
 use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::{BezPath, Rect};
+use vello_cpu::kurbo::{Affine, BezPath, Rect};
 use vello_cpu::peniko::{BlendMode, Compose, Mix};
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
@@ -23,6 +23,7 @@ use crate::composite;
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
+use crate::tile::TiledSurface;
 
 /// Content this build cannot draw yet, and the milestone that adds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,8 +119,9 @@ pub struct DocumentRenderer {
     singles: Vec<Raster>,
     level: vello_cpu::Level,
     threads: usize,
-    /// The paint layers' own surfaces, reused from render to render.
-    surfaces: Vec<Pixmap>,
+    /// The paint layers' own surfaces.
+    surfaces: Vec<TiledSurface>,
+    tile_edge: u32,
     timings: Timings,
 }
 
@@ -151,6 +153,9 @@ struct Raster {
     threads: usize,
 }
 
+/// Pixels along a side of a layer surface tile.
+pub const TILE_EDGE: u32 = 128;
+
 /// One thing to draw, in document order.
 enum Step<'a> {
     /// Starts a surface: a layer or an isolated section.
@@ -177,12 +182,23 @@ impl DocumentRenderer {
             level,
             threads: usize::from(threads.max(1)),
             surfaces: Vec::new(),
+            tile_edge: TILE_EDGE,
             timings: Timings::default(),
         }
     }
 
     pub fn timings(&self) -> Timings {
         self.timings
+    }
+
+    /// Uses tiles of `edge` pixels, a multiple of 4, instead of `TILE_EDGE`.
+    pub fn set_tile_edge(&mut self, edge: u32) {
+        self.tile_edge = edge;
+    }
+
+    /// Bytes held by the layer surfaces of the last render.
+    pub fn surface_bytes(&self) -> usize {
+        self.surfaces.iter().map(TiledSurface::bytes).sum()
     }
 
     /// Draws `frame` of a document that passed `check` into `pixmap`, which
@@ -219,28 +235,25 @@ impl DocumentRenderer {
                 },
             )
             .collect();
+        let empty = TiledSurface::new(document.canvas, self.tile_edge);
         if self
             .surfaces
             .first()
-            .is_some_and(|surface| [surface.width(), surface.height()] != [width, height])
+            .is_some_and(|surface| (surface.size(), surface.edge()) != (empty.size(), empty.edge()))
         {
             self.surfaces.clear();
         }
-        self.surfaces
-            .resize_with(paints.len(), || Pixmap::new(width, height));
+        self.surfaces.resize(paints.len(), empty);
         self.timings = Timings::default();
         if paints.len() >= self.threads && self.threads > 1 {
             self.draw_at_once(document, &paints, frame);
         } else {
             for (paint, surface) in paints.iter().zip(&mut self.surfaces) {
-                self.timings +=
-                    self.main
-                        .draw_ops(document, frame, None, &[(paint, None)], surface);
+                self.timings += self.main.draw_layer(document, frame, paint, surface);
             }
         }
         let started = std::time::Instant::now();
-        let surfaces: Vec<Option<&Pixmap>> =
-            self.surfaces[..paints.len()].iter().map(Some).collect();
+        let surfaces: Vec<Option<&TiledSurface>> = self.surfaces.iter().map(Some).collect();
         let background = premultiplied(document.background.0);
         let rect = [0, 0, u32::from(width), u32::from(height)];
         composite::evaluate(
@@ -261,7 +274,7 @@ impl DocumentRenderer {
             self.singles.push(Raster::new(self.level, 0));
         }
         let next = std::sync::atomic::AtomicUsize::new(0);
-        let slots: Vec<std::sync::Mutex<&mut Pixmap>> = self
+        let slots: Vec<std::sync::Mutex<&mut TiledSurface>> = self
             .surfaces
             .iter_mut()
             .map(std::sync::Mutex::new)
@@ -280,13 +293,7 @@ impl DocumentRenderer {
                                 return timings;
                             };
                             let mut surface = slots[index].lock().expect("one worker per layer");
-                            timings += raster.draw_ops(
-                                document,
-                                frame,
-                                None,
-                                &[(paint, None)],
-                                &mut surface,
-                            );
+                            timings += raster.draw_layer(document, frame, paint, &mut surface);
                         }
                     })
                 })
@@ -361,18 +368,107 @@ impl Raster {
                 steps.push(Step::Pop);
             }
         }
+        self.draw_steps(&steps, frame, background, [0, 0], pixmap)
+    }
+
+    /// Draws a paint layer's own pixels into the tiles its strokes reach.
+    fn draw_layer(
+        &mut self,
+        document: &Document,
+        frame: u32,
+        paint: &PaintLayer,
+        surface: &mut TiledSurface,
+    ) -> Timings {
+        let mut steps = Vec::new();
+        collect(
+            &paint.ops,
+            &document.store,
+            document.wobble,
+            paint.wobble.unwrap_or(document.wobble),
+            &mut steps,
+        );
+        let [columns, rows] = surface.grid();
+        let edge = surface.edge();
+        let size = surface.size().map(f64::from);
+        let mut reached = vec![false; (columns * rows) as usize];
+        for step in &steps {
+            // Erasing only takes away, so it reaches no new tile.
+            let Step::Draw {
+                stroke,
+                pen,
+                erase: false,
+            } = step
+            else {
+                continue;
+            };
+            // One more pixel each way for antialiasing.
+            let [left, top, right, bottom] = stroke::bounds(&stroke.points, pen);
+            let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
+            let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
+            if from[0] >= to[0] || from[1] >= to[1] {
+                continue;
+            }
+            let first = from.map(|value| (value / f64::from(edge)) as u32);
+            let last = [
+                ((to[0] / f64::from(edge)).ceil() as u32).min(columns),
+                ((to[1] / f64::from(edge)).ceil() as u32).min(rows),
+            ];
+            for row in first[1]..last[1] {
+                for column in first[0]..last[0] {
+                    reached[(row * columns + column) as usize] = true;
+                }
+            }
+        }
+        let mut span = [u32::MAX, u32::MAX, 0, 0];
+        for (index, _) in reached.iter().enumerate().filter(|(_, reached)| **reached) {
+            let [column, row] = [index as u32 % columns, index as u32 / columns];
+            span = [
+                span[0].min(column),
+                span[1].min(row),
+                span[2].max(column + 1),
+                span[3].max(row + 1),
+            ];
+        }
+        let reused = surface.clear();
+        if span[0] >= span[2] {
+            return Timings::default();
+        }
+        let (origin, extent) = surface.area(span);
+        let mut pixmap = match reused {
+            Some(pixmap) if [pixmap.width(), pixmap.height()] == extent => pixmap,
+            _ => Pixmap::new(extent[0], extent[1]),
+        };
+        let timings = self.draw_steps(&steps, frame, None, origin, &mut pixmap);
+        surface.set(span, pixmap, reached);
+        timings
+    }
+
+    /// Draws `steps` into `pixmap`, which covers the document from `origin`.
+    fn draw_steps(
+        &mut self,
+        steps: &[Step<'_>],
+        frame: u32,
+        background: Option<Rgba8>,
+        origin: [u32; 2],
+        pixmap: &mut Pixmap,
+    ) -> Timings {
+        let [width, height] = [pixmap.width(), pixmap.height()];
         let started = std::time::Instant::now();
-        let outlines = self.outlines(&steps, frame);
+        let outlines = self.outlines(steps, frame);
         let outlined = started.elapsed();
 
         self.context.reset_and_resize(width, height);
+        self.context.set_transform(Affine::translate((
+            -f64::from(origin[0]),
+            -f64::from(origin[1]),
+        )));
         if let Some(Rgba8([r, g, b, a])) = background {
             self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
             self.context
                 .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
         }
         let mut outlines = outlines.into_iter();
-        for step in &steps {
+        for step in steps {
             match step {
                 Step::Push(opacity) => {
                     self.context
@@ -840,8 +936,8 @@ mod tests {
         assert!(multiplied[0] < 40 && multiplied[1] < 40, "{multiplied:?}");
     }
 
-    #[test]
-    fn many_layers_draw_the_same_on_any_thread_count() {
+    /// Ten layers with erasers, every blend mode, clipping and a group.
+    fn many_layers() -> Document {
         let mut document = document();
         let mut layers = Vec::new();
         for index in 0..10u32 {
@@ -878,12 +974,56 @@ mod tests {
         let grouped = layers.split_off(6);
         layers.push(tree_group(20, Blend::Screen, grouped));
         document.layers = layers;
+        document
+    }
+
+    #[test]
+    fn many_layers_draw_the_same_on_any_thread_count() {
+        let document = many_layers();
         let single = render(&document, 3, 0);
         for threads in [1, 4, 8, 16] {
             assert!(
                 render(&document, 3, threads).data_as_u8_slice() == single.data_as_u8_slice(),
                 "{threads} threads differ"
             );
+        }
+    }
+
+    fn render_tiled(document: &Document, frame: i64, edge: u32, threads: u16) -> Pixmap {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut pixmap = Pixmap::new(width, height);
+        let mut renderer = DocumentRenderer::new(threads);
+        renderer.set_tile_edge(edge);
+        renderer.render(document, frame, Purpose::Display, &mut pixmap);
+        pixmap
+    }
+
+    #[test]
+    fn tiles_keep_the_pixels_within_a_level() {
+        let (base, below, above) = two_layers();
+        let merged = merge_down(&below, &above).unwrap();
+        let merged = with_layers(&base, &[below, above, merged]);
+        for document in [merged, many_layers()] {
+            for frame in [0, 3] {
+                // One tile covers the whole canvas, as before tiles.
+                let whole = render_tiled(&document, frame, 4096, 0);
+                for edge in [8, 12, 32] {
+                    let tiled = render_tiled(&document, frame, edge, 0);
+                    // A layer is drawn from where its tiles start, and Vello
+                    // rounds moved coordinates to f32 afresh, which can move
+                    // an edge pixel's coverage by a level.
+                    let most = max_difference(&tiled, &whole);
+                    assert!(
+                        most <= 1,
+                        "{edge}-pixel tiles differ by {most} on frame {frame}"
+                    );
+                    let threaded = render_tiled(&document, frame, edge, 8);
+                    assert!(
+                        threaded.data_as_u8_slice() == tiled.data_as_u8_slice(),
+                        "{edge}-pixel tiles differ on 8 threads"
+                    );
+                }
+            }
         }
     }
 }

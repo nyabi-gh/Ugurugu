@@ -9,13 +9,15 @@
 //!   from a different random sequence.
 //! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file.
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
-//! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame, by
+//! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
 //!   drawn as pens and what M4 adds is left out, which keeps the amount of
 //!   work close and says so.
 //! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
 //!   out what M4 adds, keeping groups, blend modes and clipping, so the app
 //!   can open a fixture to measure with.
+//! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
+//!   a fifth of the canvas, for work that leaves most of a layer empty.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -28,7 +30,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads] | pen-only <in.ugu2> <out.ugu2>";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -40,12 +42,17 @@ fn main() -> ExitCode {
             .parse()
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
-        ["render", file] => render(Path::new(file), 8),
+        ["render", file] => render(Path::new(file), 8, None),
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
+        ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["render", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
-            .and_then(|threads| render(Path::new(file), threads)),
+            .and_then(|threads| render(Path::new(file), threads, None)),
+        ["render", file, threads, tile] => match (threads.parse(), tile.parse()) {
+            (Ok(threads), Ok(tile)) => render(Path::new(file), threads, Some(tile)),
+            _ => Err(USAGE.to_owned()),
+        },
         _ => Err(USAGE.to_owned()),
     };
     match result {
@@ -212,6 +219,51 @@ fn each_paint(layers: &mut [Layer], visit: &mut impl FnMut(&mut PaintLayer)) {
     }
 }
 
+/// Gathers each layer's strokes into a box a fifth of the canvas wide,
+/// boxes spread over the canvas, so most tiles of a layer stay empty.
+fn sparse(from: &Path, to: &Path) -> Result<(), String> {
+    let mut document = open(from)?;
+    let size = document.canvas.map(|edge| edge as f32);
+    let mut layer_strokes: Vec<Vec<StrokeId>> = Vec::new();
+    each_paint(&mut document.layers, &mut |paint| {
+        fn ids(ops: &[Op], into: &mut Vec<StrokeId>) {
+            for op in ops {
+                match op {
+                    Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => into.push(*stroke),
+                    Op::Isolated(section) => ids(&section.ops, into),
+                    _ => {}
+                }
+            }
+        }
+        let mut found = Vec::new();
+        ids(&paint.ops, &mut found);
+        layer_strokes.push(found);
+    });
+    for (index, strokes) in layer_strokes.iter().enumerate() {
+        let cell = [(index * 7) % 5, (index * 3) % 5].map(|cell| cell as f32 * 0.2);
+        for id in strokes {
+            let stroke = document
+                .store
+                .strokes
+                .get_mut(id)
+                .ok_or("a stroke is missing")?;
+            let points: Vec<Point> = stroke
+                .points
+                .iter()
+                .map(|point| Point {
+                    x: (cell[0] + point.x / size[0] * 0.2) * size[0],
+                    y: (cell[1] + point.y / size[1] * 0.2) * size[1],
+                    pressure: point.pressure,
+                })
+                .collect();
+            stroke.points = Arc::from(points);
+        }
+    }
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)?;
+    info(to)
+}
+
 fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
     let mut document = open(from)?;
     to_pens(&mut document);
@@ -245,7 +297,7 @@ fn percentiles(times: &mut [f64]) -> String {
 
 /// Draws every frame once to warm up, then twice more, and prints the
 /// first frame's time and p50 and max per frame of the later rounds.
-fn render(path: &Path, threads: u16) -> Result<(), String> {
+fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     use ugu_render::document::{DocumentRenderer, Purpose};
 
     let mut document = open(path)?;
@@ -253,6 +305,9 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
+    if let Some(tile) = tile {
+        renderer.set_tile_edge(tile);
+    }
     let mut times = Vec::new();
     let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     let mut first = 0.0;
@@ -283,6 +338,10 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
     println!("  encode    {}", percentiles(encode));
     println!("  rasterize {}", percentiles(rasterize));
     println!("  composite {}", percentiles(composite));
+    println!(
+        "layer surfaces: {:.0} MiB in the last frame",
+        renderer.surface_bytes() as f64 / (1024.0 * 1024.0)
+    );
     let whole_peak = peak_working_set_mib();
     splits(&document, threads);
     println!(
