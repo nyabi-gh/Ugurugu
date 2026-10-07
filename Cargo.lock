@@ -3519,8 +3519,11 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "ugu-core",
  "ugu-render",
+ "ugu-session",
  "ugu-win",
+ "vello_cpu 0.3.0",
  "wgpu",
  "winit",
 ]

@@ -129,12 +129,17 @@ enum Step<'a> {
 impl DocumentRenderer {
     /// `threads` 0 draws on the calling thread; the result is the same.
     pub fn new(threads: u16) -> Self {
+        Self::with_level(threads, document_level())
+    }
+
+    /// Uses the SIMD instructions of `level` instead of the document level.
+    pub fn with_level(threads: u16, level: vello_cpu::Level) -> Self {
         Self {
             context: RenderContext::new_with(
                 1,
                 1,
                 RenderSettings {
-                    level: document_level(),
+                    level,
                     num_threads: threads,
                 },
             ),

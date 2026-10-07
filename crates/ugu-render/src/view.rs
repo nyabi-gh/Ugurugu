@@ -1,19 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Shows the CPU canvas on the GPU: changed pixels are uploaded as they are,
-//! and each screen pixel reads exactly one canvas pixel over the paper.
+//! Shows the document on the GPU: changed document pixels are uploaded as
+//! they are, and the shader maps each screen pixel to a document pixel by
+//! the view's scale and offset. At 100% and above a screen pixel shows one
+//! document pixel exactly; below, neighbouring pixels are blended.
 
-use crate::raster::{CanvasRaster, PixelRect};
+use vello_cpu::Pixmap;
+
+use crate::raster::PixelRect;
 
 const SHADER: &str = r"
 struct View {
-    origin: vec2<f32>,
-    paper: vec4<f32>,
+    // Screen pixels of the document's top-left corner, and screen pixels
+    // per document pixel.
+    offset: vec2<f32>,
+    scale: f32,
+    blended: f32,
+    size: vec2<f32>,
+    _pad: vec2<f32>,
+    workspace: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
-@group(0) @binding(1) var canvas: texture_2d<f32>;
+@group(0) @binding(1) var document: texture_2d<f32>;
+@group(0) @binding(2) var blend: sampler;
 
 @vertex
 fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -24,42 +35,75 @@ fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let ink = textureLoad(canvas, vec2<i32>(position.xy - view.origin), 0);
-    return ink + view.paper * (1.0 - ink.a);
+    let at = (position.xy - view.offset) / view.scale;
+    if (any(at < vec2<f32>(0.0)) || any(at >= view.size)) {
+        return view.workspace;
+    }
+    var ink: vec4<f32>;
+    if (view.blended > 0.5) {
+        ink = textureSampleLevel(document, blend, at / view.size, 0.0);
+    } else {
+        ink = textureLoad(document, vec2<i32>(floor(at)), 0);
+    }
+    // A transparent background shows a checkerboard of 8 screen pixels.
+    let cell = vec2<i32>(floor(position.xy / 8.0));
+    let light = select(0.8, 1.0, ((cell.x + cell.y) & 1) == 0);
+    return ink + vec4<f32>(light, light, light, 1.0) * (1.0 - ink.a);
 }
 ";
 
-/// `View` in the shader: origin, padding to 16 bytes, paper.
-fn uniform_bytes(origin: [f32; 2], paper: [f32; 4]) -> [u8; 32] {
+/// Where the document sits on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    /// Target pixels of the document's top-left corner.
+    pub offset: [f32; 2],
+    /// Target pixels per document pixel.
+    pub scale: f32,
+}
+
+fn uniform_bytes(placement: Placement, size: [u32; 2], workspace: [f32; 4]) -> [u8; 48] {
     let values = [
-        origin[0], origin[1], 0.0, 0.0, paper[0], paper[1], paper[2], paper[3],
+        placement.offset[0],
+        placement.offset[1],
+        placement.scale,
+        if placement.scale < 1.0 { 1.0 } else { 0.0 },
+        size[0] as f32,
+        size[1] as f32,
+        0.0,
+        0.0,
+        workspace[0],
+        workspace[1],
+        workspace[2],
+        workspace[3],
     ];
-    let mut bytes = [0; 32];
+    let mut bytes = [0; 48];
     for (chunk, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(values) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
     bytes
 }
 
-pub struct CanvasView {
+pub struct DocumentView {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     uniform: wgpu::Buffer,
+    sampler: wgpu::Sampler,
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
-    paper: [f32; 4],
-    origin: Option<[u32; 2]>,
+    workspace: [f32; 4],
+    uploaded: Option<(Placement, [u32; 2])>,
 }
 
-impl CanvasView {
-    /// `format` is the target's format; `paper` is opaque straight RGBA.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, paper: [u8; 4]) -> Self {
+impl DocumentView {
+    /// `format` is the target's format; `workspace`, opaque straight RGBA, is
+    /// shown around the document.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, workspace: [u8; 4]) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("canvas view"),
+            label: Some("document view"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("canvas view"),
+            label: Some("document view"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -75,21 +119,27 @@ impl CanvasView {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("canvas view"),
+            label: Some("document view"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("canvas view"),
+            label: Some("document view"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -114,27 +164,34 @@ impl CanvasView {
             cache: None,
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("canvas view"),
-            size: 32,
+            label: Some("document view"),
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("document view"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..wgpu::SamplerDescriptor::default()
+        });
         let texture = Self::create_texture(device, [1, 1]);
-        let bind_group = Self::create_bind_group(device, &layout, &uniform, &texture);
+        let bind_group = Self::create_bind_group(device, &layout, &uniform, &texture, &sampler);
         Self {
             pipeline,
             layout,
             uniform,
+            sampler,
             texture,
             bind_group,
-            paper: paper.map(|value| f32::from(value) / 255.0),
-            origin: None,
+            workspace: workspace.map(|value| f32::from(value) / 255.0),
+            uploaded: None,
         }
     }
 
     fn create_texture(device: &wgpu::Device, [width, height]: [u32; 2]) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("canvas"),
+            label: Some("document"),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -143,7 +200,8 @@ impl CanvasView {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            // Not sRGB: the canvas holds encoded values, as the swap chain does.
+            // Not sRGB: the document holds encoded values, as the swap chain
+            // does.
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
@@ -155,10 +213,11 @@ impl CanvasView {
         layout: &wgpu::BindGroupLayout,
         uniform: &wgpu::Buffer,
         texture: &wgpu::Texture,
+        sampler: &wgpu::Sampler,
     ) -> wgpu::BindGroup {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("canvas view"),
+            label: Some("document view"),
             layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -169,27 +228,38 @@ impl CanvasView {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
             ],
         })
     }
 
-    /// Uploads what changed in `raster` since the last call; a new size
+    /// Uploads `rect` of `document` (premultiplied RGBA8); a new size
     /// replaces the texture and uploads everything.
     pub fn update(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        raster: &mut CanvasRaster,
+        document: &Pixmap,
+        rect: Option<PixelRect>,
     ) {
-        let [width, height] = raster.size();
-        let mut dirty = raster.take_dirty();
+        let (width, height) = (u32::from(document.width()), u32::from(document.height()));
+        let mut rect = rect;
         if self.texture.width() != width || self.texture.height() != height {
             self.texture = Self::create_texture(device, [width, height]);
-            self.bind_group =
-                Self::create_bind_group(device, &self.layout, &self.uniform, &self.texture);
-            dirty = Some([0, 0, width, height]);
+            self.bind_group = Self::create_bind_group(
+                device,
+                &self.layout,
+                &self.uniform,
+                &self.texture,
+                &self.sampler,
+            );
+            self.uploaded = None;
+            rect = Some([0, 0, width, height]);
         }
-        let Some([left, top, right, bottom]): Option<PixelRect> = dirty else {
+        let Some([left, top, right, bottom]) = rect else {
             return;
         };
         let row = width * 4;
@@ -204,7 +274,7 @@ impl CanvasView {
                 },
                 aspect: wgpu::TextureAspect::All,
             },
-            raster.pixels(),
+            document.data_as_u8_slice(),
             wgpu::TexelCopyBufferLayout {
                 offset: u64::from(top * row + left * 4),
                 bytes_per_row: Some(row),
@@ -218,39 +288,35 @@ impl CanvasView {
         );
     }
 
-    /// Draws the canvas with its top-left pixel at `origin` of a target of
-    /// `target_size`, clipped to the target.
+    /// Draws into `area` (left, top, right, bottom target pixels) of a
+    /// target of `target_size`, the document placed by `placement`.
     pub fn draw(
         &mut self,
         queue: &wgpu::Queue,
         pass: &mut wgpu::RenderPass<'_>,
-        origin: [u32; 2],
+        area: [u32; 4],
+        placement: Placement,
         target_size: [u32; 2],
     ) {
-        let width = self
-            .texture
-            .width()
-            .min(target_size[0].saturating_sub(origin[0]));
-        let height = self
-            .texture
-            .height()
-            .min(target_size[1].saturating_sub(origin[1]));
-        if width == 0 || height == 0 {
+        let right = area[2].min(target_size[0]);
+        let bottom = area[3].min(target_size[1]);
+        if right <= area[0] || bottom <= area[1] {
             return;
         }
-        if self.origin != Some(origin) {
+        let size = [self.texture.width(), self.texture.height()];
+        if self.uploaded != Some((placement, size)) {
             queue.write_buffer(
                 &self.uniform,
                 0,
-                &uniform_bytes(origin.map(|value| value as f32), self.paper),
+                &uniform_bytes(placement, size, self.workspace),
             );
-            self.origin = Some(origin);
+            self.uploaded = Some((placement, size));
         }
         pass.set_viewport(
-            origin[0] as f32,
-            origin[1] as f32,
-            width as f32,
-            height as f32,
+            area[0] as f32,
+            area[1] as f32,
+            (right - area[0]) as f32,
+            (bottom - area[1]) as f32,
             0.0,
             1.0,
         );
@@ -263,9 +329,8 @@ impl CanvasView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raster::StrokeStyle;
 
-    const PAPER: [u8; 4] = [245, 240, 230, 255];
+    const WORKSPACE: [u8; 4] = [60, 62, 66, 255];
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -278,12 +343,13 @@ mod tests {
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
     }
 
-    /// Draws `raster` at `origin` of a `target`-sized image and reads it back.
-    fn render(raster: &mut CanvasRaster, origin: [u32; 2], target: [u32; 2]) -> Option<Vec<u8>> {
+    /// Draws `document` into the whole of a `target`-sized image and reads
+    /// it back.
+    fn render(document: &Pixmap, placement: Placement, target: [u32; 2]) -> Option<Vec<u8>> {
         let (device, queue) = device()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut view = CanvasView::new(&device, format, PAPER);
-        view.update(&device, &queue, raster);
+        let mut view = DocumentView::new(&device, format, WORKSPACE);
+        view.update(&device, &queue, document, None);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -324,7 +390,13 @@ mod tests {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            view.draw(&queue, &mut pass, origin, target);
+            view.draw(
+                &queue,
+                &mut pass,
+                [0, 0, target[0], target[1]],
+                placement,
+                target,
+            );
         }
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
@@ -350,45 +422,69 @@ mod tests {
         Some(pixels)
     }
 
+    /// An opaque document with a distinct colour per pixel.
+    fn document() -> Pixmap {
+        let mut pixmap = Pixmap::new(20, 12);
+        for (index, pixel) in pixmap.data_as_u8_slice_mut().chunks_mut(4).enumerate() {
+            pixel.copy_from_slice(&[(index * 7 % 256) as u8, (index * 13 % 256) as u8, 90, 255]);
+        }
+        pixmap
+    }
+
     #[test]
-    fn each_screen_pixel_shows_one_canvas_pixel_over_the_paper() {
-        let mut raster = CanvasRaster::new([20, 12]);
-        let style = StrokeStyle {
-            width: 3.0,
-            color: [200, 30, 10, 160],
-        };
-        raster.dot([4.0, 3.0], style);
-        raster.segment([4.0, 3.0], [17.0, 9.0], style);
-        let (origin, target) = ([5, 3], [32, 24]);
-        let Some(shown) = render(&mut raster, origin, target) else {
-            eprintln!("skipped: no DX12 adapter");
-            return;
-        };
-        let canvas = raster.pixels();
-        for y in 0..target[1] {
-            for x in 0..target[0] {
-                let at = ((y * target[0] + x) * 4) as usize;
-                let inside = (origin[0]..origin[0] + 20).contains(&x)
-                    && (origin[1]..origin[1] + 12).contains(&y);
-                let expected: [u8; 4] = if inside {
-                    let source = (((y - origin[1]) * 20 + x - origin[0]) * 4) as usize;
-                    let ink = &canvas[source..source + 4];
-                    let cover = 255 - u32::from(ink[3]);
-                    std::array::from_fn(|channel| {
-                        (u32::from(ink[channel]) + (u32::from(PAPER[channel]) * cover + 127) / 255)
-                            .min(255) as u8
-                    })
-                } else {
-                    [0, 0, 0, 255]
-                };
-                for channel in 0..4 {
-                    assert!(
-                        shown[at + channel].abs_diff(expected[channel]) <= 1,
-                        "pixel {x},{y} shows {:?}, expected {expected:?}",
-                        &shown[at..at + 4]
+    fn at_whole_scales_each_screen_pixel_shows_one_document_pixel() {
+        let document = document();
+        for scale in [1.0, 3.0] {
+            let placement = Placement {
+                offset: [5.0, 3.0],
+                scale,
+            };
+            let target = [80, 48];
+            let Some(shown) = render(&document, placement, target) else {
+                eprintln!("skipped: no DX12 adapter");
+                return;
+            };
+            let source = document.data_as_u8_slice();
+            for y in 0..target[1] {
+                for x in 0..target[0] {
+                    let at = ((y * target[0] + x) * 4) as usize;
+                    let document_x = ((x as f32 + 0.5 - 5.0) / scale).floor();
+                    let document_y = ((y as f32 + 0.5 - 3.0) / scale).floor();
+                    let inside =
+                        (0.0..20.0).contains(&document_x) && (0.0..12.0).contains(&document_y);
+                    let expected: [u8; 4] = if inside {
+                        let from = ((document_y as usize) * 20 + document_x as usize) * 4;
+                        source[from..from + 4].try_into().unwrap()
+                    } else {
+                        WORKSPACE
+                    };
+                    assert_eq!(
+                        &shown[at..at + 4],
+                        &expected,
+                        "scale {scale}, screen pixel {x},{y}"
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn below_100_percent_neighbouring_pixels_blend() {
+        let mut document = Pixmap::new(4, 4);
+        for (index, pixel) in document.data_as_u8_slice_mut().chunks_mut(4).enumerate() {
+            let white = (index % 4 + index / 4) % 2 == 0;
+            pixel.copy_from_slice(&if white { [255; 4] } else { [0, 0, 0, 255] });
+        }
+        let placement = Placement {
+            offset: [0.0, 0.0],
+            scale: 0.5,
+        };
+        let Some(shown) = render(&document, placement, [2, 2]) else {
+            eprintln!("skipped: no DX12 adapter");
+            return;
+        };
+        for pixel in shown.chunks(4) {
+            assert!((100..=155).contains(&pixel[0]), "{pixel:?}");
         }
     }
 }

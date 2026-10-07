@@ -8,18 +8,20 @@
 //! reads the input queued meanwhile afterwards, so it shows the newest input.
 
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use ugu_core::document::Document;
 use ugu_render::gpu::{AdapterChoice, Gpu};
 use ugu_render::present::{Acquired, Presenter};
-use ugu_render::view::CanvasView;
+use ugu_render::view::{DocumentView, Placement};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::PointerEvent;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::canvas::{self, ProbeCanvas};
+use crate::cache::Rendered;
+use crate::canvas::{self, Canvas};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
@@ -30,6 +32,8 @@ pub enum ToRender {
     /// A screen reader connected (`true`) or left.
     Accessibility(bool),
     AccessibilityAction(egui::accesskit::ActionRequest),
+    /// The cache worker finished a canvas split.
+    Cache(Box<Rendered>),
     Shutdown,
 }
 
@@ -80,7 +84,7 @@ pub struct RenderThread {
     /// `UGURUGU_DIAGNOSTICS=1` enables test-only keys.
     diagnostics: bool,
     router: InputRouter,
-    canvas: ProbeCanvas,
+    canvas: Canvas,
     ime: ImeProbe,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
@@ -94,7 +98,7 @@ struct Display {
     gpu: Gpu,
     presenter: Presenter,
     egui_renderer: egui_wgpu::Renderer,
-    canvas_view: CanvasView,
+    canvas_view: DocumentView,
 }
 
 impl Display {
@@ -111,7 +115,7 @@ impl Display {
             presenter.format(),
             egui_wgpu::RendererOptions::default(),
         );
-        let canvas_view = CanvasView::new(&gpu.device, presenter.format(), canvas::PAPER);
+        let canvas_view = DocumentView::new(&gpu.device, presenter.format(), canvas::WORKSPACE);
         Ok(Self {
             gpu,
             presenter,
@@ -150,6 +154,7 @@ impl RenderThread {
         tree_sink: TreeSink,
         egui_ctx: egui::Context,
         EguiState(egui_state): EguiState,
+        to_self: Sender<ToRender>,
     ) -> Result<Self, String> {
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
@@ -171,7 +176,9 @@ impl RenderThread {
             display,
             diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
             router: InputRouter::default(),
-            canvas: ProbeCanvas::default(),
+            canvas: Canvas::new(Document::new([1024, 768]), move |rendered| {
+                let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
+            }),
             ime: ImeProbe::default(),
             present_latency: LatencyLog::default(),
             display_latency: LatencyLog::default(),
@@ -197,6 +204,7 @@ impl RenderThread {
             self.adapter_choice,
             [size.width, size.height],
         )?;
+        self.canvas.upload_all();
         // egui sends only changes to its font atlas, so the new device gets
         // the whole atlas once.
         let atlas = self.egui_ctx.fonts(|fonts| fonts.image());
@@ -305,15 +313,22 @@ impl RenderThread {
                 self.egui_state.on_accesskit_action_request(request);
                 self.needs_frame = true;
             }
+            ToRender::Cache(rendered) => {
+                self.canvas.adopt(*rendered);
+                self.needs_frame = true;
+            }
             ToRender::Pointer(events) => {
                 let pixels_per_point = egui_winit::pixels_per_point(&self.egui_ctx, &self.window);
-                let modifiers = self.egui_ctx.input(|input| input.modifiers);
+                let (modifiers, space) = self
+                    .egui_ctx
+                    .input(|input| (input.modifiers, input.key_down(egui::Key::Space)));
+                let pan_held = space && !self.egui_ctx.egui_wants_keyboard_input();
                 let canvas = &self.canvas;
-                let routed = self
-                    .router
-                    .route(events, pixels_per_point, modifiers, |position| {
-                        canvas.contains(position)
-                    });
+                let routed =
+                    self.router
+                        .route(events, pixels_per_point, modifiers, pan_held, |position| {
+                            canvas.contains(position)
+                        });
                 self.egui_state.egui_input_mut().events.extend(routed.egui);
                 for input in routed.canvas {
                     // egui never sees canvas presses, so it would keep a
@@ -377,14 +392,16 @@ impl RenderThread {
                     }
                     ui.label(adapter_summary.as_str());
                     ui.separator();
+                    ui.label(format!("{:.0}%", canvas.scale() * 100.0));
+                    ui.separator();
                     ui.label(format!("samples {}", canvas.sample_count()));
                     if let Some(summary) = display_latency.summary() {
                         ui.separator();
                         ui.label(format!("input to display {summary}"));
                     }
-                    if ui.button("Clear").clicked() {
-                        canvas.clear();
-                        tracing::info!("canvas cleared");
+                    if let Some(notice) = canvas.notice() {
+                        ui.separator();
+                        ui.colored_label(ui.visuals().warn_fg_color, notice);
                     }
                 });
             });
@@ -418,6 +435,7 @@ impl RenderThread {
             .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
         self.needs_frame = false;
 
+        self.canvas.sync();
         let pixels_per_point = output.pixels_per_point;
         let primitives = self.egui_ctx.tessellate(output.shapes, pixels_per_point);
         let textures = output.textures_delta;
@@ -437,15 +455,18 @@ impl RenderThread {
                     egui_renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
                 }
             }
-            canvas_view.update(&gpu.device, &gpu.queue, self.canvas.raster_mut());
-            let canvas_origin = [canvas_area[0].max(0) as u32, canvas_area[1].max(0) as u32];
+            let upload = self.canvas.take_upload();
+            canvas_view.update(&gpu.device, &gpu.queue, self.canvas.display(), upload);
+            let canvas_area = canvas_area.map(|edge| edge.max(0) as u32);
+            let placement = self.canvas.placement();
 
             match draw(
                 &gpu.device,
                 &gpu.queue,
                 presenter,
                 canvas_view,
-                canvas_origin,
+                canvas_area,
+                placement,
                 egui_renderer,
                 &primitives,
                 pixels_per_point,
@@ -489,16 +510,17 @@ impl RenderThread {
     }
 }
 
-/// Draws the canvas with its top-left pixel at `canvas_origin`, then egui
-/// over it, into the next buffer of `presenter`, and submits it. Returns
-/// `None` when there is no buffer to draw into now.
+/// Draws the document into `canvas_area` as `placement` places it, then
+/// egui over it, into the next buffer of `presenter`, and submits it.
+/// Returns `None` when there is no buffer to draw into now.
 #[expect(clippy::too_many_arguments, reason = "one frame's parts, used once")]
 fn draw(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     presenter: &mut Presenter,
-    canvas: &mut CanvasView,
-    canvas_origin: [u32; 2],
+    canvas: &mut DocumentView,
+    canvas_area: [u32; 4],
+    placement: Placement,
     egui_renderer: &mut egui_wgpu::Renderer,
     primitives: &[egui::ClippedPrimitive],
     pixels_per_point: f32,
@@ -537,7 +559,7 @@ fn draw(
                 multiview_mask: None,
             })
             .forget_lifetime();
-        canvas.draw(queue, &mut pass, canvas_origin, size);
+        canvas.draw(queue, &mut pass, canvas_area, placement, size);
         pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
         egui_renderer.render(&mut pass, primitives, &screen);
     }

@@ -14,8 +14,11 @@ pollster.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+ugu-core.workspace = true
 ugu-render.workspace = true
+ugu-session.workspace = true
 ugu-win.workspace = true
+vello_cpu.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 

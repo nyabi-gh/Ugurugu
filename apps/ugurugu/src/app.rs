@@ -132,6 +132,7 @@ impl Session {
             let _ = tree_proxy.send_event(UiEvent::AccessibilityTree(update));
         });
         let (to_render, messages) = mpsc::channel();
+        let to_self = to_render.clone();
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -143,6 +144,7 @@ impl Session {
                     tree_sink,
                     egui_ctx,
                     egui_state,
+                    to_self,
                 )
                 .and_then(|render| render.run(&messages))
                 .err();
