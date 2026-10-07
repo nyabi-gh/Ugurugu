@@ -125,8 +125,14 @@ pub struct DocumentRenderer {
     /// together one layer at a time.
     surface_budget: usize,
     tile_edge: u32,
+    /// Stroke sample spacing in sixteenths of the full detail; see
+    /// `set_detail`.
+    detail: u32,
     timings: Timings,
 }
+
+/// Full detail for `DocumentRenderer::set_detail`.
+pub const FULL_DETAIL: u32 = 16;
 
 /// A layer's own pixels and what they were drawn from.
 struct Cached {
@@ -134,6 +140,7 @@ struct Cached {
     revision: Option<u64>,
     /// The frame within the cycle, or `None` for a layer that does not move.
     frame: Option<u32>,
+    detail: u32,
     surface: Arc<TiledSurface>,
 }
 
@@ -221,8 +228,19 @@ impl DocumentRenderer {
             stop: None,
             surface_budget: SURFACE_BUDGET,
             tile_edge: TILE_EDGE,
+            detail: FULL_DETAIL,
             timings: Timings::default(),
         }
+    }
+
+    /// Spaces stroke samples `sixteenths`/16 times as far apart as at full
+    /// detail ([`FULL_DETAIL`]). The strokes keep their motion, which follows
+    /// the distance along them, and are outlined from fewer samples: for
+    /// playback frames shown smaller than the canvas, where the samples would
+    /// otherwise be closer together on screen than when editing at 100%.
+    /// Editing and export keep full detail.
+    pub fn set_detail(&mut self, sixteenths: u32) {
+        self.detail = sixteenths.max(FULL_DETAIL);
     }
 
     /// Lets go of Vello's working memory, which keeps the size of the
@@ -266,9 +284,9 @@ impl DocumentRenderer {
     ) -> TiledSurface {
         let size = scaled_size(document.canvas, shrink);
         let mut surface = TiledSurface::new(size, self.tile_edge);
-        self.timings += self
-            .main
-            .draw_layer(document, frame, shrink, paint, &mut surface);
+        self.timings +=
+            self.main
+                .draw_layer(document, frame, shrink, self.detail, paint, &mut surface);
         surface
     }
 
@@ -367,10 +385,12 @@ impl DocumentRenderer {
             self.timings = Timings::default();
             return self.render_streamed(document, plan, frame, shrink, pixmap);
         }
+        let detail = self.detail;
         self.cache.retain(|id, cached| {
             plan.moves(*id).is_some()
                 && cached.surface.size() == size
                 && cached.surface.edge() == edge
+                && cached.detail == detail
         });
         let mut work = Vec::new();
         for (id, moves) in &plan.layers {
@@ -408,9 +428,14 @@ impl DocumentRenderer {
                 if self.stopped() {
                     break;
                 }
-                self.timings +=
-                    self.main
-                        .draw_layer(document, frame, shrink, each.paint, &mut each.surface);
+                self.timings += self.main.draw_layer(
+                    document,
+                    frame,
+                    shrink,
+                    detail,
+                    each.paint,
+                    &mut each.surface,
+                );
                 each.drawn = true;
             }
         }
@@ -419,6 +444,7 @@ impl DocumentRenderer {
             let cached = Cached {
                 revision: each.revision,
                 frame: each.frame,
+                detail,
                 surface: Arc::new(each.surface),
             };
             self.cache.insert(each.id, cached);
@@ -479,6 +505,7 @@ impl DocumentRenderer {
         let slots: Vec<std::sync::Mutex<&mut Work<'_>>> =
             work.iter_mut().map(std::sync::Mutex::new).collect();
         let stop = self.stop.as_deref();
+        let detail = self.detail;
         let timings = std::thread::scope(|scope| {
             let workers: Vec<_> = self
                 .singles
@@ -501,6 +528,7 @@ impl DocumentRenderer {
                                 document,
                                 frame,
                                 shrink,
+                                detail,
                                 each.paint,
                                 &mut each.surface,
                             );
@@ -544,6 +572,7 @@ impl Raster {
         document: &Document,
         frame: u32,
         shrink: u32,
+        detail: u32,
         paint: &PaintLayer,
         surface: &mut TiledSurface,
     ) -> Timings {
@@ -558,7 +587,7 @@ impl Raster {
             Some(pixmap) if [pixmap.width(), pixmap.height()] == extent => pixmap,
             _ => Pixmap::new(extent[0], extent[1]),
         };
-        let timings = self.draw_steps(&steps, frame, shrink, origin, &mut pixmap);
+        let timings = self.draw_steps(&steps, frame, shrink, detail, origin, &mut pixmap);
         surface.set(span, pixmap, reached);
         timings
     }
@@ -570,12 +599,13 @@ impl Raster {
         steps: &[Step<'_>],
         frame: u32,
         shrink: u32,
+        detail: u32,
         origin: [u32; 2],
         pixmap: &mut Pixmap,
     ) -> Timings {
         let [width, height] = [pixmap.width(), pixmap.height()];
         let started = std::time::Instant::now();
-        let outlines = self.outlines(steps, frame);
+        let outlines = self.outlines(steps, frame, detail);
         let outlined = started.elapsed();
 
         self.context.reset_and_resize(width, height);
@@ -612,7 +642,7 @@ impl Raster {
 
     /// The outline of each `Step::Draw`, in order, made on the worker
     /// threads in contiguous runs.
-    fn outlines(&self, steps: &[Step<'_>], frame: u32) -> Vec<Option<BezPath>> {
+    fn outlines(&self, steps: &[Step<'_>], frame: u32, detail: u32) -> Vec<Option<BezPath>> {
         let draws: Vec<(&Stroke, &Pen)> = steps
             .iter()
             .filter_map(|step| match step {
@@ -621,7 +651,9 @@ impl Raster {
             })
             .collect();
         let make = |(stroke, pen): &(&Stroke, &Pen)| {
-            let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
+            let spacing =
+                stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
+            let samples = Resampler::whole(&stroke.points, spacing);
             stroke::outline(&samples, pen, frame)
         };
         let run = draws.len().div_ceil(self.threads).max(1);
@@ -1385,6 +1417,54 @@ mod tests {
                 assert!(mean < limit, "1/{shrink} differs by {mean} on average");
             }
         }
+    }
+
+    #[test]
+    fn fewer_samples_keep_a_smaller_frame_within_the_same_limits() {
+        let (base, below, above) = two_layers();
+        let cases = [
+            (with_layers(&base, &[below, above]), 3.0),
+            (many_layers(), 20.0),
+        ];
+        for (document, limit) in cases {
+            let plan = RenderPlan::new(&document, Purpose::Display);
+            let full = render(&document, 2, 0);
+            for shrink in [2, 4] {
+                let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+                let mut small = Pixmap::new(size[0], size[1]);
+                let mut renderer = DocumentRenderer::new(4);
+                // Playback asks for less than this: under 2 × `shrink`.
+                renderer.set_detail(FULL_DETAIL * 2 * shrink);
+                assert!(renderer.render_scaled(&document, &plan, 2, None, shrink, &mut small));
+                let expected = box_down(&full, shrink);
+                let mean = small
+                    .data_as_u8_slice()
+                    .iter()
+                    .zip(&expected)
+                    .map(|(a, b)| (f32::from(*a) - b).abs())
+                    .sum::<f32>()
+                    / expected.len() as f32;
+                assert!(
+                    mean < limit,
+                    "1/{shrink} with fewer samples differs by {mean} on average"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn layers_drawn_with_fewer_samples_are_not_reused_at_full_detail() {
+        let (document, below, above) = two_layers();
+        let document = with_layers(&document, &[below, above]);
+        let revisions = LayerRevisions::default();
+        let mut renderer = DocumentRenderer::new(0);
+        let plan = RenderPlan::new(&document, Purpose::Display);
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut pixmap = Pixmap::new(width, height);
+        renderer.set_detail(FULL_DETAIL * 2);
+        renderer.render_plan(&document, &plan, 1, Some(&revisions), &mut pixmap);
+        renderer.set_detail(FULL_DETAIL);
+        assert_eq!(cached(&mut renderer, &document, 1, &revisions), 2);
     }
 
     #[test]

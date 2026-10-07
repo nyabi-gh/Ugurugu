@@ -22,7 +22,7 @@ use std::time::Instant;
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
 use ugu_render::compose::Split;
-use ugu_render::document::{DocumentRenderer, Purpose, scaled_size};
+use ugu_render::document::{DocumentRenderer, FULL_DETAIL, Purpose, scaled_size};
 use ugu_render::plan::RenderPlan;
 use vello_cpu::Pixmap;
 
@@ -44,6 +44,14 @@ pub struct Key {
     pub frame: u32,
 }
 
+/// How playback frames are drawn: at 1/`shrink` of the canvas size, with
+/// stroke samples spaced `detail`/16 as far apart as at full detail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Preview {
+    pub shrink: u32,
+    pub detail: u32,
+}
+
 pub enum Rendered {
     Split {
         key: Key,
@@ -54,8 +62,7 @@ pub enum Rendered {
     Frame {
         version: Version,
         frame: u32,
-        /// How much smaller than the canvas it is drawn.
-        shrink: u32,
+        preview: Preview,
         pixels: Arc<Pixmap>,
     },
     /// Layers' own pixels, small, each with the revision it shows; a
@@ -79,7 +86,7 @@ pub struct Snapshot {
 
 enum Job {
     Split(Key, Snapshot),
-    Frame(Version, u32, u32, Snapshot),
+    Frame(Version, u32, Preview, Snapshot),
     Export {
         document: Arc<Document>,
         frame: i64,
@@ -92,7 +99,7 @@ enum Job {
 #[derive(Clone, Copy, PartialEq)]
 enum Running {
     Split,
-    Frame(Version, u32, u32),
+    Frame(Version, u32, Preview),
     Export,
     Thumbnails,
 }
@@ -100,7 +107,7 @@ enum Running {
 #[derive(Default)]
 struct Queue {
     split: Option<(Key, Snapshot)>,
-    frames: VecDeque<(Version, u32, u32, Snapshot)>,
+    frames: VecDeque<(Version, u32, Preview, Snapshot)>,
     exports: VecDeque<Job>,
     /// The newest list of thumbnails wanted.
     thumbnails: Option<Job>,
@@ -137,9 +144,16 @@ impl CacheWorker {
         });
         let worker = shared.clone();
         // One thread is left for the render thread, which takes input.
-        let threads = std::thread::available_parallelism()
-            .map_or(1, |count| count.get().saturating_sub(1))
-            .min(8) as u16;
+        // `UGU_WORKER_THREADS` sets the count, to measure as a smaller
+        // processor would.
+        let threads = std::env::var("UGU_WORKER_THREADS")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map_or(1, |count| count.get().saturating_sub(1).max(1))
+                    .min(usize::from(u16::MAX)) as u16
+            });
         let thread = std::thread::Builder::new()
             .name("canvas cache".to_owned())
             .spawn(move || {
@@ -184,18 +198,18 @@ impl CacheWorker {
     }
 
     /// Replaces the playback frames waiting to be rendered, the first due
-    /// first, at 1/`shrink` of the canvas size. Layers that do not move are
-    /// drawn once for all of them.
+    /// first, drawn as `preview` says. Layers that do not move are drawn
+    /// once for all of them.
     pub fn request_frames(
         &self,
         version: Version,
         frames: &[u32],
         snapshot: &Snapshot,
-        shrink: u32,
+        preview: Preview,
     ) {
         self.renders
             .shared
-            .request_frames(version, frames, snapshot, shrink);
+            .request_frames(version, frames, snapshot, preview);
     }
 
     /// Replaces the thumbnails waiting to be drawn: `layers` of `document`
@@ -225,14 +239,20 @@ impl Shared {
         self.wake.notify_one();
     }
 
-    fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot, shrink: u32) {
+    fn request_frames(
+        &self,
+        version: Version,
+        frames: &[u32],
+        snapshot: &Snapshot,
+        preview: Preview,
+    ) {
         let mut queue = self.queue.lock().expect("queue lock");
         queue.frames = frames
             .iter()
-            .map(|&frame| (version, frame, shrink, snapshot.clone()))
+            .map(|&frame| (version, frame, preview, snapshot.clone()))
             .collect();
-        if let Some(Running::Frame(running, frame, running_shrink)) = queue.running
-            && !(running == version && running_shrink == shrink && frames.contains(&frame))
+        if let Some(Running::Frame(running, frame, running_preview)) = queue.running
+            && !(running == version && running_preview == preview && frames.contains(&frame))
         {
             self.stop.store(true, Ordering::Relaxed);
         }
@@ -270,10 +290,10 @@ fn next(shared: &Shared) -> Option<Job> {
         }
         let job = if let Some((key, snapshot)) = queue.split.take() {
             Some((Running::Split, Job::Split(key, snapshot)))
-        } else if let Some((version, frame, shrink, snapshot)) = queue.frames.pop_front() {
+        } else if let Some((version, frame, preview, snapshot)) = queue.frames.pop_front() {
             Some((
-                Running::Frame(version, frame, shrink),
-                Job::Frame(version, frame, shrink, snapshot),
+                Running::Frame(version, frame, preview),
+                Job::Frame(version, frame, preview, snapshot),
             ))
         } else if let Some(job) = queue.exports.pop_front() {
             Some((Running::Export, job))
@@ -296,6 +316,10 @@ fn next(shared: &Shared) -> Option<Job> {
 fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> Option<Job> {
     let started = Instant::now();
     let ms = || started.elapsed().as_secs_f64() * 1000.0;
+    renderer.set_detail(match &job {
+        Job::Frame(_, _, preview, _) => preview.detail,
+        _ => FULL_DETAIL,
+    });
     match job {
         Job::Split(key, snapshot) => {
             let document = &snapshot.document;
@@ -322,9 +346,10 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
                 display,
             });
         }
-        Job::Frame(version, frame, shrink, snapshot) => {
+        Job::Frame(version, frame, preview, snapshot) => {
             let document = &snapshot.document;
-            let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+            let [width, height] =
+                scaled_size(document.canvas, preview.shrink).map(|edge| edge as u16);
             let mut pixels = Pixmap::new(width, height);
             let plan = RenderPlan::new(document, Purpose::Display);
             let finished = renderer.render_scaled(
@@ -332,7 +357,7 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
                 &plan,
                 i64::from(frame),
                 Some(&snapshot.layers),
-                shrink,
+                preview.shrink,
                 &mut pixels,
             );
             if !finished {
@@ -343,7 +368,7 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             done(Rendered::Frame {
                 version,
                 frame,
-                shrink,
+                preview,
                 pixels: Arc::new(pixels),
             });
         }
@@ -438,7 +463,7 @@ mod tests {
                 frame: 0,
                 reply,
             });
-            queue.frames.push_back((version, 3, 1, state.clone()));
+            queue.frames.push_back((version, 3, full(1), state.clone()));
             queue.split = Some((
                 Key {
                     version,
@@ -459,6 +484,13 @@ mod tests {
         assert_eq!(order, ["split", "frame", "export", "thumbnails"]);
     }
 
+    fn full(shrink: u32) -> Preview {
+        Preview {
+            shrink,
+            detail: FULL_DETAIL,
+        }
+    }
+
     #[test]
     fn a_new_split_stops_the_render_under_way() {
         let shared = shared();
@@ -467,15 +499,22 @@ mod tests {
             document: 0,
             revision: 0,
         };
-        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2, 1));
+        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2, full(1)));
         // A list that still has the frame keeps it going; one without it, or
-        // at another size, stops it.
-        shared.request_frames(version, &[2, 3], &state, 1);
+        // at another size or detail, stops it.
+        shared.request_frames(version, &[2, 3], &state, full(1));
         assert!(!shared.stop.load(Ordering::Relaxed));
-        shared.request_frames(version, &[2, 3], &state, 2);
+        shared.request_frames(version, &[2, 3], &state, full(2));
         assert!(shared.stop.load(Ordering::Relaxed));
         shared.stop.store(false, Ordering::Relaxed);
-        shared.request_frames(version, &[3], &state, 1);
+        let fewer = Preview {
+            shrink: 1,
+            detail: FULL_DETAIL * 2,
+        };
+        shared.request_frames(version, &[2, 3], &state, fewer);
+        assert!(shared.stop.load(Ordering::Relaxed));
+        shared.stop.store(false, Ordering::Relaxed);
+        shared.request_frames(version, &[3], &state, full(1));
         assert!(shared.stop.load(Ordering::Relaxed));
         shared.stop.store(false, Ordering::Relaxed);
         let key = Key {

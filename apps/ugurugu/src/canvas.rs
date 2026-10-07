@@ -18,7 +18,9 @@ use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
 use ugu_render::compose::{Split, Stamp, composite, premultiplied, stroke_color};
-use ugu_render::document::{Purpose, SURFACE_BUDGET, TILE_EDGE, scaled_size, surface_estimate};
+use ugu_render::document::{
+    FULL_DETAIL, Purpose, SURFACE_BUDGET, TILE_EDGE, scaled_size, surface_estimate,
+};
 use ugu_render::live::LiveStroke;
 use ugu_render::plan::RenderPlan;
 use ugu_render::raster::PixelRect;
@@ -29,7 +31,7 @@ use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
-use crate::cache::{CacheWorker, Key, Rendered, Renders, Snapshot, Version};
+use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Version};
 use crate::input::{CanvasInput, Gesture};
 
 /// Shown around the document, opaque straight RGBA.
@@ -52,8 +54,9 @@ struct Playback {
     /// Frames of one document state, by frame within the cycle.
     frames: HashMap<u32, Arc<Pixmap>>,
     version: Version,
-    /// How much smaller than the canvas the frames are drawn.
-    shrink: u32,
+    /// How the frames are drawn: smaller than the canvas, and with fewer
+    /// stroke samples when shown smaller.
+    preview: Preview,
     /// How many frames fit in the budget; 0 before it is worked out.
     ahead: u32,
     /// The frame on screen and how much smaller it is; at first the edited
@@ -373,12 +376,12 @@ impl Canvas {
             Rendered::Frame {
                 version,
                 frame,
-                shrink,
+                preview,
                 pixels,
             } => {
                 if let Some(playback) = self.playback.as_mut()
                     && playback.version == version
-                    && playback.shrink == shrink
+                    && playback.preview == preview
                 {
                     playback.frames.insert(frame, pixels);
                 }
@@ -428,7 +431,7 @@ impl Canvas {
             due: Instant::now(),
             frames: HashMap::new(),
             version: self.version(),
-            shrink: preview_shrink(self.scale),
+            preview: preview(self.scale),
             ahead: 0,
             shown,
             window: None,
@@ -442,14 +445,15 @@ impl Canvas {
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
         let period = Duration::from_secs_f64(1.0 / fps);
         let version = self.version();
-        let shrink = preview_shrink(self.scale);
+        let preview = preview(self.scale);
+        let shrink = preview.shrink;
         let playback = self.playback.as_ref()?;
-        if playback.version != version || playback.shrink != shrink || playback.ahead == 0 {
+        if playback.version != version || playback.preview != preview || playback.ahead == 0 {
             let ahead = frames_ahead(document, shrink);
             let playback = self.playback.as_mut()?;
             playback.frames.clear();
             playback.version = version;
-            playback.shrink = shrink;
+            playback.preview = preview;
             playback.ahead = ahead;
             playback.window = None;
         }
@@ -487,7 +491,7 @@ impl Canvas {
             playback.window = Some(cycle);
             let snapshot = self.snapshot();
             self.cache
-                .request_frames(version, &missing, &snapshot, shrink);
+                .request_frames(version, &missing, &snapshot, preview);
         }
         if shown {
             tracing::debug!(frame = cycle, "playback frame shown");
@@ -747,6 +751,18 @@ fn frames_ahead(document: &Document, shrink: u32) -> u32 {
     fit.clamp(2, document.frames as usize) as u32
 }
 
+/// How playback frames are drawn at `scale` (screen pixels per document
+/// pixel): as small as `preview_shrink` allows, with stroke samples as far
+/// apart on screen as when editing at 100%. The spacing is kept in 16ths so
+/// that small zoom changes during playback reuse the frames drawn.
+fn preview(scale: f64) -> Preview {
+    let detail = (f64::from(FULL_DETAIL) / scale).floor();
+    Preview {
+        shrink: preview_shrink(scale),
+        detail: detail.clamp(f64::from(FULL_DETAIL), f64::from(FULL_DETAIL * 64)) as u32,
+    }
+}
+
 /// How much smaller playback frames can be drawn at `scale` (screen pixels
 /// per document pixel) and still have a pixel for every screen pixel: the
 /// largest such power of two up to 8.
@@ -800,6 +816,12 @@ mod tests {
     fn playback_frames_keep_a_pixel_for_every_screen_pixel() {
         let shrinks = [1.5, 1.0, 0.6, 0.5, 0.3, 0.25, 0.2, 0.05].map(super::preview_shrink);
         assert_eq!(shrinks, [1, 1, 1, 2, 2, 4, 4, 8]);
+    }
+
+    #[test]
+    fn playback_samples_are_as_far_apart_on_screen_as_at_100_percent() {
+        let details = [2.0, 1.0, 0.73, 0.5, 0.3, 0.001].map(|scale| super::preview(scale).detail);
+        assert_eq!(details, [16, 16, 21, 32, 53, 1024]);
     }
 
     #[test]
