@@ -35,7 +35,6 @@ M0 앱(`apps/ugurugu`)의 probe UI(IME 칸, 지연 표시, 진단 키)는 실증
 | serde / serde_json | =1.0.229 / =1.0.151 | `derive` | `document.json`, `manifest.json` |
 | sha2 | =0.11.0 | — | 자산 이름(SHA-256) |
 | uuid | =1.27.0 | `v4` | 문서 id |
-| thiserror | =2.0.21 | — | io·core 오류 타입 |
 | proptest | =1.11.0 | dev 전용 | 잘못된 입력 거부, roundtrip 시험 |
 
 ## 3. M0 종료 조건 대비
