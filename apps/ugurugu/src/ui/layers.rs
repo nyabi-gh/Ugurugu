@@ -310,6 +310,24 @@ impl LayerDock {
     }
 
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {
+        // Rows are drawn before what is done to them is applied, so a change
+        // needs another frame to show, on screen and to screen readers.
+        let state = |dock: &Self, canvas: &Canvas| {
+            (
+                canvas.session().revision(),
+                canvas.session().current_layer(),
+                dock.folded.len(),
+                dock.renaming.as_ref().map(|(id, _)| *id),
+            )
+        };
+        let before = state(self, canvas);
+        self.draw(ui, canvas, refusal);
+        if state(self, canvas) != before {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    fn draw(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {
         self.refresh_thumbnails(ui.ctx(), canvas);
         let current = canvas.session().current_layer();
         let mut rows = Vec::new();
@@ -401,6 +419,17 @@ impl LayerDock {
                 Glyph::MoveUp
             };
             icons::paint(&painter, fold, glyph, theme::MUTED, 0.0);
+            fold_response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    if folded {
+                        tr("group-unfold")
+                    } else {
+                        tr("group-fold")
+                    },
+                )
+            });
             if fold_response.clicked() && !self.folded.remove(&row.id) {
                 self.folded.insert(row.id);
             }
@@ -480,6 +509,18 @@ impl LayerDock {
                 },
                 0.0,
             );
+            wobble_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    true,
+                    wobbles,
+                    if wobbles {
+                        tr("layer-wobbles")
+                    } else {
+                        tr("layer-still")
+                    },
+                )
+            });
             if wobble_response.clicked() {
                 let id = row.id;
                 // Held still, or back to following the drawing.
@@ -587,6 +628,8 @@ impl LayerDock {
         if response.clicked() && !toggles_hit {
             let id = row.id;
             canvas.edit(|session| session.select_layer(id));
+            // egui focuses only text fields on click; F2 and Space need the row.
+            response.request_focus();
         }
         if response.double_clicked()
             || (selected
@@ -595,7 +638,15 @@ impl LayerDock {
         {
             self.renaming = Some((row.id, row.name.clone()));
         }
-        if selected && response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Space))
+        // Over the canvas, Space pans instead.
+        let over_canvas = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
+            let ppp = ui.ctx().pixels_per_point();
+            canvas.contains([f64::from(pos.x * ppp), f64::from(pos.y * ppp)])
+        });
+        if selected
+            && response.has_focus()
+            && !over_canvas
+            && ui.input(|input| input.key_pressed(egui::Key::Space))
         {
             let (id, shown) = (row.id, !row.visible);
             report(
@@ -676,10 +727,11 @@ impl LayerDock {
             if text_button(ui, Glyph::Remove, "G", tr("layer-ungroup"), is_group).clicked() {
                 report(refusal, canvas.edit(Session::ungroup));
             }
-            let merge = widgets::icon_button(
+            let merge = widgets::icon_button_tip(
                 ui,
                 Glyph::MoveDown,
                 16.0,
+                tr("layer-merge"),
                 merge_refused.unwrap_or(tr("layer-merge")),
                 merge_refused.is_none(),
             );
@@ -739,6 +791,14 @@ impl LayerDock {
                         for each in BLENDS {
                             ui.selectable_value(&mut chosen, each, blend_name(each));
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            true,
+                            tr("blend-mode-name"),
+                        )
                     });
                 ui.end_row();
                 if chosen != blend {
@@ -768,6 +828,14 @@ impl LayerDock {
                         for (id, name) in &groups {
                             ui.selectable_value(&mut target, Some(*id), name);
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            true,
+                            tr("group-parent"),
+                        )
                     });
                 ui.end_row();
                 if target != parent {

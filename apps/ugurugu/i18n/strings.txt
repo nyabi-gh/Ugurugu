@@ -111,6 +111,10 @@ reference | ugurugu::LayerDock | Reference layer
 reference-tip | ugurugu::LayerDock | Use this layer when a selection tool references marked layers
 layer-visible | ugurugu::LayerDock | Layer is visible
 layer-hidden | ugurugu::LayerDock | Layer is hidden
+layer-wobbles | - | Layer wobbles | 레이어가 우글거립니다 | レイヤーはゆらいでいます
+layer-still | - | Layer holds still | 레이어가 멈춰 있습니다 | レイヤーは静止しています
+group-fold | - | Fold group | 그룹 접기 | グループを折りたたむ
+group-unfold | - | Unfold group | 그룹 펼치기 | グループを展開
 
 # Animation bar
 play-tip | ugurugu::TimelineBar | Play preview (P)

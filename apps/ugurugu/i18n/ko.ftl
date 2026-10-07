@@ -113,6 +113,10 @@ reference = 참조 레이어
 reference-tip = 표시한 레이어를 참조하는 선택 도구에서 이 레이어 사용
 layer-visible = 레이어가 표시되어 있습니다
 layer-hidden = 레이어가 숨겨져 있습니다
+layer-wobbles = 레이어가 우글거립니다
+layer-still = 레이어가 멈춰 있습니다
+group-fold = 그룹 접기
+group-unfold = 그룹 펼치기
 
 # Animation bar
 play-tip = 미리보기 재생 (P)

@@ -90,7 +90,9 @@ impl Panels {
 /// Handles the canvas's shortcuts in this frame's input. Text fields keep
 /// their keys, Enter that commits a composition included.
 pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, panels: &mut Panels) {
-    if ctx.egui_wants_keyboard_input() {
+    // Not `egui_wants_keyboard_input`, which also holds for a focused row or
+    // button and would leave the shortcuts dead after clicking a layer.
+    if ctx.text_edit_focused() {
         return;
     }
     // A whole chord can arrive within one frame, so each key is matched with

@@ -63,6 +63,19 @@ pub fn icon_button(
     name: &str,
     enabled: bool,
 ) -> Response {
+    icon_button_tip(ui, glyph, glyph_size, name, name, enabled)
+}
+
+/// An icon button whose tooltip says more than its name, such as why it is
+/// disabled.
+pub fn icon_button_tip(
+    ui: &mut Ui,
+    glyph: Glyph,
+    glyph_size: f32,
+    name: &str,
+    tip: &str,
+    enabled: bool,
+) -> Response {
     let side = glyph_size + 8.0;
     let sense = if enabled {
         Sense::click()
@@ -87,7 +100,7 @@ pub fn icon_button(
         ink,
         0.0,
     );
-    response.on_hover_text(name)
+    response.on_hover_text(tip)
 }
 
 /// A flat button with a small glyph and its text beside it, as 2.2.13's

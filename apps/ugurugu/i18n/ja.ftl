@@ -113,6 +113,10 @@ reference = 参照レイヤー
 reference-tip = マークしたレイヤーを参照する選択ツールでこのレイヤーを使用
 layer-visible = レイヤーは表示されています
 layer-hidden = レイヤーは非表示です
+layer-wobbles = レイヤーはゆらいでいます
+layer-still = レイヤーは静止しています
+group-fold = グループを折りたたむ
+group-unfold = グループを展開
 
 # Animation bar
 play-tip = プレビューを再生 (P)

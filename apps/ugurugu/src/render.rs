@@ -376,7 +376,7 @@ impl RenderThread {
                 let (modifiers, space) = self
                     .egui_ctx
                     .input(|input| (input.modifiers, input.key_down(egui::Key::Space)));
-                let pan_held = space && !self.egui_ctx.egui_wants_keyboard_input();
+                let pan_held = space && !self.egui_ctx.text_edit_focused();
                 let canvas = &self.canvas;
                 let routed =
                     self.router

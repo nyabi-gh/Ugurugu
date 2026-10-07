@@ -113,6 +113,10 @@ reference = Reference layer
 reference-tip = Use this layer when a selection tool references marked layers
 layer-visible = Layer is visible
 layer-hidden = Layer is hidden
+layer-wobbles = Layer wobbles
+layer-still = Layer holds still
+group-fold = Fold group
+group-unfold = Unfold group
 
 # Animation bar
 play-tip = Play preview (P)
