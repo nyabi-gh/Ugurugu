@@ -18,6 +18,9 @@ use vello_cpu::kurbo::{BezPath, Rect};
 use vello_cpu::peniko::{BlendMode, Compose, Mix};
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
+use crate::compose::premultiplied;
+use crate::composite;
+use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
 
@@ -108,20 +111,44 @@ pub enum Purpose {
 }
 
 pub struct DocumentRenderer {
-    context: RenderContext,
-    resources: Resources,
-    /// Threads that make stroke outlines, which Vello then draws in order.
+    /// Draws one layer at a time with every thread.
+    main: Raster,
+    /// One single-threaded rasterizer per thread, to draw several layers at
+    /// once.
+    singles: Vec<Raster>,
+    level: vello_cpu::Level,
     threads: usize,
+    /// The paint layers' own surfaces, reused from render to render.
+    surfaces: Vec<Pixmap>,
     timings: Timings,
 }
 
-/// Where the last render spent its time.
+/// Where the last render spent its time. With layers drawn at once, the
+/// layer stages add up the time of every thread.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timings {
     pub outlines: std::time::Duration,
     /// Handing paths to Vello, up to and including its flush.
     pub encode: std::time::Duration,
     pub rasterize: std::time::Duration,
+    /// Putting the layer surfaces together.
+    pub composite: std::time::Duration,
+}
+
+impl std::ops::AddAssign for Timings {
+    fn add_assign(&mut self, other: Self) {
+        self.outlines += other.outlines;
+        self.encode += other.encode;
+        self.rasterize += other.rasterize;
+        self.composite += other.composite;
+    }
+}
+
+/// A Vello context and the threads that make stroke outlines for it.
+struct Raster {
+    context: RenderContext,
+    resources: Resources,
+    threads: usize,
 }
 
 /// One thing to draw, in document order.
@@ -145,16 +172,11 @@ impl DocumentRenderer {
     /// Uses the SIMD instructions of `level` instead of the document level.
     pub fn with_level(threads: u16, level: vello_cpu::Level) -> Self {
         Self {
-            context: RenderContext::new_with(
-                1,
-                1,
-                RenderSettings {
-                    level,
-                    num_threads: threads,
-                },
-            ),
-            resources: Resources::new(),
+            main: Raster::new(level, threads),
+            singles: Vec::new(),
+            level,
             threads: usize::from(threads.max(1)),
+            surfaces: Vec::new(),
             timings: Timings::default(),
         }
     }
@@ -172,17 +194,112 @@ impl DocumentRenderer {
         purpose: Purpose,
         pixmap: &mut Pixmap,
     ) {
-        let layers: Vec<_> = document
+        let plan = RenderPlan::new(document, purpose);
+        self.render_plan(document, &plan, frame, pixmap);
+    }
+
+    /// Draws `frame` as `plan`, made from `document`, says.
+    pub fn render_plan(
+        &mut self,
+        document: &Document,
+        plan: &RenderPlan,
+        frame: i64,
+        pixmap: &mut Pixmap,
+    ) {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
+        let frame = frame_in_cycle(frame, document.frames);
+        let paints: Vec<&PaintLayer> = plan
             .layers
             .iter()
-            .filter(|layer| layer.visible && !(purpose == Purpose::Export && layer.reference))
-            .filter_map(|layer| match &layer.kind {
-                LayerKind::Paint(paint) => Some((paint, Some(paint.opacity))),
-                LayerKind::Group(_) => None,
-            })
+            .map(
+                |(id, _)| match document.layer(*id).map(|layer| &layer.kind) {
+                    Some(LayerKind::Paint(paint)) => paint,
+                    _ => panic!("the plan was made from another document"),
+                },
+            )
             .collect();
-        let frame = frame_in_cycle(frame, document.frames);
-        self.render_ops(document, frame, Some(document.background), &layers, pixmap);
+        if self
+            .surfaces
+            .first()
+            .is_some_and(|surface| [surface.width(), surface.height()] != [width, height])
+        {
+            self.surfaces.clear();
+        }
+        self.surfaces
+            .resize_with(paints.len(), || Pixmap::new(width, height));
+        self.timings = Timings::default();
+        if paints.len() >= self.threads && self.threads > 1 {
+            self.draw_at_once(document, &paints, frame);
+        } else {
+            for (paint, surface) in paints.iter().zip(&mut self.surfaces) {
+                self.timings +=
+                    self.main
+                        .draw_ops(document, frame, None, &[(paint, None)], surface);
+            }
+        }
+        let started = std::time::Instant::now();
+        let surfaces: Vec<Option<&Pixmap>> =
+            self.surfaces[..paints.len()].iter().map(Some).collect();
+        let background = premultiplied(document.background.0);
+        let rect = [0, 0, u32::from(width), u32::from(height)];
+        composite::evaluate(
+            plan,
+            Some(background),
+            &surfaces,
+            rect,
+            pixmap,
+            self.threads,
+        );
+        self.timings.composite = started.elapsed();
+    }
+
+    /// Draws each layer on one thread, as many layers at once as there are
+    /// threads.
+    fn draw_at_once(&mut self, document: &Document, paints: &[&PaintLayer], frame: u32) {
+        while self.singles.len() < self.threads {
+            self.singles.push(Raster::new(self.level, 0));
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let slots: Vec<std::sync::Mutex<&mut Pixmap>> = self
+            .surfaces
+            .iter_mut()
+            .map(std::sync::Mutex::new)
+            .collect();
+        let timings = std::thread::scope(|scope| {
+            let workers: Vec<_> = self
+                .singles
+                .iter_mut()
+                .map(|raster| {
+                    let (next, slots) = (&next, &slots);
+                    scope.spawn(move || {
+                        let mut timings = Timings::default();
+                        loop {
+                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(paint) = paints.get(index) else {
+                                return timings;
+                            };
+                            let mut surface = slots[index].lock().expect("one worker per layer");
+                            timings += raster.draw_ops(
+                                document,
+                                frame,
+                                None,
+                                &[(paint, None)],
+                                &mut surface,
+                            );
+                        }
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().expect("layer worker panicked"))
+                .fold(Timings::default(), |mut sum, each| {
+                    sum += each;
+                    sum
+                })
+        });
+        self.timings += timings;
     }
 
     /// Draws `layers` over `background` (transparent without one). A layer
@@ -196,6 +313,36 @@ impl DocumentRenderer {
         layers: &[(&PaintLayer, Option<f32>)],
         pixmap: &mut Pixmap,
     ) {
+        self.timings = self
+            .main
+            .draw_ops(document, frame, background, layers, pixmap);
+    }
+}
+
+impl Raster {
+    fn new(level: vello_cpu::Level, threads: u16) -> Self {
+        Self {
+            context: RenderContext::new_with(
+                1,
+                1,
+                RenderSettings {
+                    level,
+                    num_threads: threads,
+                },
+            ),
+            resources: Resources::new(),
+            threads: usize::from(threads.max(1)),
+        }
+    }
+
+    fn draw_ops(
+        &mut self,
+        document: &Document,
+        frame: u32,
+        background: Option<Rgba8>,
+        layers: &[(&PaintLayer, Option<f32>)],
+        pixmap: &mut Pixmap,
+    ) -> Timings {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let mut steps = Vec::new();
@@ -243,11 +390,12 @@ impl DocumentRenderer {
         let encoded = started.elapsed();
         self.context
             .render_with(pixmap, &mut self.resources, RasterizerSettings::default());
-        self.timings = Timings {
+        Timings {
             outlines: outlined,
             encode: encoded - outlined,
             rasterize: started.elapsed() - encoded,
-        };
+            composite: std::time::Duration::ZERO,
+        }
     }
 
     /// The outline of each `Step::Draw`, in order, made on the worker
@@ -346,7 +494,7 @@ fn collect<'a>(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use ugu_core::document::LayerId;
+    use ugu_core::document::{Layer, LayerId};
     use ugu_core::ops::{Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
 
@@ -616,5 +764,126 @@ mod tests {
         paint_layer(&mut document).ops.clear();
         paint_layer(&mut document).blend = Blend::Multiply;
         assert_eq!(check(&document), Err(Unsupported::Blend));
+    }
+
+    fn tree_layer(id: u32, ops: Vec<Op>, update: impl FnOnce(&mut PaintLayer)) -> Layer {
+        let mut paint = PaintLayer {
+            ops,
+            opacity: 1.0,
+            blend: Blend::Normal,
+            clip_to_below: false,
+            wobble: Some(Wobble::classic(0.0)),
+            initial_size: [96, 48],
+        };
+        update(&mut paint);
+        Layer {
+            id: LayerId(id),
+            name: String::new(),
+            visible: true,
+            reference: false,
+            kind: LayerKind::Paint(paint),
+        }
+    }
+
+    fn tree_group(id: u32, blend: Blend, children: Vec<Layer>) -> Layer {
+        Layer {
+            id: LayerId(id),
+            name: String::new(),
+            visible: true,
+            reference: false,
+            kind: LayerKind::Group(ugu_core::document::Group {
+                opacity: 1.0,
+                blend,
+                clip_to_below: false,
+                children,
+            }),
+        }
+    }
+
+    fn painting(stroke: StrokeId) -> Vec<Op> {
+        vec![Op::Paint { stroke, clip: None }]
+    }
+
+    #[test]
+    fn a_clipped_layer_shows_only_where_its_base_is() {
+        let mut document = document();
+        let base = line(&mut document, 8.0, 48.0, 24.0, RED, true);
+        let over = line(&mut document, 8.0, 88.0, 24.0, BLUE, true);
+        document.layers = vec![
+            tree_layer(1, painting(base), |_| {}),
+            tree_layer(2, painting(over), |paint| paint.clip_to_below = true),
+        ];
+        let result = render(&document, 0, 0);
+        assert_eq!(at(&result, 24, 24), BLUE);
+        assert_eq!(at(&result, 72, 24), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_group_keeps_its_blend_modes_inside() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let green = line(&mut document, 8.0, 88.0, 24.0, [30, 220, 30, 255], true);
+        let group = |blend| {
+            tree_group(
+                10,
+                blend,
+                vec![tree_layer(2, painting(green), |paint| {
+                    paint.blend = Blend::Multiply
+                })],
+            )
+        };
+        document.layers = vec![tree_layer(1, painting(red), |_| {}), group(Blend::Normal)];
+        // Multiplied with the empty group surface, the green stays green.
+        assert_eq!(at(&render(&document, 0, 0), 48, 24), [30, 220, 30, 255]);
+        document.layers[1] = group(Blend::Multiply);
+        let multiplied = at(&render(&document, 0, 0), 48, 24);
+        assert!(multiplied[0] < 40 && multiplied[1] < 40, "{multiplied:?}");
+    }
+
+    #[test]
+    fn many_layers_draw_the_same_on_any_thread_count() {
+        let mut document = document();
+        let mut layers = Vec::new();
+        for index in 0..10u32 {
+            let y = 6.0 + index as f32 * 4.0;
+            let stroke = line(
+                &mut document,
+                4.0,
+                92.0,
+                y,
+                [20 * index as u8, 90, 200, 220],
+                true,
+            );
+            let eraser = line(&mut document, 40.0, 50.0, y, [0, 0, 0, 255], true);
+            let blend = [
+                Blend::Normal,
+                Blend::Multiply,
+                Blend::Screen,
+                Blend::Overlay,
+            ][index as usize % 4];
+            let ops = vec![
+                Op::Paint { stroke, clip: None },
+                Op::Erase {
+                    stroke: eraser,
+                    clip: None,
+                },
+            ];
+            layers.push(tree_layer(index + 1, ops, |paint| {
+                paint.blend = blend;
+                paint.opacity = 0.7;
+                paint.clip_to_below = index % 3 == 2;
+                paint.wobble = None;
+            }));
+        }
+        let grouped = layers.split_off(6);
+        layers.push(tree_group(20, Blend::Screen, grouped));
+        document.layers = layers;
+        let single = render(&document, 3, 0);
+        for threads in [1, 4, 8, 16] {
+            assert!(
+                render(&document, 3, threads).data_as_u8_slice() == single.data_as_u8_slice(),
+                "{threads} threads differ"
+            );
+        }
     }
 }

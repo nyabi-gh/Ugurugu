@@ -8,6 +8,7 @@
 //! frame's result from one that acts on a frozen raster. The real renderer
 //! must agree with these results; it is not this code.
 
+use crate::document::{Group, Layer, LayerId, LayerKind};
 use crate::ops::*;
 use std::collections::HashMap;
 
@@ -225,6 +226,80 @@ impl World {
         }
         document
     }
+
+    /// A layer tree over `background`, walked the way 2.2.13 composites it:
+    /// each group on its own surface, each unclipped shown layer becoming
+    /// the base that the clipped layers after it are cut to.
+    fn tree(&self, layers: &[Layer], frame: u32, background: [f32; 4]) -> Surface {
+        let size = self.size_of(layers);
+        let mut result = Surface::new(size);
+        result.pixels.fill(background);
+        self.children(layers, frame, &mut result);
+        result
+    }
+
+    fn size_of(&self, layers: &[Layer]) -> [u32; 2] {
+        match &layers.first().expect("a layer").kind {
+            LayerKind::Paint(paint) => paint.final_size(),
+            LayerKind::Group(group) => self.size_of(&group.children),
+        }
+    }
+
+    fn children(&self, layers: &[Layer], frame: u32, result: &mut Surface) {
+        let mut base: Option<(Surface, f32)> = None;
+        for layer in layers {
+            let (blend, opacity, clipped) = match &layer.kind {
+                LayerKind::Paint(paint) => (paint.blend, paint.opacity, paint.clip_to_below),
+                LayerKind::Group(group) => (group.blend, group.opacity, group.clip_to_below),
+            };
+            if !layer.visible || opacity <= 0.0 {
+                if !clipped {
+                    base = None;
+                }
+                continue;
+            }
+            let mut image = match &layer.kind {
+                LayerKind::Paint(paint) => self.layer(paint, frame),
+                LayerKind::Group(group) => {
+                    let mut surface = Surface::new(result.size);
+                    self.children(&group.children, frame, &mut surface);
+                    surface
+                }
+            };
+            if clipped {
+                let Some((base, base_opacity)) = &base else {
+                    continue;
+                };
+                for (pixel, below) in image.pixels.iter_mut().zip(&base.pixels) {
+                    *pixel = pixel.map(|c| c * below[3] * base_opacity);
+                }
+            }
+            for (target, source) in result.pixels.iter_mut().zip(&image.pixels) {
+                *target = blend_over(blend, source.map(|c| c * opacity), *target);
+            }
+            if !clipped {
+                base = Some((image, opacity));
+            }
+        }
+    }
+}
+
+/// Premultiplied `source` over `backdrop` with a separable W3C blend mode.
+fn blend_over(mode: Blend, source: [f32; 4], backdrop: [f32; 4]) -> [f32; 4] {
+    let (sa, ba) = (source[3], backdrop[3]);
+    let mixed = |s: f32, b: f32| match mode {
+        Blend::Normal => s * ba,
+        Blend::Multiply => s * b,
+        Blend::Screen => s * ba + b * sa - s * b,
+        Blend::Overlay if 2.0 * b <= ba => 2.0 * s * b,
+        Blend::Overlay => sa * ba - 2.0 * (ba - b) * (sa - s),
+    };
+    let mut out = [0.0; 4];
+    for c in 0..3 {
+        out[c] = source[c] * (1.0 - ba) + backdrop[c] * (1.0 - sa) + mixed(source[c], backdrop[c]);
+    }
+    out[3] = sa + ba - sa * ba;
+    out
 }
 
 fn layer(ops: Vec<Op>, size: [u32; 2]) -> PaintLayer {
@@ -423,5 +498,156 @@ fn a_crop_moves_the_canvas_and_a_resample_scales_what_came_before() {
     assert_eq!(
         [result.at(0, 0), result.at(1, 1), result.at(2, 2)],
         [BLUE, RED, GREEN]
+    );
+}
+
+/// A shown paint layer in a tree, drawing `strokes`.
+fn shown(id: u32, strokes: &[StrokeId], size: [u32; 2]) -> Layer {
+    Layer {
+        id: LayerId(id),
+        name: String::new(),
+        visible: true,
+        reference: false,
+        kind: LayerKind::Paint(layer(strokes.iter().copied().map(paint).collect(), size)),
+    }
+}
+
+fn with(mut layer: Layer, update: impl FnOnce(&mut PaintLayer)) -> Layer {
+    if let LayerKind::Paint(paint) = &mut layer.kind {
+        update(paint);
+    }
+    layer
+}
+
+fn clipped(layer: Layer) -> Layer {
+    with(layer, |paint| paint.clip_to_below = true)
+}
+
+#[test]
+fn a_clipped_layer_shows_only_where_its_base_is() {
+    let mut world = World::default();
+    let base = world.stroke([0, 0, 2, 1], RED);
+    let over = world.stroke([0, 0, 4, 1], BLUE);
+    let layers = [
+        with(shown(1, &[base], [4, 1]), |paint| paint.opacity = 0.5),
+        clipped(shown(2, &[over], [4, 1])),
+    ];
+    let result = world.tree(&layers, 0, CLEAR);
+    // Blue is cut to the base's alpha times its opacity, then goes over it.
+    assert_eq!(result.at(0, 0), [0.25, 0.0, 0.5, 0.75]);
+    assert_eq!(result.at(2, 0), CLEAR);
+}
+
+#[test]
+fn clipped_layers_in_a_row_share_one_base() {
+    let mut world = World::default();
+    let base = world.stroke([0, 0, 2, 1], RED);
+    let first = world.stroke([0, 0, 1, 1], BLUE);
+    let second = world.stroke([1, 0, 3, 1], GREEN);
+    let mut hidden = clipped(shown(3, &[first], [3, 1]));
+    hidden.visible = false;
+    let layers = [
+        shown(1, &[base], [3, 1]),
+        clipped(shown(2, &[first], [3, 1])),
+        hidden,
+        clipped(shown(4, &[second], [3, 1])),
+    ];
+    let result = world.tree(&layers, 0, CLEAR);
+    // The second is cut to the red base, not to the blue layer below it.
+    assert_eq!(
+        [result.at(0, 0), result.at(1, 0), result.at(2, 0)],
+        [BLUE, GREEN, CLEAR]
+    );
+}
+
+#[test]
+fn a_hidden_or_empty_base_hides_what_is_clipped_to_it() {
+    let mut world = World::default();
+    let under = world.stroke([0, 0, 2, 1], GREEN);
+    let base = world.stroke([0, 0, 2, 1], RED);
+    let over = world.stroke([0, 0, 2, 1], BLUE);
+    let mut hidden = shown(2, &[base], [2, 1]);
+    hidden.visible = false;
+    let bases = [
+        hidden,
+        with(shown(2, &[base], [2, 1]), |paint| paint.opacity = 0.0),
+        shown(2, &[], [2, 1]),
+    ];
+    for base in bases {
+        let layers = [
+            shown(1, &[under], [2, 1]),
+            base,
+            clipped(shown(3, &[over], [2, 1])),
+        ];
+        let result = world.tree(&layers, 0, CLEAR);
+        assert_eq!([result.at(0, 0), result.at(1, 0)], [GREEN, GREEN]);
+    }
+}
+
+#[test]
+fn a_group_is_drawn_on_its_own_surface() {
+    let mut world = World::default();
+    let red = world.stroke([0, 0, 2, 1], RED);
+    let blue = world.stroke([1, 0, 2, 1], BLUE);
+    let green = world.stroke([0, 0, 2, 1], GREEN);
+    let group = |blend| Layer {
+        id: LayerId(10),
+        name: String::new(),
+        visible: true,
+        reference: false,
+        kind: LayerKind::Group(Group {
+            opacity: 1.0,
+            blend,
+            clip_to_below: false,
+            children: vec![
+                shown(2, &[blue], [2, 1]),
+                with(shown(3, &[green], [2, 1]), |paint| {
+                    paint.blend = Blend::Multiply
+                }),
+            ],
+        }),
+    };
+    let black = [0.0, 0.0, 0.0, 1.0];
+    // The Multiply layer multiplies only the blue inside the group; where the
+    // group is empty, green goes over the red below unchanged.
+    let normal = world.tree(&[shown(1, &[red], [2, 1]), group(Blend::Normal)], 0, CLEAR);
+    assert_eq!([normal.at(0, 0), normal.at(1, 0)], [GREEN, black]);
+    // The group's own blend mode is what reaches the layers below.
+    let multiplied = world.tree(
+        &[shown(1, &[red], [2, 1]), group(Blend::Multiply)],
+        0,
+        CLEAR,
+    );
+    assert_eq!([multiplied.at(0, 0), multiplied.at(1, 0)], [black, black]);
+}
+
+#[test]
+fn blend_modes_follow_the_w3c_formulas() {
+    let backdrop = [0.6, 0.2, 0.4, 1.0];
+    let source = [0.5, 0.5, 0.25, 1.0];
+    let near = |a: [f32; 4], b: [f32; 4]| {
+        assert!(
+            a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6),
+            "{a:?} != {b:?}"
+        );
+    };
+    near(blend_over(Blend::Normal, source, backdrop), source);
+    near(
+        blend_over(Blend::Multiply, source, backdrop),
+        [0.3, 0.1, 0.1, 1.0],
+    );
+    near(
+        blend_over(Blend::Screen, source, backdrop),
+        [0.8, 0.6, 0.55, 1.0],
+    );
+    // Overlay multiplies where the backdrop is dark and screens where light.
+    near(
+        blend_over(Blend::Overlay, source, backdrop),
+        [0.6, 0.2, 0.2, 1.0],
+    );
+    // Half-covered source: the uncovered half shows the backdrop.
+    near(
+        blend_over(Blend::Multiply, source.map(|c| c * 0.5), backdrop),
+        [0.45, 0.15, 0.25, 1.0],
     );
 }

@@ -10,10 +10,9 @@
 //! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file.
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame, by
-//!   stage, on separate layer surfaces and as editing splits, with the peak
-//!   working set. Other brushes are drawn as pens, and what M4 adds is left
-//!   out; groups and blend modes not drawn yet are lifted out and made
-//!   Normal, which keeps the amount of work close and says so.
+//!   stage, and editing splits, with the peak working set. Other brushes are
+//!   drawn as pens and what M4 adds is left out, which keeps the amount of
+//!   work close and says so.
 //! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
 //!   out what M4 adds, keeping groups, blend modes and clipping, so the app
 //!   can open a fixture to measure with.
@@ -213,34 +212,6 @@ fn each_paint(layers: &mut [Layer], visit: &mut impl FnMut(&mut PaintLayer)) {
     }
 }
 
-/// Lifts layers out of groups and makes them Normal and unclipped, which the
-/// renderer can draw until it draws groups (M3-3). The work stays close.
-fn flatten(document: &mut Document) -> Result<(), String> {
-    use ugu_render::document::check;
-
-    let Err(unsupported) = check(document) else {
-        return Ok(());
-    };
-    fn lift(layers: Vec<Layer>, into: &mut Vec<Layer>) {
-        for mut layer in layers {
-            match layer.kind {
-                LayerKind::Group(group) => lift(group.children, into),
-                LayerKind::Paint(ref mut paint) => {
-                    paint.blend = Blend::Normal;
-                    paint.clip_to_below = false;
-                    into.push(layer);
-                }
-            }
-        }
-    }
-    let mut flat = Vec::new();
-    lift(std::mem::take(&mut document.layers), &mut flat);
-    document.layers = flat;
-    check(document).map_err(|left| format!("cannot draw {unsupported} or {left} yet"))?;
-    println!("drawn approximately: groups lifted out, blend modes and clipping made Normal");
-    Ok(())
-}
-
 fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
     let mut document = open(from)?;
     to_pens(&mut document);
@@ -279,12 +250,11 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
 
     let mut document = open(path)?;
     to_pens(&mut document);
-    flatten(&mut document)?;
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
     let mut times = Vec::new();
-    let mut stages = [Vec::new(), Vec::new(), Vec::new()];
+    let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     let mut first = 0.0;
     for round in 0..3 {
         for frame in 0..i64::from(document.frames) {
@@ -296,22 +266,24 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
             } else if round > 0 {
                 times.push(ms);
                 let timings = renderer.timings();
-                for (stage, time) in
-                    stages
-                        .iter_mut()
-                        .zip([timings.outlines, timings.encode, timings.rasterize])
-                {
+                for (stage, time) in stages.iter_mut().zip([
+                    timings.outlines,
+                    timings.encode,
+                    timings.rasterize,
+                    timings.composite,
+                ]) {
                     stage.push(time.as_secs_f64() * 1000.0);
                 }
             }
         }
     }
-    let [outlines, encode, rasterize] = &mut stages;
+    // Summed over threads when layers are drawn at once.
+    let [outlines, encode, rasterize, composite] = &mut stages;
     println!("  outlines  {}", percentiles(outlines));
     println!("  encode    {}", percentiles(encode));
     println!("  rasterize {}", percentiles(rasterize));
+    println!("  composite {}", percentiles(composite));
     let whole_peak = peak_working_set_mib();
-    separate_layers(&document, threads, &pixmap)?;
     splits(&document, threads);
     println!(
         "peak working set: {whole_peak:.0} MiB after whole frames, {:.0} MiB in the end",
@@ -369,94 +341,6 @@ fn render(path: &Path, threads: u16) -> Result<(), String> {
     println!(
         "{threads} threads: first frame {first:.1} ms, then per frame {}",
         percentiles(&mut times)
-    );
-    Ok(())
-}
-
-/// Draws each layer on its own surface and puts the surfaces together, the
-/// shape M3 gives every render, and compares it with one Vello scene.
-fn separate_layers(
-    document: &Document,
-    threads: u16,
-    whole: &vello_cpu::Pixmap,
-) -> Result<(), String> {
-    use ugu_render::compose::src_over;
-    use ugu_render::document::{DocumentRenderer, Purpose};
-
-    let [width, height] = document.canvas.map(|edge| edge as u16);
-    let mut renderer = DocumentRenderer::new(threads);
-    let mut surfaces: Vec<(vello_cpu::Pixmap, u8)> = Vec::new();
-    let mut single = document.clone();
-    single.background = Rgba8([0, 0, 0, 0]);
-    let mut layers_ms = Vec::new();
-    let mut composite_ms = Vec::new();
-    let mut out = vello_cpu::Pixmap::new(width, height);
-    for frame in 0..i64::from(document.frames) {
-        let started = Instant::now();
-        surfaces.clear();
-        for layer in document.layers.iter().filter(|layer| layer.visible) {
-            let LayerKind::Paint(paint) = &layer.kind else {
-                return Err("groups are drawn from M3-3 on".to_owned());
-            };
-            let mut own = layer.clone();
-            if let LayerKind::Paint(paint) = &mut own.kind {
-                paint.opacity = 1.0;
-            }
-            single.layers = vec![own];
-            let mut surface = vello_cpu::Pixmap::new(width, height);
-            renderer.render(&single, frame, Purpose::Display, &mut surface);
-            let opacity = (paint.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-            surfaces.push((surface, opacity));
-        }
-        layers_ms.push(started.elapsed().as_secs_f64() * 1000.0);
-
-        let started = Instant::now();
-        let Rgba8(background) = document.background;
-        let background = ugu_render::compose::premultiplied(background);
-        let rows = usize::from(height).div_ceil(usize::from(threads.max(1)));
-        let row_bytes = usize::from(width) * 4;
-        std::thread::scope(|scope| {
-            for (band, target) in out
-                .data_as_u8_slice_mut()
-                .chunks_mut(rows * row_bytes)
-                .enumerate()
-            {
-                let surfaces = &surfaces;
-                scope.spawn(move || {
-                    let start = band * rows * row_bytes;
-                    for (at, pixel) in target.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                        pixel.copy_from_slice(&background);
-                        let from = start + at * 4;
-                        for (surface, opacity) in surfaces {
-                            let source: [u8; 4] = surface.data_as_u8_slice()[from..from + 4]
-                                .try_into()
-                                .expect("4 bytes");
-                            if source[3] == 0 {
-                                continue;
-                            }
-                            let faded = source.map(|value| {
-                                ((u16::from(value) * u16::from(*opacity) + 255) >> 8) as u8
-                            });
-                            src_over(pixel, &faded);
-                        }
-                    }
-                });
-            }
-        });
-        composite_ms.push(started.elapsed().as_secs_f64() * 1000.0);
-    }
-    let most = out
-        .data_as_u8_slice()
-        .iter()
-        .zip(whole.data_as_u8_slice())
-        .map(|(a, b)| a.abs_diff(*b))
-        .max()
-        .unwrap_or(0);
-    println!(
-        "separate surfaces ({} layers): render {}, composite {}; last frame differs from one scene by up to {most}",
-        surfaces.len(),
-        percentiles(&mut layers_ms),
-        percentiles(&mut composite_ms)
     );
     Ok(())
 }
