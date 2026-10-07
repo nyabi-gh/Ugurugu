@@ -628,7 +628,7 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 다음 작업:
 
-1. M4 편집 기능 완성(브랜치 `rust/m4`): 분해·결정·진행은 [rust/m4-plan.md](rust/m4-plan.md)(M4-1~M4-15). M4-1은 M3에서 넘긴 ②p 30fps 처리 능력(레이어 사이 일 분배)이다. 사용자 결정(2026-10-07): 회전도 대기 편집으로 통일, 복사는 클립보드만·붙여넣기는 새 레이어와 대기 편집, 다른 앱 이미지 붙여넣기 지원, 브러시 필드는 `.ugu2` 스키마 1을 넓힘(M2·M3 빌드 파일은 열지 않음), 모션 Smooth·Stepped·끊어진 선은 C++ 수식을 골든 값으로 대조, 문자는 Parley·Fontique·Skrifa로 시작해 DirectWrite와 비교.
+1. M4 편집 기능 완성(브랜치 `rust/m4`): 분해·결정·진행은 [rust/m4-plan.md](rust/m4-plan.md)(M4-1~M4-15). 2026-10-08 기준 M4-1~M4-4 완료: 윤곽 경로 재사용(②p 8스레드 39 → 35.5ms, 앱 첫 바퀴 1.24s, 33ms는 M4-6에서 다시), GUI 재측정과 진행 중 획 버퍼 재사용(⑤p pen-up CPU 6.3 → 4.0ms), 선택 clip·채우기(2.2.13 화소 규칙)·선택 지우기, 선택 변형·이미지 배치(원본 ⑤ 1스레드 540ms, 2.2.13 951~967ms). 사용자 결정: mimalloc은 측정 뒤 넣지 않음, RAM 1GiB는 참고값이고 예산은 M4-5b에서 PC 메모리에 맞춤. 다음은 M4-5(자르기·리사이즈 렌더). 사용자 결정(2026-10-07): 회전도 대기 편집으로 통일, 복사는 클립보드만·붙여넣기는 새 레이어와 대기 편집, 다른 앱 이미지 붙여넣기 지원, 브러시 필드는 `.ugu2` 스키마 1을 넓힘(M2·M3 빌드 파일은 열지 않음), 모션 Smooth·Stepped·끊어진 선은 C++ 수식을 골든 값으로 대조, 문자는 Parley·Fontique·Skrifa로 시작해 DirectWrite와 비교.
 2. 펜 장치를 확보하면 펜 경로 실증(M6 전 필수 gate).
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
