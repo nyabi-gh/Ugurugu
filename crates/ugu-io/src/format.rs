@@ -17,13 +17,11 @@ pub const STROKE_MAGIC: [u8; 4] = *b"UGS\0";
 pub const MASK_MAGIC: [u8; 4] = *b"UGM\0";
 pub const BINARY_VERSION: u16 = 1;
 
-pub fn stroke_entry(id: u32) -> String {
-    format!("strokes/{id}.bin")
-}
-
-pub fn mask_entry(id: u32) -> String {
-    format!("masks/{id}.bin")
-}
+/// The points of every stroke, one entry: per-entry overhead dominated
+/// saving 20,000 strokes when each had its own.
+pub const STROKES: &str = "strokes.bin";
+/// The bits of every mask.
+pub const MASKS: &str = "masks.bin";
 
 pub fn image_entry(id: &str) -> String {
     format!("images/{id}.png")

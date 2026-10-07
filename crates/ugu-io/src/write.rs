@@ -12,7 +12,7 @@ use std::io::{Seek, Write};
 
 use ugu_core::document::{Document, Layer, LayerKind};
 use ugu_core::ops::{AssetId, Blend, MaskId, Op, Sampling, StrokeId, Wobble};
-use ugu_core::store::BrushEngine;
+use ugu_core::store::{BrushEngine, Mask, Point};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
@@ -115,15 +115,16 @@ pub fn write<W: Write + Seek>(
     zip.write_all(&serde_json::to_vec(&manifest).map_err(WriteError::Json)?)?;
     zip.start_file(DOCUMENT, deflated)?;
     zip.write_all(&serde_json::to_vec(&dto).map_err(WriteError::Json)?)?;
-    for id in &used.strokes {
-        zip.start_file(stroke_entry(id.0), deflated)?;
-        zip.write_all(&stroke_bytes(&document.store.strokes[id].points))?;
-    }
-    for id in &used.masks {
-        let mask = &document.store.masks[id];
-        zip.start_file(mask_entry(id.0), deflated)?;
-        zip.write_all(&mask_bytes(mask.bounds, &mask.bits))?;
-    }
+    zip.start_file(STROKES, deflated)?;
+    zip.write_all(&strokes_bytes(
+        used.strokes
+            .iter()
+            .map(|id| (*id, &*document.store.strokes[id].points)),
+    ))?;
+    zip.start_file(MASKS, deflated)?;
+    zip.write_all(&masks_bytes(
+        used.masks.iter().map(|id| (*id, &document.store.masks[id])),
+    ))?;
     for id in &used.assets {
         zip.start_file(image_entry(&hex(&id.0)), stored)?;
         zip.write_all(&document.store.assets[id].png)?;
@@ -131,33 +132,45 @@ pub fn write<W: Write + Seek>(
     Ok(zip.finish()?)
 }
 
-/// `"UGS\0"`, version, flags, point count, then x, y, pressure per point,
-/// all little-endian.
-pub fn stroke_bytes(points: &[ugu_core::store::Point]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(12 + points.len() * 12);
-    bytes.extend_from_slice(&STROKE_MAGIC);
+fn header(magic: [u8; 4], count: usize) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&magic);
     bytes.extend_from_slice(&BINARY_VERSION.to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
-    bytes.extend_from_slice(&(points.len() as u32).to_le_bytes());
-    for point in points {
-        bytes.extend_from_slice(&point.x.to_le_bytes());
-        bytes.extend_from_slice(&point.y.to_le_bytes());
-        bytes.extend_from_slice(&point.pressure.to_le_bytes());
+    bytes.extend_from_slice(&(count as u32).to_le_bytes());
+    bytes
+}
+
+/// `"UGS\0"`, version, flags, stroke count, then for each stroke in id
+/// order its id, point count and x, y, pressure per point; little-endian.
+pub fn strokes_bytes<'a>(
+    strokes: impl ExactSizeIterator<Item = (StrokeId, &'a [Point])>,
+) -> Vec<u8> {
+    let mut bytes = header(STROKE_MAGIC, strokes.len());
+    for (id, points) in strokes {
+        bytes.extend_from_slice(&id.0.to_le_bytes());
+        bytes.extend_from_slice(&(points.len() as u32).to_le_bytes());
+        for point in points {
+            bytes.extend_from_slice(&point.x.to_le_bytes());
+            bytes.extend_from_slice(&point.y.to_le_bytes());
+            bytes.extend_from_slice(&point.pressure.to_le_bytes());
+        }
     }
     bytes
 }
 
-/// `"UGM\0"`, version, kind (0: one bit per pixel), left, top, width,
-/// height, then the rows.
-pub fn mask_bytes(bounds: [i32; 4], bits: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(24 + bits.len());
-    bytes.extend_from_slice(&MASK_MAGIC);
-    bytes.extend_from_slice(&BINARY_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&0u16.to_le_bytes());
-    for value in bounds {
-        bytes.extend_from_slice(&value.to_le_bytes());
+/// `"UGM\0"`, version, flags, mask count, then for each mask in id order
+/// its id, left, top, width, height and rows of bits (the leftmost pixel in
+/// the highest bit, each row padded to whole bytes); little-endian.
+pub fn masks_bytes<'a>(masks: impl ExactSizeIterator<Item = (MaskId, &'a Mask)>) -> Vec<u8> {
+    let mut bytes = header(MASK_MAGIC, masks.len());
+    for (id, mask) in masks {
+        bytes.extend_from_slice(&id.0.to_le_bytes());
+        for value in mask.bounds {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&mask.bits);
     }
-    bytes.extend_from_slice(bits);
     bytes
 }
 

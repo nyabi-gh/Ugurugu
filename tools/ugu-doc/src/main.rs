@@ -110,17 +110,22 @@ fn count(layers: &[Layer], total: &mut usize, operations: &mut usize) {
     }
 }
 
-/// Times opening (read and validate) and saving (write, flush, check and
-/// replace) the file, alternating, then prints p50 and max of each.
+/// Times opening (read and validate), encoding into memory, and saving
+/// (write, flush, check and replace), in turn, then prints p50 and max.
 fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     let copy = path.with_extension("bench.ugu2");
     std::fs::copy(path, &copy).map_err(|error| error.to_string())?;
     let mut opens = Vec::new();
+    let mut encodes = Vec::new();
     let mut saves = Vec::new();
     for _ in 0..rounds {
         let started = Instant::now();
         let document = open(&copy)?;
         opens.push(started.elapsed().as_secs_f64() * 1000.0);
+        let started = Instant::now();
+        ugu_io::write::write(&document, [0; 16], std::io::Cursor::new(Vec::new()))
+            .map_err(|error| error.to_string())?;
+        encodes.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
         save(&document, &copy)?;
         saves.push(started.elapsed().as_secs_f64() * 1000.0);
@@ -136,6 +141,7 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
         );
     };
     summary("open", &mut opens);
+    summary("encode in memory", &mut encodes);
     summary("save", &mut saves);
     Ok(())
 }

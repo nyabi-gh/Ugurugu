@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::format::*;
 use crate::read::{ReadError, read};
-use crate::write::{stroke_bytes, write};
+use crate::write::{strokes_bytes, write};
 
 const ID: [u8; 16] = [0xab; 16];
 
@@ -167,18 +167,7 @@ fn entries_come_in_a_fixed_order_with_only_used_data() {
         .map(|index| archive.by_index(index).unwrap().name().to_owned())
         .collect();
     let image = image_entry(&hex(&Sha256::digest([0x89, b'P', b'N', b'G', 1, 2, 3])));
-    assert_eq!(
-        names,
-        [
-            MANIFEST,
-            DOCUMENT,
-            "strokes/0.bin",
-            "strokes/1.bin",
-            "strokes/3.bin",
-            "masks/0.bin",
-            image.as_str()
-        ]
-    );
+    assert_eq!(names, [MANIFEST, DOCUMENT, STROKES, MASKS, image.as_str()]);
     assert_eq!(
         archive.by_name(&image).unwrap().compression(),
         zip::CompressionMethod::Stored
@@ -222,12 +211,14 @@ fn stroke_points_have_an_explicit_little_endian_layout() {
         pressure: 0.5,
     }];
     assert_eq!(
-        stroke_bytes(&points),
+        strokes_bytes([(StrokeId(7), &points[..])].into_iter()),
         [
             b'U', b'G', b'S', 0, // magic
             1, 0, // version
             0, 0, // flags
-            1, 0, 0, 0, // count
+            1, 0, 0, 0, // stroke count
+            7, 0, 0, 0, // id
+            1, 0, 0, 0, // point count
             0x00, 0x00, 0x80, 0x3f, // 1.0
             0x00, 0x00, 0x00, 0xc0, // -2.0
             0x00, 0x00, 0x00, 0x3f, // 0.5
@@ -326,11 +317,20 @@ fn files_from_a_newer_version_are_refused_as_newer() {
 #[test]
 fn missing_extra_and_unknown_entries_are_refused() {
     let mut all = entries(&written(&sample()));
-    all.retain(|(name, _)| name != "strokes/1.bin");
+    all.retain(|(name, _)| name != STROKES);
     assert!(matches!(
         read_bytes(archive(&all)),
         Err(ReadError::Corrupt(_))
     ));
+    let mut all = entries(&written(&sample()));
+    all.push(("strokes/9.bin".to_owned(), Vec::new()));
+    assert!(matches!(
+        read_bytes(archive(&all)),
+        Err(ReadError::Corrupt(_))
+    ));
+    // A stroke whose points are stored under another id.
+    let renamed = with_json(DOCUMENT, r#""id":3,"color""#, r#""id":4,"color""#);
+    assert!(matches!(read_bytes(renamed), Err(ReadError::Corrupt(_))));
     let mut all = entries(&written(&sample()));
     all.push(("strokes/9.bin".to_owned(), Vec::new()));
     assert!(matches!(
@@ -347,17 +347,19 @@ fn missing_extra_and_unknown_entries_are_refused() {
 
 #[test]
 fn broken_binary_entries_are_refused() {
-    // One point too few for the count.
-    let short = with_entry("strokes/0.bin", |data| data.truncate(data.len() - 12));
+    // One point too few for its count.
+    let short = with_entry(STROKES, |data| data.truncate(data.len() - 12));
     assert!(matches!(read_bytes(short), Err(ReadError::Corrupt(_))));
     // A point that is not a number.
-    let nan = with_entry("strokes/0.bin", |data| {
-        data[12..16].copy_from_slice(&f32::NAN.to_le_bytes())
+    // The first point of the first stroke, after the header, id and count.
+    let nan = with_entry(STROKES, |data| {
+        data[20..24].copy_from_slice(&f32::NAN.to_le_bytes())
     });
     assert!(matches!(read_bytes(nan), Err(ReadError::Invalid(_))));
     // Mask bounds that do not match the bits that follow.
-    let mask = with_entry("masks/0.bin", |data| {
-        data[20..24].copy_from_slice(&5i32.to_le_bytes())
+    // The width of the first mask, after the header, id, left and top.
+    let mask = with_entry(MASKS, |data| {
+        data[24..28].copy_from_slice(&5i32.to_le_bytes())
     });
     assert!(matches!(read_bytes(mask), Err(ReadError::Corrupt(_))));
     // An image whose bytes no longer match its name.

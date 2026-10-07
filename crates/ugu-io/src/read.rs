@@ -8,7 +8,7 @@
 //! Declared sizes are never used for allocation. The document is fully
 //! validated before it is returned.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, Seek};
 use std::sync::Arc;
 
@@ -27,6 +27,10 @@ pub mod limits {
     pub const ENTRIES: usize = 2 + 3 * ugu_core::document::limits::OPERATIONS;
     pub const MANIFEST_BYTES: u64 = 64 * 1024;
     pub const DOCUMENT_BYTES: u64 = 64 * 1024 * 1024;
+    /// Header, then id and count per stroke, then 12 bytes per point.
+    pub const STROKES_BYTES: u64 = 12
+        + 8 * ugu_core::document::limits::OPERATIONS as u64
+        + 12 * ugu_core::store::limits::POINTS as u64;
     /// All entries together, inflated.
     pub const TOTAL_BYTES: u64 = DOCUMENT_BYTES + ugu_core::store::limits::BYTES + 1024 * 1024;
 }
@@ -226,11 +230,16 @@ impl<R: Read + Seek> Entries<R> {
 
     fn store(&mut self, dto: &DocumentDto) -> Result<Store, ReadError> {
         let mut store = Store::default();
-        let point_bytes = 12 + 12 * store::limits::POINTS_PER_STROKE as u64;
+        let mut points = parse_strokes(&self.read(STROKES, limits::STROKES_BYTES)?)
+            .ok_or_else(|| corrupt("stroke points"))?;
+        if points.len() != dto.strokes.len() {
+            return Err(corrupt("stroke points do not match the strokes"));
+        }
         for stroke in &dto.strokes {
             let id = StrokeId(stroke.id);
-            let points = parse_points(&self.read(&stroke_entry(stroke.id), point_bytes)?)
-                .ok_or_else(|| corrupt(format!("stroke {}", stroke.id)))?;
+            let points = points
+                .remove(&stroke.id)
+                .ok_or_else(|| corrupt(format!("stroke {} has no points", stroke.id)))?;
             let seed = parse_hex::<8>(&stroke.seed)
                 .ok_or_else(|| corrupt(format!("stroke {} seed", stroke.id)))?;
             let value = Stroke {
@@ -253,9 +262,15 @@ impl<R: Read + Seek> Entries<R> {
                 return Err(corrupt(format!("stroke {} appears twice", stroke.id)));
             }
         }
+        let mut masks = parse_masks(&self.read(MASKS, store::limits::BYTES)?)
+            .ok_or_else(|| corrupt("mask bits"))?;
+        if masks.len() != dto.masks.len() {
+            return Err(corrupt("mask bits do not match the masks"));
+        }
         for mask in &dto.masks {
-            let bytes = self.read(&mask_entry(mask.id), store::limits::BYTES)?;
-            let value = parse_mask(&bytes).ok_or_else(|| corrupt(format!("mask {}", mask.id)))?;
+            let value = masks
+                .remove(&mask.id)
+                .ok_or_else(|| corrupt(format!("mask {} has no bits", mask.id)))?;
             if store.masks.insert(MaskId(mask.id), value).is_some() {
                 return Err(corrupt(format!("mask {} appears twice", mask.id)));
             }
@@ -282,42 +297,49 @@ impl<R: Read + Seek> Entries<R> {
 }
 
 fn known_name(name: &str) -> bool {
-    let number = |text: &str| {
-        !text.is_empty() && text.len() <= 10 && text.bytes().all(|byte| byte.is_ascii_digit())
-    };
-    name == MANIFEST
-        || name == DOCUMENT
-        || name
-            .strip_prefix("strokes/")
-            .and_then(|rest| rest.strip_suffix(".bin"))
-            .is_some_and(number)
-        || name
-            .strip_prefix("masks/")
-            .and_then(|rest| rest.strip_suffix(".bin"))
-            .is_some_and(number)
+    [MANIFEST, DOCUMENT, STROKES, MASKS].contains(&name)
         || name
             .strip_prefix("images/")
             .and_then(|rest| rest.strip_suffix(".png"))
             .is_some_and(|hex| parse_hex::<32>(hex).is_some())
 }
 
-fn header(bytes: &[u8], magic: [u8; 4]) -> Option<&[u8]> {
+/// Reads the shared header and returns the record count and the rest.
+fn header(bytes: &[u8], magic: [u8; 4]) -> Option<(usize, &[u8])> {
     let rest = bytes.strip_prefix(&magic)?;
-    let version = u16::from_le_bytes(rest.get(0..2)?.try_into().ok()?);
-    let flags = u16::from_le_bytes(rest.get(2..4)?.try_into().ok()?);
-    (version == BINARY_VERSION && flags == 0).then(|| &rest[4..])
+    let [v0, v1, f0, f1, c0, c1, c2, c3] = *rest.first_chunk::<8>()?;
+    let version = u16::from_le_bytes([v0, v1]);
+    let flags = u16::from_le_bytes([f0, f1]);
+    let count = u32::from_le_bytes([c0, c1, c2, c3]) as usize;
+    (version == BINARY_VERSION && flags == 0).then(|| (count, &rest[8..]))
 }
 
-fn parse_points(bytes: &[u8]) -> Option<Vec<Point>> {
-    let rest = header(bytes, STROKE_MAGIC)?;
-    let count = u32::from_le_bytes(rest.get(0..4)?.try_into().ok()?) as usize;
-    let data = &rest[4..];
-    if data.len() != count.checked_mul(12)? {
-        return None;
-    }
-    let (points, _) = data.as_chunks::<12>();
-    Some(
-        points
+/// Takes a little-endian u32 or i32 off the front.
+fn take_u32(bytes: &mut &[u8]) -> Option<u32> {
+    let (value, rest) = bytes.split_first_chunk::<4>()?;
+    *bytes = rest;
+    Some(u32::from_le_bytes(*value))
+}
+
+/// Records in strictly increasing id order, covering the entry exactly.
+fn parse_strokes(bytes: &[u8]) -> Option<BTreeMap<u32, Vec<Point>>> {
+    let (count, mut rest) = header(bytes, STROKE_MAGIC)?;
+    let mut strokes = BTreeMap::new();
+    for _ in 0..count {
+        let id = take_u32(&mut rest)?;
+        let points = take_u32(&mut rest)? as usize;
+        let length = points.checked_mul(12)?;
+        if length > rest.len()
+            || strokes
+                .last_key_value()
+                .is_some_and(|(last, _)| *last >= id)
+        {
+            return None;
+        }
+        let (data, after) = rest.split_at(length);
+        rest = after;
+        let (chunks, _) = data.as_chunks::<12>();
+        let parsed = chunks
             .iter()
             .map(|point| {
                 let [x, y, pressure] = [0, 4, 8].map(|at| {
@@ -325,21 +347,42 @@ fn parse_points(bytes: &[u8]) -> Option<Vec<Point>> {
                 });
                 Point { x, y, pressure }
             })
-            .collect(),
-    )
+            .collect();
+        strokes.insert(id, parsed);
+    }
+    rest.is_empty().then_some(strokes)
 }
 
-fn parse_mask(bytes: &[u8]) -> Option<Mask> {
-    let rest = header(bytes, MASK_MAGIC)?;
-    let mut bounds = [0i32; 4];
-    for (index, value) in bounds.iter_mut().enumerate() {
-        *value = i32::from_le_bytes(rest.get(index * 4..index * 4 + 4)?.try_into().ok()?);
+/// Records in strictly increasing id order, covering the entry exactly.
+fn parse_masks(bytes: &[u8]) -> Option<BTreeMap<u32, Mask>> {
+    let (count, mut rest) = header(bytes, MASK_MAGIC)?;
+    let mut masks = BTreeMap::new();
+    for _ in 0..count {
+        let id = take_u32(&mut rest)?;
+        let mut bounds = [0i32; 4];
+        for value in &mut bounds {
+            *value = take_u32(&mut rest)? as i32;
+        }
+        let [_, _, width, height] = bounds;
+        if width <= 0 || height <= 0 || masks.last_key_value().is_some_and(|(last, _)| *last >= id)
+        {
+            return None;
+        }
+        let length = (height as usize).checked_mul(Mask::row_bytes(width))?;
+        if length > rest.len() {
+            return None;
+        }
+        let (bits, after) = rest.split_at(length);
+        rest = after;
+        masks.insert(
+            id,
+            Mask {
+                bounds,
+                bits: Arc::from(bits),
+            },
+        );
     }
-    let bits: Arc<[u8]> = rest.get(16..)?.into();
-    let mask = Mask { bounds, bits };
-    // The bounds must account for every byte that follows.
-    store::check_mask(MaskId(0), &mask).ok()?;
-    Some(mask)
+    rest.is_empty().then_some(masks)
 }
 
 fn wobble(dto: &WobbleDto) -> Wobble {
