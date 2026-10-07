@@ -501,7 +501,7 @@ impl Canvas {
                 return;
             }
             Err(StrokeRefused::NoLayer) => {
-                self.notice = Some("There is no layer to draw on".to_owned());
+                self.notice = Some("Select a paint layer to draw on".to_owned());
                 return;
             }
         }

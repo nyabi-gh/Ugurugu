@@ -4,11 +4,14 @@
 //! The panels around the canvas: tools on top, layers on the right, status
 //! at the bottom, and the keyboard shortcuts the canvas takes.
 
+use std::collections::HashSet;
+
+use ugu_core::command;
 use ugu_core::document::limits;
-use ugu_core::document::{LayerId, LayerKind};
+use ugu_core::document::{Document, DocumentError, Layer, LayerId, LayerKind};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{Rgba8, Wobble};
+use ugu_core::ops::{Blend, MergeRefusal, Rgba8, Wobble};
 use ugu_session::{Session, Tool};
 
 use crate::canvas::Canvas;
@@ -22,12 +25,10 @@ pub struct Panels {
     opacity: Option<(LayerId, f32)>,
     /// Frames, frames per second and wobble amount being edited.
     animation: Option<(u32, f32, f32)>,
-}
-
-fn report(result: Result<Outcome, EditError>) {
-    if let Err(error) = result {
-        tracing::warn!(%error, "edit refused");
-    }
+    /// Groups whose children the layer list leaves out.
+    collapsed: HashSet<LayerId>,
+    /// Why the last edit from the panels was refused.
+    refusal: Option<String>,
 }
 
 /// Handles the canvas's shortcuts in this frame's input. Text fields keep
@@ -180,72 +181,158 @@ pub fn tools(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files) {
 }
 
 impl Panels {
+    /// Reports a refused edit under the layer buttons until the next edit.
+    fn report(&mut self, result: Result<Outcome, EditError>) {
+        match result {
+            Ok(Outcome::Committed(_)) => self.refusal = None,
+            Ok(Outcome::NoChange) => {}
+            Err(error) => {
+                tracing::warn!(%error, "edit refused");
+                self.refusal = Some(refusal_text(&error));
+            }
+        }
+    }
+
     pub fn layers(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas) {
         ui.heading("Layers");
+        let current = canvas.session().current_layer();
+        let document = canvas.session().document();
+        let is_group = matches!(
+            document.layer(current).map(|layer| &layer.kind),
+            Some(LayerKind::Group(_))
+        );
+        let (count, index) = document
+            .position(current)
+            .and_then(|(parent, index)| Some((command::siblings(document, parent)?.len(), index)))
+            .unwrap_or((0, 0));
+        let merge_refused = merge_refusal(document, current);
+        let removable = canvas.session().can_remove_layer();
         ui.horizontal_wrapped(|ui| {
             if ui.button("Add layer").clicked() {
-                report(canvas.edit(Session::add_layer));
+                self.report(canvas.edit(Session::add_layer));
                 tracing::info!("layer added");
             }
-            let count = canvas.session().document().layers.len();
             if ui
-                .add_enabled(count > 1, egui::Button::new("Delete"))
+                .button("Add group")
+                .on_hover_text("Add a group containing the selected layer")
                 .clicked()
             {
-                report(canvas.edit(Session::remove_layer));
+                self.report(canvas.edit(Session::add_group));
             }
-            if ui.button("Up").clicked() {
-                report(canvas.edit(|session| session.move_layer(1)));
+            if ui
+                .add_enabled(is_group, egui::Button::new("Ungroup"))
+                .clicked()
+            {
+                self.report(canvas.edit(Session::ungroup));
             }
-            if ui.button("Down").clicked() {
-                report(canvas.edit(|session| session.move_layer(-1)));
+            if ui
+                .add_enabled(removable, egui::Button::new("Delete"))
+                .clicked()
+            {
+                self.report(canvas.edit(Session::remove_layer));
             }
-            if ui.button("Merge down").clicked() {
-                report(canvas.edit(Session::merge_down));
+            if ui
+                .add_enabled(index + 1 < count, egui::Button::new("Up"))
+                .clicked()
+            {
+                self.report(canvas.edit(|session| session.move_layer(1)));
+            }
+            if ui
+                .add_enabled(index > 0, egui::Button::new("Down"))
+                .clicked()
+            {
+                self.report(canvas.edit(|session| session.move_layer(-1)));
+            }
+            let merge = ui
+                .add_enabled(merge_refused.is_none(), egui::Button::new("Merge down"))
+                .on_disabled_hover_text(merge_refused.unwrap_or_default());
+            if merge.clicked() {
+                self.report(canvas.edit(Session::merge_down));
             }
         });
+        if let Some(refusal) = &self.refusal {
+            ui.colored_label(ui.visuals().warn_fg_color, refusal);
+        }
         ui.separator();
 
-        let current = canvas.session().current_layer();
-        // Top first, as the layers stack on the canvas.
-        let rows: Vec<(LayerId, String, bool)> = canvas
-            .session()
-            .document()
-            .layers
-            .iter()
-            .rev()
-            .map(|layer| (layer.id, layer.name.clone(), layer.visible))
-            .collect();
+        let mut rows = Vec::new();
+        flatten(
+            &canvas.session().document().layers,
+            0,
+            &self.collapsed,
+            &mut rows,
+        );
         egui::ScrollArea::vertical()
             .max_height(ui.available_height() * 0.6)
             .show(ui, |ui| {
-                for (id, name, visible) in rows {
-                    ui.horizontal(|ui| {
-                        let mut shown = visible;
-                        let toggle = ui.checkbox(&mut shown, "");
-                        toggle.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Checkbox,
-                                true,
-                                shown,
-                                format!("Show {name}"),
-                            )
-                        });
-                        if shown != visible {
-                            report(canvas.edit(|session| {
-                                session.update_layer(id, "Show or hide layer", |layer| {
-                                    layer.visible = shown;
-                                })
-                            }));
-                        }
-                        if ui.selectable_label(id == current, &name).clicked() {
-                            canvas.edit(|session| session.select_layer(id));
-                        }
-                    });
+                for row in rows {
+                    self.row(ui, canvas, &row, row.id == current);
                 }
             });
         ui.separator();
         self.properties(ui, canvas, current);
+    }
+
+    fn row(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, row: &Row, selected: bool) {
+        ui.horizontal(|ui| {
+            ui.add_space(row.depth as f32 * INDENT);
+            let fold = ui.spacing().interact_size.y;
+            match row.collapsed {
+                Some(collapsed) => {
+                    let (text, action) = if collapsed {
+                        ("⏵", "Expand")
+                    } else {
+                        ("⏷", "Collapse")
+                    };
+                    let button = ui.add_sized([fold, fold], egui::Button::new(text).frame(false));
+                    button.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("{action} {}", row.name),
+                        )
+                    });
+                    if button.clicked() && !self.collapsed.remove(&row.id) {
+                        self.collapsed.insert(row.id);
+                    }
+                }
+                None => {
+                    ui.add_space(fold + ui.spacing().item_spacing.x);
+                }
+            }
+            let mut shown = row.visible;
+            let toggle = ui.checkbox(&mut shown, "");
+            toggle.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    true,
+                    shown,
+                    format!("Show {}", row.name),
+                )
+            });
+            if shown != row.visible {
+                let id = row.id;
+                self.report(canvas.edit(|session| {
+                    session.update_layer(id, "Show or hide layer", |layer| {
+                        layer.visible = shown;
+                    })
+                }));
+            }
+            if row.clipped {
+                ui.weak("clip").on_hover_text("Clipped to the layer below");
+            }
+            let mut text = egui::RichText::new(&row.name);
+            if row.collapsed.is_some() {
+                text = text.strong();
+            }
+            if ui.selectable_label(selected, text).clicked() {
+                let id = row.id;
+                canvas.edit(|session| session.select_layer(id));
+            }
+            if row.blend != Blend::Normal {
+                ui.weak(blend_name(row.blend));
+            }
+        });
     }
 
     pub fn timeline(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas) {
@@ -307,7 +394,7 @@ impl Panels {
             }
             if ended {
                 self.animation = None;
-                report(canvas.edit(|session| {
+                self.report(canvas.edit(|session| {
                     session.set_animation(new_frames, new_fps, Wobble::classic(new_wobble))
                 }));
             }
@@ -315,13 +402,20 @@ impl Panels {
     }
 
     fn properties(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, current: LayerId) {
-        let Some(layer) = canvas.session().document().layer(current) else {
+        let document = canvas.session().document();
+        let Some(layer) = document.layer(current) else {
             return;
         };
-        let LayerKind::Paint(paint) = &layer.kind else {
-            return;
-        };
-        let (name, opacity) = (layer.name.clone(), paint.opacity);
+        let (name, opacity, blend, clipped) = (
+            layer.name.clone(),
+            layer.opacity(),
+            layer.blend(),
+            layer.clip_to_below(),
+        );
+        let is_paint = matches!(layer.kind, LayerKind::Paint(_));
+        let parent = document.position(current).and_then(|(parent, _)| parent);
+        let mut groups = Vec::new();
+        groups_outside(&document.layers, current, &mut groups);
 
         if self.name.as_ref().is_none_or(|(id, _)| *id != current) {
             self.name = Some((current, name.clone()));
@@ -341,7 +435,7 @@ impl Panels {
                 .take(ugu_core::document::limits::LAYER_NAME_CHARS)
                 .collect();
             if !edited.is_empty() && edited != name {
-                report(canvas.edit(|session| {
+                self.report(canvas.edit(|session| {
                     session.update_layer(current, "Rename layer", |layer| layer.name = edited)
                 }));
                 tracing::info!("layer renamed");
@@ -366,14 +460,192 @@ impl Panels {
             && percent / 100.0 != opacity
         {
             let value = percent / 100.0;
-            report(canvas.edit(|session| {
-                session.update_layer(current, "Layer opacity", |layer| {
-                    if let LayerKind::Paint(paint) = &mut layer.kind {
-                        paint.opacity = value;
-                    }
+            self.report(canvas.edit(|session| {
+                session.update_layer(current, "Layer opacity", |layer| match &mut layer.kind {
+                    LayerKind::Paint(paint) => paint.opacity = value,
+                    LayerKind::Group(group) => group.opacity = value,
                 })
             }));
             self.opacity = None;
         }
+
+        let label = ui.label("Blend mode");
+        let mut chosen = blend;
+        egui::ComboBox::from_id_salt("layer-blend")
+            .selected_text(blend_name(blend))
+            .show_ui(ui, |ui| {
+                for each in BLENDS {
+                    ui.selectable_value(&mut chosen, each, blend_name(each));
+                }
+            })
+            .response
+            .labelled_by(label.id);
+        if chosen != blend {
+            self.report(canvas.edit(|session| {
+                session.update_layer(current, "Change layer blend mode", |layer| match &mut layer
+                    .kind
+                {
+                    LayerKind::Paint(paint) => paint.blend = chosen,
+                    LayerKind::Group(group) => group.blend = chosen,
+                })
+            }));
+        }
+
+        // As in 2.2.13, only paint layers are clipped from the panel; a
+        // group clipped in a file still shows it in the list.
+        if is_paint {
+            let mut clip = clipped;
+            if ui.checkbox(&mut clip, "Clip to layer below").changed() {
+                self.report(canvas.edit(|session| {
+                    session.update_layer(current, "Change layer clipping", |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            paint.clip_to_below = clip;
+                        }
+                    })
+                }));
+            }
+        }
+
+        let label = ui.label("Group");
+        let mut target = parent;
+        let shown = parent
+            .and_then(|id| groups.iter().find(|(group, _)| *group == id))
+            .map_or(NO_GROUP, |(_, name)| name.as_str());
+        egui::ComboBox::from_id_salt("layer-group")
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target, None, NO_GROUP);
+                for (id, name) in &groups {
+                    ui.selectable_value(&mut target, Some(*id), name);
+                }
+            })
+            .response
+            .labelled_by(label.id);
+        if target != parent {
+            self.report(canvas.edit(|session| session.move_to_group(target)));
+        }
+    }
+}
+
+const INDENT: f32 = 14.0;
+const NO_GROUP: &str = "No group";
+const BLENDS: [Blend; 4] = [
+    Blend::Normal,
+    Blend::Multiply,
+    Blend::Screen,
+    Blend::Overlay,
+];
+
+/// A line of the layer list.
+struct Row {
+    id: LayerId,
+    name: String,
+    visible: bool,
+    depth: usize,
+    /// For a group, whether its children are hidden from the list.
+    collapsed: Option<bool>,
+    clipped: bool,
+    blend: Blend,
+}
+
+/// The layers top first, as they stack on the canvas, each group followed by
+/// its children unless it is collapsed.
+fn flatten(layers: &[Layer], depth: usize, collapsed: &HashSet<LayerId>, rows: &mut Vec<Row>) {
+    for layer in layers.iter().rev() {
+        let folded = collapsed.contains(&layer.id);
+        rows.push(Row {
+            id: layer.id,
+            name: layer.name.clone(),
+            visible: layer.visible,
+            depth,
+            collapsed: matches!(layer.kind, LayerKind::Group(_)).then_some(folded),
+            clipped: layer.clip_to_below(),
+            blend: layer.blend(),
+        });
+        if let LayerKind::Group(group) = &layer.kind
+            && !folded
+        {
+            flatten(&group.children, depth + 1, collapsed, rows);
+        }
+    }
+}
+
+/// The groups `id` can be moved into: all but itself and what it holds,
+/// top first.
+fn groups_outside(layers: &[Layer], id: LayerId, groups: &mut Vec<(LayerId, String)>) {
+    for layer in layers.iter().rev() {
+        if layer.id == id {
+            continue;
+        }
+        if let LayerKind::Group(group) = &layer.kind {
+            groups.push((layer.id, layer.name.clone()));
+            groups_outside(&group.children, id, groups);
+        }
+    }
+}
+
+fn blend_name(blend: Blend) -> &'static str {
+    match blend {
+        Blend::Normal => "Normal",
+        Blend::Multiply => "Multiply",
+        Blend::Screen => "Screen",
+        Blend::Overlay => "Overlay",
+    }
+}
+
+/// Why the current layer cannot be merged down, or `None` when it can.
+fn merge_refusal(document: &Document, id: LayerId) -> Option<&'static str> {
+    let error = command::merge_down(document, id).err()?;
+    Some(match error {
+        EditError::Merge(MergeRefusal::Blend) => "Both layers must use the Normal blend mode",
+        EditError::Merge(MergeRefusal::Clipping) => {
+            "Neither layer may be clipped, and no clipping layer may rest on this one"
+        }
+        EditError::Merge(MergeRefusal::CanvasEpoch) => {
+            "The layers use incompatible canvas histories"
+        }
+        EditError::Merge(MergeRefusal::CanvasChange) => {
+            "This layer resizes the canvas, so merging would change the picture"
+        }
+        _ => {
+            let paint = |id: LayerId| {
+                matches!(
+                    document.layer(id).map(|layer| &layer.kind),
+                    Some(LayerKind::Paint(_))
+                )
+            };
+            let below = document.position(id).and_then(|(parent, index)| {
+                Some(
+                    command::siblings(document, parent)?
+                        .get(index.checked_sub(1)?)?
+                        .id,
+                )
+            });
+            if !paint(id) {
+                "Select a paint layer to merge"
+            } else if !below.is_some_and(paint) {
+                "No paint layer is directly below"
+            } else {
+                "Both layers must be shown or hidden alike, and be reference layers alike"
+            }
+        }
+    })
+}
+
+fn refusal_text(error: &EditError) -> String {
+    match error {
+        EditError::Document(DocumentError::TooDeep(_)) => format!(
+            "Groups can be nested at most {} deep",
+            ugu_core::document::limits::LAYER_DEPTH
+        ),
+        EditError::Document(DocumentError::TooManyLayers(_)) => format!(
+            "A document holds at most {} layers and groups",
+            ugu_core::document::limits::LAYERS
+        ),
+        EditError::Document(DocumentError::TooManyOperations(_)) => format!(
+            "A document holds at most {} operations",
+            ugu_core::document::limits::OPERATIONS
+        ),
+        other => format!("The edit was refused: {other}"),
     }
 }

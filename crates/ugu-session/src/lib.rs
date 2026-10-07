@@ -345,12 +345,17 @@ impl Session {
         Ok(outcome)
     }
 
-    /// Removes the current layer unless it is the last one.
+    pub fn can_remove_layer(&self) -> bool {
+        paint_outside(&self.document().layers, self.layer)
+    }
+
+    /// Removes the current layer, with what it holds, unless no paint layer
+    /// would be left.
     pub fn remove_layer(&mut self) -> Result<Outcome, EditError> {
-        if self.document().layers.len() <= 1 {
+        let id = self.layer;
+        if !self.can_remove_layer() {
             return Ok(Outcome::NoChange);
         }
-        let id = self.layer;
         let outcome = self
             .history
             .edit("Delete layer", |_| command::remove_layer(id))?;
@@ -367,11 +372,51 @@ impl Session {
         let Some(to) = index.checked_add_signed(by) else {
             return Ok(Outcome::NoChange);
         };
-        if to >= self.document().layers.len() {
+        let count = command::siblings(self.document(), parent).map_or(0, <[Layer]>::len);
+        if to >= count {
             return Ok(Outcome::NoChange);
         }
         let changes = command::move_layer(self.document(), id, parent, to)?;
         self.history.edit("Move layer", |_| changes)
+    }
+
+    /// Puts the current layer in a new group in its place.
+    pub fn add_group(&mut self) -> Result<Outcome, EditError> {
+        let name = (1..)
+            .map(|number| format!("Group {number}"))
+            .find(|name| !named(&self.document().layers, name))
+            .expect("fewer layers than numbers");
+        let (_, changes) = command::wrap_in_group(self.document(), self.layer, name)?;
+        self.history.edit("Add layer group", |_| changes)
+    }
+
+    /// Puts the children of the current group in its place; the top one
+    /// becomes current.
+    pub fn ungroup(&mut self) -> Result<Outcome, EditError> {
+        let group = self.layer;
+        let Some(LayerKind::Group(content)) = self.document().layer(group).map(|layer| &layer.kind)
+        else {
+            return Ok(Outcome::NoChange);
+        };
+        let top = content.children.last().map(|child| child.id);
+        let changes = command::ungroup(self.document(), group)?;
+        let outcome = self.history.edit("Ungroup", |_| changes)?;
+        if let (Outcome::Committed(_), Some(top)) = (&outcome, top) {
+            self.layer = top;
+        }
+        self.keep_layer_valid();
+        Ok(outcome)
+    }
+
+    /// Moves the current layer to the top of `group`, or out to the top level
+    /// with `None`.
+    pub fn move_to_group(&mut self, group: Option<LayerId>) -> Result<Outcome, EditError> {
+        let changes = command::move_to_group(self.document(), self.layer, group)?;
+        let label = match group {
+            Some(_) => "Move layer into group",
+            None => "Move layer out of groups",
+        };
+        self.history.edit(label, |_| changes)
     }
 
     /// Changes one of a layer's own properties.
@@ -397,11 +442,10 @@ impl Session {
     /// Merges the current layer into the one below, which becomes current.
     pub fn merge_down(&mut self) -> Result<Outcome, EditError> {
         let above = self.layer;
-        let below = self
-            .document()
-            .position(above)
-            .and_then(|(_, index)| index.checked_sub(1))
-            .map(|index| self.document().layers[index].id);
+        let below = self.document().position(above).and_then(|(parent, index)| {
+            let siblings = command::siblings(self.document(), parent)?;
+            Some(siblings.get(index.checked_sub(1)?)?.id)
+        });
         let changes = command::merge_down(self.document(), above)?;
         let outcome = self.history.edit("Merge down", |_| changes)?;
         if let Some(below) = below {
@@ -443,6 +487,25 @@ fn shown(layers: &[Layer], id: LayerId) -> bool {
         layer.visible
             && (layer.id == id
                 || matches!(&layer.kind, LayerKind::Group(group) if shown(&group.children, id)))
+    })
+}
+
+/// Whether a paint layer is left when `id` and what it holds are taken out.
+fn paint_outside(layers: &[Layer], id: LayerId) -> bool {
+    layers.iter().any(|layer| {
+        layer.id != id
+            && match &layer.kind {
+                LayerKind::Paint(_) => true,
+                LayerKind::Group(group) => paint_outside(&group.children, id),
+            }
+    })
+}
+
+/// Whether a layer is called `name`, inside groups too.
+fn named(layers: &[Layer], name: &str) -> bool {
+    layers.iter().any(|layer| {
+        layer.name == name
+            || matches!(&layer.kind, LayerKind::Group(group) if named(&group.children, name))
     })
 }
 

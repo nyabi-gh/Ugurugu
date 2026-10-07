@@ -66,6 +66,29 @@ pub struct Group {
     pub children: Vec<Layer>,
 }
 
+impl Layer {
+    pub fn clip_to_below(&self) -> bool {
+        match &self.kind {
+            LayerKind::Paint(paint) => paint.clip_to_below,
+            LayerKind::Group(group) => group.clip_to_below,
+        }
+    }
+
+    pub fn opacity(&self) -> f32 {
+        match &self.kind {
+            LayerKind::Paint(paint) => paint.opacity,
+            LayerKind::Group(group) => group.opacity,
+        }
+    }
+
+    pub fn blend(&self) -> Blend {
+        match &self.kind {
+            LayerKind::Paint(paint) => paint.blend,
+            LayerKind::Group(group) => group.blend,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum DocumentError {
     Canvas([u32; 2]),

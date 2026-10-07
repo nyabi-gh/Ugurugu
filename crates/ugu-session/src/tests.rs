@@ -329,3 +329,113 @@ fn pen_up_cost_on_a_large_document() {
         times[times.len() - 1]
     );
 }
+
+/// Undoes one step and checks it gives `before`, then redoes it.
+fn one_step(session: &mut Session, before: &Document) {
+    let after = session.document().clone();
+    session.undo().unwrap();
+    assert_eq!(session.document(), before);
+    session.redo().unwrap();
+    assert_eq!(session.document(), &after);
+}
+
+#[test]
+fn group_commands_are_one_undo_step_each() {
+    let mut session = session();
+    let bottom = session.current_layer();
+    session.add_layer().unwrap();
+    let middle = session.current_layer();
+    session.add_layer().unwrap();
+    let top = session.current_layer();
+
+    session.select_layer(middle);
+    let before = session.document().clone();
+    session.add_group().unwrap();
+    assert_eq!(session.undo_label(), Some("Add layer group"));
+    one_step(&mut session, &before);
+    let group = session.document().layers[1].id;
+    assert_eq!(session.document().layers[1].name, "Group 1");
+    assert_eq!(session.document().position(middle), Some((Some(group), 0)));
+    assert_eq!(session.current_layer(), middle);
+    // Alone in its group, it has nowhere to move.
+    assert_eq!(session.move_layer(1).unwrap(), Outcome::NoChange);
+
+    session.select_layer(top);
+    let before = session.document().clone();
+    session.move_to_group(Some(group)).unwrap();
+    one_step(&mut session, &before);
+    assert_eq!(session.document().position(top), Some((Some(group), 1)));
+    let before = session.document().clone();
+    session.move_layer(-1).unwrap();
+    one_step(&mut session, &before);
+    assert_eq!(session.document().position(top), Some((Some(group), 0)));
+    let before = session.document().clone();
+    session.move_to_group(None).unwrap();
+    one_step(&mut session, &before);
+    assert_eq!(session.document().position(top), Some((None, 2)));
+
+    session.select_layer(group);
+    assert_eq!(
+        session.begin_stroke(at(10.0, 10.0, 0.0)),
+        Err(StrokeRefused::NoLayer)
+    );
+    let before = session.document().clone();
+    session.ungroup().unwrap();
+    assert_eq!(session.current_layer(), middle);
+    one_step(&mut session, &before);
+    let order: Vec<LayerId> = session
+        .document()
+        .layers
+        .iter()
+        .map(|layer| layer.id)
+        .collect();
+    assert_eq!(order, [bottom, middle, top]);
+    session.undo().unwrap();
+    assert_eq!(
+        session.document().layer(group).map(|layer| layer.id),
+        Some(group)
+    );
+}
+
+#[test]
+fn layers_in_a_group_merge_and_move_among_their_siblings() {
+    let mut session = session();
+    session.add_group().unwrap();
+    let lower = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    session.add_layer().unwrap();
+    let upper = session.current_layer();
+    draw(&mut session, 20.0, 70.0);
+    let (group, index) = session.document().position(upper).unwrap();
+    assert_eq!(index, 1);
+    assert!(group.is_some());
+    assert_eq!(session.move_layer(1).unwrap(), Outcome::NoChange);
+    session.merge_down().unwrap();
+    assert_eq!(session.current_layer(), lower);
+    assert_eq!(session.document().position(lower), Some((group, 0)));
+}
+
+#[test]
+fn the_last_paint_layer_is_not_removed_even_with_its_group() {
+    let mut session = session();
+    let only = session.current_layer();
+    session.add_group().unwrap();
+    let group = session.document().layers[0].id;
+    session.select_layer(group);
+    assert_eq!(session.remove_layer().unwrap(), Outcome::NoChange);
+    session.select_layer(only);
+    assert_eq!(session.remove_layer().unwrap(), Outcome::NoChange);
+    // Added beside the group, not in it.
+    session.select_layer(group);
+    session.add_layer().unwrap();
+    session.select_layer(group);
+    session.remove_layer().unwrap();
+    assert_eq!(session.document().layers.len(), 1);
+    assert!(matches!(
+        session
+            .document()
+            .layer(session.current_layer())
+            .map(|layer| &layer.kind),
+        Some(LayerKind::Paint(_))
+    ));
+}
