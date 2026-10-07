@@ -34,6 +34,8 @@ pub struct LiveStroke {
     settled: usize,
     /// Alpha is the settled pieces' coverage; document size.
     coverage: Pixmap,
+    /// Where `coverage` has been written.
+    written: Option<PixelRect>,
     /// The tail over the settled coverage, and where it lies.
     tail: Option<(PixelRect, Pixmap)>,
     stamp: Stamp,
@@ -41,7 +43,20 @@ pub struct LiveStroke {
 
 impl LiveStroke {
     /// `color` is premultiplied, as the stroke paints or erases with it.
-    pub fn new(size: [u16; 2], pen: Pen, frame: u32, color: [u8; 4], erase: bool) -> Self {
+    /// `spare` is a previous stroke's coverage from `into_spare`, used again
+    /// when it has the document's size: allocating and freeing a document's
+    /// worth of pixels for every stroke costs milliseconds on large canvases.
+    pub fn new(
+        size: [u16; 2],
+        pen: Pen,
+        frame: u32,
+        color: [u8; 4],
+        erase: bool,
+        spare: Option<Pixmap>,
+    ) -> Self {
+        let coverage = spare
+            .filter(|spare| [spare.width(), spare.height()] == size)
+            .unwrap_or_else(|| Pixmap::new(size[0], size[1]));
         Self {
             pen,
             frame,
@@ -50,10 +65,23 @@ impl LiveStroke {
             resampler: Resampler::new(stroke::spacing(pen.width)),
             points: 0,
             settled: 0,
-            coverage: Pixmap::new(size[0], size[1]),
+            coverage,
+            written: None,
             tail: None,
             stamp: Stamp::default(),
         }
+    }
+
+    /// The coverage cleared again, for the next stroke's `new`.
+    pub fn into_spare(mut self) -> Pixmap {
+        if let Some([left, top, right, bottom]) = self.written {
+            let row = usize::from(self.coverage.width()) * 4;
+            let pixels = self.coverage.data_as_u8_slice_mut();
+            for y in top as usize..bottom as usize {
+                pixels[y * row + left as usize * 4..y * row + right as usize * 4].fill(0);
+            }
+        }
+        self.coverage
     }
 
     /// Takes the points after those seen before and returns the pixels whose
@@ -83,6 +111,7 @@ impl LiveStroke {
             if let Some(rect) = clamp(pieces.bounds, self.size()) {
                 let piece = self.draw(rect, &pieces.path);
                 add_coverage(&mut self.coverage, &piece, rect);
+                self.written = union(self.written, Some(rect));
                 dirty = Some(rect);
             }
             self.settled = fixed;
@@ -267,7 +296,7 @@ mod tests {
         for antialias in [true, false] {
             let pen = pen(antialias);
             let points = points();
-            let mut live = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false);
+            let mut live = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
             let mut seen: Option<PixelRect> = None;
             for count in 1..=points.len() {
                 seen = union(seen, live.update(&points[..count]));
@@ -301,11 +330,11 @@ mod tests {
     fn the_tail_is_replaced_not_added_to() {
         let pen = pen(true);
         let points = points();
-        let mut stepwise = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false);
+        let mut stepwise = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
         for count in 1..=points.len() {
             stepwise.update(&points[..count]);
         }
-        let mut at_once = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false);
+        let mut at_once = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
         at_once.update(&points);
         let most = live_coverage(&stepwise)
             .iter()
@@ -318,10 +347,36 @@ mod tests {
     }
 
     #[test]
+    fn a_stroke_on_a_used_coverage_covers_what_it_does_on_a_new_one() {
+        let pen = pen(true);
+        let points = points();
+        let mut first = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
+        for count in 1..=points.len() {
+            first.update(&points[..count]);
+        }
+        let spare = first.into_spare();
+        assert!(spare.data_as_u8_slice().iter().all(|&value| value == 0));
+        let other: Vec<Point> = points
+            .iter()
+            .map(|point| Point {
+                y: 120.0 - point.y,
+                ..*point
+            })
+            .collect();
+        let mut reused = LiveStroke::new([200, 120], pen, 3, [0, 0, 0, 255], false, Some(spare));
+        let mut fresh = LiveStroke::new([200, 120], pen, 3, [0, 0, 0, 255], false, None);
+        for count in 1..=other.len() {
+            reused.update(&other[..count]);
+            fresh.update(&other[..count]);
+        }
+        assert_eq!(live_coverage(&reused), live_coverage(&fresh));
+    }
+
+    #[test]
     fn a_translucent_live_stroke_does_not_darken_where_it_overlaps() {
         let pen = pen(true);
         let color = premultiplied([200, 0, 0, 100]);
-        let mut live = LiveStroke::new([200, 120], pen, 2, color, false);
+        let mut live = LiveStroke::new([200, 120], pen, 2, color, false, None);
         let points = points();
         for count in 1..=points.len() {
             live.update(&points[..count]);

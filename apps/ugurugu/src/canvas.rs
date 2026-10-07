@@ -92,6 +92,8 @@ pub struct Canvas {
     upload: Option<PixelRect>,
     stamp: Stamp,
     interaction: Interaction,
+    /// The last stroke's coverage, cleared, for the next stroke.
+    spare_coverage: Option<Pixmap>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
     area: Option<[i32; 4]>,
     /// Physical pixels per document pixel.
@@ -144,6 +146,7 @@ impl Canvas {
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             stamp: Stamp::default(),
             interaction: Interaction::Idle,
+            spare_coverage: None,
             area: None,
             scale: 1.0,
             offset: [0.0, 0.0],
@@ -173,6 +176,7 @@ impl Canvas {
         self.display = Pixmap::new(width, height);
         self.held = None;
         self.interaction = Interaction::Idle;
+        self.spare_coverage = None;
         self.playback = None;
         self.upload_all();
         self.snapshot = None;
@@ -421,6 +425,7 @@ impl Canvas {
         // them for playback.
         self.split = None;
         self.requested = None;
+        self.spare_coverage = None;
         let shown = self.held.take().unwrap_or_else(|| {
             let display = std::mem::replace(&mut self.display, Pixmap::new(1, 1));
             (Arc::new(display), 1)
@@ -591,7 +596,14 @@ impl Canvas {
         };
         let size = document.canvas.map(|edge| edge as u16);
         let color = premultiplied(stroke_color(&live.template, live.erase));
-        let mut stroke = LiveStroke::new(size, pen, self.key().frame, color, live.erase);
+        let mut stroke = LiveStroke::new(
+            size,
+            pen,
+            self.key().frame,
+            color,
+            live.erase,
+            self.spare_coverage.take(),
+        );
         let rect = stroke.update(&live.points);
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
@@ -624,7 +636,7 @@ impl Canvas {
         let before = self.key();
         let point = self.input_point(sample);
         let outcome = self.session.end_stroke(point);
-        drop(live);
+        self.spare_coverage = Some(live.into_spare());
         match outcome {
             Ok(Outcome::Committed(_)) => {}
             Ok(Outcome::NoChange) => return self.recomposite(rect),
