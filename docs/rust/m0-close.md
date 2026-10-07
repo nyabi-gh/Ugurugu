@@ -75,7 +75,7 @@ M1 종료 조건은 "roundtrip·거부 입력·macro 원자성·save failure 검
 | M1-2 | 데이터 저장소: 획 점(f32 x·y·pressure)·브러시·seed, 1비트 마스크, 자산 바이트를 `Arc`로 공유하고 바이트를 집계 | ugu-core | 복제해도 큰 배열을 복사하지 않는다. 바이트 합계가 맞는다 |
 | M1-3 | 명령과 커밋: 연산 추가, 레이어 추가·삭제·이동·속성, `merge_down`. 검증 후 한 번 커밋하고 `Committed`/`NoChange`/오류를 구분. 단조 증가 `Revision` | ugu-core | 변경 없음은 undo 항목을 만들지 않는다. 잘못된 명령은 문서를 바꾸지 않는다 |
 | M1-4 | undo/redo와 macro: delta history, macro 중간 실패 시 전체 되돌림, 저장 지점 identity로 dirty 판정 | ugu-core | 저장 지점으로 undo하면 dirty가 아니다. macro 실패 전후 문서가 같다. 긴 history의 커밋 비용을 잰다 |
-| M1-5 | `.ugu2` 쓰기: manifest, `document.json`, `strokes/*.bin`, `masks/*.bin`, `images/<sha256>.png` | ugu-io | 같은 문서는 같은 바이트로 저장된다. wire format의 바이트 배치 시험 |
+| M1-5 | `.ugu2` 쓰기: manifest, `document.json`, `strokes.bin`, `masks.bin`, `images/<sha256>.png` | ugu-io | 같은 문서는 같은 바이트로 저장된다. wire format의 바이트 배치 시험 |
 | M1-6 | `.ugu2` 읽기와 거부: 항목 수, 이름 중복, 경로, 압축·해제 크기, 실제 해제량 누계, 좌표 유한성, 연산 수, section 깊이, id 참조, 모르는 schema·required | ugu-io | roundtrip이 같다. 잘라낸 파일, 부풀린 크기, 순환 참조, NaN 좌표 등 거부 시험(proptest 포함) |
 | M1-7 | 안전한 저장: 같은 폴더 임시 파일, 검증, flush, 교체(`ReplaceFileW`, 처음이면 이동). 실패하면 기존 파일과 dirty 상태를 유지 | ugu-io, ugu-win | 실패 주입(디스크 가득, 권한 없음, 공유 위반) 뒤 기존 파일이 그대로다 |
 | M1-8 | 구형 파일 판별: `.ugu`·`.wagle`·`.wobble`·`.wawa`·`.wwpreset`을 알아보고 "지원하지 않는 형식"으로 거절 | ugu-io | 구형 fixture 각각이 같은 오류를 낸다 |
@@ -83,6 +83,8 @@ M1 종료 조건은 "roundtrip·거부 입력·macro 원자성·save failure 검
 | M1-10 | 측정: 새 형식의 파일 크기, 저장·열기 시간을 같은 PC에서 2.2.13 값과 비교 | tools | m0-evidence 5절 표에 나란히 기록한다. 나쁘면 원인과 판단을 남긴다 |
 
 M1에서 하지 않는 것: 화면 UI 연결(M2), 렌더러와 문서의 연결(M2), 자동복구(M5).
+
+**진행 (2026-10-07):** M1-1~M1-10 모두 완료(`rust/m1`). 결과는 m0-evidence 9절.
 
 ## 6. 사용자 확인이 필요한 것
 
