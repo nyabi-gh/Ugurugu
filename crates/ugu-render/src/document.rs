@@ -12,9 +12,9 @@
 use ugu_core::document::{Document, LayerKind};
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{Blend, Op, Wobble};
-use ugu_core::store::{BrushEngine, Store};
+use ugu_core::store::{BrushEngine, Store, Stroke};
 use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::Rect;
+use vello_cpu::kurbo::{BezPath, Rect};
 use vello_cpu::peniko::{BlendMode, Compose, Mix};
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
@@ -110,6 +110,20 @@ pub enum Purpose {
 pub struct DocumentRenderer {
     context: RenderContext,
     resources: Resources,
+    /// Threads that make stroke outlines, which Vello then draws in order.
+    threads: usize,
+}
+
+/// One thing to draw, in document order.
+enum Step<'a> {
+    /// Starts a surface: a layer or an isolated section.
+    Push(f32),
+    Pop,
+    Draw {
+        stroke: &'a Stroke,
+        pen: Pen,
+        erase: bool,
+    },
 }
 
 impl DocumentRenderer {
@@ -125,6 +139,7 @@ impl DocumentRenderer {
                 },
             ),
             resources: Resources::new(),
+            threads: usize::from(threads.max(1)),
         }
     }
 
@@ -140,11 +155,8 @@ impl DocumentRenderer {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
-        self.context.reset_and_resize(width, height);
-        let [r, g, b, a] = document.background.0;
-        self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
-        self.context
-            .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+
+        let mut steps = Vec::new();
         for layer in &document.layers {
             if !layer.visible || (purpose == Purpose::Export && layer.reference) {
                 continue;
@@ -152,11 +164,37 @@ impl DocumentRenderer {
             let LayerKind::Paint(paint) = &layer.kind else {
                 continue;
             };
-            let wobble = paint.wobble.unwrap_or(document.wobble);
-            self.context
-                .push_layer(None, None, Some(paint.opacity), None, None);
-            self.ops(&paint.ops, &document.store, document.wobble, wobble, frame);
-            self.context.pop_layer();
+            steps.push(Step::Push(paint.opacity));
+            collect(
+                &paint.ops,
+                &document.store,
+                document.wobble,
+                paint.wobble.unwrap_or(document.wobble),
+                &mut steps,
+            );
+            steps.push(Step::Pop);
+        }
+        let outlines = self.outlines(&steps, frame);
+
+        self.context.reset_and_resize(width, height);
+        let [r, g, b, a] = document.background.0;
+        self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
+        self.context
+            .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+        let mut outlines = outlines.into_iter();
+        for step in &steps {
+            match step {
+                Step::Push(opacity) => {
+                    self.context
+                        .push_layer(None, None, Some(*opacity), None, None);
+                }
+                Step::Pop => self.context.pop_layer(),
+                Step::Draw { stroke, erase, .. } => {
+                    if let Some(path) = outlines.next().flatten() {
+                        self.draw(stroke, *erase, &path);
+                    }
+                }
+            }
         }
         self.context.flush();
         // Clear first: the layers above draw over it.
@@ -165,60 +203,94 @@ impl DocumentRenderer {
             .render_with(pixmap, &mut self.resources, RasterizerSettings::default());
     }
 
-    fn ops(
-        &mut self,
-        ops: &[Op],
-        store: &Store,
-        document_wobble: Wobble,
-        wobble: Wobble,
-        frame: u32,
-    ) {
-        for op in ops {
-            match op {
-                Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
-                    let Some(stroke) = store.strokes.get(stroke) else {
-                        continue;
-                    };
-                    let pen = Pen {
+    /// The outline of each `Step::Draw`, in order, made on the worker
+    /// threads in contiguous runs.
+    fn outlines(&self, steps: &[Step<'_>], frame: u32) -> Vec<Option<BezPath>> {
+        let draws: Vec<(&Stroke, &Pen)> = steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Draw { stroke, pen, .. } => Some((*stroke, pen)),
+                _ => None,
+            })
+            .collect();
+        let make = |(stroke, pen): &(&Stroke, &Pen)| {
+            let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
+            stroke::outline(&samples, pen, frame)
+        };
+        let run = draws.len().div_ceil(self.threads).max(1);
+        if self.threads == 1 || draws.len() < 2 {
+            return draws.iter().map(make).collect();
+        }
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = draws
+                .chunks(run)
+                .map(|chunk| scope.spawn(move || chunk.iter().map(make).collect::<Vec<_>>()))
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().expect("outline worker panicked"))
+                .collect()
+        })
+    }
+
+    fn draw(&mut self, stroke: &Stroke, erase: bool, path: &BezPath) {
+        let [r, g, b, a] = stroke.color.0;
+        let alpha = (f32::from(a) * stroke.brush.opacity.clamp(0.0, 1.0)).round() as u8;
+        self.context
+            .set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
+        if erase {
+            let mode = BlendMode::new(Mix::Normal, Compose::DestOut);
+            self.context.push_layer(None, Some(mode), None, None, None);
+            self.context
+                .set_paint(AlphaColor::from_rgba8(0, 0, 0, alpha));
+            self.context.fill_path(path);
+            self.context.pop_layer();
+        } else {
+            self.context
+                .set_paint(AlphaColor::from_rgba8(r, g, b, alpha));
+            self.context.fill_path(path);
+        }
+        self.context.set_aliasing_threshold(None);
+    }
+}
+
+fn collect<'a>(
+    ops: &[Op],
+    store: &'a Store,
+    document_wobble: Wobble,
+    wobble: Wobble,
+    steps: &mut Vec<Step<'a>>,
+) {
+    for op in ops {
+        match op {
+            Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
+                let Some(stroke) = store.strokes.get(stroke) else {
+                    continue;
+                };
+                steps.push(Step::Draw {
+                    stroke,
+                    pen: Pen {
                         width: stroke.width,
                         brush: stroke.brush,
                         seed: stroke.seed,
                         wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
-                    };
-                    let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
-                    let Some(path) = stroke::outline(&samples, &pen, frame) else {
-                        continue;
-                    };
-                    let [r, g, b, a] = stroke.color.0;
-                    let alpha = (f32::from(a) * stroke.brush.opacity.clamp(0.0, 1.0)).round() as u8;
-                    self.context
-                        .set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
-                    let erase = matches!(op, Op::Erase { .. });
-                    if erase {
-                        let mode = BlendMode::new(Mix::Normal, Compose::DestOut);
-                        self.context.push_layer(None, Some(mode), None, None, None);
-                        self.context
-                            .set_paint(AlphaColor::from_rgba8(0, 0, 0, alpha));
-                    } else {
-                        self.context
-                            .set_paint(AlphaColor::from_rgba8(r, g, b, alpha));
-                    }
-                    self.context.fill_path(&path);
-                    if erase {
-                        self.context.pop_layer();
-                    }
-                    self.context.set_aliasing_threshold(None);
-                }
-                Op::Isolated(section) => {
-                    let wobble = section.wobble.unwrap_or(document_wobble);
-                    self.context
-                        .push_layer(None, None, Some(section.opacity), None, None);
-                    self.ops(&section.ops, store, document_wobble, wobble, frame);
-                    self.context.pop_layer();
-                }
-                // `check` refuses documents with anything else.
-                _ => {}
+                    },
+                    erase: matches!(op, Op::Erase { .. }),
+                });
             }
+            Op::Isolated(section) => {
+                steps.push(Step::Push(section.opacity));
+                collect(
+                    &section.ops,
+                    store,
+                    document_wobble,
+                    section.wobble.unwrap_or(document_wobble),
+                    steps,
+                );
+                steps.push(Step::Pop);
+            }
+            // `check` refuses documents with anything else.
+            _ => {}
         }
     }
 }
@@ -229,7 +301,7 @@ mod tests {
     use std::sync::Arc;
     use ugu_core::document::LayerId;
     use ugu_core::ops::{PaintLayer, Rgba8, Section, StrokeId, merge_down};
-    use ugu_core::store::{Brush, Point, Stroke};
+    use ugu_core::store::{Brush, Point};
 
     const RED: [u8; 4] = [220, 30, 30, 255];
     const BLUE: [u8; 4] = [30, 30, 220, 255];

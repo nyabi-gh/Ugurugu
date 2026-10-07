@@ -229,25 +229,44 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
     let point = |[x, y]: [f64; 2]| kurbo::Point::new(x, y);
 
     let mut path = BezPath::new();
-    let mut winding = 0.0;
     for (sample, &center) in samples.iter().zip(&points) {
-        let circle = Circle::new(point(center), radius(sample)).to_path(TOLERANCE);
-        winding = circle.area().signum();
-        path.extend(circle);
+        path.extend(Circle::new(point(center), radius(sample)).path_elements(TOLERANCE));
     }
+    let reverse = *BANDS_REVERSED;
     for (pair, centers) in samples.windows(2).zip(points.windows(2)) {
         let radii = [radius(&pair[0]), radius(&pair[1])];
-        if let Some(band) = band(centers[0], centers[1], radii, winding) {
-            path.extend(band);
+        if let Some(mut corners) = band(centers[0], centers[1], radii) {
+            if reverse {
+                corners.reverse();
+            }
+            path.move_to(corners[0]);
+            for &corner in &corners[1..] {
+                path.line_to(corner);
+            }
+            path.close_path();
         }
     }
     Some(path)
 }
 
-/// The quadrilateral between the outer tangents of two circles, wound like
-/// the circles so that the union fills without holes. `None` when one circle
-/// contains the other.
-fn band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2], winding: f64) -> Option<BezPath> {
+/// Whether `band`'s corners run against kurbo's circles. Rotating, moving
+/// and scaling keep a polygon's orientation, so one band decides for all.
+static BANDS_REVERSED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+    let circle = Circle::new((0.0, 0.0), 1.0).to_path(TOLERANCE).area();
+    let corners = band([0.0, 0.0], [4.0, 0.0], [1.0, 2.0]).expect("apart");
+    let mut quad = BezPath::new();
+    quad.move_to(corners[0]);
+    for &corner in &corners[1..] {
+        quad.line_to(corner);
+    }
+    quad.close_path();
+    quad.area().signum() != circle.signum()
+});
+
+/// The corners of the quadrilateral between the outer tangents of two
+/// circles, always in the same orientation. `None` when one circle contains
+/// the other.
+fn band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2]) -> Option<[kurbo::Point; 4]> {
     let length = distance(a, b);
     let k = (ra - rb) / length;
     if !(length > 0.0 && k.abs() < 1.0) {
@@ -262,28 +281,12 @@ fn band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2], winding: f64) -> Option<Be
             center[1] + radius * (k * along[1] + sign * side * across[1]),
         )
     };
-    let mut corners = [
+    Some([
         touch(a, ra, 1.0),
         touch(b, rb, 1.0),
         touch(b, rb, -1.0),
         touch(a, ra, -1.0),
-    ];
-    let mut quad = polygon(&corners);
-    if quad.area().signum() != winding {
-        corners.reverse();
-        quad = polygon(&corners);
-    }
-    Some(quad)
-}
-
-fn polygon(corners: &[kurbo::Point]) -> BezPath {
-    let mut path = BezPath::new();
-    path.move_to(corners[0]);
-    for &corner in &corners[1..] {
-        path.line_to(corner);
-    }
-    path.close_path();
-    path
+    ])
 }
 
 #[cfg(test)]
@@ -480,6 +483,26 @@ mod tests {
         let pixels = rasterize(&outline(&samples, &pen, 0).unwrap(), None, [0, 0, 0, 100]);
         let darkest = pixels.chunks(4).map(|pixel| pixel[3]).max().unwrap();
         assert_eq!(darkest, 100);
+    }
+
+    #[test]
+    fn circles_and_bands_wind_the_same_way() {
+        let points = wave(80, |index| 0.2 + (index % 9) as f32 / 10.0);
+        let pen = pen(0.8, 6.0);
+        let samples = Resampler::whole(&points, spacing(pen.width));
+        let path = outline(&samples, &pen, 4).unwrap();
+        let mut signs = Vec::new();
+        let mut piece = BezPath::new();
+        for element in path.elements() {
+            if matches!(element, kurbo::PathEl::MoveTo(_)) && !piece.elements().is_empty() {
+                signs.push(piece.area().signum());
+                piece = BezPath::new();
+            }
+            piece.push(*element);
+        }
+        signs.push(piece.area().signum());
+        assert!(signs.len() > samples.len());
+        assert!(signs.iter().all(|&sign| sign == signs[0]));
     }
 
     #[test]

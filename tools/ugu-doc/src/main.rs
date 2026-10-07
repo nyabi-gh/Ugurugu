@@ -9,6 +9,9 @@
 //!   from a different random sequence.
 //! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file.
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
+//! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame. Brushes
+//!   and blend modes this build cannot draw yet are drawn as pens and Normal,
+//!   which keeps the amount of work close and says so.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -20,8 +23,8 @@ use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
-const USAGE: &str =
-    "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> | bench <file.ugu2> [rounds]";
+const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> \
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,6 +36,11 @@ fn main() -> ExitCode {
             .parse()
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
+        ["render", file] => render(Path::new(file), 8),
+        ["render", file, threads] => threads
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|threads| render(Path::new(file), threads)),
         _ => Err(USAGE.to_owned()),
     };
     match result {
@@ -143,6 +151,109 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     summary("open", &mut opens);
     summary("encode in memory", &mut encodes);
     summary("save", &mut saves);
+    Ok(())
+}
+
+/// Draws every frame once to warm up, then twice more, and prints the
+/// first frame's time and p50 and max per frame of the later rounds.
+fn render(path: &Path, threads: u16) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose, check};
+
+    let mut document = open(path)?;
+    if let Err(unsupported) = check(&document) {
+        let mut changed = 0;
+        for layer in &mut document.layers {
+            if let LayerKind::Paint(paint) = &mut layer.kind
+                && (paint.blend != Blend::Normal || paint.clip_to_below)
+            {
+                paint.blend = Blend::Normal;
+                paint.clip_to_below = false;
+                changed += 1;
+            }
+        }
+        for stroke in document.store.strokes.values_mut() {
+            if stroke.brush.engine != BrushEngine::Line {
+                stroke.brush.engine = BrushEngine::Line;
+                changed += 1;
+            }
+        }
+        check(&document).map_err(|left| format!("cannot draw {unsupported} or {left} yet"))?;
+        println!("drawn approximately: {changed} brushes or blend modes made pens or Normal");
+    }
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    let mut renderer = DocumentRenderer::new(threads);
+    let mut times = Vec::new();
+    let mut first = 0.0;
+    for round in 0..3 {
+        for frame in 0..i64::from(document.frames) {
+            let started = Instant::now();
+            renderer.render(&document, frame, Purpose::Display, &mut pixmap);
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if round == 0 && frame == 0 {
+                first = ms;
+            } else if round > 0 {
+                times.push(ms);
+            }
+        }
+    }
+    // The part of a frame spent making stroke outlines on one thread.
+    let started = Instant::now();
+    let mut samples_total = 0;
+    let all_samples: Vec<_> = document
+        .store
+        .strokes
+        .values()
+        .map(|stroke| {
+            let samples = ugu_render::stroke::Resampler::whole(
+                &stroke.points,
+                ugu_render::stroke::spacing(stroke.width),
+            );
+            samples_total += samples.len();
+            (stroke, samples)
+        })
+        .collect();
+    let resampled = started.elapsed().as_secs_f64() * 1000.0;
+    let started = Instant::now();
+    for (stroke, samples) in &all_samples {
+        let pen = ugu_render::stroke::Pen {
+            width: stroke.width,
+            brush: stroke.brush,
+            seed: stroke.seed,
+            wobble: f64::from(document.wobble.amount),
+        };
+        std::hint::black_box(ugu_render::stroke::displaced(samples, &pen, 1));
+    }
+    println!(
+        "displacement only: {:.1} ms",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    let started = Instant::now();
+    let mut elements = 0;
+    for (stroke, samples) in &all_samples {
+        let pen = ugu_render::stroke::Pen {
+            width: stroke.width,
+            brush: stroke.brush,
+            seed: stroke.seed,
+            wobble: f64::from(document.wobble.amount),
+        };
+        if let Some(path) = ugu_render::stroke::outline(samples, &pen, 1) {
+            elements += path.elements().len();
+        }
+    }
+    println!(
+        "geometry on 1 thread: resample {resampled:.1} ms ({samples_total} samples), \
+         outlines {:.1} ms ({elements} path elements)",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    times.sort_by(f64::total_cmp);
+    println!(
+        "{threads} threads: first frame {first:.1} ms, then per frame n={} p50={:.1} ms p95={:.1} ms max={:.1} ms",
+        times.len(),
+        times[times.len() / 2],
+        times[times.len() * 95 / 100],
+        times[times.len() - 1]
+    );
     Ok(())
 }
 

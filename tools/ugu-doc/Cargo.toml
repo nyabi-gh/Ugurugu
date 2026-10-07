@@ -11,7 +11,9 @@ png.workspace = true
 sha2.workspace = true
 ugu-core.workspace = true
 ugu-io.workspace = true
+ugu-render.workspace = true
 ugu-win.workspace = true
+vello_cpu.workspace = true
 
 [lints]
 workspace = true
