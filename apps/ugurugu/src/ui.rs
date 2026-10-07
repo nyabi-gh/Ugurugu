@@ -4,9 +4,11 @@
 //! The panels around the canvas: tools on top, layers on the right, status
 //! at the bottom, and the keyboard shortcuts the canvas takes.
 
+use ugu_core::document::limits;
 use ugu_core::document::{LayerId, LayerKind};
 use ugu_core::edit::{EditError, Outcome};
-use ugu_core::ops::Rgba8;
+use ugu_core::motion::frame_in_cycle;
+use ugu_core::ops::{Rgba8, Wobble};
 use ugu_session::{Session, Tool};
 
 use crate::canvas::Canvas;
@@ -17,6 +19,8 @@ use crate::canvas::Canvas;
 pub struct Panels {
     name: Option<(LayerId, String)>,
     opacity: Option<(LayerId, f32)>,
+    /// Frames, frames per second and wobble amount being edited.
+    animation: Option<(u32, f32, f32)>,
 }
 
 fn report(result: Result<Outcome, EditError>) {
@@ -61,6 +65,9 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas) {
     }
     if pressed(command, egui::Key::Num0) {
         canvas.fit();
+    }
+    if pressed(egui::Modifiers::NONE, egui::Key::P) {
+        canvas.toggle_playback();
     }
 }
 
@@ -206,6 +213,72 @@ impl Panels {
             });
         ui.separator();
         self.properties(ui, canvas, current);
+    }
+
+    pub fn timeline(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas) {
+        ui.horizontal_wrapped(|ui| {
+            let playing = canvas.is_playing();
+            if ui.button(if playing { "Stop" } else { "Play" }).clicked() {
+                canvas.toggle_playback();
+            }
+            let document = canvas.session().document();
+            let (frames, fps, wobble) = (
+                document.frames,
+                document.frames_per_second,
+                document.wobble.amount,
+            );
+            let label = ui.label("Frame");
+            let mut frame = frame_in_cycle(canvas.session().frame(), frames) + 1;
+            let slider = ui
+                .add(egui::Slider::new(&mut frame, 1..=frames))
+                .labelled_by(label.id);
+            if slider.changed() {
+                if canvas.is_playing() {
+                    canvas.toggle_playback();
+                }
+                canvas.edit(|session| session.set_frame(i64::from(frame) - 1));
+            }
+            ui.separator();
+
+            let (mut new_frames, mut new_fps, mut new_wobble) =
+                self.animation.unwrap_or((frames, fps, wobble));
+            let mut ended = false;
+            let mut field = |response: egui::Response| {
+                if response.drag_stopped() || (response.changed() && !response.dragged()) {
+                    ended = true;
+                }
+                response.changed()
+            };
+            let label = ui.label("Frames");
+            let response = ui
+                .add(egui::DragValue::new(&mut new_frames).range(limits::FRAMES))
+                .labelled_by(label.id);
+            let mut changed = field(response);
+            let label = ui.label("FPS");
+            let response = ui
+                .add(
+                    egui::DragValue::new(&mut new_fps)
+                        .range(limits::FRAMES_PER_SECOND)
+                        .speed(0.1)
+                        .max_decimals(1),
+                )
+                .labelled_by(label.id);
+            changed |= field(response);
+            let label = ui.label("Wobble");
+            let response = ui
+                .add(egui::Slider::new(&mut new_wobble, limits::WOBBLE_AMOUNT).max_decimals(1))
+                .labelled_by(label.id);
+            changed |= field(response);
+            if changed {
+                self.animation = Some((new_frames, new_fps, new_wobble));
+            }
+            if ended {
+                self.animation = None;
+                report(canvas.edit(|session| {
+                    session.set_animation(new_frames, new_fps, Wobble::classic(new_wobble))
+                }));
+            }
+        });
     }
 
     fn properties(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, current: LayerId) {

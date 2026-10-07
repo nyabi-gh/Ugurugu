@@ -9,7 +9,9 @@
 //! frame again. Anything else that changes the document asks the cache
 //! worker for a new split and keeps showing the old one until it arrives.
 
-use std::time::Instant;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ugu_core::document::{Document, LayerKind};
 use ugu_core::edit::Outcome;
@@ -32,6 +34,23 @@ use crate::input::{CanvasInput, Gesture};
 pub const WORKSPACE: [u8; 4] = [64, 66, 70, 255];
 const ZOOM_STEP: f64 = 1.25;
 const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
+/// Memory for playback frames rendered ahead. Frames beyond it are rendered
+/// when they come up.
+const PLAYBACK_BUDGET: usize = 512 * 1024 * 1024;
+
+struct Playback {
+    started: Instant,
+    /// The frame shown when playback started.
+    first: i64,
+    /// Frames of one revision, by frame within the cycle.
+    frames: HashMap<u32, Arc<Pixmap>>,
+    revision: u64,
+    /// The frame on screen, and whether it is uploaded.
+    shown: Option<(u32, Arc<Pixmap>)>,
+    /// The first frame of the frames asked for, which run as far as the
+    /// budget allows.
+    window: Option<u32>,
+}
 
 enum Interaction {
     Idle,
@@ -63,6 +82,9 @@ pub struct Canvas {
     placed: bool,
     sample_count: usize,
     notice: Option<&'static str>,
+    playback: Option<Playback>,
+    /// The document as last handed to the worker, shared by its jobs.
+    snapshot: Option<(u64, Arc<Document>)>,
 }
 
 fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
@@ -101,6 +123,8 @@ impl Canvas {
             placed: false,
             sample_count: 0,
             notice: None,
+            playback: None,
+            snapshot: None,
         }
     }
 
@@ -178,30 +202,140 @@ impl Canvas {
         }
     }
 
-    /// Asks for a new split when the shown one no longer matches.
+    fn snapshot(&mut self) -> Arc<Document> {
+        let revision = self.session.revision();
+        match &self.snapshot {
+            Some((at, document)) if *at == revision => document.clone(),
+            _ => {
+                let document = Arc::new(self.session.document().clone());
+                self.snapshot = Some((revision, document.clone()));
+                document
+            }
+        }
+    }
+
+    /// Asks for a new split when the shown one no longer matches. Playback
+    /// shows whole frames instead.
     pub fn sync(&mut self) {
+        if self.playback.is_some() {
+            return;
+        }
         let key = self.key();
         if self.split.as_ref().map(|(shown, _)| *shown) != Some(key) && self.requested != Some(key)
         {
-            self.cache.request(key, self.session.document().clone());
+            let document = self.snapshot();
+            self.cache.request(key, document);
             self.requested = Some(key);
         }
     }
 
-    /// Takes a finished split if it is still the one wanted.
+    /// Takes a finished render if it is still wanted.
     pub fn adopt(&mut self, rendered: Rendered) {
-        if rendered.key != self.key() {
+        match rendered {
+            Rendered::Split {
+                key,
+                split,
+                display,
+            } => {
+                if key != self.key() || self.playback.is_some() {
+                    return;
+                }
+                self.requested = None;
+                self.display = display;
+                self.split = Some((key, split));
+                self.upload_all();
+                if let Interaction::Drawing { rect, .. } = &self.interaction {
+                    let rect = *rect;
+                    self.recomposite(rect);
+                }
+            }
+            Rendered::Frame {
+                revision,
+                frame,
+                pixels,
+            } => {
+                if let Some(playback) = self.playback.as_mut()
+                    && playback.revision == revision
+                {
+                    playback.frames.insert(frame, pixels);
+                }
+            }
+        }
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.playback.is_some()
+    }
+
+    /// Plays from the current frame, or stops on the frame shown.
+    pub fn toggle_playback(&mut self) {
+        if self.playback.take().is_some() {
+            self.upload_all();
             return;
         }
-        self.requested = None;
-        self.display = rendered.display;
-        self.split = Some((rendered.key, rendered.split));
-        let [width, height] = [self.display.width(), self.display.height()];
-        self.upload = Some([0, 0, u32::from(width), u32::from(height)]);
-        if let Interaction::Drawing { rect, .. } = &self.interaction {
-            let rect = *rect;
-            self.recomposite(rect);
+        self.edit(|_| ());
+        self.playback = Some(Playback {
+            started: Instant::now(),
+            first: self.session.frame(),
+            frames: HashMap::new(),
+            revision: self.session.revision(),
+            shown: None,
+            window: None,
+        });
+    }
+
+    /// Moves playback to the frame due at `now` and returns when the next
+    /// one is due; `None` when not playing.
+    pub fn tick(&mut self, now: Instant) -> Option<Instant> {
+        let document = self.session.document();
+        let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
+        let revision = self.session.revision();
+        let bytes = usize::from(self.display.width()) * usize::from(self.display.height()) * 4;
+        let ahead = (PLAYBACK_BUDGET / bytes.max(1)).clamp(1, frames as usize) as u32;
+
+        let playback = self.playback.as_mut()?;
+        if playback.revision != revision {
+            playback.frames.clear();
+            playback.revision = revision;
+            playback.window = None;
         }
+        let elapsed = now
+            .saturating_duration_since(playback.started)
+            .as_secs_f64();
+        let step = (elapsed * fps).floor() as i64;
+        let frame = playback.first + step;
+        let cycle = frame_in_cycle(frame, frames);
+        let next = playback.started + Duration::from_secs_f64((step + 1) as f64 / fps);
+        let covered = playback
+            .window
+            .is_some_and(|start| (cycle + frames - start) % frames < ahead);
+        let shown = match playback.frames.get(&cycle) {
+            Some(pixels) if playback.shown.as_ref().is_none_or(|(at, _)| *at != cycle) => {
+                playback.shown = Some((cycle, pixels.clone()));
+                true
+            }
+            _ => false,
+        };
+
+        if !covered {
+            // From the frame due now onwards, as far as the budget allows;
+            // frames outside that window are let go.
+            let wanted: Vec<u32> = (0..ahead).map(|offset| (cycle + offset) % frames).collect();
+            playback.frames.retain(|at, _| wanted.contains(at));
+            let missing: Vec<u32> = wanted
+                .into_iter()
+                .filter(|at| !playback.frames.contains_key(at))
+                .collect();
+            playback.window = Some(cycle);
+            let document = self.snapshot();
+            self.cache.request_frames(revision, &missing, &document);
+        }
+        if shown {
+            // Keeps showing the last frame until the due one is ready.
+            self.session.set_frame(frame);
+            self.upload_all();
+        }
+        Some(next)
     }
 
     /// Puts `rect` of the display back together, with the stroke being drawn.
@@ -261,6 +395,9 @@ impl Canvas {
 
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
         self.notice = None;
+        if self.playback.take().is_some() {
+            self.upload_all();
+        }
         // The eraser end of a pen erases whatever tool is chosen.
         let tool = self.session.tool;
         if kind == PointerKind::Pen && sample.inverted {
@@ -413,8 +550,16 @@ impl Canvas {
         self.upload.take()
     }
 
+    /// What the canvas shows: the playback frame, or the edited image.
     pub fn display(&self) -> &Pixmap {
-        &self.display
+        match self
+            .playback
+            .as_ref()
+            .and_then(|playback| playback.shown.as_ref())
+        {
+            Some((_, pixels)) => pixels,
+            None => &self.display,
+        }
     }
 
     /// Where the document is drawn, in client physical pixels.

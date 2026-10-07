@@ -386,6 +386,7 @@ impl RenderThread {
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             egui::Panel::top("tools").show(ui, |ui| ui::tools(ui, canvas));
+            egui::Panel::bottom("timeline").show(ui, |ui| panels.timeline(ui, canvas));
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if software {
@@ -451,6 +452,9 @@ impl RenderThread {
             .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
         self.needs_frame = false;
 
+        if let Some(next) = self.canvas.tick(Instant::now()) {
+            self.repaint_at = Some(self.repaint_at.map_or(next, |at| at.min(next)));
+        }
         self.canvas.sync();
         let pixels_per_point = output.pixels_per_point;
         let primitives = self.egui_ctx.tessellate(output.shapes, pixels_per_point);

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Renders the canvas split on a worker thread, so the render thread keeps
-//! showing the previous image and taking input while a frame is drawn.
-//! Only the newest request matters; one that arrives while another renders
-//! replaces any still waiting.
+//! Renders on a worker thread, so the render thread keeps showing the
+//! previous image and taking input while a frame is drawn: the canvas split
+//! for editing, and whole frames for playback. Only the newest split request
+//! matters, and it goes before any frame.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
 use ugu_core::document::{Document, LayerId};
 use ugu_render::compose::{Split, composite};
-use ugu_render::document::DocumentRenderer;
+use ugu_render::document::{DocumentRenderer, Purpose};
 use vello_cpu::Pixmap;
 
 /// What a split shows.
@@ -24,27 +25,35 @@ pub struct Key {
     pub frame: u32,
 }
 
-pub struct Rendered {
-    pub key: Key,
-    pub split: Split,
-    /// The split put together.
-    pub display: Pixmap,
-}
-
-struct Job {
-    key: Key,
-    document: Document,
+pub enum Rendered {
+    Split {
+        key: Key,
+        split: Split,
+        /// The split put together.
+        display: Pixmap,
+    },
+    Frame {
+        revision: u64,
+        frame: u32,
+        pixels: Arc<Pixmap>,
+    },
 }
 
 #[derive(Default)]
 struct Queue {
-    job: Option<Job>,
+    split: Option<(Key, Arc<Document>)>,
+    frames: VecDeque<(u64, u32, Arc<Document>)>,
     stop: bool,
 }
 
 pub struct CacheWorker {
     queue: Arc<(Mutex<Queue>, Condvar)>,
     thread: Option<JoinHandle<()>>,
+}
+
+enum Job {
+    Split(Key, Arc<Document>),
+    Frame(u64, u32, Arc<Document>),
 }
 
 impl CacheWorker {
@@ -59,44 +68,55 @@ impl CacheWorker {
             .name("canvas cache".to_owned())
             .spawn(move || {
                 let mut renderer = DocumentRenderer::new(threads);
-                loop {
-                    let job = {
-                        let (lock, wake) = &*shared;
-                        let mut queue = lock.lock().expect("queue lock");
-                        loop {
-                            if queue.stop {
-                                return;
-                            }
-                            if let Some(job) = queue.job.take() {
-                                break job;
-                            }
-                            queue = wake.wait(queue).expect("queue lock");
-                        }
-                    };
+                while let Some(job) = next(&shared) {
                     let started = Instant::now();
-                    let Some(split) =
-                        renderer.split(&job.document, job.key.layer, i64::from(job.key.frame))
-                    else {
-                        continue;
-                    };
-                    let [width, height] = job.document.canvas.map(|edge| edge as u16);
-                    let mut display = Pixmap::new(width, height);
-                    composite(
-                        &split,
-                        None,
-                        [0, 0, u32::from(width), u32::from(height)],
-                        &mut display,
-                    );
-                    tracing::debug!(
-                        ms = started.elapsed().as_secs_f64() * 1000.0,
-                        revision = job.key.revision,
-                        "canvas split rendered"
-                    );
-                    done(Rendered {
-                        key: job.key,
-                        split,
-                        display,
-                    });
+                    match job {
+                        Job::Split(key, document) => {
+                            let Some(split) =
+                                renderer.split(&document, key.layer, i64::from(key.frame))
+                            else {
+                                continue;
+                            };
+                            let [width, height] = document.canvas.map(|edge| edge as u16);
+                            let mut display = Pixmap::new(width, height);
+                            composite(
+                                &split,
+                                None,
+                                [0, 0, u32::from(width), u32::from(height)],
+                                &mut display,
+                            );
+                            tracing::debug!(
+                                ms = started.elapsed().as_secs_f64() * 1000.0,
+                                revision = key.revision,
+                                "canvas split rendered"
+                            );
+                            done(Rendered::Split {
+                                key,
+                                split,
+                                display,
+                            });
+                        }
+                        Job::Frame(revision, frame, document) => {
+                            let [width, height] = document.canvas.map(|edge| edge as u16);
+                            let mut pixels = Pixmap::new(width, height);
+                            renderer.render(
+                                &document,
+                                i64::from(frame),
+                                Purpose::Display,
+                                &mut pixels,
+                            );
+                            tracing::debug!(
+                                ms = started.elapsed().as_secs_f64() * 1000.0,
+                                frame,
+                                "playback frame rendered"
+                            );
+                            done(Rendered::Frame {
+                                revision,
+                                frame,
+                                pixels: Arc::new(pixels),
+                            });
+                        }
+                    }
                 }
             })
             .expect("cannot start the canvas cache thread");
@@ -106,10 +126,39 @@ impl CacheWorker {
         }
     }
 
-    pub fn request(&self, key: Key, document: Document) {
+    pub fn request(&self, key: Key, document: Arc<Document>) {
         let (lock, wake) = &*self.queue;
-        lock.lock().expect("queue lock").job = Some(Job { key, document });
+        lock.lock().expect("queue lock").split = Some((key, document));
         wake.notify_one();
+    }
+
+    /// Replaces the frames waiting to be rendered for playback.
+    pub fn request_frames(&self, revision: u64, frames: &[u32], document: &Arc<Document>) {
+        let (lock, wake) = &*self.queue;
+        let mut queue = lock.lock().expect("queue lock");
+        queue.frames = frames
+            .iter()
+            .map(|&frame| (revision, frame, document.clone()))
+            .collect();
+        wake.notify_one();
+    }
+}
+
+/// The next job, splits first; `None` once stopped.
+fn next(queue: &(Mutex<Queue>, Condvar)) -> Option<Job> {
+    let (lock, wake) = queue;
+    let mut queue = lock.lock().expect("queue lock");
+    loop {
+        if queue.stop {
+            return None;
+        }
+        if let Some((key, document)) = queue.split.take() {
+            return Some(Job::Split(key, document));
+        }
+        if let Some((revision, frame, document)) = queue.frames.pop_front() {
+            return Some(Job::Frame(revision, frame, document));
+        }
+        queue = wake.wait(queue).expect("queue lock");
     }
 }
 
