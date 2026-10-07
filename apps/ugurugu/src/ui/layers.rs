@@ -219,6 +219,12 @@ fn report(refusal: &mut Option<String>, result: Result<Outcome, EditError>) {
 }
 
 impl LayerDock {
+    /// Drops the thumbnail textures, which a new GPU device does not have;
+    /// they are made again from the canvas's thumbnails.
+    pub fn forget_textures(&mut self) {
+        self.thumbnails.clear();
+    }
+
     /// Brings the thumbnails up to date with the canvas's, groups made from
     /// their children.
     fn refresh_thumbnails(&mut self, ctx: &egui::Context, canvas: &Canvas) {

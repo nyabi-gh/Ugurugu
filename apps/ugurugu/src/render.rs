@@ -47,10 +47,16 @@ const IDLE_WAKE: Duration = Duration::from_secs(1);
 /// Display times are read back this often while presents await them.
 const DISPLAY_POLL: Duration = Duration::from_millis(2);
 const FRAME_WAIT_LIMIT: Duration = Duration::from_millis(100);
+/// How long a swap chain made after a device loss may hold back the next
+/// frame before it is made again, and how many times.
+const STALL_LIMIT: Duration = Duration::from_secs(1);
+const RECOVERY_ATTEMPTS: u32 = 3;
 
-/// Makes a new surface for the window. Only the UI thread may read the window
-/// handle, so this asks it and waits for the answer.
-pub type SurfaceSource = Box<dyn Fn() -> Result<wgpu::Surface<'static>, String> + Send>;
+/// Makes a new instance and a surface for the window with it. Only the UI
+/// thread may read the window handle, so this asks it and waits for the
+/// answer.
+pub type SurfaceSource =
+    Box<dyn Fn() -> Result<(wgpu::Instance, wgpu::Surface<'static>), String> + Send>;
 
 /// egui-winit's input state on its way to the render thread. With the
 /// `accesskit` feature it can hold an AccessKit adapter, which is not `Send`.
@@ -91,7 +97,6 @@ pub struct RenderThread {
     window: Arc<Window>,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
-    instance: wgpu::Instance,
     surface_source: SurfaceSource,
     tree_sink: TreeSink,
     adapter_choice: AdapterChoice,
@@ -110,6 +115,17 @@ pub struct RenderThread {
     repaint_at: Option<Instant>,
     /// Nothing is drawn, played or uploaded while the window is minimized.
     minimized: bool,
+    /// Set after a lost device is replaced, until the new swap chain lets a
+    /// second frame through. After a driver reset the display can still be
+    /// resetting when the new swap chain is made, and such a swap chain shows
+    /// one frame and never signals for another.
+    recovery: Option<Recovery>,
+}
+
+struct Recovery {
+    attempts: u32,
+    frames: u32,
+    stalled_since: Option<Instant>,
 }
 
 /// Everything made with one GPU device, replaced together when it is lost.
@@ -157,19 +173,21 @@ impl RenderThread {
     }
 
     /// Called on the UI thread, the only thread winit lets read the window
-    /// handle.
+    /// handle. The instance is new each time: after a driver reset, swap
+    /// chains made through an older instance's DXGI factory never reach the
+    /// screen.
     pub fn create_surface(
-        instance: &wgpu::Instance,
         window: &Arc<Window>,
-    ) -> Result<wgpu::Surface<'static>, String> {
-        instance
+    ) -> Result<(wgpu::Instance, wgpu::Surface<'static>), String> {
+        let instance = Self::create_instance();
+        let surface = instance
             .create_surface(window.clone())
-            .map_err(|error| format!("cannot create the window surface: {error}"))
+            .map_err(|error| format!("cannot create the window surface: {error}"))?;
+        Ok((instance, surface))
     }
 
     pub fn create(
         window: Arc<Window>,
-        instance: wgpu::Instance,
         links: Links,
         egui_ctx: egui::Context,
         EguiState(egui_state): EguiState,
@@ -183,7 +201,7 @@ impl RenderThread {
         } = links;
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
-        let surface = surface_source()?;
+        let (instance, surface) = surface_source()?;
         let display = Display::open(
             &instance,
             surface,
@@ -194,7 +212,6 @@ impl RenderThread {
             window,
             egui_ctx,
             egui_state,
-            instance,
             surface_source,
             tree_sink,
             adapter_choice,
@@ -224,6 +241,7 @@ impl RenderThread {
             needs_frame: true,
             repaint_at: None,
             minimized: false,
+            recovery: None,
         })
     }
 
@@ -236,15 +254,16 @@ impl RenderThread {
         // new device, so it goes before the window gets a new one.
         drop(self.display);
         let dropped = started.elapsed();
-        let surface = (self.surface_source)()?;
+        let (instance, surface) = (self.surface_source)()?;
         let surfaced = started.elapsed();
         self.display = Display::open(
-            &self.instance,
+            &instance,
             surface,
             self.adapter_choice,
             [size.width, size.height],
         )?;
         self.canvas.upload_all();
+        self.panels.layers.forget_textures();
         // egui sends only changes to its font atlas, so the new device gets
         // the whole atlas once.
         let atlas = self.egui_ctx.fonts(|fonts| fonts.image());
@@ -262,6 +281,14 @@ impl RenderThread {
             &egui::epaint::ImageDelta::full(atlas, options),
         );
         self.needs_frame = true;
+        self.recovery = Some(Recovery {
+            attempts: self
+                .recovery
+                .as_ref()
+                .map_or(1, |recovery| recovery.attempts + 1),
+            frames: 0,
+            stalled_since: None,
+        });
         let ms = |elapsed: Duration| elapsed.as_secs_f64() * 1000.0;
         tracing::info!(
             drop_ms = ms(dropped),
@@ -305,10 +332,39 @@ impl RenderThread {
                 self.needs_frame = true;
             }
             if self.needs_frame && self.display.presenter.wait_for_frame(FRAME_WAIT_LIMIT) {
+                if self
+                    .recovery
+                    .as_ref()
+                    .is_some_and(|recovery| recovery.frames > 0)
+                {
+                    self.recovery = None;
+                }
                 if !self.apply_queued(messages) {
                     break;
                 }
                 self.frame();
+                if let Some(recovery) = self.recovery.as_mut() {
+                    recovery.frames += 1;
+                }
+            } else if self.needs_frame
+                && let Some(recovery) = self.recovery.as_mut()
+                && recovery.frames > 0
+                && recovery
+                    .stalled_since
+                    .get_or_insert_with(Instant::now)
+                    .elapsed()
+                    >= STALL_LIMIT
+            {
+                if recovery.attempts < RECOVERY_ATTEMPTS {
+                    tracing::warn!(
+                        attempt = recovery.attempts,
+                        "the new swap chain shows nothing; replacing it again"
+                    );
+                    self = self.recover()?;
+                } else {
+                    tracing::error!("the display did not come back after a device loss");
+                    self.recovery = None;
+                }
             }
             self.collect_display_times();
             if self.files.should_close() {

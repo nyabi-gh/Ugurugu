@@ -25,7 +25,7 @@ pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
     RenderStopped(Option<String>),
     /// The render thread needs a new surface for the window.
-    NeedSurface(Sender<Result<wgpu::Surface<'static>, String>>),
+    NeedSurface(Sender<Result<(wgpu::Instance, wgpu::Surface<'static>), String>>),
     /// A screen reader connected, left, or asked for an action.
     Accessibility(accesskit_winit::Event),
     /// egui's accessibility tree changed.
@@ -53,7 +53,6 @@ struct Session {
     /// window, so egui's tree updates are sent here from the render thread.
     accessibility: accesskit_winit::Adapter,
     window: Arc<Window>,
-    instance: wgpu::Instance,
     to_render: Sender<ToRender>,
     render_thread: Option<JoinHandle<()>>,
 }
@@ -115,8 +114,6 @@ impl Session {
             window.theme(),
             None,
         ));
-        let instance = RenderThread::create_instance();
-        let render_instance = instance.clone();
         let surface_proxy = proxy.clone();
         let surface_source: SurfaceSource = Box::new(move || {
             let (reply, answer) = mpsc::channel();
@@ -141,7 +138,6 @@ impl Session {
             .spawn(move || {
                 let error = RenderThread::create(
                     render_window,
-                    render_instance,
                     Links {
                         surface_source,
                         tree_sink,
@@ -162,7 +158,6 @@ impl Session {
             pointer,
             accessibility,
             window,
-            instance,
             to_render,
             render_thread: Some(render_thread),
         })
@@ -207,10 +202,7 @@ impl ApplicationHandler<UiEvent> for App {
         let error = match event {
             UiEvent::NeedSurface(reply) => {
                 if let Some(session) = self.session.as_ref() {
-                    let _ = reply.send(RenderThread::create_surface(
-                        &session.instance,
-                        &session.window,
-                    ));
+                    let _ = reply.send(RenderThread::create_surface(&session.window));
                 }
                 return;
             }
