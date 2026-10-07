@@ -15,13 +15,15 @@
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
-//!   drawn as pens and what M4 adds is left out, which keeps the amount of
-//!   work close and says so.
+//!   drawn as pens and images and moved selections are left out, which
+//!   keeps the amount of work close and says so.
 //! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
-//!   out what M4 adds, keeping groups, blend modes and clipping, so the app
-//!   can open a fixture to measure with.
+//!   out images and moved selections, keeping groups, blend modes, clipping,
+//!   fills and clears, so the app can open a fixture to measure with.
 //! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
+//! - `ugu-doc fills <in.ugu2> <out.ugu2>`: adds a large clipped fill and a
+//!   clear to every layer, to measure what masks cost to draw.
 //! - `ugu-doc stop <file.ugu2>`: times how long a frame render on 8 threads
 //!   takes to end once it is told to stop, at points spread over the render.
 //! - `ugu-doc layers <file.ugu2> <threads>`: times each layer drawn alone on
@@ -38,7 +40,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | many <operations> <layers> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | stop <file.ugu2> | layers <file.ugu2> <threads>";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | fills <in.ugu2> <out.ugu2> | stop <file.ugu2> | layers <file.ugu2> <threads>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -64,6 +66,7 @@ fn main() -> ExitCode {
         ["render", file] => render(Path::new(file), 8, None),
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
+        ["fills", from, to] => fills(Path::new(from), Path::new(to)),
         ["stop", file] => stop(Path::new(file)),
         ["layers", file, threads] => threads
             .parse()
@@ -219,8 +222,9 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes every brush a pen and drops what M4 adds (fills, images, selections
-/// and stroke clips), keeping layers, groups, blend modes and clipping.
+/// Makes every brush a pen and drops what the renderer cannot draw yet
+/// (images and moved selections), keeping fills, clears, stroke clips,
+/// layers, groups, blend modes and clipping.
 fn to_pens(document: &mut Document) {
     let mut changed = 0;
     for stroke in document.store.strokes.values_mut() {
@@ -230,37 +234,106 @@ fn to_pens(document: &mut Document) {
         }
     }
     let mut dropped = 0;
+    let mut masks = std::collections::HashSet::new();
     each_paint(&mut document.layers, &mut |paint| {
-        strip(&mut paint.ops, &mut dropped);
+        strip(&mut paint.ops, &mut dropped, &mut masks);
     });
-    document.store.masks.clear();
+    document.store.masks.retain(|id, _| masks.contains(id));
     document.store.assets.clear();
     if changed + dropped > 0 {
-        println!("{changed} brushes made pens, {dropped} fills, images or selections dropped");
+        println!("{changed} brushes made pens, {dropped} images or moved selections dropped");
     }
 }
 
-fn strip(ops: &mut Vec<Op>, dropped: &mut usize) {
+/// Drops images and moved selections from `ops` and gathers the masks the
+/// rest use.
+fn strip(ops: &mut Vec<Op>, dropped: &mut usize, masks: &mut std::collections::HashSet<MaskId>) {
     let before = ops.len();
-    ops.retain(|op| {
-        !matches!(
-            op,
-            Op::Fill { .. }
-                | Op::PlaceImage { .. }
-                | Op::TransformSelection { .. }
-                | Op::ClearSelection { .. }
-        )
-    });
+    ops.retain(|op| !matches!(op, Op::PlaceImage { .. } | Op::TransformSelection { .. }));
     *dropped += before - ops.len();
     for op in ops {
         match op {
-            Op::Paint { clip, .. } | Op::Erase { clip, .. } => {
-                *dropped += usize::from(clip.take().is_some());
+            Op::Paint { clip, .. } | Op::Erase { clip, .. } => masks.extend(*clip),
+            Op::Fill { coverage, clip, .. } => {
+                masks.insert(*coverage);
+                masks.extend(*clip);
             }
-            Op::Isolated(section) => strip(&mut section.ops, dropped),
+            Op::ClearSelection { mask } => {
+                masks.insert(*mask);
+            }
+            Op::Isolated(section) => strip(&mut section.ops, dropped, masks),
             _ => {}
         }
     }
+}
+
+/// Adds to every paint layer a fill of a disc a third of the canvas wide,
+/// cut to stripes, and a clear of a smaller disc, at different places per
+/// layer, for measuring what masks cost to draw.
+fn fills(from: &Path, to: &Path) -> Result<(), String> {
+    let mut document = open(from)?;
+    to_pens(&mut document);
+    let [width, height] = document.canvas.map(|edge| edge as i32);
+    let mut next = document
+        .store
+        .masks
+        .keys()
+        .map(|id| id.0 + 1)
+        .max()
+        .unwrap_or(0);
+    let mut add = |masks: &mut std::collections::HashMap<MaskId, Mask>,
+                   inside: &dyn Fn(i32, i32) -> bool| {
+        let row_bytes = Mask::row_bytes(width);
+        let mut bits = vec![0u8; row_bytes * height as usize];
+        for y in 0..height {
+            for x in 0..width {
+                if inside(x, y) {
+                    bits[y as usize * row_bytes + x as usize / 8] |= 0x80 >> (x % 8);
+                }
+            }
+        }
+        let id = MaskId(next);
+        next += 1;
+        masks.insert(
+            id,
+            Mask {
+                bounds: [0, 0, width, height],
+                bits: Arc::from(bits),
+            },
+        );
+        id
+    };
+    let mut layer = 0;
+    let masks = &mut document.store.masks;
+    each_paint(&mut document.layers, &mut |paint| {
+        let [cx, cy] = [
+            width / 4 + (layer * 397) % (width / 2),
+            height / 4 + (layer * 251) % (height / 2),
+        ];
+        let radius = width / 6;
+        let disc = add(masks, &|x, y| {
+            (x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius
+        });
+        let stripes = add(masks, &|x, y| (x / 37 + y / 53) % 3 != 0);
+        let small = add(masks, &|x, y| {
+            (x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius / 9
+        });
+        let at = paint.ops.len() / 2;
+        paint.ops.insert(
+            at,
+            Op::Fill {
+                coverage: disc,
+                color: Rgba8([40, 140, 200, 200]),
+                antialias: true,
+                clip: Some(stripes),
+            },
+        );
+        paint.ops.push(Op::ClearSelection { mask: small });
+        layer += 1;
+    });
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)?;
+    info(to)
 }
 
 fn each_paint(layers: &mut [Layer], visit: &mut impl FnMut(&mut PaintLayer)) {

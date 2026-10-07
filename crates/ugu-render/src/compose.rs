@@ -340,6 +340,7 @@ mod tests {
     use super::*;
     use ugu_core::command;
     use ugu_core::document::LayerKind;
+    use ugu_core::edit::Change;
     use ugu_core::history::History;
     use ugu_core::ops::{Blend, Rgba8, Wobble};
     use ugu_core::store::{Brush, BrushEngine, Point};
@@ -426,6 +427,58 @@ mod tests {
             stroke([60.0, 0.0], [60.0, 80.0], [0, 0, 0, 255], 99),
             true,
         );
+        // A selection: a fill in it under the first layer's stroke's end,
+        // and a clear in it on the Multiply layer.
+        let [width, height] = [70, 50];
+        let row_bytes = ugu_core::store::Mask::row_bytes(width);
+        let mut bits = vec![0u8; row_bytes * height as usize];
+        for y in 0..height {
+            for x in 0..width {
+                if (x - 35) * (x - 35) + (y - 25) * (y - 25) < 500 && (x + y) % 11 != 0 {
+                    bits[y as usize * row_bytes + x as usize / 8] |= 0x80 >> (x % 8);
+                }
+            }
+        }
+        let mask = ugu_core::ops::MaskId(0);
+        history
+            .edit("Fill", |document| {
+                let index = match document.layer(first).map(|layer| &layer.kind) {
+                    Some(LayerKind::Paint(paint)) => paint.ops.len(),
+                    _ => unreachable!(),
+                };
+                let selection = ugu_core::store::Mask {
+                    bounds: [30, 20, width, height],
+                    bits: bits.into(),
+                };
+                let fill = ugu_core::ops::Op::Fill {
+                    coverage: mask,
+                    color: Rgba8([20, 120, 220, 170]),
+                    antialias: true,
+                    clip: Some(mask),
+                };
+                vec![
+                    Change::InsertMask(mask, selection),
+                    Change::InsertOp {
+                        layer: first,
+                        index,
+                        op: fill,
+                    },
+                ]
+            })
+            .unwrap();
+        history
+            .edit("Clear", |document| {
+                let index = match document.layer(middle).map(|layer| &layer.kind) {
+                    Some(LayerKind::Paint(paint)) => paint.ops.len(),
+                    _ => unreachable!(),
+                };
+                vec![Change::InsertOp {
+                    layer: middle,
+                    index,
+                    op: ugu_core::ops::Op::ClearSelection { mask },
+                }]
+            })
+            .unwrap();
         let set = |history: &mut History, id, update: &dyn Fn(&mut ugu_core::ops::PaintLayer)| {
             history
                 .edit("Set", |document| {

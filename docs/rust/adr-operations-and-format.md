@@ -38,6 +38,8 @@ Paint 레이어의 프레임 f 결과 S(f)는 투명한 표면에서 시작해 �
 
 `antialias`가 켜진 채우기는 coverage 바로 바깥 4-이웃 화소에 색을 뒤에 깔듯 합성한다(2.2.13 `applyFillStroke`와 같은 규칙). 정확한 화소 규칙은 M4 채우기 구현 때 fixture로 고정한다.
 
+M4-3에서 고정한 규칙(2.2.13 `applyFillStroke`와 같음): coverage ∩ clip 안의 화소는 채우기 색(premultiplied)으로 **대체**한다(위에 덮어 그리지 않는다). `antialias`면 coverage 밖이면서 4-이웃 중 하나가 coverage 안인 화소 ∩ clip에 `기존 + 색 × (1 − 기존 alpha)`로 뒤에 깐다. 브러시 불투명도는 쓰지 않고 색의 alpha만 쓴다. 시험: `semantics::a_fill_replaces_what_it_covers_and_goes_behind_its_edge`(참조 평가기), `document::tests::a_fill_replaces_what_it_covers_and_goes_behind_its_edge`(렌더러, 덮은 화소는 바이트 단위로 같고 가장자리는 1단계 이내).
+
 ## 3. 결정: 병합은 isolated section으로 표현한다
 
 아래 레이어 B 위로 위 레이어 A를 병합하면 결과 레이어는 다음과 같다.

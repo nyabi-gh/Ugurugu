@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{Op, PaintLayer, Wobble};
-use ugu_core::store::{BrushEngine, Store, Stroke};
+use ugu_core::ops::{MaskId, Op, PaintLayer, Wobble};
+use ugu_core::store::{BrushEngine, Mask, Store, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::{Affine, BezPath};
 use vello_cpu::peniko::{BlendMode, Compose, Mix};
@@ -25,6 +25,7 @@ use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resou
 
 use crate::compose::premultiplied;
 use crate::composite::{self, Source};
+use crate::mask::Runs;
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
@@ -33,8 +34,7 @@ use crate::tile::TiledSurface;
 /// Content this build cannot draw yet, and the milestone that adds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unsupported {
-    /// Fills, images, selections and their clips (M4).
-    Fill,
+    /// Images and moved selections (M4).
     Image,
     Selection,
     /// Crops and resizes (M4).
@@ -46,9 +46,8 @@ pub enum Unsupported {
 impl std::fmt::Display for Unsupported {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Fill => "fills",
             Self::Image => "images",
-            Self::Selection => "selections",
+            Self::Selection => "moved selections",
             Self::CanvasChange => "canvas crops or resizes",
             Self::Brush => "airbrush or spray strokes",
         })
@@ -73,10 +72,7 @@ fn check_layers(layers: &[ugu_core::document::Layer], store: &Store) -> Result<(
 fn check_ops(ops: &[Op], store: &Store) -> Result<(), Unsupported> {
     for op in ops {
         match op {
-            Op::Paint { stroke, clip } | Op::Erase { stroke, clip } => {
-                if clip.is_some() {
-                    return Err(Unsupported::Selection);
-                }
+            Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
                 if store
                     .strokes
                     .get(stroke)
@@ -85,11 +81,9 @@ fn check_ops(ops: &[Op], store: &Store) -> Result<(), Unsupported> {
                     return Err(Unsupported::Brush);
                 }
             }
-            Op::Fill { .. } => return Err(Unsupported::Fill),
+            Op::Fill { .. } | Op::ClearSelection { .. } => {}
             Op::PlaceImage { .. } => return Err(Unsupported::Image),
-            Op::TransformSelection { .. } | Op::ClearSelection { .. } => {
-                return Err(Unsupported::Selection);
-            }
+            Op::TransformSelection { .. } => return Err(Unsupported::Selection),
             Op::Crop { .. } | Op::Resample { .. } => return Err(Unsupported::CanvasChange),
             Op::Isolated(section) => check_ops(&section.ops, store)?,
         }
@@ -129,6 +123,7 @@ pub struct DocumentRenderer {
     /// `set_detail`.
     detail: u32,
     timings: Timings,
+    masks: MaskCache,
 }
 
 /// Full detail for `DocumentRenderer::set_detail`.
@@ -177,6 +172,16 @@ impl std::ops::AddAssign for Timings {
     }
 }
 
+/// What every layer of one frame is drawn with.
+#[derive(Clone, Copy)]
+struct Frame<'a> {
+    document: &'a Document,
+    frame: u32,
+    shrink: u32,
+    detail: u32,
+    masks: &'a MaskCache,
+}
+
 /// A Vello context and the threads that make stroke outlines for it.
 struct Raster {
     context: RenderContext,
@@ -209,6 +214,18 @@ enum Step<'a> {
         stroke: &'a Stroke,
         pen: Pen,
         erase: bool,
+        /// The selection the stroke was drawn in.
+        clip: Option<Arc<Ready>>,
+    },
+    /// Puts `color` in place of what is in the area, and when the fill is
+    /// antialiased, behind what is in the fringe (2.2.13 `applyFillStroke`).
+    Fill {
+        color: [u8; 4],
+        ready: Arc<Ready>,
+    },
+    /// Removes what is in the area.
+    Clear {
+        ready: Arc<Ready>,
     },
 }
 
@@ -233,6 +250,7 @@ impl DocumentRenderer {
             tile_edge: TILE_EDGE,
             detail: FULL_DETAIL,
             timings: Timings::default(),
+            masks: MaskCache::default(),
         }
     }
 
@@ -287,9 +305,17 @@ impl DocumentRenderer {
     ) -> TiledSurface {
         let size = scaled_size(document.canvas, shrink);
         let mut surface = TiledSurface::new(size, self.tile_edge);
-        self.timings +=
-            self.main
-                .draw_layer(document, frame, shrink, self.detail, paint, &mut surface);
+        self.timings += self.main.draw_layer(
+            &Frame {
+                document,
+                frame,
+                shrink,
+                detail: self.detail,
+                masks: &self.masks,
+            },
+            paint,
+            &mut surface,
+        );
         surface
     }
 
@@ -381,6 +407,7 @@ impl DocumentRenderer {
         let [width, height] = size.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
+        self.masks.next_render();
         let edge = self.tile_edge;
         if self.over_budget(document, plan, shrink) {
             self.cache.clear();
@@ -432,10 +459,13 @@ impl DocumentRenderer {
                     break;
                 }
                 self.timings += self.main.draw_layer(
-                    document,
-                    frame,
-                    shrink,
-                    detail,
+                    &Frame {
+                        document,
+                        frame,
+                        shrink,
+                        detail,
+                        masks: &self.masks,
+                    },
                     each.paint,
                     &mut each.surface,
                 );
@@ -509,6 +539,7 @@ impl DocumentRenderer {
             work.iter_mut().map(std::sync::Mutex::new).collect();
         let stop = self.stop.as_deref();
         let detail = self.detail;
+        let masks = &self.masks;
         let timings = std::thread::scope(|scope| {
             let workers: Vec<_> = self
                 .singles
@@ -528,10 +559,13 @@ impl DocumentRenderer {
                             let mut slot = slot.lock().expect("one worker per layer");
                             let each = &mut **slot;
                             timings += raster.draw_layer(
-                                document,
-                                frame,
-                                shrink,
-                                detail,
+                                &Frame {
+                                    document,
+                                    frame,
+                                    shrink,
+                                    detail,
+                                    masks,
+                                },
                                 each.paint,
                                 &mut each.surface,
                             );
@@ -573,15 +607,19 @@ impl Raster {
     /// tiles its strokes reach.
     fn draw_layer(
         &mut self,
-        document: &Document,
-        frame: u32,
-        shrink: u32,
-        detail: u32,
+        at: &Frame<'_>,
         paint: &PaintLayer,
         surface: &mut TiledSurface,
     ) -> Timings {
-        let steps = layer_steps(document, paint);
-        let (span, reached) = reach(&steps, shrink, surface);
+        let Frame {
+            document,
+            frame,
+            shrink,
+            detail,
+            masks,
+        } = *at;
+        let steps = layer_steps(document, paint, masks);
+        let (span, reached) = reach(step_bounds(&steps), shrink, surface);
         let reused = surface.clear();
         if span[0] >= span[2] {
             return Timings::default();
@@ -626,12 +664,35 @@ impl Raster {
                         .push_layer(None, None, Some(*opacity), None, None);
                 }
                 Step::Pop => self.context.pop_layer(),
-                Step::Draw { stroke, erase, .. } => {
+                Step::Draw {
+                    stroke,
+                    erase,
+                    clip,
+                    ..
+                } => {
                     let path = outlines.next().expect("one outline per stroke");
                     if !path.is_empty() {
-                        self.draw(stroke, *erase, path);
+                        self.draw(stroke, *erase, path, clip.as_ref().map(|clip| &clip.area));
                     }
                 }
+                Step::Fill {
+                    color: [r, g, b, a],
+                    ready,
+                } => {
+                    let color = AlphaColor::from_rgba8(*r, *g, *b, *a);
+                    self.take_away(&ready.area);
+                    self.context.set_paint(color);
+                    self.context.fill_path(&ready.area);
+                    if let Some(fringe) = &ready.fringe {
+                        let behind = BlendMode::new(Mix::Normal, Compose::DestOver);
+                        self.context
+                            .push_layer(None, Some(behind), None, None, None);
+                        self.context.set_paint(color);
+                        self.context.fill_path(fringe);
+                        self.context.pop_layer();
+                    }
+                }
+                Step::Clear { ready } => self.take_away(&ready.area),
             }
         }
         self.paths = paths;
@@ -682,33 +743,51 @@ impl Raster {
         });
     }
 
-    fn draw(&mut self, stroke: &Stroke, erase: bool, path: &BezPath) {
+    /// Draws `stroke` along `path`, inside `clip` when given. A layer takes
+    /// the aliasing setting its clip is pushed with, so the clip is pushed
+    /// first and stays exact for aliased pens too.
+    fn draw(&mut self, stroke: &Stroke, erase: bool, path: &BezPath, clip: Option<&BezPath>) {
         let [r, g, b, a] = stroke.color.0;
         let alpha = (f32::from(a) * stroke.brush.opacity.clamp(0.0, 1.0)).round() as u8;
+        let layer = erase || clip.is_some();
+        if layer {
+            let mode = erase.then(|| BlendMode::new(Mix::Normal, Compose::DestOut));
+            self.context.push_layer(clip, mode, None, None, None);
+        }
         self.context
             .set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
-        if erase {
-            let mode = BlendMode::new(Mix::Normal, Compose::DestOut);
-            self.context.push_layer(None, Some(mode), None, None, None);
-            self.context
-                .set_paint(AlphaColor::from_rgba8(0, 0, 0, alpha));
-            self.context.fill_path(path);
-            self.context.pop_layer();
+        let paint = if erase {
+            [0, 0, 0, alpha]
         } else {
-            self.context
-                .set_paint(AlphaColor::from_rgba8(r, g, b, alpha));
-            self.context.fill_path(path);
-        }
+            [r, g, b, alpha]
+        };
+        self.context.set_paint(AlphaColor::from_rgba8(
+            paint[0], paint[1], paint[2], paint[3],
+        ));
+        self.context.fill_path(path);
         self.context.set_aliasing_threshold(None);
+        if layer {
+            self.context.pop_layer();
+        }
+    }
+
+    /// Removes what is under `area`.
+    fn take_away(&mut self, area: &BezPath) {
+        let mode = BlendMode::new(Mix::Normal, Compose::DestOut);
+        self.context.push_layer(None, Some(mode), None, None, None);
+        self.context.set_paint(AlphaColor::from_rgba8(0, 0, 0, 255));
+        self.context.fill_path(area);
+        self.context.pop_layer();
     }
 }
 
 /// What drawing `paint` takes, in order.
-fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer) -> Vec<Step<'a>> {
+fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &MaskCache) -> Vec<Step<'a>> {
     let mut steps = Vec::new();
     collect(
         &paint.ops,
         &document.store,
+        masks,
         document.wobble,
         paint.wobble.unwrap_or(document.wobble),
         &mut steps,
@@ -716,27 +795,103 @@ fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer) -> Vec<Step<'a>> 
     steps
 }
 
-/// The tiles of `surface` that `steps` drawn at 1/`shrink` reach, and the
-/// rectangle of tiles around them (left, top, right, bottom; empty when
-/// none).
-fn reach(steps: &[Step<'_>], shrink: u32, surface: &TiledSurface) -> ([u32; 4], Vec<bool>) {
+fn pen(stroke: &Stroke, wobble: Wobble) -> Pen {
+    Pen {
+        width: stroke.width,
+        brush: stroke.brush,
+        seed: stroke.seed,
+        wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
+    }
+}
+
+/// Where the steps that add pixels reach, in document pixels. Erasing and
+/// clearing only take away.
+fn step_bounds<'s>(steps: &'s [Step<'_>]) -> impl Iterator<Item = [f64; 4]> + 's {
+    steps.iter().filter_map(|step| match step {
+        Step::Draw {
+            stroke,
+            pen,
+            erase: false,
+            ..
+        } => Some(stroke::bounds(&stroke.points, pen)),
+        Step::Fill { ready, .. } => ready.bounds.map(|bounds| bounds.map(f64::from)),
+        _ => None,
+    })
+}
+
+/// Where `ops` may add pixels, from stroke bounds and mask bounds alone,
+/// without reading mask bits; a fill may cover less.
+fn op_bounds(
+    ops: &[Op],
+    store: &Store,
+    document_wobble: Wobble,
+    wobble: Wobble,
+    out: &mut Vec<[f64; 4]>,
+) {
+    for op in ops {
+        match op {
+            Op::Paint { stroke, .. } => {
+                if let Some(stroke) = store.strokes.get(stroke) {
+                    out.push(stroke::bounds(&stroke.points, &pen(stroke, wobble)));
+                }
+            }
+            Op::Fill {
+                coverage,
+                antialias,
+                clip,
+                ..
+            } => {
+                let edges = |id: &MaskId| {
+                    store.masks.get(id).map(|mask| {
+                        let [left, top, width, height] = mask.bounds;
+                        [left, top, left + width, top + height]
+                    })
+                };
+                let Some(mut bounds) = edges(coverage) else {
+                    continue;
+                };
+                if *antialias {
+                    bounds = [bounds[0] - 1, bounds[1] - 1, bounds[2] + 1, bounds[3] + 1];
+                }
+                if let Some(cut) = clip.as_ref().and_then(edges) {
+                    bounds = [
+                        bounds[0].max(cut[0]),
+                        bounds[1].max(cut[1]),
+                        bounds[2].min(cut[2]),
+                        bounds[3].min(cut[3]),
+                    ];
+                }
+                if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
+                    out.push(bounds.map(f64::from));
+                }
+            }
+            Op::Isolated(section) => op_bounds(
+                &section.ops,
+                store,
+                document_wobble,
+                section.wobble.unwrap_or(document_wobble),
+                out,
+            ),
+            _ => {}
+        }
+    }
+}
+
+/// The tiles of `surface` that what lies in `bounds` (document pixels)
+/// reaches when drawn at 1/`shrink`, and the rectangle of tiles around them
+/// (left, top, right, bottom; empty when none).
+fn reach(
+    bounds: impl Iterator<Item = [f64; 4]>,
+    shrink: u32,
+    surface: &TiledSurface,
+) -> ([u32; 4], Vec<bool>) {
     let [columns, rows] = surface.grid();
     let edge = f64::from(surface.edge());
     let size = surface.size().map(f64::from);
     let mut reached = vec![false; (columns * rows) as usize];
-    for step in steps {
-        // Erasing only takes away, so it reaches no new tile.
-        let Step::Draw {
-            stroke,
-            pen,
-            erase: false,
-        } = step
-        else {
-            continue;
-        };
+    for bounds in bounds {
         // One more pixel each way for antialiasing.
-        let [left, top, right, bottom] =
-            stroke::bounds(&stroke.points, pen).map(|value| value / f64::from(shrink));
+        let [left, top, right, bottom] = bounds.map(|value| value / f64::from(shrink));
         let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
         let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
         if from[0] >= to[0] || from[1] >= to[1] {
@@ -766,8 +921,8 @@ fn reach(steps: &[Step<'_>], shrink: u32, surface: &TiledSurface) -> ([u32; 4], 
     (span, reached)
 }
 
-/// Bytes the surfaces of `plan`'s layers take when drawn at 1/`shrink` on
-/// tiles of `edge` pixels.
+/// Bytes the surfaces of `plan`'s layers take at most when drawn at
+/// 1/`shrink` on tiles of `edge` pixels.
 pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edge: u32) -> usize {
     let empty = TiledSurface::new(scaled_size(document.canvas, shrink), edge);
     plan.layers
@@ -779,7 +934,15 @@ pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edg
             },
         )
         .map(|paint| {
-            let (span, _) = reach(&layer_steps(document, paint), shrink, &empty);
+            let mut bounds = Vec::new();
+            op_bounds(
+                &paint.ops,
+                &document.store,
+                document.wobble,
+                paint.wobble.unwrap_or(document.wobble),
+                &mut bounds,
+            );
+            let (span, _) = reach(bounds.into_iter(), shrink, &empty);
             if span[0] >= span[2] {
                 return 0;
             }
@@ -789,35 +952,182 @@ pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edg
         .sum()
 }
 
+/// A mask, or a fill's coverage cut to its clip, ready to draw: its pixels
+/// as a path and, for an antialiased fill, the pixels just outside it.
+pub(crate) struct Ready {
+    area: BezPath,
+    fringe: Option<BezPath>,
+    /// Left, top, right, bottom of both; `None` when they hold no pixel.
+    bounds: Option<[i32; 4]>,
+}
+
+/// What a `Ready` was made from: the address and bounds of each mask's bits.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum MaskKey {
+    Area(usize, [i32; 4]),
+    Fill {
+        coverage: (usize, [i32; 4]),
+        clip: Option<(usize, [i32; 4])>,
+        antialias: bool,
+    },
+}
+
+struct Prepared {
+    /// Keeps the bits alive, so their address names no other mask.
+    _bits: Vec<Arc<[u8]>>,
+    ready: Arc<Ready>,
+    /// The render it was last used in.
+    used: u64,
+}
+
+/// Masks made ready to draw, kept from render to render: reading a mask's
+/// bits into a path costs milliseconds for a canvas-sized mask, and stored
+/// masks never change.
+#[derive(Default)]
+pub(crate) struct MaskCache {
+    prepared: std::sync::Mutex<HashMap<MaskKey, Prepared>>,
+    render: u64,
+}
+
+fn mask_key(mask: &Mask) -> (usize, [i32; 4]) {
+    (mask.bits.as_ptr() as usize, mask.bounds)
+}
+
+impl MaskCache {
+    fn get(&self, key: MaskKey, bits: &[&Mask], make: impl FnOnce() -> Ready) -> Arc<Ready> {
+        let lock = || self.prepared.lock().expect("no panic while holding it");
+        if let Some(prepared) = lock().get_mut(&key) {
+            prepared.used = self.render;
+            return prepared.ready.clone();
+        }
+        // Made without the lock, so other layers are not held up.
+        let ready = Arc::new(make());
+        let prepared = Prepared {
+            _bits: bits.iter().map(|mask| mask.bits.clone()).collect(),
+            ready: ready.clone(),
+            used: self.render,
+        };
+        lock().insert(key, prepared);
+        ready
+    }
+
+    fn area(&self, mask: &Mask) -> Arc<Ready> {
+        self.get(
+            MaskKey::Area(mask_key(mask).0, mask.bounds),
+            &[mask],
+            || {
+                let runs = Runs::from_mask(mask);
+                Ready {
+                    area: runs.path(),
+                    fringe: None,
+                    bounds: runs.bounds(),
+                }
+            },
+        )
+    }
+
+    fn fill(&self, coverage: &Mask, clip: Option<&Mask>, antialias: bool) -> Arc<Ready> {
+        let key = MaskKey::Fill {
+            coverage: mask_key(coverage),
+            clip: clip.map(mask_key),
+            antialias,
+        };
+        let bits: Vec<&Mask> = std::iter::once(coverage).chain(clip).collect();
+        self.get(key, &bits, || {
+            let covered = Runs::from_mask(coverage);
+            let clip = clip.map(Runs::from_mask);
+            let cut = |runs: Runs| match &clip {
+                Some(clip) => runs.intersect(clip),
+                None => runs,
+            };
+            let fringe = antialias
+                .then(|| cut(covered.fringe()))
+                .filter(|fringe| !fringe.is_empty());
+            let area = cut(covered);
+            let bounds = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
+                .into_iter()
+                .flatten()
+                .reduce(|[l, t, r, b], [l2, t2, r2, b2]| {
+                    [l.min(l2), t.min(t2), r.max(r2), b.max(b2)]
+                });
+            Ready {
+                area: area.path(),
+                fringe: fringe.map(|fringe| fringe.path()),
+                bounds,
+            }
+        })
+    }
+
+    /// Starts a render, letting go of what the one before did not use.
+    fn next_render(&mut self) {
+        self.render += 1;
+        let render = self.render;
+        self.prepared
+            .get_mut()
+            .expect("no panic while holding it")
+            .retain(|_, prepared| prepared.used + 1 >= render);
+    }
+}
+
 fn collect<'a>(
     ops: &[Op],
     store: &'a Store,
+    masks: &MaskCache,
     document_wobble: Wobble,
     wobble: Wobble,
     steps: &mut Vec<Step<'a>>,
 ) {
     for op in ops {
         match op {
-            Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
+            Op::Paint { stroke, clip } | Op::Erase { stroke, clip } => {
                 let Some(stroke) = store.strokes.get(stroke) else {
                     continue;
                 };
+                // A missing mask cuts nothing away; validation keeps it from
+                // happening.
+                let clip = clip
+                    .and_then(|id| store.masks.get(&id))
+                    .map(|mask| masks.area(mask));
                 steps.push(Step::Draw {
                     stroke,
-                    pen: Pen {
-                        width: stroke.width,
-                        brush: stroke.brush,
-                        seed: stroke.seed,
-                        wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
-                    },
+                    pen: pen(stroke, wobble),
                     erase: matches!(op, Op::Erase { .. }),
+                    clip,
                 });
+            }
+            Op::Fill {
+                coverage,
+                color,
+                antialias,
+                clip,
+            } => {
+                let Some(coverage) = store.masks.get(coverage) else {
+                    continue;
+                };
+                let clip = clip.and_then(|id| store.masks.get(&id));
+                let ready = masks.fill(coverage, clip, *antialias);
+                if ready.bounds.is_some() {
+                    steps.push(Step::Fill {
+                        color: color.0,
+                        ready,
+                    });
+                }
+            }
+            Op::ClearSelection { mask } => {
+                let Some(mask) = store.masks.get(mask) else {
+                    continue;
+                };
+                let ready = masks.area(mask);
+                if ready.bounds.is_some() {
+                    steps.push(Step::Clear { ready });
+                }
             }
             Op::Isolated(section) => {
                 steps.push(Step::Push(section.opacity));
                 collect(
                     &section.ops,
                     store,
+                    masks,
                     document_wobble,
                     section.wobble.unwrap_or(document_wobble),
                     steps,
@@ -1093,28 +1403,41 @@ mod tests {
             size: [96, 48],
         }];
         assert_eq!(check(&document), Err(Unsupported::CanvasChange));
-        paint_layer(&mut document).ops = vec![Op::Isolated(Box::new(Section {
-            ops: vec![Op::ClearSelection {
-                mask: ugu_core::ops::MaskId(0),
-            }],
-            opacity: 1.0,
-            wobble: None,
-        }))];
-        assert_eq!(check(&document), Err(Unsupported::Selection));
+        let mask = ugu_core::ops::MaskId(0);
         let fill = Op::Fill {
-            coverage: ugu_core::ops::MaskId(0),
+            coverage: mask,
             color: Rgba8([0, 0, 0, 255]),
             antialias: false,
-            clip: None,
+            clip: Some(mask),
+        };
+        paint_layer(&mut document).ops = vec![
+            fill.clone(),
+            Op::ClearSelection { mask },
+            Op::Isolated(Box::new(Section {
+                ops: vec![Op::TransformSelection {
+                    mask,
+                    transform: ugu_core::ops::Affine::IDENTITY,
+                    sampling: ugu_core::ops::Sampling::Nearest,
+                    keep_source: false,
+                }],
+                opacity: 1.0,
+                wobble: None,
+            })),
+        ];
+        assert_eq!(check(&document), Err(Unsupported::Selection));
+        let image = Op::PlaceImage {
+            asset: ugu_core::ops::AssetId([0; 32]),
+            transform: ugu_core::ops::Affine::IDENTITY,
+            sampling: ugu_core::ops::Sampling::Smooth,
         };
         document.layers = vec![tree_group(
             10,
             Blend::Overlay,
-            vec![tree_layer(1, vec![fill], |paint| {
+            vec![tree_layer(1, vec![fill, image], |paint| {
                 paint.clip_to_below = true
             })],
         )];
-        assert_eq!(check(&document), Err(Unsupported::Fill));
+        assert_eq!(check(&document), Err(Unsupported::Image));
         document.layers = vec![tree_group(
             10,
             Blend::Overlay,
@@ -1247,6 +1570,206 @@ mod tests {
                 render(&document, 3, threads).data_as_u8_slice() == single.data_as_u8_slice(),
                 "{threads} threads differ"
             );
+        }
+    }
+
+    /// Adds a mask of the pixels `inside` picks within `bounds`.
+    fn add_mask(
+        document: &mut Document,
+        bounds: [i32; 4],
+        inside: impl Fn(i32, i32) -> bool,
+    ) -> ugu_core::ops::MaskId {
+        let [left, top, width, height] = bounds;
+        let row_bytes = ugu_core::store::Mask::row_bytes(width);
+        let mut bits = vec![0u8; row_bytes * height as usize];
+        for row in 0..height {
+            for column in 0..width {
+                if inside(left + column, top + row) {
+                    bits[row as usize * row_bytes + column as usize / 8] |= 0x80 >> (column % 8);
+                }
+            }
+        }
+        let id = ugu_core::ops::MaskId(document.store.masks.len() as u32);
+        let mask = ugu_core::store::Mask {
+            bounds,
+            bits: Arc::from(bits),
+        };
+        document.store.masks.insert(id, mask);
+        id
+    }
+
+    /// A blob with a hole and a stray column, so that runs start and end
+    /// inside strokes.
+    fn blob(x: i32, y: i32) -> bool {
+        let d = (x - 40) * (x - 40) + (y - 24) * (y - 24);
+        (30..300).contains(&d) || x == 70
+    }
+
+    fn with_ops(document: &Document, ops: Vec<Op>) -> Document {
+        let mut document = document.clone();
+        paint_layer(&mut document).ops = ops;
+        document
+    }
+
+    /// Each pixel of `cut` is `inside`'s where `mask` covers it and
+    /// `outside`'s elsewhere, byte for byte.
+    fn assert_cut(cut: &Pixmap, inside: &Pixmap, outside: &Pixmap, mask: &ugu_core::store::Mask) {
+        for y in 0..cut.height() {
+            for x in 0..cut.width() {
+                let expected = if mask.contains(i32::from(x), i32::from(y)) {
+                    at(inside, x, y)
+                } else {
+                    at(outside, x, y)
+                };
+                assert_eq!(at(cut, x, y), expected, "at {x}, {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn clipped_strokes_erasers_and_clears_change_only_the_masked_pixels() {
+        for antialias in [true, false] {
+            let mut document = document();
+            let red = line(&mut document, 8.0, 88.0, 24.0, RED, antialias);
+            let blue = line(&mut document, 20.0, 76.0, 22.0, BLUE, antialias);
+            let mask = add_mask(&mut document, [10, 4, 70, 40], blob);
+            let bits = document.store.masks[&mask].clone();
+            let paint = |stroke, clip| Op::Paint { stroke, clip };
+            let erase = |stroke, clip| Op::Erase { stroke, clip };
+            let empty = render(&with_ops(&document, vec![]), 3, 0);
+            let painted = render(&with_ops(&document, vec![paint(red, None)]), 3, 0);
+            let clipped = render(&with_ops(&document, vec![paint(red, Some(mask))]), 3, 0);
+            assert_cut(&clipped, &painted, &empty, &bits);
+            let erased = render(
+                &with_ops(&document, vec![paint(red, None), erase(blue, None)]),
+                3,
+                0,
+            );
+            let erased_inside = render(
+                &with_ops(&document, vec![paint(red, None), erase(blue, Some(mask))]),
+                3,
+                0,
+            );
+            assert_cut(&erased_inside, &erased, &painted, &bits);
+            let cleared = render(
+                &with_ops(
+                    &document,
+                    vec![paint(red, None), Op::ClearSelection { mask }],
+                ),
+                3,
+                0,
+            );
+            assert_cut(&cleared, &empty, &painted, &bits);
+        }
+    }
+
+    #[test]
+    fn a_fill_replaces_what_it_covers_and_goes_behind_its_edge() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, [220, 30, 30, 120], true);
+        let coverage = add_mask(&mut document, [10, 4, 70, 40], blob);
+        let clip = add_mask(&mut document, [0, 0, 96, 30], |_, _| true);
+        let half_green = Rgba8([0, 255, 0, 128]);
+        let green = premultiplied(half_green.0);
+        let under = render(
+            &with_ops(
+                &document,
+                vec![Op::Paint {
+                    stroke: red,
+                    clip: None,
+                }],
+            ),
+            0,
+            0,
+        );
+        for clip in [None, Some(clip)] {
+            let filled = render(
+                &with_ops(
+                    &document,
+                    vec![
+                        Op::Paint {
+                            stroke: red,
+                            clip: None,
+                        },
+                        Op::Fill {
+                            coverage,
+                            color: half_green,
+                            antialias: true,
+                            clip,
+                        },
+                    ],
+                ),
+                0,
+                0,
+            );
+            let mask = &document.store.masks[&coverage];
+            let cut = |y: i32| clip.is_none_or(|_| y < 30);
+            for y in 0..filled.height() {
+                for x in 0..filled.width() {
+                    let (cx, cy) = (i32::from(x), i32::from(y));
+                    let below = at(&under, x, y);
+                    let got = at(&filled, x, y);
+                    let next = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        .iter()
+                        .any(|(dx, dy)| mask.contains(cx + dx, cy + dy));
+                    if mask.contains(cx, cy) && cut(cy) {
+                        assert_eq!(got, green, "covered at {x}, {y}");
+                    } else if next && cut(cy) {
+                        let keep = 255 - u16::from(below[3]);
+                        let expected: [u8; 4] = std::array::from_fn(|c| {
+                            below[c] + ((u16::from(green[c]) * keep + 127) / 255) as u8
+                        });
+                        let off = (0..4).map(|c| got[c].abs_diff(expected[c])).max().unwrap();
+                        assert!(off <= 1, "edge at {x}, {y}: {got:?} against {expected:?}");
+                    } else {
+                        assert_eq!(got, below, "outside at {x}, {y}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A clipped stroke, a clipped fill, a clear and a stroke over them.
+    fn masked_work() -> (Document, Op) {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let coverage = add_mask(&mut document, [10, 4, 70, 40], blob);
+        let clip = add_mask(&mut document, [0, 0, 60, 48], |x, y| (x + y) % 9 != 0);
+        let fill = Op::Fill {
+            coverage,
+            color: Rgba8([0, 160, 90, 200]),
+            antialias: true,
+            clip: Some(clip),
+        };
+        let mixed = with_ops(
+            &document,
+            vec![
+                Op::Paint {
+                    stroke: red,
+                    clip: Some(clip),
+                },
+                fill.clone(),
+                Op::ClearSelection { mask: clip },
+                Op::Paint {
+                    stroke: red,
+                    clip: None,
+                },
+            ],
+        );
+        (mixed, fill)
+    }
+
+    #[test]
+    fn a_fill_stays_while_strokes_move_and_draws_alike_everywhere() {
+        let (mixed, fill) = masked_work();
+        let alone = with_ops(&mixed, vec![fill]);
+        assert!(render(&alone, 0, 0).data_as_u8_slice() == render(&alone, 1, 0).data_as_u8_slice());
+        for frame in [0, 5] {
+            let single = render(&mixed, frame, 0);
+            assert!(render(&mixed, frame, 8).data_as_u8_slice() == single.data_as_u8_slice());
+            for edge in [16, 64, 4096] {
+                assert!(max_difference(&render_tiled(&mixed, frame, edge, 8), &single) <= 1);
+            }
         }
     }
 
@@ -1407,6 +1930,7 @@ mod tests {
         let cases = [
             (with_layers(&base, &[below, above]), 3.0),
             (many_layers(), 20.0),
+            (masked_work().0, 3.0),
         ];
         for (document, limit) in cases {
             let plan = RenderPlan::new(&document, Purpose::Display);

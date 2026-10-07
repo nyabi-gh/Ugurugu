@@ -50,6 +50,14 @@ impl Surface {
         }
     }
 
+    /// `source` behind what is at `x`, `y`.
+    fn under(&mut self, x: i32, y: i32, source: [f32; 4]) {
+        if let Some(index) = self.index(x, y) {
+            let above = self.pixels[index];
+            self.pixels[index] = std::array::from_fn(|c| above[c] + source[c] * (1.0 - above[3]));
+        }
+    }
+
     fn set(&mut self, x: i32, y: i32, value: [f32; 4]) {
         if let Some(index) = self.index(x, y) {
             self.pixels[index] = value;
@@ -128,16 +136,35 @@ impl World {
                         }
                     }
                 }
+                // As 2.2.13 `applyFillStroke`: the colour replaces what the
+                // coverage holds, and an antialiased fill goes behind the
+                // pixels just outside it, within the clip.
                 Op::Fill {
                     coverage,
                     color,
+                    antialias,
                     clip,
-                    ..
                 } => {
                     let [r, g, b, a] = color.0.map(|c| f32::from(c) / 255.0);
-                    for (x, y) in self.masks[coverage].cells() {
+                    let color = [r * a, g * a, b * a, a];
+                    let covered: Vec<_> = self.masks[coverage].cells().collect();
+                    for &(x, y) in &covered {
                         if self.masked(*clip, x, y) {
-                            surface.over(x, y, [r * a, g * a, b * a, a]);
+                            surface.set(x, y, color);
+                        }
+                    }
+                    if *antialias {
+                        let mut fringe: Vec<_> = covered
+                            .iter()
+                            .flat_map(|&(x, y)| [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
+                            .filter(|cell| !covered.contains(cell))
+                            .collect();
+                        fringe.sort_unstable();
+                        fringe.dedup();
+                        for (x, y) in fringe {
+                            if self.masked(*clip, x, y) {
+                                surface.under(x, y, color);
+                            }
                         }
                     }
                 }
@@ -468,6 +495,43 @@ fn a_fill_keeps_its_coverage_while_lines_move() {
     assert_eq!(
         [odd.at(0, 1), odd.at(1, 1), odd.at(2, 1), odd.at(3, 1)],
         [CLEAR, BLUE, GREEN, CLEAR]
+    );
+}
+
+#[test]
+fn a_fill_replaces_what_it_covers_and_goes_behind_its_edge() {
+    let mut world = World::default();
+    let under = world.stroke([0, 0, 5, 1], RED);
+    let inside = world.mask([1, 0, 3, 1]);
+    let half_green = Rgba8([0, 255, 0, 128]);
+    let fill = |antialias| Op::Fill {
+        coverage: inside,
+        color: half_green,
+        antialias,
+        clip: None,
+    };
+    let green = [0.0, 128.0 / 255.0, 0.0, 128.0 / 255.0];
+    let plain = world.layer(&layer(vec![paint(under), fill(false)], [6, 1]), 0);
+    // Replaced, not put over the red.
+    assert_eq!(
+        [
+            plain.at(0, 0),
+            plain.at(1, 0),
+            plain.at(2, 0),
+            plain.at(3, 0)
+        ],
+        [RED, green, green, RED]
+    );
+    let smooth = world.layer(&layer(vec![paint(under), fill(true)], [6, 1]), 0);
+    // Behind the opaque red next to it, and alone where nothing was.
+    assert_eq!(
+        [smooth.at(0, 0), smooth.at(3, 0), smooth.at(5, 0)],
+        [RED, RED, CLEAR]
+    );
+    let lone = world.layer(&layer(vec![fill(true)], [6, 1]), 0);
+    assert_eq!(
+        [lone.at(0, 0), lone.at(3, 0), lone.at(4, 0)],
+        [green, green, CLEAR]
     );
 }
 

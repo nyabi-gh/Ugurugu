@@ -803,8 +803,10 @@ fn last_stroke(
         return None;
     };
     let (id, erase) = match paint.ops.last()? {
-        Op::Paint { stroke, .. } => (stroke, false),
-        Op::Erase { stroke, .. } => (stroke, true),
+        // A stroke drawn in a selection is left to a new split, which cuts
+        // it to the selection.
+        Op::Paint { stroke, clip: None } => (stroke, false),
+        Op::Erase { stroke, clip: None } => (stroke, true),
         _ => return None,
     };
     document.store.strokes.get(id).map(|stroke| (stroke, erase))
