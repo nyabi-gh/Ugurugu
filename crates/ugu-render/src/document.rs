@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::{Op, PaintLayer, Rgba8, Wobble};
+use ugu_core::ops::{Op, PaintLayer, Wobble};
 use ugu_core::store::{BrushEngine, Store, Stroke};
 use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::{Affine, BezPath, Rect};
+use vello_cpu::kurbo::{Affine, BezPath};
 use vello_cpu::peniko::{BlendMode, Compose, Mix};
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
@@ -172,6 +172,11 @@ struct Raster {
     threads: usize,
 }
 
+/// The size a canvas of `size` is drawn at with `shrink`.
+pub fn scaled_size(size: [u32; 2], shrink: u32) -> [u32; 2] {
+    size.map(|edge| edge.div_ceil(shrink))
+}
+
 /// Pixels along a side of a layer surface tile.
 pub const TILE_EDGE: u32 = 128;
 
@@ -265,13 +270,30 @@ impl DocumentRenderer {
         revisions: Option<&LayerRevisions>,
         pixmap: &mut Pixmap,
     ) -> bool {
-        let [width, height] = document.canvas.map(|edge| edge as u16);
+        self.render_scaled(document, plan, frame, revisions, 1, pixmap)
+    }
+
+    /// `render_plan` at 1/`shrink` of the canvas size in each direction,
+    /// `shrink` a power of two: the same plan and compositing with the
+    /// strokes drawn smaller. `pixmap` has the canvas size divided by
+    /// `shrink`, rounded up.
+    pub fn render_scaled(
+        &mut self,
+        document: &Document,
+        plan: &RenderPlan,
+        frame: i64,
+        revisions: Option<&LayerRevisions>,
+        shrink: u32,
+        pixmap: &mut Pixmap,
+    ) -> bool {
+        let size = scaled_size(document.canvas, shrink);
+        let [width, height] = size.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
         let edge = self.tile_edge;
         self.cache.retain(|id, cached| {
             plan.moves(*id).is_some()
-                && cached.surface.size() == document.canvas
+                && cached.surface.size() == size
                 && cached.surface.edge() == edge
         });
         let mut work = Vec::new();
@@ -291,7 +313,7 @@ impl DocumentRenderer {
                 .cache
                 .remove(id)
                 .and_then(|cached| Arc::try_unwrap(cached.surface).ok())
-                .unwrap_or_else(|| TiledSurface::new(document.canvas, edge));
+                .unwrap_or_else(|| TiledSurface::new(size, edge));
             work.push(Work {
                 id: *id,
                 paint,
@@ -304,7 +326,7 @@ impl DocumentRenderer {
         self.drawn = work.len();
         self.timings = Timings::default();
         if work.len() >= self.threads && self.threads > 1 {
-            self.draw_at_once(document, &mut work, frame);
+            self.draw_at_once(document, &mut work, frame, shrink);
         } else {
             for each in &mut work {
                 if self.stopped() {
@@ -312,7 +334,7 @@ impl DocumentRenderer {
                 }
                 self.timings +=
                     self.main
-                        .draw_layer(document, frame, each.paint, &mut each.surface);
+                        .draw_layer(document, frame, shrink, each.paint, &mut each.surface);
                 each.drawn = true;
             }
         }
@@ -363,7 +385,13 @@ impl DocumentRenderer {
 
     /// Draws each layer on one thread, as many layers at once as there are
     /// threads.
-    fn draw_at_once(&mut self, document: &Document, work: &mut [Work<'_>], frame: u32) {
+    fn draw_at_once(
+        &mut self,
+        document: &Document,
+        work: &mut [Work<'_>],
+        frame: u32,
+        shrink: u32,
+    ) {
         while self.singles.len() < self.threads {
             self.singles.push(Raster::new(self.level, 0));
         }
@@ -389,8 +417,13 @@ impl DocumentRenderer {
                             };
                             let mut slot = slot.lock().expect("one worker per layer");
                             let each = &mut **slot;
-                            timings +=
-                                raster.draw_layer(document, frame, each.paint, &mut each.surface);
+                            timings += raster.draw_layer(
+                                document,
+                                frame,
+                                shrink,
+                                each.paint,
+                                &mut each.surface,
+                            );
                             each.drawn = true;
                         }
                     })
@@ -424,11 +457,13 @@ impl Raster {
         }
     }
 
-    /// Draws a paint layer's own pixels into the tiles its strokes reach.
+    /// Draws a paint layer's own pixels at 1/`shrink` of their size into the
+    /// tiles its strokes reach.
     fn draw_layer(
         &mut self,
         document: &Document,
         frame: u32,
+        shrink: u32,
         paint: &PaintLayer,
         surface: &mut TiledSurface,
     ) -> Timings {
@@ -455,7 +490,8 @@ impl Raster {
                 continue;
             };
             // One more pixel each way for antialiasing.
-            let [left, top, right, bottom] = stroke::bounds(&stroke.points, pen);
+            let [left, top, right, bottom] =
+                stroke::bounds(&stroke.points, pen).map(|value| value / f64::from(shrink));
             let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
             let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
             if from[0] >= to[0] || from[1] >= to[1] {
@@ -491,17 +527,18 @@ impl Raster {
             Some(pixmap) if [pixmap.width(), pixmap.height()] == extent => pixmap,
             _ => Pixmap::new(extent[0], extent[1]),
         };
-        let timings = self.draw_steps(&steps, frame, None, origin, &mut pixmap);
+        let timings = self.draw_steps(&steps, frame, shrink, origin, &mut pixmap);
         surface.set(span, pixmap, reached);
         timings
     }
 
-    /// Draws `steps` into `pixmap`, which covers the document from `origin`.
+    /// Draws `steps` at 1/`shrink` of their size into `pixmap`, which covers
+    /// the scaled document from `origin`.
     fn draw_steps(
         &mut self,
         steps: &[Step<'_>],
         frame: u32,
-        background: Option<Rgba8>,
+        shrink: u32,
         origin: [u32; 2],
         pixmap: &mut Pixmap,
     ) -> Timings {
@@ -511,15 +548,10 @@ impl Raster {
         let outlined = started.elapsed();
 
         self.context.reset_and_resize(width, height);
-        self.context.set_transform(Affine::translate((
-            -f64::from(origin[0]),
-            -f64::from(origin[1]),
-        )));
-        if let Some(Rgba8([r, g, b, a])) = background {
-            self.context.set_paint(AlphaColor::from_rgba8(r, g, b, a));
-            self.context
-                .fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
-        }
+        self.context.set_transform(
+            Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
+                * Affine::scale(1.0 / f64::from(shrink)),
+        );
         let mut outlines = outlines.into_iter();
         for step in steps {
             match step {
@@ -644,7 +676,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use ugu_core::document::{Layer, LayerId};
-    use ugu_core::ops::{Blend, Section, StrokeId, merge_down};
+    use ugu_core::ops::{Blend, Rgba8, Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
 
     const RED: [u8; 4] = [220, 30, 30, 255];
@@ -1185,6 +1217,56 @@ mod tests {
                 cached(&mut renderer, &document, 1, &revisions),
                 plan.layers.len()
             );
+        }
+    }
+
+    /// Averages `shrink` × `shrink` blocks of `pixmap`.
+    fn box_down(pixmap: &Pixmap, shrink: u32) -> Vec<f32> {
+        let [width, height] = [pixmap.width(), pixmap.height()].map(u32::from);
+        let size = scaled_size([width, height], shrink);
+        let data = pixmap.data_as_u8_slice();
+        let mut out = vec![0.0; (size[0] * size[1] * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let to = (((y / shrink) * size[0] + x / shrink) * 4) as usize;
+                let from = ((y * width + x) * 4) as usize;
+                for channel in 0..4 {
+                    out[to + channel] += f32::from(data[from + channel]) / (shrink * shrink) as f32;
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_smaller_render_is_the_full_render_made_smaller() {
+        let (base, below, above) = two_layers();
+        // Lines 8 pixels wide over each other every 4 pixels: at a quarter
+        // size, where edges of several layers share a pixel, their coverage
+        // is averaged before it is combined, which a smaller render cannot
+        // avoid. A misplaced or missing layer would differ by far more.
+        let cases = [
+            (with_layers(&base, &[below, above]), 3.0),
+            (many_layers(), 20.0),
+        ];
+        for (document, limit) in cases {
+            let plan = RenderPlan::new(&document, Purpose::Display);
+            let full = render(&document, 2, 0);
+            for shrink in [2, 4] {
+                let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+                let mut small = Pixmap::new(size[0], size[1]);
+                let mut renderer = DocumentRenderer::new(4);
+                assert!(renderer.render_scaled(&document, &plan, 2, None, shrink, &mut small));
+                let expected = box_down(&full, shrink);
+                let mean = small
+                    .data_as_u8_slice()
+                    .iter()
+                    .zip(&expected)
+                    .map(|(a, b)| (f32::from(*a) - b).abs())
+                    .sum::<f32>()
+                    / expected.len() as f32;
+                assert!(mean < limit, "1/{shrink} differs by {mean} on average");
+            }
         }
     }
 }

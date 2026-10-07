@@ -18,6 +18,7 @@ use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
 use ugu_render::compose::{Split, Stamp, composite, premultiplied, stroke_color};
+use ugu_render::document::scaled_size;
 use ugu_render::live::LiveStroke;
 use ugu_render::raster::PixelRect;
 use ugu_render::stroke::Pen;
@@ -50,8 +51,10 @@ struct Playback {
     /// Frames of one document state, by frame within the cycle.
     frames: HashMap<u32, Arc<Pixmap>>,
     version: Version,
-    /// The frame on screen.
-    shown: Option<(u32, Arc<Pixmap>)>,
+    /// How much smaller than the canvas the frames are drawn.
+    shrink: u32,
+    /// The frame on screen and how much smaller it is.
+    shown: Option<(u32, Arc<Pixmap>, u32)>,
     /// The first frame of the frames asked for, which run as far as the
     /// budget allows.
     window: Option<u32>,
@@ -303,10 +306,12 @@ impl Canvas {
             Rendered::Frame {
                 version,
                 frame,
+                shrink,
                 pixels,
             } => {
                 if let Some(playback) = self.playback.as_mut()
                     && playback.version == version
+                    && playback.shrink == shrink
                 {
                     playback.frames.insert(frame, pixels);
                 }
@@ -331,6 +336,7 @@ impl Canvas {
             due: Instant::now(),
             frames: HashMap::new(),
             version: self.version(),
+            shrink: preview_shrink(self.scale),
             shown: None,
             window: None,
         });
@@ -343,13 +349,16 @@ impl Canvas {
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
         let period = Duration::from_secs_f64(1.0 / fps);
         let version = self.version();
-        let bytes = usize::from(self.display.width()) * usize::from(self.display.height()) * 4;
+        let shrink = preview_shrink(self.scale);
+        let [width, height] = scaled_size(document.canvas, shrink);
+        let bytes = width as usize * height as usize * 4;
         let ahead = (PLAYBACK_BUDGET / bytes.max(1)).clamp(1, frames as usize) as u32;
 
         let playback = self.playback.as_mut()?;
-        if playback.version != version {
+        if playback.version != version || playback.shrink != shrink {
             playback.frames.clear();
             playback.version = version;
+            playback.shrink = shrink;
             playback.window = None;
         }
         let cycle = frame_in_cycle(playback.next, frames);
@@ -360,7 +369,7 @@ impl Canvas {
         if now >= playback.due
             && let Some(pixels) = playback.frames.get(&cycle)
         {
-            playback.shown = Some((cycle, pixels.clone()));
+            playback.shown = Some((cycle, pixels.clone(), shrink));
             playback.next += 1;
             // Keep the cadence unless a wait for rendering put it behind.
             playback.due = if now - playback.due < period {
@@ -383,7 +392,8 @@ impl Canvas {
                 .collect();
             playback.window = Some(cycle);
             let snapshot = self.snapshot();
-            self.cache.request_frames(version, &missing, &snapshot);
+            self.cache
+                .request_frames(version, &missing, &snapshot, shrink);
         }
         if shown {
             tracing::debug!(frame = cycle, "playback frame shown");
@@ -608,7 +618,7 @@ impl Canvas {
             .as_ref()
             .and_then(|playback| playback.shown.as_ref())
         {
-            Some((_, pixels)) => pixels,
+            Some((_, pixels, _)) => pixels,
             None => &self.display,
         }
     }
@@ -616,14 +626,31 @@ impl Canvas {
     /// Where the document is drawn, in client physical pixels.
     pub fn placement(&self) -> Placement {
         let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
+        // A playback frame drawn smaller has fewer pixels to spread out.
+        let shrink = self
+            .playback
+            .as_ref()
+            .and_then(|playback| playback.shown.as_ref())
+            .map_or(1, |(_, _, shrink)| *shrink);
         Placement {
             offset: [
                 (f64::from(origin[0]) + self.offset[0]) as f32,
                 (f64::from(origin[1]) + self.offset[1]) as f32,
             ],
-            scale: self.scale as f32,
+            scale: (self.scale * f64::from(shrink)) as f32,
         }
     }
+}
+
+/// How much smaller playback frames can be drawn at `scale` (screen pixels
+/// per document pixel) and still have a pixel for every screen pixel: the
+/// largest such power of two up to 8.
+fn preview_shrink(scale: f64) -> u32 {
+    let mut shrink = 1;
+    while shrink < 8 && scale * f64::from(shrink * 2) <= 1.0 {
+        shrink *= 2;
+    }
+    shrink
 }
 
 /// The wobble amount of strokes on `layer`.
@@ -648,4 +675,13 @@ fn last_stroke(
         _ => return None,
     };
     document.store.strokes.get(id).map(|stroke| (stroke, erase))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn playback_frames_keep_a_pixel_for_every_screen_pixel() {
+        let shrinks = [1.5, 1.0, 0.6, 0.5, 0.3, 0.25, 0.2, 0.05].map(super::preview_shrink);
+        assert_eq!(shrinks, [1, 1, 1, 2, 2, 4, 4, 8]);
+    }
 }

@@ -22,7 +22,7 @@ use std::time::Instant;
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
 use ugu_render::compose::Split;
-use ugu_render::document::{DocumentRenderer, Purpose};
+use ugu_render::document::{DocumentRenderer, Purpose, scaled_size};
 use ugu_render::plan::RenderPlan;
 use vello_cpu::Pixmap;
 
@@ -54,6 +54,8 @@ pub enum Rendered {
     Frame {
         version: Version,
         frame: u32,
+        /// How much smaller than the canvas it is drawn.
+        shrink: u32,
         pixels: Arc<Pixmap>,
     },
 }
@@ -68,7 +70,7 @@ pub struct Snapshot {
 
 enum Job {
     Split(Key, Snapshot),
-    Frame(Version, u32, Snapshot),
+    Frame(Version, u32, u32, Snapshot),
     Export {
         document: Arc<Document>,
         frame: i64,
@@ -80,14 +82,14 @@ enum Job {
 #[derive(Clone, Copy, PartialEq)]
 enum Running {
     Split,
-    Frame(Version, u32),
+    Frame(Version, u32, u32),
     Export,
 }
 
 #[derive(Default)]
 struct Queue {
     split: Option<(Key, Snapshot)>,
-    frames: VecDeque<(Version, u32, Snapshot)>,
+    frames: VecDeque<(Version, u32, u32, Snapshot)>,
     exports: VecDeque<Job>,
     running: Option<Running>,
     quit: bool,
@@ -159,11 +161,18 @@ impl CacheWorker {
     }
 
     /// Replaces the playback frames waiting to be rendered, the first due
-    /// first. Layers that do not move are drawn once for all of them.
-    pub fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot) {
+    /// first, at 1/`shrink` of the canvas size. Layers that do not move are
+    /// drawn once for all of them.
+    pub fn request_frames(
+        &self,
+        version: Version,
+        frames: &[u32],
+        snapshot: &Snapshot,
+        shrink: u32,
+    ) {
         self.renders
             .shared
-            .request_frames(version, frames, snapshot);
+            .request_frames(version, frames, snapshot, shrink);
     }
 }
 
@@ -179,14 +188,14 @@ impl Shared {
         self.wake.notify_one();
     }
 
-    fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot) {
+    fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot, shrink: u32) {
         let mut queue = self.queue.lock().expect("queue lock");
         queue.frames = frames
             .iter()
-            .map(|&frame| (version, frame, snapshot.clone()))
+            .map(|&frame| (version, frame, shrink, snapshot.clone()))
             .collect();
-        if let Some(Running::Frame(running, frame)) = queue.running
-            && !(running == version && frames.contains(&frame))
+        if let Some(Running::Frame(running, frame, running_shrink)) = queue.running
+            && !(running == version && running_shrink == shrink && frames.contains(&frame))
         {
             self.stop.store(true, Ordering::Relaxed);
         }
@@ -224,10 +233,10 @@ fn next(shared: &Shared) -> Option<Job> {
         }
         let job = if let Some((key, snapshot)) = queue.split.take() {
             Some((Running::Split, Job::Split(key, snapshot)))
-        } else if let Some((version, frame, snapshot)) = queue.frames.pop_front() {
+        } else if let Some((version, frame, shrink, snapshot)) = queue.frames.pop_front() {
             Some((
-                Running::Frame(version, frame),
-                Job::Frame(version, frame, snapshot),
+                Running::Frame(version, frame, shrink),
+                Job::Frame(version, frame, shrink, snapshot),
             ))
         } else {
             queue.exports.pop_front().map(|job| (Running::Export, job))
@@ -271,16 +280,17 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
                 display,
             });
         }
-        Job::Frame(version, frame, snapshot) => {
+        Job::Frame(version, frame, shrink, snapshot) => {
             let document = &snapshot.document;
-            let [width, height] = document.canvas.map(|edge| edge as u16);
+            let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
             let mut pixels = Pixmap::new(width, height);
             let plan = RenderPlan::new(document, Purpose::Display);
-            let finished = renderer.render_plan(
+            let finished = renderer.render_scaled(
                 document,
                 &plan,
                 i64::from(frame),
                 Some(&snapshot.layers),
+                shrink,
                 &mut pixels,
             );
             if !finished {
@@ -291,6 +301,7 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             done(Rendered::Frame {
                 version,
                 frame,
+                shrink,
                 pixels: Arc::new(pixels),
             });
         }
@@ -364,7 +375,7 @@ mod tests {
                 frame: 0,
                 reply,
             });
-            queue.frames.push_back((version, 3, state.clone()));
+            queue.frames.push_back((version, 3, 1, state.clone()));
             queue.split = Some((
                 Key {
                     version,
@@ -392,11 +403,15 @@ mod tests {
             document: 0,
             revision: 0,
         };
-        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2));
-        // A list that still has the frame keeps it going; one without stops it.
-        shared.request_frames(version, &[2, 3], &state);
+        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2, 1));
+        // A list that still has the frame keeps it going; one without it, or
+        // at another size, stops it.
+        shared.request_frames(version, &[2, 3], &state, 1);
         assert!(!shared.stop.load(Ordering::Relaxed));
-        shared.request_frames(version, &[3], &state);
+        shared.request_frames(version, &[2, 3], &state, 2);
+        assert!(shared.stop.load(Ordering::Relaxed));
+        shared.stop.store(false, Ordering::Relaxed);
+        shared.request_frames(version, &[3], &state, 1);
         assert!(shared.stop.load(Ordering::Relaxed));
         shared.stop.store(false, Ordering::Relaxed);
         let key = Key {
