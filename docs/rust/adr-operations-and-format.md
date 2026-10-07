@@ -92,7 +92,7 @@ thumbnail.png        선택. 파생 데이터라 읽을 때 믿지 않는다
 - 연산 enum에 mode와 무관한 optional 조합이 없다. `TransformSelection`에 `drawDestination=false`가 섞이는 대신 `ClearSelection`이 따로 있다.
 - 병합이 2.2.13보다 넓게 허용된다(불투명도·모션 차이).
 - 채우기는 움직이지 않는다. 2.2.13의 새 채우기와 같은 모습이다.
-- 남은 일: undo delta 형식(M1), 브러시·모션 필드(M2), 문자 도구가 만드는 연산(M4. 적용 시 윤곽을 `Fill`과 `Paint`로 확정)은 각 단계에서 이 enum을 넓혀 정한다.
+- 남은 일: undo delta 형식(M1), 브러시·모션 필드(M2, [m2-plan.md](m2-plan.md) 3절), 문자 도구가 만드는 연산(M4. 적용 시 윤곽을 `Fill`과 `Paint`로 확정)은 각 단계에서 이 enum을 넓혀 정한다.
 
 ## 6. 사용자 확인 (2026-10-07)
 
