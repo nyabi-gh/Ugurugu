@@ -619,12 +619,12 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 10~11일차 렌더러 비교 | 측정 완료(`tools/render-bench`, 2048² 교대 3회). Vello CPU가 1스레드에서 래스터화 3.4배, 8스레드에서 약 24배 빠르고 메모리는 비슷하다. tiny-skia와의 차이는 가장자리 안티에일리어싱뿐이다. Vello CPU 채택, Vello GPU 보류로 확정. Vello GPU는 래스터화가 CPU 8스레드보다 5배 느려(전처리가 1스레드) 재생 경로에도 쓰지 않는다 |
 | 8~9일차 IME | 한국어·일본어 완료. 조합·받침·한자 후보, 로마자 변환·문절·후보창, Enter 누출, 캔버스 단축키를 실제 IME로 자동 시험해 100/125/150/200% 모두 통과. 캔버스 포커스 버그와 CJK fallback 글꼴 기준선 버그 수정. 일본어 첫 실패는 PC에 일본어 기본 입력 기능(사전)이 없었던 탓. Narrator와 후보창의 커서 위치 맞춤은 남음 |
 | 12일차 ADR | 완료. 레이어 연산 enum·병합(isolated section, 불투명도·모션 차이 허용)·채우기(확정 coverage)·선택 의미와 `.ugu2` 스키마 1. `crates/ugu-core` 의미 시험 7개. [adr-operations-and-format.md](rust/adr-operations-and-format.md) |
-| 14~15일차 | 시작 전 |
+| 13~14일차 | 완료. 장치 손실 복구(RemoveDevice로 3회 시험, 캔버스 보존, 0.4~0.9초), WARP fallback과 안내, 4K 최대화 창 입력→표시 p50 5.8 / p95 8.9ms(2560 창과 같음), WARP는 p50 59~76ms, 오프라인 진입점 확인. 실제 TDR은 M3, RDP는 M6. m0-evidence 8절 |
+| 15일차 | 시작 전 |
 
 다음 작업:
 
-1. 13~14일차: 4K·장치 손실·WARP/원격·오프라인 진입점 시험.
+1. 15일차: 기술 조합 결정, 버전 고정, M1 작업을 작은 변경 단위로 분해.
 2. 남은 기준선: 재생 fps(앱 내), export 중 UI 반응. 남은 IME: Narrator, 후보창을 커서 위치에 맞추기.
-3. 15일차: 기술 조합 결정, 버전 고정, M1 작업 분해.
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
