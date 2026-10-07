@@ -398,6 +398,12 @@ impl RenderThread {
         if let Some(update) = platform_output.accesskit_update.take() {
             (self.tree_sink)(update);
         }
+        // egui-winit gives the IME the whole text field to avoid, so the
+        // candidate window opens below the field; Windows apps open it below
+        // the caret, which a text tool on the canvas also needs.
+        if let Some(ime) = platform_output.ime.as_mut() {
+            ime.rect = ime.cursor_rect;
+        }
         self.egui_state
             .handle_platform_output(&self.window, platform_output);
         if remove_device {
