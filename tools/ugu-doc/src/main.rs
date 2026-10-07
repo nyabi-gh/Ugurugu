@@ -7,7 +7,11 @@
 //!   same make-up as the 2.2.13 ones (docs/rust/m0-evidence.md section 2):
 //!   the same canvases, layers, stroke and point counts and stroke shapes,
 //!   from a different random sequence.
-//! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file.
+//! - `ugu-doc many <operations> <layers> <out.ugu2>`: fixture 4's short
+//!   strokes, as many as asked, spread over that many layers, to measure the
+//!   operation limit (docs/rust/m3-plan.md M3-10).
+//! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file, and
+//!   lists its layers top first.
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
@@ -31,13 +35,24 @@ use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
-const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> \
+const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | many <operations> <layers> <out.ugu2> | info <file.ugu2> \
      | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | stop <file.ugu2>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["fixture", number, out] => fixture(number, Path::new(out)),
+        ["many", operations, layers, out] => match (operations.parse(), layers.parse()) {
+            (Ok(operations), Ok(layers)) if layers > 0 => {
+                let document = short_strokes_over(operations, layers);
+                document
+                    .validate()
+                    .map_err(|error| error.to_string())
+                    .and_then(|()| save(&document, Path::new(out)))
+                    .and_then(|()| info(Path::new(out)))
+            }
+            _ => Err(USAGE.to_owned()),
+        },
         ["info", file] => info(Path::new(file)),
         ["bench", file] => bench(Path::new(file), 10),
         ["bench", file, rounds] => rounds
@@ -120,7 +135,32 @@ fn info(path: &Path) -> Result<(), String> {
         document.store.assets.len(),
         bytes
     );
+    tree(&document.layers, 1);
     Ok(())
+}
+
+/// One line per layer, top first, indented by depth.
+fn tree(layers: &[Layer], depth: usize) {
+    for layer in layers.iter().rev() {
+        let (kind, operations) = match &layer.kind {
+            LayerKind::Paint(paint) => ("paint", paint.ops.len()),
+            LayerKind::Group(group) => ("group", group.children.len()),
+        };
+        println!(
+            "{:indent$}{kind} \"{}\" {operations} {:?} {:.0}%{}{}{}",
+            "",
+            layer.name,
+            layer.blend(),
+            layer.opacity() * 100.0,
+            if layer.visible { "" } else { " hidden" },
+            if layer.clip_to_below() { " clipped" } else { "" },
+            if layer.reference { " reference" } else { "" },
+            indent = depth * 2
+        );
+        if let LayerKind::Group(group) = &layer.kind {
+            tree(&group.children, depth + 1);
+        }
+    }
 }
 
 fn count(layers: &[Layer], total: &mut usize, operations: &mut usize) {
@@ -808,14 +848,26 @@ fn long_strokes() -> Document {
 
 /// 4: twenty thousand short strokes, the most a document may hold.
 fn short_strokes() -> Document {
+    short_strokes_over(ugu_core::document::limits::OPERATIONS, 1)
+}
+
+/// `operations` short strokes of six points, spread evenly over `layers`.
+fn short_strokes_over(operations: usize, layers: usize) -> Document {
     let mut builder = Builder::new([2048, 2048]);
-    let limit = ugu_core::document::limits::OPERATIONS;
-    let layer = builder.paint("Short strokes", limit, |_| Shape {
-        width: (2.0, 8.0),
-        reach: 0.01,
-        ..Shape::plain(6)
-    });
-    builder.document.layers.push(layer);
+    for index in 0..layers {
+        let strokes = operations / layers + usize::from(index < operations % layers);
+        let name = if layers == 1 {
+            "Short strokes".to_owned()
+        } else {
+            format!("Short strokes {index}")
+        };
+        let layer = builder.paint(&name, strokes, |_| Shape {
+            width: (2.0, 8.0),
+            reach: 0.01,
+            ..Shape::plain(6)
+        });
+        builder.document.layers.push(layer);
+    }
     builder.document
 }
 
