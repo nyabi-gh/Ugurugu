@@ -604,7 +604,7 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 ## 11. Rust 3.0 재작성 — M0 완료(펜 제외), M1 완료, M2 완료
 
-계획은 [RUST_WINDOWS_PORT_PLAN.md](RUST_WINDOWS_PORT_PLAN.md), 범위·결정은 [rust/scope.md](rust/scope.md), 측정·실증 근거는 [rust/m0-evidence.md](rust/m0-evidence.md)에 둔다. 작업 브랜치는 `rust/m0`이다. 이 절은 진행 상태만 적는다.
+계획은 [RUST_WINDOWS_PORT_PLAN.md](RUST_WINDOWS_PORT_PLAN.md), 범위·결정은 [rust/scope.md](rust/scope.md), 측정·실증 근거는 [rust/m0-evidence.md](rust/m0-evidence.md)에 둔다. M0·M1·M2는 main에 합쳤고, 다음 단계는 새 브랜치에서 한다. 이 절은 진행 상태만 적는다.
 
 2026-10-07 기준:
 
@@ -623,12 +623,11 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 | 15일차 마무리 | 완료. 기술 조합·버전 고정 정책·M0 종료 조건 대비·위험표·M1 분해(10단계). 펜만 미충족으로 M6 전 gate에 이월. [m0-close.md](rust/m0-close.md) |
 | M1 도메인·새 저장 | 완료(`rust/m1`). 레이어 트리·저장소·검증, 원자적 커밋, undo/redo·macro·dirty 판정, `.ugu2` 쓰기·읽기·거부·안전 저장(`ReplaceFileW`), 구형 판별, headless 도구. 커밋 0.2ms(연산 상한), `.ugu2`는 2.2.13보다 1/5~1/9 크기에 저장·열기 모두 빠름. m0-evidence 9절 |
 
-| M2 첫 드로잉 완주 | 완료(`rust/m2`). 분해·결정·진행은 [rust/m2-plan.md](rust/m2-plan.md). Classic 모션(C++ 골든 값과 비트 단위 일치), 획 합집합 윤곽, Vello CPU 문서 렌더러, `ugu-session`, 레이어 분할 캐시와 pen-up 증분, 진행 중 획, 확대·이동 표시, 제품 UI, 타임라인·재생, 파일, PNG. 입력→표시는 M1과 같은 수준, pen-up p95 1.1ms(③), 재생은 ③④도 2초 안에 25fps. m0-evidence 10절 |
+| M2 첫 드로잉 완주 | 완료, main에 합침(PR #20, CI 통과). 분해·결정·진행은 [rust/m2-plan.md](rust/m2-plan.md). Classic 모션(C++ 골든 값과 비트 단위 일치), 획 합집합 윤곽, Vello CPU 문서 렌더러, `ugu-session`, 레이어 분할 캐시와 pen-up 증분, 진행 중 획, 확대·이동 표시, 제품 UI, 타임라인·재생, 파일, PNG. 입력→표시는 M1과 같은 수준, pen-up p95 1.1ms(③), 재생은 ③④도 2초 안에 25fps. m0-evidence 10절 |
 
 다음 작업:
 
-1. `rust/m2` CI 확인 후 main에 합치기(사용자 확인). M1은 main `fa56513`에 합쳤다(PR #19).
-2. M3 렌더·스케줄러 완성: 시작 전에 작은 단위로 나눈다. M2에서 넘긴 것: 연산 상한, 4096² 재생 예산, 2560 창 iflip 승격 조사.
-3. 펜 장치를 확보하면 펜 경로 실증(M6 전 필수 gate).
+1. M3 렌더·스케줄러 완성: 시작 전에 작은 단위로 나눠 m2-plan.md처럼 문서로 남긴다. M2에서 넘긴 것: 연산 상한(20,000), 4096² 재생 예산, 2560 창 iflip 승격 조사.
+2. 펜 장치를 확보하면 펜 경로 실증(M6 전 필수 gate).
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.
