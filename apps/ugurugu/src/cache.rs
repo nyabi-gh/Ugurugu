@@ -6,7 +6,7 @@
 //! compete with each other for the processor.
 //!
 //! Work goes in this order: the canvas split for editing, playback frames
-//! (the one due first at the front), then export frames. Only the newest
+//! (the one due first at the front), export frames, then layer thumbnails. Only the newest
 //! split and the newest list of playback frames matter; anything waiting
 //! that they replace is dropped. A render under way that is no longer wanted
 //! is stopped between layers or rows, and an export stopped that way starts
@@ -58,7 +58,16 @@ pub enum Rendered {
         shrink: u32,
         pixels: Arc<Pixmap>,
     },
+    /// Layers' own pixels, small, each with the revision it shows; a
+    /// render stopped for other work brings what it had.
+    Thumbnails {
+        document: u64,
+        thumbnails: Vec<(LayerId, u64, Pixmap)>,
+    },
 }
+
+/// Thumbnails fit in this many pixels, twice the layer list's size.
+pub const THUMBNAIL: [u32; 2] = [96, 64];
 
 /// A document state handed to the worker, with what its layers are made
 /// from.
@@ -76,6 +85,7 @@ enum Job {
         frame: i64,
         reply: Sender<Pixmap>,
     },
+    Thumbnails(u64, Vec<(LayerId, u64)>, Arc<Document>),
 }
 
 /// What the worker is doing now.
@@ -84,6 +94,7 @@ enum Running {
     Split,
     Frame(Version, u32, u32),
     Export,
+    Thumbnails,
 }
 
 #[derive(Default)]
@@ -91,6 +102,8 @@ struct Queue {
     split: Option<(Key, Snapshot)>,
     frames: VecDeque<(Version, u32, u32, Snapshot)>,
     exports: VecDeque<Job>,
+    /// The newest list of thumbnails wanted.
+    thumbnails: Option<Job>,
     running: Option<Running>,
     quit: bool,
 }
@@ -146,7 +159,8 @@ impl CacheWorker {
                     queue.running = None;
                     let idle = queue.split.is_none()
                         && queue.frames.is_empty()
-                        && queue.exports.is_empty();
+                        && queue.exports.is_empty()
+                        && queue.thumbnails.is_none();
                     drop(queue);
                     // Measured free: drawing allocates it again at no cost.
                     if idle {
@@ -182,6 +196,20 @@ impl CacheWorker {
         self.renders
             .shared
             .request_frames(version, frames, snapshot, shrink);
+    }
+
+    /// Replaces the thumbnails waiting to be drawn: `layers` of `document`
+    /// with the revisions they are wanted at.
+    pub fn request_thumbnails(
+        &self,
+        generation: u64,
+        layers: Vec<(LayerId, u64)>,
+        document: Arc<Document>,
+    ) {
+        let shared = &self.renders.shared;
+        let mut queue = shared.queue.lock().expect("queue lock");
+        queue.thumbnails = Some(Job::Thumbnails(generation, layers, document));
+        shared.wake.notify_one();
     }
 }
 
@@ -247,8 +275,13 @@ fn next(shared: &Shared) -> Option<Job> {
                 Running::Frame(version, frame, shrink),
                 Job::Frame(version, frame, shrink, snapshot),
             ))
+        } else if let Some(job) = queue.exports.pop_front() {
+            Some((Running::Export, job))
         } else {
-            queue.exports.pop_front().map(|job| (Running::Export, job))
+            queue
+                .thumbnails
+                .take()
+                .map(|job| (Running::Thumbnails, job))
         };
         if let Some((running, job)) = job {
             queue.running = Some(running);
@@ -333,6 +366,22 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             tracing::debug!(ms = ms(), "export frame rendered");
             let _ = reply.send(pixels);
         }
+        Job::Thumbnails(generation, layers, document) => {
+            let mut thumbnails = Vec::new();
+            for (id, revision) in layers {
+                if renderer.is_stopped() {
+                    break;
+                }
+                if let Some(pixels) = renderer.thumbnail(&document, id, THUMBNAIL) {
+                    thumbnails.push((id, revision, pixels));
+                }
+            }
+            tracing::debug!(ms = ms(), count = thumbnails.len(), "thumbnails rendered");
+            done(Rendered::Thumbnails {
+                document: generation,
+                thumbnails,
+            });
+        }
     }
     None
 }
@@ -369,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn a_split_goes_before_frames_and_frames_before_exports() {
+    fn a_split_goes_before_frames_frames_before_exports_and_exports_before_thumbnails() {
         let shared = shared();
         let version = Version {
             document: 0,
@@ -379,6 +428,11 @@ mod tests {
         {
             let mut queue = shared.queue.lock().unwrap();
             let (reply, _) = channel();
+            queue.thumbnails = Some(Job::Thumbnails(
+                0,
+                vec![(LayerId(1), 1)],
+                state.document.clone(),
+            ));
             queue.exports.push_back(Job::Export {
                 document: state.document.clone(),
                 frame: 0,
@@ -394,14 +448,15 @@ mod tests {
                 state,
             ));
         }
-        let order: Vec<_> = (0..3)
+        let order: Vec<_> = (0..4)
             .map(|_| match next(&shared).unwrap() {
                 Job::Split(..) => "split",
                 Job::Frame(..) => "frame",
                 Job::Export { .. } => "export",
+                Job::Thumbnails(..) => "thumbnails",
             })
             .collect();
-        assert_eq!(order, ["split", "frame", "export"]);
+        assert_eq!(order, ["split", "frame", "export", "thumbnails"]);
     }
 
     #[test]

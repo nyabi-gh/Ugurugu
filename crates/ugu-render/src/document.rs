@@ -248,7 +248,7 @@ impl DocumentRenderer {
         surface_estimate(document, plan, shrink, self.tile_edge) > self.surface_budget
     }
 
-    pub(crate) fn is_stopped(&self) -> bool {
+    pub fn is_stopped(&self) -> bool {
         self.stopped()
     }
 
@@ -270,6 +270,21 @@ impl DocumentRenderer {
             .main
             .draw_layer(document, frame, shrink, paint, &mut surface);
         surface
+    }
+
+    /// Paint layer `id`'s own pixels on frame 0, drawn smaller by a whole
+    /// factor so that they fit in `fit`; `None` for a group or a missing
+    /// layer.
+    pub fn thumbnail(&mut self, document: &Document, id: LayerId, fit: [u32; 2]) -> Option<Pixmap> {
+        let Some(LayerKind::Paint(paint)) = document.layer(id).map(|layer| &layer.kind) else {
+            return None;
+        };
+        let shrink = (0..2)
+            .map(|axis| document.canvas[axis].div_ceil(fit[axis].max(1)))
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        Some(self.draw_alone(document, 0, shrink, paint).to_pixmap())
     }
 
     /// Uses tiles of `edge` pixels, a multiple of 4, instead of `TILE_EDGE`.
@@ -1370,6 +1385,34 @@ mod tests {
                 assert!(mean < limit, "1/{shrink} differs by {mean} on average");
             }
         }
+    }
+
+    #[test]
+    fn a_thumbnail_fits_and_shows_the_layer_alone() {
+        let document = many_layers();
+        let mut renderer = DocumentRenderer::new(0);
+        let mut seen = 0;
+        for layer in &document.layers {
+            let Some(thumbnail) = renderer.thumbnail(&document, layer.id, [48, 32]) else {
+                assert!(matches!(layer.kind, LayerKind::Group(_)));
+                continue;
+            };
+            assert!(thumbnail.width() <= 48 && thumbnail.height() <= 32);
+            let shrink = document.canvas[0]
+                .div_ceil(48)
+                .max(document.canvas[1].div_ceil(32));
+            assert_eq!(
+                [thumbnail.width(), thumbnail.height()].map(u32::from),
+                scaled_size(document.canvas, shrink)
+            );
+            seen += usize::from(
+                thumbnail
+                    .data_as_u8_slice()
+                    .chunks(4)
+                    .any(|pixel| pixel[3] > 0),
+            );
+        }
+        assert!(seen > 0);
     }
 
     #[test]

@@ -8,7 +8,9 @@
 //! are renamed by double-click or F2. Groups also fold, which 2.2.13's list
 //! did not.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, Ui, Vec2};
 use ugu_core::command;
@@ -42,6 +44,57 @@ pub struct LayerDock {
     opacity: Option<(LayerId, f32)>,
     /// The layer being dragged in the list.
     dragging: Option<LayerId>,
+    thumbnails: HashMap<LayerId, Thumbnail>,
+}
+
+/// A layer's thumbnail: premultiplied pixels, what they were made from, and
+/// the texture showing them on the paper colour.
+struct Thumbnail {
+    key: u64,
+    size: [usize; 2],
+    pixels: Arc<Vec<u8>>,
+    texture: egui::TextureHandle,
+}
+
+/// Puts `layers` over each other, bottom first, Normal at their opacity.
+fn stack(layers: &[(&[u8], f32)], size: [usize; 2]) -> Vec<u8> {
+    let mut out = vec![0u8; size[0] * size[1] * 4];
+    for (pixels, opacity) in layers {
+        for (to, from) in out
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(pixels.as_chunks::<4>().0)
+        {
+            let alpha = f32::from(from[3]) * opacity / 255.0;
+            for channel in 0..4 {
+                let source = f32::from(from[channel]) * opacity;
+                to[channel] = (source + f32::from(to[channel]) * (1.0 - alpha))
+                    .round()
+                    .min(255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// `pixels` over the paper colour, for showing.
+fn on_paper(pixels: &[u8], size: [usize; 2], paper: [u8; 4]) -> egui::ColorImage {
+    let rgba: Vec<u8> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|pixel| {
+            let rest = 1.0 - f32::from(pixel[3]) / 255.0;
+            let mix = |channel: usize| {
+                (f32::from(pixel[channel]) + f32::from(paper[channel]) * rest)
+                    .round()
+                    .min(255.0) as u8
+            };
+            [mix(0), mix(1), mix(2), 255]
+        })
+        .collect();
+    egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
 }
 
 /// Where a dragged layer would land.
@@ -166,7 +219,98 @@ fn report(refusal: &mut Option<String>, result: Result<Outcome, EditError>) {
 }
 
 impl LayerDock {
+    /// Brings the thumbnails up to date with the canvas's, groups made from
+    /// their children.
+    fn refresh_thumbnails(&mut self, ctx: &egui::Context, canvas: &Canvas) {
+        let document = canvas.session().document();
+        let paper = document.background.0;
+        self.refresh(ctx, canvas, &document.layers, paper);
+        self.thumbnails
+            .retain(|id, _| document.layer(*id).is_some());
+    }
+
+    fn refresh(&mut self, ctx: &egui::Context, canvas: &Canvas, layers: &[Layer], paper: [u8; 4]) {
+        for layer in layers {
+            let made = match &layer.kind {
+                LayerKind::Paint(_) => canvas.thumbnail(layer.id).and_then(|(revision, pixmap)| {
+                    if self
+                        .thumbnails
+                        .get(&layer.id)
+                        .is_some_and(|thumbnail| thumbnail.key == revision)
+                    {
+                        return None;
+                    }
+                    let size = [usize::from(pixmap.width()), usize::from(pixmap.height())];
+                    Some((revision, size, pixmap.data_as_u8_slice().to_vec()))
+                }),
+                LayerKind::Group(group) => {
+                    self.refresh(ctx, canvas, &group.children, paper);
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    let shown: Vec<_> = group
+                        .children
+                        .iter()
+                        .filter(|child| child.visible)
+                        .filter_map(|child| {
+                            self.thumbnails
+                                .get(&child.id)
+                                .map(|thumbnail| (child, thumbnail))
+                        })
+                        .collect();
+                    for (child, thumbnail) in &shown {
+                        (child.id.0, thumbnail.key, child.opacity().to_bits()).hash(&mut hasher);
+                    }
+                    let key = hasher.finish();
+                    let size = shown.first().map(|(_, thumbnail)| thumbnail.size);
+                    match size {
+                        Some(size)
+                            if self
+                                .thumbnails
+                                .get(&layer.id)
+                                .is_none_or(|thumbnail| thumbnail.key != key) =>
+                        {
+                            let parts: Vec<(&[u8], f32)> = shown
+                                .iter()
+                                .filter(|(_, thumbnail)| thumbnail.size == size)
+                                .map(|(child, thumbnail)| {
+                                    (thumbnail.pixels.as_slice(), child.opacity())
+                                })
+                                .collect();
+                            Some((key, size, stack(&parts, size)))
+                        }
+                        _ => None,
+                    }
+                }
+            };
+            if let Some((key, size, pixels)) = made {
+                let image = on_paper(&pixels, size, paper);
+                let options = egui::TextureOptions::LINEAR;
+                match self.thumbnails.get_mut(&layer.id) {
+                    Some(thumbnail) => {
+                        thumbnail.texture.set(image, options);
+                        thumbnail.key = key;
+                        thumbnail.size = size;
+                        thumbnail.pixels = Arc::new(pixels);
+                    }
+                    None => {
+                        let texture =
+                            ctx.load_texture(format!("layer {}", layer.id.0), image, options);
+                        self.thumbnails.insert(
+                            layer.id,
+                            Thumbnail {
+                                key,
+                                size,
+                                pixels: Arc::new(pixels),
+                                texture,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {
+        self.refresh_thumbnails(ui.ctx(), canvas);
         let current = canvas.session().current_layer();
         let mut rows = Vec::new();
         let document = canvas.session().document();
@@ -265,10 +409,18 @@ impl LayerDock {
             egui::pos2(left + 12.0, card.center().y - THUMB.y / 2.0),
             THUMB,
         );
-        painter.rect(
+        painter.rect_filled(thumb, CornerRadius::same(4), dim(theme::BASE));
+        if let Some(thumbnail) = self.thumbnails.get(&row.id) {
+            let [width, height] = thumbnail.size.map(|edge| edge as f32);
+            let scale = (thumb.width() / width).min(thumb.height() / height);
+            let shown =
+                Rect::from_center_size(thumb.center(), egui::vec2(width * scale, height * scale));
+            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            painter.image(thumbnail.texture.id(), shown, uv, dim(Color32::WHITE));
+        }
+        painter.rect_stroke(
             thumb,
             CornerRadius::same(4),
-            dim(theme::BASE),
             Stroke::new(1.0, theme::BORDER),
             egui::StrokeKind::Inside,
         );

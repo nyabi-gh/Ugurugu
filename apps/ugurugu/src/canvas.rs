@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ugu_core::document::{Document, LayerKind};
+use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
@@ -103,6 +103,11 @@ pub struct Canvas {
     generation: u64,
     /// The document as last handed to the worker, shared by its jobs.
     snapshot: Option<(u64, Snapshot)>,
+    /// Small images of paint layers' own pixels, with the revision each
+    /// shows.
+    thumbnails: HashMap<LayerId, (u64, Arc<Pixmap>)>,
+    /// Thumbnails asked for and not yet back.
+    thumbnails_asked: bool,
 }
 
 fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
@@ -145,6 +150,8 @@ impl Canvas {
             playback: None,
             snapshot: None,
             generation: 0,
+            thumbnails: HashMap::new(),
+            thumbnails_asked: false,
         }
     }
 
@@ -166,6 +173,8 @@ impl Canvas {
         self.playback = None;
         self.upload_all();
         self.snapshot = None;
+        self.thumbnails.clear();
+        self.thumbnails_asked = false;
         self.placed = false;
         if let Some(area) = self.area {
             self.place(area);
@@ -289,9 +298,45 @@ impl Canvas {
         self.cache.renders()
     }
 
-    /// Asks for a new split when the shown one no longer matches. Playback
-    /// shows whole frames instead.
+    /// The thumbnail of paint layer `id` and the revision it shows.
+    pub fn thumbnail(&self, id: LayerId) -> Option<(u64, &Arc<Pixmap>)> {
+        self.thumbnails
+            .get(&id)
+            .map(|(revision, pixels)| (*revision, pixels))
+    }
+
+    /// Asks for the thumbnails of paint layers whose pixels changed since
+    /// theirs were drawn, unless some are already on their way.
+    fn sync_thumbnails(&mut self) {
+        if self.thumbnails_asked || matches!(self.interaction, Interaction::Drawing { .. }) {
+            return;
+        }
+        let revisions = self.session.layer_revisions();
+        let mut stale = Vec::new();
+        paint_layers(&self.session.document().layers, &mut |id| {
+            let revision = revisions.of(id);
+            if self
+                .thumbnails
+                .get(&id)
+                .is_none_or(|(shown, _)| *shown != revision)
+            {
+                stale.push((id, revision));
+            }
+        });
+        if stale.is_empty() {
+            return;
+        }
+        let snapshot = self.snapshot();
+        self.cache
+            .request_thumbnails(self.generation, stale, snapshot.document);
+        self.thumbnails_asked = true;
+    }
+
+    /// Asks for a new split when the shown one no longer matches, and for
+    /// thumbnails that are out of date. Playback shows whole frames instead
+    /// of a split.
     pub fn sync(&mut self) {
+        self.sync_thumbnails();
         if self.playback.is_some() {
             return;
         }
@@ -337,6 +382,21 @@ impl Canvas {
                 {
                     playback.frames.insert(frame, pixels);
                 }
+            }
+            Rendered::Thumbnails {
+                document,
+                thumbnails,
+            } => {
+                if document != self.generation {
+                    return;
+                }
+                self.thumbnails_asked = false;
+                for (id, revision, pixels) in thumbnails {
+                    self.thumbnails.insert(id, (revision, Arc::new(pixels)));
+                }
+                let document = self.session.document();
+                self.thumbnails
+                    .retain(|id, _| document.layer(*id).is_some());
             }
         }
     }
@@ -720,6 +780,16 @@ fn last_stroke(
         _ => return None,
     };
     document.store.strokes.get(id).map(|stroke| (stroke, erase))
+}
+
+/// Calls `each` with every paint layer's id, inside groups too.
+fn paint_layers(layers: &[ugu_core::document::Layer], each: &mut impl FnMut(LayerId)) {
+    for layer in layers {
+        match &layer.kind {
+            LayerKind::Paint(_) => each(layer.id),
+            LayerKind::Group(group) => paint_layers(&group.children, each),
+        }
+    }
 }
 
 #[cfg(test)]
