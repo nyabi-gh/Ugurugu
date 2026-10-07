@@ -633,3 +633,6 @@ mod tests {
         assert_eq!(a[8] >> 6, 0b10);
     }
 }
+
+#[cfg(test)]
+mod end_to_end;
