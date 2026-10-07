@@ -160,3 +160,24 @@ fn draw_move_save_reopen_and_export() {
     assert!(decoded == expected);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_render_of_the_document_before_an_open_is_not_taken() {
+    let (to_test, renders) = channel();
+    let mut canvas = Canvas::new(Document::new([120, 90]), move |rendered| {
+        let _ = to_test.send(rendered);
+    });
+    canvas.sync();
+    let old = renders
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the first document renders");
+    // The new document starts at the same revision, layer id and frame.
+    canvas.replace(Document::new(SIZE), true);
+    canvas.adopt(old);
+    assert_eq!(
+        [canvas.display().width(), canvas.display().height()],
+        [SIZE[0] as u16, SIZE[1] as u16]
+    );
+    stroke(&mut canvas, &renders, 80.0, 0.0);
+    assert_eq!(canvas.session().document().store.strokes.len(), 1);
+}

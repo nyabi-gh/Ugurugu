@@ -27,7 +27,7 @@ use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
-use crate::cache::{CacheWorker, Key, Rendered};
+use crate::cache::{CacheWorker, Key, Rendered, Version};
 use crate::input::{CanvasInput, Gesture};
 
 /// Shown around the document, opaque straight RGBA.
@@ -44,7 +44,7 @@ struct Playback {
     first: i64,
     /// Frames of one revision, by frame within the cycle.
     frames: HashMap<u32, Arc<Pixmap>>,
-    revision: u64,
+    version: Version,
     /// The frame on screen, and whether it is uploaded.
     shown: Option<(u32, Arc<Pixmap>)>,
     /// The first frame of the frames asked for, which run as far as the
@@ -81,8 +81,10 @@ pub struct Canvas {
     offset: [f64; 2],
     placed: bool,
     sample_count: usize,
-    notice: Option<&'static str>,
+    notice: Option<String>,
     playback: Option<Playback>,
+    /// Counts documents opened, so renders of an earlier one are told apart.
+    generation: u64,
     /// The document as last handed to the worker, shared by its jobs.
     snapshot: Option<(u64, Arc<Document>)>,
 }
@@ -125,6 +127,7 @@ impl Canvas {
             notice: None,
             playback: None,
             snapshot: None,
+            generation: 0,
         }
     }
 
@@ -137,6 +140,7 @@ impl Canvas {
     pub fn replace(&mut self, document: Document, saved: bool) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         self.session = Session::new(document, saved);
+        self.generation += 1;
         self.split = None;
         self.requested = None;
         self.display = Pixmap::new(width, height);
@@ -190,8 +194,15 @@ impl Canvas {
         self.sample_count
     }
 
-    pub fn notice(&self) -> Option<&'static str> {
-        self.notice
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    fn version(&self) -> Version {
+        Version {
+            document: self.generation,
+            revision: self.session.revision(),
+        }
     }
 
     pub fn scale(&self) -> f64 {
@@ -201,7 +212,7 @@ impl Canvas {
     fn key(&self) -> Key {
         let document = self.session.document();
         Key {
-            revision: self.session.revision(),
+            version: self.version(),
             layer: self.session.current_layer(),
             frame: frame_in_cycle(self.session.frame(), document.frames),
         }
@@ -277,12 +288,12 @@ impl Canvas {
                 }
             }
             Rendered::Frame {
-                revision,
+                version,
                 frame,
                 pixels,
             } => {
                 if let Some(playback) = self.playback.as_mut()
-                    && playback.revision == revision
+                    && playback.version == version
                 {
                     playback.frames.insert(frame, pixels);
                 }
@@ -301,11 +312,12 @@ impl Canvas {
             return;
         }
         self.edit(|_| ());
+        tracing::debug!("playback started");
         self.playback = Some(Playback {
             started: Instant::now(),
             first: self.session.frame(),
             frames: HashMap::new(),
-            revision: self.session.revision(),
+            version: self.version(),
             shown: None,
             window: None,
         });
@@ -316,14 +328,14 @@ impl Canvas {
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
         let document = self.session.document();
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
-        let revision = self.session.revision();
+        let version = self.version();
         let bytes = usize::from(self.display.width()) * usize::from(self.display.height()) * 4;
         let ahead = (PLAYBACK_BUDGET / bytes.max(1)).clamp(1, frames as usize) as u32;
 
         let playback = self.playback.as_mut()?;
-        if playback.revision != revision {
+        if playback.version != version {
             playback.frames.clear();
-            playback.revision = revision;
+            playback.version = version;
             playback.window = None;
         }
         let elapsed = now
@@ -355,10 +367,11 @@ impl Canvas {
                 .collect();
             playback.window = Some(cycle);
             let document = self.snapshot();
-            self.cache.request_frames(revision, &missing, &document);
+            self.cache.request_frames(version, &missing, &document);
         }
         if shown {
             // Keeps showing the last frame until the due one is ready.
+            tracing::debug!(frame = cycle, "playback frame shown");
             self.session.set_frame(frame);
             self.upload_all();
         }
@@ -435,11 +448,11 @@ impl Canvas {
         match begun {
             Ok(()) => {}
             Err(StrokeRefused::HiddenLayer) => {
-                self.notice = Some("The current layer is hidden");
+                self.notice = Some("The current layer is hidden".to_owned());
                 return;
             }
             Err(StrokeRefused::NoLayer) => {
-                self.notice = Some("There is no layer to draw on");
+                self.notice = Some("There is no layer to draw on".to_owned());
                 return;
             }
         }
@@ -493,6 +506,7 @@ impl Canvas {
             Ok(Outcome::NoChange) => return self.recomposite(rect),
             Err(error) => {
                 tracing::error!(%error, "the stroke could not be committed");
+                self.notice = Some(format!("The stroke was not added: {error}"));
                 return self.recomposite(rect);
             }
         }

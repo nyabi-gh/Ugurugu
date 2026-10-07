@@ -16,10 +16,19 @@ use ugu_render::compose::{Split, composite};
 use ugu_render::document::{DocumentRenderer, Purpose};
 use vello_cpu::Pixmap;
 
+/// Which state of which open document a render shows. Revisions start
+/// again with each document opened, so they alone could match a render of
+/// the document before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Version {
+    pub document: u64,
+    pub revision: u64,
+}
+
 /// What a split shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
-    pub revision: u64,
+    pub version: Version,
     pub layer: LayerId,
     /// The frame within the cycle.
     pub frame: u32,
@@ -33,7 +42,7 @@ pub enum Rendered {
         display: Pixmap,
     },
     Frame {
-        revision: u64,
+        version: Version,
         frame: u32,
         pixels: Arc<Pixmap>,
     },
@@ -42,7 +51,7 @@ pub enum Rendered {
 #[derive(Default)]
 struct Queue {
     split: Option<(Key, Arc<Document>)>,
-    frames: VecDeque<(u64, u32, Arc<Document>)>,
+    frames: VecDeque<(Version, u32, Arc<Document>)>,
     stop: bool,
 }
 
@@ -53,7 +62,7 @@ pub struct CacheWorker {
 
 enum Job {
     Split(Key, Arc<Document>),
-    Frame(u64, u32, Arc<Document>),
+    Frame(Version, u32, Arc<Document>),
 }
 
 impl CacheWorker {
@@ -87,7 +96,7 @@ impl CacheWorker {
                             );
                             tracing::debug!(
                                 ms = started.elapsed().as_secs_f64() * 1000.0,
-                                revision = key.revision,
+                                revision = key.version.revision,
                                 "canvas split rendered"
                             );
                             done(Rendered::Split {
@@ -96,7 +105,7 @@ impl CacheWorker {
                                 display,
                             });
                         }
-                        Job::Frame(revision, frame, document) => {
+                        Job::Frame(version, frame, document) => {
                             let [width, height] = document.canvas.map(|edge| edge as u16);
                             let mut pixels = Pixmap::new(width, height);
                             renderer.render(
@@ -111,7 +120,7 @@ impl CacheWorker {
                                 "playback frame rendered"
                             );
                             done(Rendered::Frame {
-                                revision,
+                                version,
                                 frame,
                                 pixels: Arc::new(pixels),
                             });
@@ -133,12 +142,12 @@ impl CacheWorker {
     }
 
     /// Replaces the frames waiting to be rendered for playback.
-    pub fn request_frames(&self, revision: u64, frames: &[u32], document: &Arc<Document>) {
+    pub fn request_frames(&self, version: Version, frames: &[u32], document: &Arc<Document>) {
         let (lock, wake) = &*self.queue;
         let mut queue = lock.lock().expect("queue lock");
         queue.frames = frames
             .iter()
-            .map(|&frame| (revision, frame, document.clone()))
+            .map(|&frame| (version, frame, document.clone()))
             .collect();
         wake.notify_one();
     }
@@ -155,8 +164,8 @@ fn next(queue: &(Mutex<Queue>, Condvar)) -> Option<Job> {
         if let Some((key, document)) = queue.split.take() {
             return Some(Job::Split(key, document));
         }
-        if let Some((revision, frame, document)) = queue.frames.pop_front() {
-            return Some(Job::Frame(revision, frame, document));
+        if let Some((version, frame, document)) = queue.frames.pop_front() {
+            return Some(Job::Frame(version, frame, document));
         }
         queue = wake.wait(queue).expect("queue lock");
     }

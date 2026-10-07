@@ -12,6 +12,8 @@
 //! - `ugu-doc render <file.ugu2> [threads]`: times drawing every frame. Brushes
 //!   and blend modes this build cannot draw yet are drawn as pens and Normal,
 //!   which keeps the amount of work close and says so.
+//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: the same change, saved, so the
+//!   app can open a fixture to measure with.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -24,7 +26,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads]";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads] | pen-only <in.ugu2> <out.ugu2>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,6 +39,7 @@ fn main() -> ExitCode {
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
         ["render", file] => render(Path::new(file), 8),
+        ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["render", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -154,32 +157,49 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Makes brushes and blend modes this build cannot draw yet pens and
+/// Normal, and says how many it changed.
+fn as_pens(document: &mut Document) -> Result<(), String> {
+    use ugu_render::document::check;
+
+    let Err(unsupported) = check(document) else {
+        return Ok(());
+    };
+    let mut changed = 0;
+    for layer in &mut document.layers {
+        if let LayerKind::Paint(paint) = &mut layer.kind
+            && (paint.blend != Blend::Normal || paint.clip_to_below)
+        {
+            paint.blend = Blend::Normal;
+            paint.clip_to_below = false;
+            changed += 1;
+        }
+    }
+    for stroke in document.store.strokes.values_mut() {
+        if stroke.brush.engine != BrushEngine::Line {
+            stroke.brush.engine = BrushEngine::Line;
+            changed += 1;
+        }
+    }
+    check(document).map_err(|left| format!("cannot draw {unsupported} or {left} yet"))?;
+    println!("drawn approximately: {changed} brushes or blend modes made pens or Normal");
+    Ok(())
+}
+
+fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
+    let mut document = open(from)?;
+    as_pens(&mut document)?;
+    save(&document, to)?;
+    info(to)
+}
+
 /// Draws every frame once to warm up, then twice more, and prints the
 /// first frame's time and p50 and max per frame of the later rounds.
 fn render(path: &Path, threads: u16) -> Result<(), String> {
-    use ugu_render::document::{DocumentRenderer, Purpose, check};
+    use ugu_render::document::{DocumentRenderer, Purpose};
 
     let mut document = open(path)?;
-    if let Err(unsupported) = check(&document) {
-        let mut changed = 0;
-        for layer in &mut document.layers {
-            if let LayerKind::Paint(paint) = &mut layer.kind
-                && (paint.blend != Blend::Normal || paint.clip_to_below)
-            {
-                paint.blend = Blend::Normal;
-                paint.clip_to_below = false;
-                changed += 1;
-            }
-        }
-        for stroke in document.store.strokes.values_mut() {
-            if stroke.brush.engine != BrushEngine::Line {
-                stroke.brush.engine = BrushEngine::Line;
-                changed += 1;
-            }
-        }
-        check(&document).map_err(|left| format!("cannot draw {unsupported} or {left} yet"))?;
-        println!("drawn approximately: {changed} brushes or blend modes made pens or Normal");
-    }
+    as_pens(&mut document)?;
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
