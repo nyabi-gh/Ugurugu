@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use ugu_core::document::Document;
 use ugu_render::gpu::{AdapterChoice, Gpu};
 use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::{DocumentView, Placement};
@@ -22,6 +21,7 @@ use winit::window::Window;
 
 use crate::cache::Rendered;
 use crate::canvas::{self, Canvas};
+use crate::files::{Action, FileEvent, Files};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
@@ -33,9 +33,12 @@ pub enum ToRender {
     /// A screen reader connected (`true`) or left.
     Accessibility(bool),
     AccessibilityAction(egui::accesskit::ActionRequest),
-    /// The cache worker finished a canvas split.
+    /// The cache worker finished a render.
     Cache(Box<Rendered>),
-    Shutdown,
+    /// A file dialog or the file thread finished.
+    File(Box<FileEvent>),
+    /// The user asked to close the window; unsaved changes come first.
+    CloseRequested,
 }
 
 /// How long to sleep when nothing is scheduled; any message wakes it earlier.
@@ -73,6 +76,16 @@ unsafe impl Send for EguiState {}
 /// UI Automation provider.
 pub type TreeSink = Box<dyn Fn(egui::accesskit::TreeUpdate) + Send>;
 
+/// How the render thread reaches the UI thread and the window.
+pub struct Links {
+    pub surface_source: SurfaceSource,
+    pub tree_sink: TreeSink,
+    /// The render thread's own message queue, for work finished elsewhere.
+    pub to_self: Sender<ToRender>,
+    /// The window handle, for dialogs to belong to.
+    pub hwnd: isize,
+}
+
 pub struct RenderThread {
     window: Arc<Window>,
     egui_ctx: egui::Context,
@@ -88,6 +101,8 @@ pub struct RenderThread {
     canvas: Canvas,
     ime: ImeProbe,
     panels: Panels,
+    files: Files,
+    title: String,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
     needs_frame: bool,
@@ -152,12 +167,17 @@ impl RenderThread {
     pub fn create(
         window: Arc<Window>,
         instance: wgpu::Instance,
-        surface_source: SurfaceSource,
-        tree_sink: TreeSink,
+        links: Links,
         egui_ctx: egui::Context,
         EguiState(egui_state): EguiState,
-        to_self: Sender<ToRender>,
+        open_at_start: Option<std::path::PathBuf>,
     ) -> Result<Self, String> {
+        let Links {
+            surface_source,
+            tree_sink,
+            to_self,
+            hwnd,
+        } = links;
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
         let surface = surface_source()?;
@@ -178,9 +198,22 @@ impl RenderThread {
             display,
             diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
             router: InputRouter::default(),
-            canvas: Canvas::new(Document::new([1024, 768]), move |rendered| {
-                let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
+            canvas: Canvas::new(Files::new_canvas(), {
+                let to_self = to_self.clone();
+                move |rendered| {
+                    let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
+                }
             }),
+            files: {
+                let mut files = Files::new(hwnd, move |event| {
+                    let _ = to_self.send(ToRender::File(Box::new(event)));
+                });
+                if let Some(path) = open_at_start {
+                    files.open_path(path);
+                }
+                files
+            },
+            title: String::new(),
             ime: ImeProbe::default(),
             panels: Panels::default(),
             present_latency: LatencyLog::default(),
@@ -270,6 +303,9 @@ impl RenderThread {
                 self.frame();
             }
             self.collect_display_times();
+            if self.files.should_close() {
+                break;
+            }
         }
         if let Some(summary) = self.display_latency.summary() {
             tracing::info!(%summary, "input to display latency");
@@ -303,7 +339,14 @@ impl RenderThread {
 
     fn apply(&mut self, message: ToRender) -> bool {
         match message {
-            ToRender::Shutdown => return false,
+            ToRender::CloseRequested => {
+                self.files.request(Action::Close, &mut self.canvas);
+                self.needs_frame = true;
+            }
+            ToRender::File(event) => {
+                self.files.handle(*event, &mut self.canvas);
+                self.needs_frame = true;
+            }
             ToRender::Accessibility(active) => {
                 if active {
                     self.egui_ctx.enable_accesskit();
@@ -374,6 +417,7 @@ impl RenderThread {
             display_latency,
             ime,
             panels,
+            files,
             diagnostics,
             ..
         } = self;
@@ -382,10 +426,11 @@ impl RenderThread {
         let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
-            ui::shortcuts(ui.ctx(), canvas);
+            ui::shortcuts(ui.ctx(), canvas, files);
+            files.confirm(ui.ctx(), canvas);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
-            egui::Panel::top("tools").show(ui, |ui| ui::tools(ui, canvas));
+            egui::Panel::top("tools").show(ui, |ui| ui::tools(ui, canvas, files));
             egui::Panel::bottom("timeline").show(ui, |ui| panels.timeline(ui, canvas));
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -400,6 +445,10 @@ impl RenderThread {
                     if let Some(notice) = canvas.notice() {
                         ui.separator();
                         ui.colored_label(ui.visuals().warn_fg_color, notice);
+                    }
+                    if let Some(message) = files.message() {
+                        ui.separator();
+                        ui.label(message);
                     }
                     if *diagnostics {
                         ui.separator();
@@ -452,6 +501,11 @@ impl RenderThread {
             .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
         self.needs_frame = false;
 
+        let title = self.files.title(&self.canvas);
+        if title != self.title {
+            self.window.set_title(&title);
+            self.title = title;
+        }
         if let Some(next) = self.canvas.tick(Instant::now()) {
             self.repaint_at = Some(self.repaint_at.map_or(next, |at| at.min(next)));
         }

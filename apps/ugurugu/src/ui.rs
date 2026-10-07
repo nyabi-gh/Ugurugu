@@ -12,6 +12,7 @@ use ugu_core::ops::{Rgba8, Wobble};
 use ugu_session::{Session, Tool};
 
 use crate::canvas::Canvas;
+use crate::files::{Action, Files};
 
 /// Edits in progress in the panels, committed as one undo step each when
 /// they end, not on every keystroke or drag step.
@@ -31,7 +32,7 @@ fn report(result: Result<Outcome, EditError>) {
 
 /// Handles the canvas's shortcuts in this frame's input. Text fields keep
 /// their keys, Enter that commits a composition included.
-pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas) {
+pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files) {
     if ctx.egui_wants_keyboard_input() {
         return;
     }
@@ -69,6 +70,18 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas) {
     if pressed(egui::Modifiers::NONE, egui::Key::P) {
         canvas.toggle_playback();
     }
+    if pressed(command, egui::Key::N) {
+        files.request(Action::New, canvas);
+    }
+    if pressed(command, egui::Key::O) {
+        files.request(Action::Open, canvas);
+    }
+    if pressed(command_shift, egui::Key::S) {
+        files.save_as();
+    }
+    if pressed(command, egui::Key::S) {
+        files.save(canvas);
+    }
 }
 
 fn report_bool(result: Result<bool, EditError>) {
@@ -77,8 +90,22 @@ fn report_bool(result: Result<bool, EditError>) {
     }
 }
 
-pub fn tools(ui: &mut egui::Ui, canvas: &mut Canvas) {
+pub fn tools(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files) {
     ui.horizontal_wrapped(|ui| {
+        if ui.button("New").clicked() {
+            files.request(Action::New, canvas);
+        }
+        if ui.button("Open").clicked() {
+            files.request(Action::Open, canvas);
+        }
+        if ui.button("Save").clicked() {
+            files.save(canvas);
+        }
+        if ui.button("Save as").clicked() {
+            files.save_as();
+        }
+        ui.separator();
+
         let tool = canvas.session().tool;
         if ui.selectable_label(tool == Tool::Pen, "Pen").clicked() {
             canvas.edit(|session| session.tool = Tool::Pen);

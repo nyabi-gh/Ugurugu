@@ -6,6 +6,7 @@
 mod app;
 mod cache;
 mod canvas;
+mod files;
 mod ime_probe;
 mod input;
 mod latency;

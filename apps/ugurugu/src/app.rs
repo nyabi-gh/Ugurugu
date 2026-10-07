@@ -19,7 +19,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
-use crate::render::{EguiState, RenderThread, SurfaceSource, ToRender, TreeSink};
+use crate::render::{EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink};
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
@@ -133,6 +133,8 @@ impl Session {
         });
         let (to_render, messages) = mpsc::channel();
         let to_self = to_render.clone();
+        let hwnd = hwnd_of(&window)?;
+        let open_at_start = std::env::args_os().nth(1).map(std::path::PathBuf::from);
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -140,11 +142,15 @@ impl Session {
                 let error = RenderThread::create(
                     render_window,
                     render_instance,
-                    surface_source,
-                    tree_sink,
+                    Links {
+                        surface_source,
+                        tree_sink,
+                        to_self,
+                        hwnd,
+                    },
                     egui_ctx,
                     egui_state,
-                    to_self,
+                    open_at_start,
                 )
                 .and_then(|render| render.run(&messages))
                 .err();
@@ -191,7 +197,7 @@ impl ApplicationHandler<UiEvent> for App {
         session.forward_pointer_input();
         let message = match event {
             // Closing waits for the render thread to report back.
-            WindowEvent::CloseRequested => ToRender::Shutdown,
+            WindowEvent::CloseRequested => ToRender::CloseRequested,
             event => ToRender::Window(event),
         };
         let _ = session.to_render.send(message);

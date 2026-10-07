@@ -132,6 +132,33 @@ impl Canvas {
         &self.session
     }
 
+    /// Puts `document` in place of the open one, with an empty history;
+    /// `saved` when it is on disk as it is.
+    pub fn replace(&mut self, document: Document, saved: bool) {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        self.session = Session::new(document, saved);
+        self.split = None;
+        self.requested = None;
+        self.display = Pixmap::new(width, height);
+        self.upload_all();
+        self.interaction = Interaction::Idle;
+        self.playback = None;
+        self.snapshot = None;
+        self.placed = false;
+        if let Some(area) = self.area {
+            self.place(area);
+        }
+    }
+
+    /// The document as it is now, shared with work off this thread.
+    pub fn snapshot_now(&mut self) -> Arc<Document> {
+        self.snapshot()
+    }
+
+    pub fn mark_saved(&mut self, state: ugu_core::history::StateId) {
+        self.session.mark_saved(state);
+    }
+
     /// Changes the session outside drawing. A stroke being drawn is dropped
     /// first, as the change may move or remove what it is drawn on.
     pub fn edit<R>(&mut self, change: impl FnOnce(&mut Session) -> R) -> R {

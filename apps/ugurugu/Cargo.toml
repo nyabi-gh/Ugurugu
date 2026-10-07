@@ -15,6 +15,7 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 ugu-core.workspace = true
+ugu-io.workspace = true
 ugu-render.workspace = true
 ugu-session.workspace = true
 ugu-win.workspace = true

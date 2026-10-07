@@ -3505,6 +3505,7 @@ name = "ugu-win"
 version = "3.0.0-dev"
 dependencies = [
  "tracing",
+ "windows",
  "windows-sys 0.61.2",
 ]
 
@@ -3520,6 +3521,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ugu-core",
+ "ugu-io",
  "ugu-render",
  "ugu-session",
  "ugu-win",
