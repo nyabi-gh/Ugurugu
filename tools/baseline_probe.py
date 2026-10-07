@@ -5,8 +5,8 @@
 (docs/rust/m0-evidence.md section 5): UI thread work per input batch and at
 pen-up, save, open, export cancel, and memory.
 
-Usage: python baseline_probe.py <stroke|save|open|cancel|memory> <app.exe>
-       <fixture.ugu> <output-dir> [--repeat N]
+Usage: python baseline_probe.py <stroke|save|open|cancel|memory|playback|export>
+       <app.exe> <fixture.ugu> <output-dir> [--repeat N] [--presentmon PATH]
 
 UI thread work is the thread's CPU cycles (QueryThreadCycleTime) from one
 input to the next, so it counts everything the thread did for that input,
@@ -41,6 +41,8 @@ user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
 user32.FindWindowExW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.LPCWSTR, wt.LPCWSTR]
 user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p]
 user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_wchar_p]
+user32.SendMessageTimeoutW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p,
+                                       ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p]
 user32.InternalGetWindowText.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
 user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
 user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -235,7 +237,7 @@ def calibrate():
 
 
 class App:
-    def __init__(self, exe, fixture, out, play_key=True):
+    def __init__(self, exe, fixture, out, play_key=True, settle=True):
         self.out = out
         self.document = os.path.join(out, "document" + os.path.splitext(fixture)[1])
         shutil.copyfile(fixture, self.document)
@@ -258,6 +260,9 @@ class App:
         time.sleep(0.5)
         self.check_front()
         self.thread = UiThread(self.hwnd)
+        self.idle_cpu_ms_per_s = math.nan
+        if not settle:
+            return
         if play_key:
             tap(ord("P"))
         self.thread.quiet(1.0)
@@ -555,28 +560,148 @@ def measure_memory(app, args):
     return rows, {"rows": rows, "window_shown_s": round(app.shown, 3)}
 
 
+def qpc():
+    value = ctypes.c_int64()
+    kernel32.QueryPerformanceCounter(ctypes.byref(value))
+    return value.value
+
+
+def qpc_frequency():
+    value = ctypes.c_int64()
+    kernel32.QueryPerformanceFrequency(ctypes.byref(value))
+    return value.value
+
+
+PRESENTMON_SESSION = "ugurugu-baseline-probe"
+
+
+def start_presentmon(presentmon, exe, csv_path, seconds):
+    """Starts PresentMon before the app, as it misses swap chains created
+    before its trace. It stops by itself after `seconds`, which flushes every
+    row. Needs administrator rights."""
+    process = subprocess.Popen(
+        [presentmon, "--process_name", os.path.basename(exe), "--output_file", csv_path, "--qpc_time",
+         "--no_track_input", "--timed", str(int(seconds)), "--terminate_after_timed",
+         "--stop_existing_session", "--no_console_stats", "--session_name", PRESENTMON_SESSION],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(100):
+        time.sleep(0.1)
+        if subprocess.run(["logman", "query", PRESENTMON_SESSION, "-ets"], capture_output=True).returncode == 0:
+            return process
+    process.kill()
+    raise SystemExit("PresentMon did not start recording; it needs administrator rights")
+
+
+def displayed_frames(csv_path):
+    """QPC display times of the frames that reached the screen."""
+    import csv
+    frequency = qpc_frequency()
+    times = []
+    with open(csv_path, encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            if row["MsUntilDisplayed"] not in ("", "NA"):
+                times.append(int(row["TimeInQPC"]) + float(row["MsUntilDisplayed"]) / 1000 * frequency)
+    return sorted(times)
+
+
+def measure_playback(app, args):
+    """The C++ app starts playing at launch. Records displayed frames for
+    `--play-seconds`: the first pass renders and caches every frame (cold),
+    later passes show cached frames (warm)."""
+    frequency = qpc_frequency()
+    started = app.playback_started
+    time.sleep(args.play_seconds)
+    app.close()
+    app.presentmon.wait(args.play_seconds + 60)
+    times = [(t - started) / frequency for t in displayed_frames(app.presentmon_csv) if t >= started]
+    intervals = [(b - a) * 1000 for a, b in zip(times, times[1:])]
+    rows = [{"t": round(t, 4)} for t in times]
+    # The document's frame rate; slower intervals than 1.5 frames are misses.
+    frame_ms = 1000 / args.document_fps
+    per_second = {}
+    for t in times:
+        per_second[int(t)] = per_second.get(int(t), 0) + 1
+    warm = [ms for t, ms in zip(times[1:], intervals) if t >= args.warm_after]
+    cold = [ms for t, ms in zip(times[1:], intervals) if t < args.warm_after]
+    return rows, {
+        "displayed": len(times),
+        "frames_per_second": [per_second.get(second, 0) for second in range(int(args.play_seconds))],
+        "cold_interval_ms": summary(cold),
+        "warm_interval_ms": summary(warm),
+        "warm_misses": sum(1 for ms in warm if ms > frame_ms * 1.5),
+        "warm_fps": round(len(warm) / max(1e-9, sum(warm) / 1000), 2) if warm else None,
+    }
+
+
+def measure_export(app, args):
+    """Exports a GIF and, meanwhile, measures how long the UI thread takes to
+    answer a sent WM_NULL: the delay any click or key would see."""
+    rows = []
+    app.check_front()
+    chord(ord("E"))
+    options = wait_for(lambda: (lambda front: front if front and front != app.hwnd
+                                and window_pid(front) == app.process.pid else None)(
+        user32.GetForegroundWindow()), 30, "the export options")
+    time.sleep(0.3)
+    tap(VK_RETURN)
+    wait_for(lambda: not user32.IsWindowVisible(ctypes.c_void_p(options)), 30, "the options to close")
+    target = os.path.join(app.out, f"export-{int(time.time() * 1000)}.gif")
+    sent = choose_in_dialog(app, target)
+    finished_before = app.log_times("Exported")
+    result = ctypes.c_size_t()
+    while not app.log_times("Exported")[len(finished_before):]:
+        before = time.perf_counter()
+        answered = user32.SendMessageTimeoutW(ctypes.c_void_p(app.hwnd), 0, 0, None, 0x0002, 5000,
+                                              ctypes.byref(result))
+        rtt = (time.perf_counter() - before) * 1000
+        rows.append({"t": round(before - sent, 4), "rtt_ms": rtt, "answered": bool(answered)})
+        time.sleep(0.02)
+        if time.perf_counter() - sent > 600:
+            raise SystemExit("the export did not finish in 10 minutes")
+    done = app.log_times("Exported")[len(finished_before)]
+    return rows, {"export_s": round(done - (time.time() - (time.perf_counter() - sent)), 3),
+                  "ui_rtt_ms": summary([row["rtt_ms"] for row in rows]),
+                  "unanswered": sum(1 for row in rows if not row["answered"]),
+                  "bytes": os.path.getsize(target) if os.path.exists(target) else None}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["stroke", "save", "open", "cancel", "memory"])
+    parser.add_argument("mode", choices=["stroke", "save", "open", "cancel", "memory", "playback", "export"])
     parser.add_argument("exe")
     parser.add_argument("fixture")
     parser.add_argument("out")
     parser.add_argument("--repeat", type=int, default=20)
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--play-seconds", type=float, default=60.0)
+    parser.add_argument("--presentmon")
+    parser.add_argument("--document-fps", type=float, default=25.0)
+    parser.add_argument("--warm-after", type=float, default=40.0,
+                        help="seconds after which playback counts as warm")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
     random.seed(7)
     app = App.__new__(App)
     try:
-        app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out))
+        if args.mode == "playback":
+            if not args.presentmon:
+                raise SystemExit("playback needs --presentmon")
+            app.presentmon_csv = os.path.join(os.path.abspath(args.out), "presentmon.csv")
+            app.presentmon = start_presentmon(args.presentmon, args.exe, app.presentmon_csv,
+                                              args.play_seconds + 30)
+            app.playback_started = qpc()
+            app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out),
+                         play_key=False, settle=False)
+        else:
+            app.__init__(os.path.abspath(args.exe), os.path.abspath(args.fixture), os.path.abspath(args.out))
         measure = {"stroke": measure_strokes, "save": measure_save, "open": measure_open,
-                   "cancel": measure_cancel, "memory": measure_memory}[args.mode]
+                   "cancel": measure_cancel, "memory": measure_memory, "playback": measure_playback,
+                   "export": measure_export}[args.mode]
         rows, result = measure(app, args)
     finally:
         app.close()
     result["cycles_per_ms"] = round(app.thread.cycles_per_ms)
-    result["idle_ui_cpu_ms_per_s"] = round(app.idle_cpu_ms_per_s, 3)
+    result["idle_ui_cpu_ms_per_s"] = None if math.isnan(app.idle_cpu_ms_per_s) else round(app.idle_cpu_ms_per_s, 3)
     with open(os.path.join(args.out, f"{args.mode}.json"), "w", encoding="utf-8") as file:
         json.dump({"result": result, "rows": rows}, file, indent=1)
     print(json.dumps(result, indent=1))
