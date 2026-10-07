@@ -14,9 +14,13 @@ egui = "=0.36.2"
 egui-winit = { version = "=0.36.2", default-features = false, features = ["accesskit", "clipboard"] }
 egui-wgpu = { version = "=0.36.2", default-features = false, features = ["winit"] }
 pollster = "=1.0.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
 tracing = "=0.1.44"
 tracing-appender = "=0.2.5"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+ugu-core = { path = "crates/ugu-core" }
+ugu-io = { path = "crates/ugu-io" }
 ugu-render = { path = "crates/ugu-render" }
 ugu-win = { path = "crates/ugu-win" }
 vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
@@ -26,6 +30,8 @@ winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] 
 # Same version as wgpu-hal so that its DXGI interfaces can be used directly.
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi", "Win32_System_Performance", "Win32_System_Threading"] }
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Performance", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Deflate through pure-Rust zlib-rs only: the default features add C codecs.
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

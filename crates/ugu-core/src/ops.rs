@@ -6,15 +6,15 @@
 //! the result of the ones before it and never on later ones.
 
 /// A stroke's points, brush and seed, stored once and referenced by id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StrokeId(pub u32);
 
 /// A binary mask with bounds, stored once and referenced by id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaskId(pub u32);
 
 /// A raster asset, named by the SHA-256 of its normalized PNG.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AssetId(pub [u8; 32]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
