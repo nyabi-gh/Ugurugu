@@ -4,6 +4,7 @@
 //! The `.ugu2` file format (docs/rust/adr-operations-and-format.md section 4).
 
 pub mod format;
+pub mod read;
 pub mod write;
 
 #[cfg(test)]
