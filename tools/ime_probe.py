@@ -256,7 +256,10 @@ def japanese(results, line_rect, text_rect):
     results["2-3 text"] = last_texts()[1]
     results["2-3 canvas Enter from text"] = count("canvas Enter") - enter_before
 
-env = dict(os.environ, UGURUGU_LOG="info,ugurugu::ime_probe=debug")
+# The probe fields are part of the diagnostics panel; canvas shortcuts are
+# logged by the UI module.
+env = dict(os.environ, UGURUGU_DIAGNOSTICS="1",
+           UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)
 HWND = None

@@ -3,9 +3,9 @@
 
 # Checks what the Rust M0 app exposes to UI Automation, the interface Narrator
 # and other screen readers use (docs/rust/m0-evidence.md section 7): prints the
-# tree, types into the first text field through ValuePattern and presses the
-# Clear button through InvokePattern. Runs in Windows PowerShell 5.1, which has
-# the .NET UI Automation client.
+# tree, types into the first text field (the layer name) and presses the Add
+# layer button through InvokePattern. Runs in Windows PowerShell 5.1, which
+# has the .NET UI Automation client.
 #
 # Usage: powershell -File uia_probe.ps1 <ugurugu.exe> <output-dir>
 
@@ -14,7 +14,7 @@ param([string]$Exe, [string]$Out)
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 New-Item -ItemType Directory -Force $Out | Out-Null
 $log = Join-Path $Out 'app.log'
-$env:UGURUGU_LOG = 'info,ugurugu::ime_probe=debug'
+$env:UGURUGU_LOG = 'info'
 $app = Start-Process -FilePath $Exe -PassThru -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Out 'stderr.log')
 
 function Get-Tree($root) {
@@ -75,13 +75,16 @@ try {
         "edit '$($edit.Current.Name)' value after typing: '$($value.Current.Value)'"
     } else { 'no Edit element' }
 
-    $clear = ($tree | Where-Object { $_.Type -eq 'Button' -and $_.Name -eq 'Clear' } | Select-Object -First 1).Element
-    if ($clear -ne $null) {
-        $clear.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-        'Clear invoked'
-    } else { 'no Clear button' }
+    # Moving focus away commits the typed name.
+    $add = ($tree | Where-Object { $_.Type -eq 'Button' -and $_.Name -eq 'Add layer' } | Select-Object -First 1).Element
+    if ($add -ne $null) {
+        $add.SetFocus()
+        Start-Sleep -Milliseconds 300
+        $add.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        'Add layer invoked'
+    } else { 'no Add layer button' }
     Start-Sleep -Milliseconds 500
 } finally {
     if (-not $app.HasExited) { $app.CloseMainWindow() | Out-Null; if (-not $app.WaitForExit(5000)) { $app.Kill() } }
 }
-Get-Content $log | Select-String 'ime probe text|canvas cleared|panicked|ERROR' | Select-Object -Last 3 | ForEach-Object { $_.Line }
+Get-Content $log | Select-String 'layer renamed|layer added|panicked|ERROR' | Select-Object -Last 3 | ForEach-Object { $_.Line }

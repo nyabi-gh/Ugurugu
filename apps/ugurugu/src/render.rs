@@ -25,6 +25,7 @@ use crate::canvas::{self, Canvas};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
+use crate::ui::{self, Panels};
 
 pub enum ToRender {
     Window(WindowEvent),
@@ -86,6 +87,7 @@ pub struct RenderThread {
     router: InputRouter,
     canvas: Canvas,
     ime: ImeProbe,
+    panels: Panels,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
     needs_frame: bool,
@@ -180,6 +182,7 @@ impl RenderThread {
                 let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
             }),
             ime: ImeProbe::default(),
+            panels: Panels::default(),
             present_latency: LatencyLog::default(),
             display_latency: LatencyLog::default(),
             needs_frame: true,
@@ -370,6 +373,7 @@ impl RenderThread {
             canvas,
             display_latency,
             ime,
+            panels,
             diagnostics,
             ..
         } = self;
@@ -378,9 +382,10 @@ impl RenderThread {
         let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
-            ime.count_canvas_shortcuts(ui.ctx());
+            ui::shortcuts(ui.ctx(), canvas);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
+            egui::Panel::top("tools").show(ui, |ui| ui::tools(ui, canvas));
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if software {
@@ -390,22 +395,33 @@ impl RenderThread {
                         );
                         ui.separator();
                     }
-                    ui.label(adapter_summary.as_str());
-                    ui.separator();
                     ui.label(format!("{:.0}%", canvas.scale() * 100.0));
-                    ui.separator();
-                    ui.label(format!("samples {}", canvas.sample_count()));
-                    if let Some(summary) = display_latency.summary() {
-                        ui.separator();
-                        ui.label(format!("input to display {summary}"));
-                    }
                     if let Some(notice) = canvas.notice() {
                         ui.separator();
                         ui.colored_label(ui.visuals().warn_fg_color, notice);
                     }
+                    if *diagnostics {
+                        ui.separator();
+                        ui.label(adapter_summary.as_str());
+                        ui.separator();
+                        ui.label(format!("samples {}", canvas.sample_count()));
+                        if let Some(summary) = display_latency.summary() {
+                            ui.separator();
+                            ui.label(format!("input to display {summary}"));
+                        }
+                    }
                 });
             });
-            egui::Panel::right("ime").show(ui, |ui| ime.show(ui));
+            egui::Panel::right("layers")
+                .resizable(true)
+                .default_size(240.0)
+                .show(ui, |ui| {
+                    panels.layers(ui, canvas);
+                    if *diagnostics {
+                        ui.separator();
+                        ime.show(ui);
+                    }
+                });
             // No panel fill: the canvas is drawn under egui.
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)

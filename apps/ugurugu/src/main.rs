@@ -10,6 +10,7 @@ mod ime_probe;
 mod input;
 mod latency;
 mod render;
+mod ui;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;

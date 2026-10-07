@@ -72,9 +72,6 @@ fn align_baselines(definitions: &mut egui::FontDefinitions, fonts: &[(&str, char
 pub struct ImeProbe {
     line: String,
     text: String,
-    /// Enter and Ctrl+Z that reached the canvas.
-    canvas_enter: u32,
-    canvas_undo: u32,
     /// Field rectangles last logged, so that tests can click them.
     logged_rects: Option<[egui::Rect; 2]>,
 }
@@ -111,34 +108,6 @@ impl ImeProbe {
         }
         if line.changed() || text.changed() {
             tracing::debug!(line = ?self.line, text = ?self.text, "ime probe text");
-        }
-        ui.label(format!(
-            "canvas Enter {}  Ctrl+Z {}",
-            self.canvas_enter, self.canvas_undo
-        ));
-    }
-
-    /// Counts canvas shortcuts in this frame's input. Text editing keeps
-    /// them, including Enter that commits a composition.
-    pub fn count_canvas_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
-            return;
-        }
-        // A whole chord can arrive within one frame, so each key is matched
-        // with the modifiers it was pressed with, not the frame's last state.
-        let (enter, undo) = ctx.input_mut(|input| {
-            (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
-            )
-        });
-        if enter {
-            self.canvas_enter += 1;
-            tracing::debug!(count = self.canvas_enter, "canvas Enter");
-        }
-        if undo {
-            self.canvas_undo += 1;
-            tracing::debug!(count = self.canvas_undo, "canvas Ctrl+Z");
         }
     }
 }

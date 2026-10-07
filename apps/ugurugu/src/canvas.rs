@@ -104,6 +104,37 @@ impl Canvas {
         }
     }
 
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// Changes the session outside drawing. A stroke being drawn is dropped
+    /// first, as the change may move or remove what it is drawn on.
+    pub fn edit<R>(&mut self, change: impl FnOnce(&mut Session) -> R) -> R {
+        if let Interaction::Drawing { rect, .. } =
+            std::mem::replace(&mut self.interaction, Interaction::Idle)
+        {
+            self.session.cancel_stroke();
+            self.recomposite(rect);
+        }
+        change(&mut self.session)
+    }
+
+    /// Zooms around the middle of the canvas area.
+    pub fn zoom_in_place(&mut self, notches: f32) {
+        if let Some([left, top, right, bottom]) = self.area {
+            let middle = [f64::from(left + right) / 2.0, f64::from(top + bottom) / 2.0];
+            self.zoom(middle, notches);
+        }
+    }
+
+    /// Shows the whole document, at most at 100%.
+    pub fn fit(&mut self) {
+        if let Some(area) = self.area {
+            self.place(area);
+        }
+    }
+
     pub fn sample_count(&self) -> usize {
         self.sample_count
     }
