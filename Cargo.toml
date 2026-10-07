@@ -25,6 +25,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 ugu-core = { path = "crates/ugu-core" }
 ugu-io = { path = "crates/ugu-io" }
 ugu-render = { path = "crates/ugu-render" }
+ugu-session = { path = "crates/ugu-session" }
 ugu-win = { path = "crates/ugu-win" }
 vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 # DX12 only: with Vulkan compiled in, wgpu would prefer a Vulkan adapter.

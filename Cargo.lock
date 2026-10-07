@@ -3494,6 +3494,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ugu-session"
+version = "3.0.0-dev"
+dependencies = [
+ "ugu-core",
+]
+
+[[package]]
 name = "ugu-win"
 version = "3.0.0-dev"
 dependencies = [
