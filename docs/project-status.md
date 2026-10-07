@@ -627,7 +627,7 @@ root README(ko/en/ja)는 사용자 안내, BUILDING/CONTRIBUTING은 빌드·기�
 
 다음 작업:
 
-1. M3 렌더·스케줄러 완성(브랜치 `rust/m3`): 분해·결정·진행은 [rust/m3-plan.md](rust/m3-plan.md)(M3-1~M3-14). M2에서 넘긴 연산 상한(20,000), 4096² 재생 예산, 2560 창 iflip 승격 조사를 포함한다.
+1. M3 렌더·스케줄러 완성(브랜치 `rust/m3`): 분해·결정·진행은 [rust/m3-plan.md](rust/m3-plan.md)(M3-1~M3-14). 2026-10-07 기준 M3-1~M3-6 완료, M3-7·M3-8 코드 완료(GUI 확인 대기): 레이어 표면 + 계획 합성(그룹·클리핑·합성 모드), 128px 타일, 레이어별 revision 캐시, 계획 기반 편집 분할(화면이 전체 렌더와 바이트 단위로 같음, pen-up p95 3ms 이하), 우선순위 작업자와 중단(p95 44ms 이하), 축소 재생, 메모리 예산과 예산 초과 시 단계별 렌더. 다음: M3-7·M3-8 GUI 확인(유휴·최소화, 4096² 재생, RAM), M3-9 그룹 UI, M3-10 연산 상한, M3-11 2560 창, M3-12 TDR, M3-13, M3-14.
 2. 펜 장치를 확보하면 펜 경로 실증(M6 전 필수 gate).
 
 측정 재현: PresentMon 2.6.0은 관리자 권한이 필요하고, 앱보다 먼저 시작해야 하며, `--no_track_input`이 필요하다(입력 추적이 지연을 늘림). 창 배치 직후에는 DWM이 합성하므로 `--warmup 150`을 넣는다. `misses`가 0이 아닌 실행은 버린다. C++ 앱은 재생이 켜진 채 시작하므로 `P`로 정지한 뒤 잰다. 입력 주입은 `SetCursorPos`가 아니라 `SendInput`으로 한다. C++ 앱 실행에는 PATH에 Qt `bin`과 설치본의 `velopack_libc.dll` 폴더가 필요하고, `UGURUGU_INSTANCE_LOCK_PATH`·`UGURUGU_RECOVERY_PATH`로 설치본과 분리한다. 예: `latency-probe --exe <Ugurugu.exe> --presentmon <PresentMon.exe> --steps 100 --warmup 150 --key P`.

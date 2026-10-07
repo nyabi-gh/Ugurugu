@@ -24,7 +24,7 @@ use vello_cpu::peniko::{BlendMode, Compose, Mix};
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
 use crate::compose::premultiplied;
-use crate::composite;
+use crate::composite::{self, Source};
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
@@ -119,6 +119,9 @@ pub struct DocumentRenderer {
     /// Layers the last render drew.
     drawn: usize,
     stop: Option<Arc<AtomicBool>>,
+    /// Bytes the layers' own surfaces may take; beyond it, frames are put
+    /// together one layer at a time.
+    surface_budget: usize,
     tile_edge: u32,
     timings: Timings,
 }
@@ -172,6 +175,11 @@ struct Raster {
     threads: usize,
 }
 
+/// Bytes the layers' own surfaces may take by default: half of the working
+/// set budget (scope.md), the rest left for playback frames, the display
+/// and the program.
+pub const SURFACE_BUDGET: usize = 512 * 1024 * 1024;
+
 /// The size a canvas of `size` is drawn at with `shrink`.
 pub fn scaled_size(size: [u32; 2], shrink: u32) -> [u32; 2] {
     size.map(|edge| edge.div_ceil(shrink))
@@ -208,6 +216,7 @@ impl DocumentRenderer {
             cache: HashMap::new(),
             drawn: 0,
             stop: None,
+            surface_budget: SURFACE_BUDGET,
             tile_edge: TILE_EDGE,
             timings: Timings::default(),
         }
@@ -215,6 +224,42 @@ impl DocumentRenderer {
 
     pub fn timings(&self) -> Timings {
         self.timings
+    }
+
+    /// Lets the layers' own surfaces take `bytes` instead of
+    /// `SURFACE_BUDGET`.
+    pub fn set_surface_budget(&mut self, bytes: usize) {
+        self.surface_budget = bytes;
+    }
+
+    /// Whether the layer surfaces of `plan` drawn at 1/`shrink` would take
+    /// more than the budget.
+    pub fn over_budget(&self, document: &Document, plan: &RenderPlan, shrink: u32) -> bool {
+        surface_estimate(document, plan, shrink, self.tile_edge) > self.surface_budget
+    }
+
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.stopped()
+    }
+
+    pub(crate) fn thread_count(&self) -> usize {
+        self.threads
+    }
+
+    /// `paint`'s own pixels on a surface of its own, with every thread.
+    pub(crate) fn draw_alone(
+        &mut self,
+        document: &Document,
+        frame: u32,
+        shrink: u32,
+        paint: &PaintLayer,
+    ) -> TiledSurface {
+        let size = scaled_size(document.canvas, shrink);
+        let mut surface = TiledSurface::new(size, self.tile_edge);
+        self.timings += self
+            .main
+            .draw_layer(document, frame, shrink, paint, &mut surface);
+        surface
     }
 
     /// Uses tiles of `edge` pixels, a multiple of 4, instead of `TILE_EDGE`.
@@ -291,6 +336,12 @@ impl DocumentRenderer {
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
         let edge = self.tile_edge;
+        if self.over_budget(document, plan, shrink) {
+            self.cache.clear();
+            self.drawn = plan.layers.len();
+            self.timings = Timings::default();
+            return self.render_streamed(document, plan, frame, shrink, pixmap);
+        }
         self.cache.retain(|id, cached| {
             plan.moves(*id).is_some()
                 && cached.surface.size() == size
@@ -351,17 +402,21 @@ impl DocumentRenderer {
             return false;
         }
         let started = std::time::Instant::now();
-        let surfaces: Vec<Option<&TiledSurface>> = plan
+        let sources: Vec<Source<'_>> = plan
             .layers
             .iter()
-            .map(|(id, _)| self.cache.get(id).map(|cached| &*cached.surface))
+            .map(|(id, _)| {
+                self.cache
+                    .get(id)
+                    .map_or(Source::Empty, |cached| Source::Tiles(&cached.surface))
+            })
             .collect();
         let background = premultiplied(document.background.0);
         let rect = [0, 0, u32::from(width), u32::from(height)];
         let finished = composite::evaluate(
-            plan,
+            &composite::program(plan),
             Some(background),
-            &surfaces,
+            &sources,
             rect,
             pixmap,
             self.threads,
@@ -467,57 +522,8 @@ impl Raster {
         paint: &PaintLayer,
         surface: &mut TiledSurface,
     ) -> Timings {
-        let mut steps = Vec::new();
-        collect(
-            &paint.ops,
-            &document.store,
-            document.wobble,
-            paint.wobble.unwrap_or(document.wobble),
-            &mut steps,
-        );
-        let [columns, rows] = surface.grid();
-        let edge = surface.edge();
-        let size = surface.size().map(f64::from);
-        let mut reached = vec![false; (columns * rows) as usize];
-        for step in &steps {
-            // Erasing only takes away, so it reaches no new tile.
-            let Step::Draw {
-                stroke,
-                pen,
-                erase: false,
-            } = step
-            else {
-                continue;
-            };
-            // One more pixel each way for antialiasing.
-            let [left, top, right, bottom] =
-                stroke::bounds(&stroke.points, pen).map(|value| value / f64::from(shrink));
-            let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
-            let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
-            if from[0] >= to[0] || from[1] >= to[1] {
-                continue;
-            }
-            let first = from.map(|value| (value / f64::from(edge)) as u32);
-            let last = [
-                ((to[0] / f64::from(edge)).ceil() as u32).min(columns),
-                ((to[1] / f64::from(edge)).ceil() as u32).min(rows),
-            ];
-            for row in first[1]..last[1] {
-                for column in first[0]..last[0] {
-                    reached[(row * columns + column) as usize] = true;
-                }
-            }
-        }
-        let mut span = [u32::MAX, u32::MAX, 0, 0];
-        for (index, _) in reached.iter().enumerate().filter(|(_, reached)| **reached) {
-            let [column, row] = [index as u32 % columns, index as u32 / columns];
-            span = [
-                span[0].min(column),
-                span[1].min(row),
-                span[2].max(column + 1),
-                span[3].max(row + 1),
-            ];
-        }
+        let steps = layer_steps(document, paint);
+        let (span, reached) = reach(&steps, shrink, surface);
         let reused = surface.clear();
         if span[0] >= span[2] {
             return Timings::default();
@@ -628,6 +634,92 @@ impl Raster {
         }
         self.context.set_aliasing_threshold(None);
     }
+}
+
+/// What drawing `paint` takes, in order.
+fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer) -> Vec<Step<'a>> {
+    let mut steps = Vec::new();
+    collect(
+        &paint.ops,
+        &document.store,
+        document.wobble,
+        paint.wobble.unwrap_or(document.wobble),
+        &mut steps,
+    );
+    steps
+}
+
+/// The tiles of `surface` that `steps` drawn at 1/`shrink` reach, and the
+/// rectangle of tiles around them (left, top, right, bottom; empty when
+/// none).
+fn reach(steps: &[Step<'_>], shrink: u32, surface: &TiledSurface) -> ([u32; 4], Vec<bool>) {
+    let [columns, rows] = surface.grid();
+    let edge = f64::from(surface.edge());
+    let size = surface.size().map(f64::from);
+    let mut reached = vec![false; (columns * rows) as usize];
+    for step in steps {
+        // Erasing only takes away, so it reaches no new tile.
+        let Step::Draw {
+            stroke,
+            pen,
+            erase: false,
+        } = step
+        else {
+            continue;
+        };
+        // One more pixel each way for antialiasing.
+        let [left, top, right, bottom] =
+            stroke::bounds(&stroke.points, pen).map(|value| value / f64::from(shrink));
+        let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
+        let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
+        if from[0] >= to[0] || from[1] >= to[1] {
+            continue;
+        }
+        let first = from.map(|value| (value / edge) as u32);
+        let last = [
+            ((to[0] / edge).ceil() as u32).min(columns),
+            ((to[1] / edge).ceil() as u32).min(rows),
+        ];
+        for row in first[1]..last[1] {
+            for column in first[0]..last[0] {
+                reached[(row * columns + column) as usize] = true;
+            }
+        }
+    }
+    let mut span = [u32::MAX, u32::MAX, 0, 0];
+    for (index, _) in reached.iter().enumerate().filter(|(_, reached)| **reached) {
+        let [column, row] = [index as u32 % columns, index as u32 / columns];
+        span = [
+            span[0].min(column),
+            span[1].min(row),
+            span[2].max(column + 1),
+            span[3].max(row + 1),
+        ];
+    }
+    (span, reached)
+}
+
+/// Bytes the surfaces of `plan`'s layers take when drawn at 1/`shrink` on
+/// tiles of `edge` pixels.
+pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edge: u32) -> usize {
+    let empty = TiledSurface::new(scaled_size(document.canvas, shrink), edge);
+    plan.layers
+        .iter()
+        .filter_map(
+            |(id, _)| match document.layer(*id).map(|layer| &layer.kind) {
+                Some(LayerKind::Paint(paint)) => Some(paint),
+                _ => None,
+            },
+        )
+        .map(|paint| {
+            let (span, _) = reach(&layer_steps(document, paint), shrink, &empty);
+            if span[0] >= span[2] {
+                return 0;
+            }
+            let (_, extent) = empty.area(span);
+            usize::from(extent[0]) * usize::from(extent[1]) * 4
+        })
+        .sum()
 }
 
 fn collect<'a>(
@@ -1266,6 +1358,38 @@ mod tests {
                     .sum::<f32>()
                     / expected.len() as f32;
                 assert!(mean < limit, "1/{shrink} differs by {mean} on average");
+            }
+        }
+    }
+
+    #[test]
+    fn a_frame_over_the_budget_is_the_same_frame() {
+        let document = many_layers();
+        let plan = RenderPlan::new(&document, Purpose::Display);
+        for shrink in [1, 2] {
+            let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+            for frame in [0, 3] {
+                let mut kept = Pixmap::new(size[0], size[1]);
+                DocumentRenderer::new(0)
+                    .render_scaled(&document, &plan, frame, None, shrink, &mut kept);
+                for threads in [0, 8] {
+                    let mut renderer = DocumentRenderer::new(threads);
+                    renderer.set_surface_budget(0);
+                    let mut streamed = Pixmap::new(size[0], size[1]);
+                    assert!(renderer.render_scaled(
+                        &document,
+                        &plan,
+                        frame,
+                        None,
+                        shrink,
+                        &mut streamed
+                    ));
+                    assert!(
+                        streamed.data_as_u8_slice() == kept.data_as_u8_slice(),
+                        "1/{shrink} frame {frame} on {threads} threads"
+                    );
+                    assert_eq!(renderer.surface_bytes(), 0);
+                }
             }
         }
     }

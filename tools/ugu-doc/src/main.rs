@@ -287,6 +287,17 @@ fn peak_working_set_mib() -> f64 {
     counters.PeakWorkingSetSize as f64 / (1024.0 * 1024.0)
 }
 
+/// `UGU_SURFACE_BUDGET_MIB` sets the layer surface budget, to measure what
+/// happens beyond it.
+fn set_budget(renderer: &mut ugu_render::document::DocumentRenderer) {
+    if let Some(mib) = std::env::var("UGU_SURFACE_BUDGET_MIB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        renderer.set_surface_budget(mib * 1024 * 1024);
+    }
+}
+
 fn percentiles(times: &mut [f64]) -> String {
     times.sort_by(f64::total_cmp);
     format!(
@@ -308,6 +319,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
+    set_budget(&mut renderer);
     if let Some(tile) = tile {
         renderer.set_tile_edge(tile);
     }
@@ -471,6 +483,7 @@ fn splits(document: &Document, threads: u16) {
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut display = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
+    set_budget(&mut renderer);
     let started = Instant::now();
     renderer.split(
         history.document(),

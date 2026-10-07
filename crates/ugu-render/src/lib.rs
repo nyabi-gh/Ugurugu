@@ -11,6 +11,7 @@ pub mod live;
 pub mod plan;
 pub mod present;
 pub mod raster;
+pub mod stream;
 pub mod stroke;
 pub mod tile;
 pub mod view;

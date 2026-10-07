@@ -19,11 +19,12 @@ use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
-use crate::composite::{self, Overlay};
+use crate::composite::{self, Overlay, Put, Source};
 use crate::document::{DocumentRenderer, Purpose};
 use crate::live::LiveStroke;
 use crate::plan::RenderPlan;
 use crate::raster::{PixelRect, document_level};
+use crate::stream::Held;
 use crate::stroke::{self, Pen, Resampler};
 use crate::tile::TiledSurface;
 
@@ -82,23 +83,17 @@ pub struct Split {
     pub layer: LayerId,
     /// The frame within the cycle.
     pub frame: u32,
-    pub plan: RenderPlan,
-    /// Premultiplied.
-    pub background: [u8; 4],
-    /// One per layer of the plan, in its order.
-    pub surfaces: Vec<Arc<TiledSurface>>,
+    /// How the shown image is put together.
+    pub puts: Vec<Put>,
+    /// Premultiplied; `None` when the first step lays the background.
+    pub background: Option<[u8; 4]>,
+    /// One per step that takes a source, in order.
+    pub sources: Vec<Held>,
+    /// The edited layer among the sources; `None` when it is not shown.
+    pub edited: Option<usize>,
 }
 
 impl Split {
-    /// Where the edited layer is among the plan's layers; `None` when it is
-    /// not shown.
-    pub fn index(&self) -> Option<usize> {
-        self.plan
-            .layers
-            .iter()
-            .position(|(id, _)| *id == self.layer)
-    }
-
     /// Adds a committed stroke to the edited layer as drawing it again would:
     /// painted over, or erased from, what is there. Returns the pixels it
     /// changed.
@@ -109,16 +104,31 @@ impl Split {
         erase: bool,
         wobble: f32,
     ) -> Option<PixelRect> {
-        let index = self.index()?;
-        let surface = Arc::make_mut(&mut self.surfaces[index]);
-        stamp.apply_stroke(surface, stroke, erase, wobble, self.frame)
+        let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        stamp.apply_stroke(Arc::make_mut(surface), stroke, erase, wobble, self.frame)
+    }
+
+    fn sources(&self) -> Vec<Source<'_>> {
+        self.sources
+            .iter()
+            .map(|held| match held {
+                Held::Tiles(surface) => Source::Tiles(surface),
+                Held::Whole(pixmap) => Source::Whole(pixmap),
+            })
+            .collect()
     }
 }
 
 impl DocumentRenderer {
     /// Draws `frame` into `display`, which must have the canvas size, and
     /// keeps what it was made from for editing `layer`. With `revisions`,
-    /// layers drawn before are reused. `None` when the stop flag ended it.
+    /// layers drawn before are reused. When the layers' own surfaces would
+    /// take more than the budget, what does not depend on `layer` is put
+    /// together ahead of time instead; the display then differs from a full
+    /// render by the rounding of that, at most 2 levels. `None` when the stop
+    /// flag ended it.
     pub fn split(
         &mut self,
         document: &Document,
@@ -128,23 +138,52 @@ impl DocumentRenderer {
         display: &mut Pixmap,
     ) -> Option<Split> {
         let plan = RenderPlan::new(document, Purpose::Display);
+        let cycle = ugu_core::motion::frame_in_cycle(frame, document.frames);
+        if self.over_budget(document, &plan, 1) {
+            let program = self.reduced(document, &plan, cycle, layer)?;
+            let split = Split {
+                layer,
+                frame: cycle,
+                puts: program.puts,
+                background: None,
+                sources: program.sources,
+                edited: program.edited,
+            };
+            let rect = [
+                0,
+                0,
+                u32::from(display.width()),
+                u32::from(display.height()),
+            ];
+            composite::evaluate(
+                &split.puts,
+                None,
+                &split.sources(),
+                rect,
+                display,
+                self.thread_count(),
+                None,
+            );
+            return Some(split);
+        }
         if !self.render_plan(document, &plan, frame, revisions, display) {
             return None;
         }
-        let surfaces = plan
+        let sources = plan
             .layers
             .iter()
-            .map(|(id, _)| self.surface(*id).expect("just drawn"))
+            .map(|(id, _)| Held::Tiles(self.surface(*id).expect("just drawn")))
             .collect();
         // The edited layer's pixels change in place from now on, so this
         // renderer does not keep a share of them.
         self.forget(layer);
         Some(Split {
             layer,
-            frame: ugu_core::motion::frame_in_cycle(frame, document.frames),
-            plan,
-            background: premultiplied(document.background.0),
-            surfaces,
+            frame: cycle,
+            edited: plan.layers.iter().position(|(id, _)| *id == layer),
+            puts: composite::program(&plan),
+            background: Some(premultiplied(document.background.0)),
+            sources,
         })
     }
 }
@@ -152,20 +191,15 @@ impl DocumentRenderer {
 /// Puts the shown image together within `rect`, drawing `live` (a stroke
 /// being drawn, `None` for none) on the edited layer first.
 pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out: &mut Pixmap) {
-    let surfaces: Vec<Option<&TiledSurface>> = split
-        .surfaces
-        .iter()
-        .map(|surface| Some(&**surface))
-        .collect();
-    let background = Some(split.background);
-    match (live, split.index()) {
-        (Some(live), Some(layer)) => {
+    let sources = split.sources();
+    match (live, split.edited) {
+        (Some(live), Some(source)) => {
             let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| live.apply(x, y, pixel);
             let overlay = Overlay {
-                layer,
+                source,
                 apply: &apply,
             };
-            composite::evaluate_with(&split.plan, background, &surfaces, rect, out, &overlay);
+            composite::evaluate_with(&split.puts, split.background, &sources, rect, out, &overlay);
         }
         _ => {
             let [left, top, right, bottom] = rect;
@@ -175,7 +209,15 @@ pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out:
             } else {
                 1
             };
-            composite::evaluate(&split.plan, background, &surfaces, rect, out, threads, None);
+            composite::evaluate(
+                &split.puts,
+                split.background,
+                &sources,
+                rect,
+                out,
+                threads,
+                None,
+            );
         }
     }
 }
@@ -501,6 +543,41 @@ mod tests {
                 assert!(most <= 1, "{layer:?} erase {erase}: differs by {most}");
                 assert!(rect[2] > rect[0]);
             }
+        }
+    }
+
+    #[test]
+    fn over_the_budget_the_split_keeps_every_layer_editable() {
+        let mut history = history();
+        for layer in paint_layers(&history) {
+            let mut display = Pixmap::new(120, 80);
+            let mut renderer = DocumentRenderer::new(4);
+            renderer.set_surface_budget(0);
+            let mut split = renderer
+                .split(history.document(), layer, 4, None, &mut display)
+                .expect("nothing stops it");
+            // What does not depend on the layer is put together ahead of
+            // time, which rounds a little differently from one at a time.
+            let full = render(history.document(), 4);
+            let most = max_difference(&display, &full);
+            assert!(most <= 2, "{layer:?}: differs by {most}");
+            assert!(split.edited.is_some());
+            assert!(split.sources.len() < 6);
+
+            let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], 600);
+            let wobble = history.document().wobble.amount;
+            split
+                .stamp(&mut Stamp::default(), &new, false, wobble)
+                .unwrap();
+            let mut shown = Pixmap::new(120, 80);
+            composite(&split, None, [0, 0, 120, 80], &mut shown);
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, layer, new, false, None)
+                })
+                .unwrap();
+            let most = max_difference(&shown, &render(history.document(), 4));
+            assert!(most <= 2, "{layer:?} after a stroke: differs by {most}");
         }
     }
 }
