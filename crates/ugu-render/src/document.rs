@@ -9,7 +9,10 @@
 //! beneath with its opacity. This is the meaning `ugu_core::semantics` pins.
 //! Only what M2 can draw is accepted; `check` names the rest.
 
-use ugu_core::document::{Document, LayerKind};
+use std::collections::HashMap;
+
+use ugu_core::document::{Document, LayerId, LayerKind};
+use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
 use ugu_core::store::{BrushEngine, Store, Stroke};
@@ -119,10 +122,21 @@ pub struct DocumentRenderer {
     singles: Vec<Raster>,
     level: vello_cpu::Level,
     threads: usize,
-    /// The paint layers' own surfaces.
-    surfaces: Vec<TiledSurface>,
+    /// The paint layers' own surfaces of the last render, kept for reuse.
+    cache: HashMap<LayerId, Cached>,
+    /// Layers the last render drew.
+    drawn: usize,
     tile_edge: u32,
     timings: Timings,
+}
+
+/// A layer's own pixels and what they were drawn from.
+struct Cached {
+    /// `None` when drawn without revisions, so never reused.
+    revision: Option<u64>,
+    /// The frame within the cycle, or `None` for a layer that does not move.
+    frame: Option<u32>,
+    surface: TiledSurface,
 }
 
 /// Where the last render spent its time. With layers drawn at once, the
@@ -181,7 +195,8 @@ impl DocumentRenderer {
             singles: Vec::new(),
             level,
             threads: usize::from(threads.max(1)),
-            surfaces: Vec::new(),
+            cache: HashMap::new(),
+            drawn: 0,
             tile_edge: TILE_EDGE,
             timings: Timings::default(),
         }
@@ -196,9 +211,17 @@ impl DocumentRenderer {
         self.tile_edge = edge;
     }
 
-    /// Bytes held by the layer surfaces of the last render.
+    /// Bytes held by the layer surfaces kept for reuse.
     pub fn surface_bytes(&self) -> usize {
-        self.surfaces.iter().map(TiledSurface::bytes).sum()
+        self.cache
+            .values()
+            .map(|cached| cached.surface.bytes())
+            .sum()
+    }
+
+    /// Layers the last render drew rather than reused.
+    pub fn layers_drawn(&self) -> usize {
+        self.drawn
     }
 
     /// Draws `frame` of a document that passed `check` into `pixmap`, which
@@ -211,49 +234,72 @@ impl DocumentRenderer {
         pixmap: &mut Pixmap,
     ) {
         let plan = RenderPlan::new(document, purpose);
-        self.render_plan(document, &plan, frame, pixmap);
+        self.render_plan(document, &plan, frame, None, pixmap);
     }
 
-    /// Draws `frame` as `plan`, made from `document`, says.
+    /// Draws `frame` as `plan`, made from `document`, says. With `revisions`
+    /// of the document, a layer whose pixels are as when it was last drawn
+    /// here is reused.
     pub fn render_plan(
         &mut self,
         document: &Document,
         plan: &RenderPlan,
         frame: i64,
+        revisions: Option<&LayerRevisions>,
         pixmap: &mut Pixmap,
     ) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
-        let paints: Vec<&PaintLayer> = plan
-            .layers
-            .iter()
-            .map(
-                |(id, _)| match document.layer(*id).map(|layer| &layer.kind) {
-                    Some(LayerKind::Paint(paint)) => paint,
-                    _ => panic!("the plan was made from another document"),
-                },
-            )
-            .collect();
-        let empty = TiledSurface::new(document.canvas, self.tile_edge);
-        if self
-            .surfaces
-            .first()
-            .is_some_and(|surface| (surface.size(), surface.edge()) != (empty.size(), empty.edge()))
-        {
-            self.surfaces.clear();
+        let edge = self.tile_edge;
+        self.cache.retain(|id, cached| {
+            plan.moves(*id).is_some()
+                && cached.surface.size() == document.canvas
+                && cached.surface.edge() == edge
+        });
+        let mut work = Vec::new();
+        for (id, moves) in &plan.layers {
+            let revision = revisions.map(|revisions| revisions.of(*id));
+            let at = moves.then_some(frame);
+            if self.cache.get(id).is_some_and(|cached| {
+                cached.revision.is_some() && cached.revision == revision && cached.frame == at
+            }) {
+                continue;
+            }
+            let Some(LayerKind::Paint(paint)) = document.layer(*id).map(|layer| &layer.kind) else {
+                panic!("the plan was made from another document");
+            };
+            let surface = self.cache.remove(id).map_or_else(
+                || TiledSurface::new(document.canvas, edge),
+                |cached| cached.surface,
+            );
+            let cached = Cached {
+                revision,
+                frame: at,
+                surface,
+            };
+            work.push((*id, paint, cached));
         }
-        self.surfaces.resize(paints.len(), empty);
+        self.drawn = work.len();
         self.timings = Timings::default();
-        if paints.len() >= self.threads && self.threads > 1 {
-            self.draw_at_once(document, &paints, frame);
+        if work.len() >= self.threads && self.threads > 1 {
+            self.draw_at_once(document, &mut work, frame);
         } else {
-            for (paint, surface) in paints.iter().zip(&mut self.surfaces) {
-                self.timings += self.main.draw_layer(document, frame, paint, surface);
+            for (_, paint, cached) in &mut work {
+                self.timings += self
+                    .main
+                    .draw_layer(document, frame, paint, &mut cached.surface);
             }
         }
+        for (id, _, cached) in work {
+            self.cache.insert(id, cached);
+        }
         let started = std::time::Instant::now();
-        let surfaces: Vec<Option<&TiledSurface>> = self.surfaces.iter().map(Some).collect();
+        let surfaces: Vec<Option<&TiledSurface>> = plan
+            .layers
+            .iter()
+            .map(|(id, _)| self.cache.get(id).map(|cached| &cached.surface))
+            .collect();
         let background = premultiplied(document.background.0);
         let rect = [0, 0, u32::from(width), u32::from(height)];
         composite::evaluate(
@@ -269,16 +315,18 @@ impl DocumentRenderer {
 
     /// Draws each layer on one thread, as many layers at once as there are
     /// threads.
-    fn draw_at_once(&mut self, document: &Document, paints: &[&PaintLayer], frame: u32) {
+    fn draw_at_once(
+        &mut self,
+        document: &Document,
+        work: &mut [(LayerId, &PaintLayer, Cached)],
+        frame: u32,
+    ) {
         while self.singles.len() < self.threads {
             self.singles.push(Raster::new(self.level, 0));
         }
         let next = std::sync::atomic::AtomicUsize::new(0);
-        let slots: Vec<std::sync::Mutex<&mut TiledSurface>> = self
-            .surfaces
-            .iter_mut()
-            .map(std::sync::Mutex::new)
-            .collect();
+        let slots: Vec<std::sync::Mutex<&mut (LayerId, &PaintLayer, Cached)>> =
+            work.iter_mut().map(std::sync::Mutex::new).collect();
         let timings = std::thread::scope(|scope| {
             let workers: Vec<_> = self
                 .singles
@@ -289,11 +337,13 @@ impl DocumentRenderer {
                         let mut timings = Timings::default();
                         loop {
                             let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some(paint) = paints.get(index) else {
+                            let Some(slot) = slots.get(index) else {
                                 return timings;
                             };
-                            let mut surface = slots[index].lock().expect("one worker per layer");
-                            timings += raster.draw_layer(document, frame, paint, &mut surface);
+                            let mut slot = slot.lock().expect("one worker per layer");
+                            let (_, paint, cached) = &mut **slot;
+                            timings +=
+                                raster.draw_layer(document, frame, paint, &mut cached.surface);
                         }
                     })
                 })
@@ -1025,5 +1075,76 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Renders with reuse and checks the result against a fresh render.
+    fn cached(
+        renderer: &mut DocumentRenderer,
+        document: &Document,
+        frame: i64,
+        revisions: &LayerRevisions,
+    ) -> usize {
+        let plan = RenderPlan::new(document, Purpose::Display);
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut pixmap = Pixmap::new(width, height);
+        renderer.render_plan(document, &plan, frame, Some(revisions), &mut pixmap);
+        assert!(
+            pixmap.data_as_u8_slice() == render(document, frame, 0).data_as_u8_slice(),
+            "a reused layer is out of date"
+        );
+        renderer.layers_drawn()
+    }
+
+    #[test]
+    fn still_layers_are_drawn_once_for_every_frame() {
+        let (document, below, mut above) = two_layers();
+        above.wobble = Some(Wobble::classic(0.0));
+        let document = with_layers(&document, &[below, above]);
+        let revisions = LayerRevisions::default();
+        let mut renderer = DocumentRenderer::new(0);
+        let drawn: Vec<usize> = (0..4)
+            .map(|frame| cached(&mut renderer, &document, frame, &revisions))
+            .collect();
+        assert_eq!(drawn, [2, 1, 1, 1]);
+    }
+
+    #[test]
+    fn only_changed_layers_are_drawn_again() {
+        use ugu_core::command;
+        use ugu_core::history::History;
+
+        let (document, below, above) = two_layers();
+        let mut history = History::new(with_layers(&document, &[below, above]), false);
+        let mut renderer = DocumentRenderer::new(0);
+        let render_now = |renderer: &mut DocumentRenderer, history: &History| {
+            cached(renderer, history.document(), 2, history.layer_revisions())
+        };
+        assert_eq!(render_now(&mut renderer, &history), 2);
+        assert_eq!(render_now(&mut renderer, &history), 0);
+
+        let stroke = document.store.strokes[&StrokeId(0)].clone();
+        history
+            .edit("Draw", |document| {
+                command::draw(document, LayerId(2), stroke, false, None)
+            })
+            .unwrap();
+        assert_eq!(render_now(&mut renderer, &history), 1);
+
+        history
+            .edit("Opacity", |document| {
+                command::update_layer(document, LayerId(1), |layer| {
+                    if let LayerKind::Paint(paint) = &mut layer.kind {
+                        paint.opacity = 0.3;
+                        paint.blend = Blend::Screen;
+                    }
+                })
+                .unwrap()
+            })
+            .unwrap();
+        assert_eq!(render_now(&mut renderer, &history), 0);
+
+        history.undo().unwrap();
+        history.undo().unwrap();
+        assert_eq!(render_now(&mut renderer, &history), 1);
     }
 }

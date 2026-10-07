@@ -7,12 +7,125 @@
 //! so a long history copies nothing big. Each document state has an id, so
 //! returning to the saved state by undo or redo is clean, not dirty.
 
-use crate::document::Document;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::document::{Document, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError, Outcome, commit};
 
 /// Identifies a document state; equal ids mean equal content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StateId(u64);
+
+/// Unique in the process, so revisions of different documents never meet.
+fn next_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Identifies what each paint layer's own pixels are made from: its
+/// operations, wobble and canvas, and the document's wobble and canvas. Its
+/// opacity, blend mode, clipping, visibility and place do not count, as they
+/// only change how the pixels are put together.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerRevisions {
+    settings: u64,
+    layers: HashMap<LayerId, u64>,
+}
+
+impl Default for LayerRevisions {
+    fn default() -> Self {
+        Self {
+            settings: next_revision(),
+            layers: HashMap::new(),
+        }
+    }
+}
+
+impl LayerRevisions {
+    /// Equal values mean the layer's pixels are the same.
+    pub fn of(&self, id: LayerId) -> u64 {
+        self.layers
+            .get(&id)
+            .copied()
+            .unwrap_or(0)
+            .max(self.settings)
+    }
+
+    fn touch(&mut self, layer: &Layer) {
+        let revision = next_revision();
+        each(layer, &mut |id| {
+            self.layers.insert(id, revision);
+        });
+    }
+
+    /// Takes note of `undo`, the changes that would undo what was just
+    /// applied to `document`.
+    fn note(&mut self, document: &Document, undo: &[Change]) {
+        for change in undo {
+            match change {
+                Change::InsertOp { layer, .. } | Change::RemoveOp { layer, .. } => {
+                    self.layers.insert(*layer, next_revision());
+                }
+                Change::InsertLayer { layer, .. } => self.touch(layer),
+                Change::RemoveLayer(id) => {
+                    if let Some(layer) = document.layer(*id) {
+                        self.touch(layer);
+                    }
+                }
+                Change::ReplaceLayer(before) => self.compare(document, before),
+                Change::SetSettings(before) => {
+                    let after = document.settings();
+                    if before.wobble != after.wobble || before.canvas != after.canvas {
+                        self.settings = next_revision();
+                    }
+                }
+                Change::InsertStroke(..)
+                | Change::RemoveStroke(_)
+                | Change::InsertMask(..)
+                | Change::RemoveMask(_)
+                | Change::InsertAsset(..)
+                | Change::RemoveAsset(_) => {}
+            }
+        }
+    }
+
+    /// Touches the paint layers in `after`'s place whose pixels differ from
+    /// those of `before`.
+    fn compare(&mut self, document: &Document, before: &Layer) {
+        let Some(after) = document.layer(before.id) else {
+            return;
+        };
+        match (&before.kind, &after.kind) {
+            (LayerKind::Paint(old), LayerKind::Paint(new)) => {
+                if old.ops != new.ops
+                    || old.wobble != new.wobble
+                    || old.initial_size != new.initial_size
+                {
+                    self.layers.insert(after.id, next_revision());
+                }
+            }
+            (LayerKind::Group(old), LayerKind::Group(new)) => {
+                for child in &new.children {
+                    match old.children.iter().find(|each| each.id == child.id) {
+                        Some(previous) => self.compare(document, previous),
+                        None => self.touch(child),
+                    }
+                }
+            }
+            _ => self.touch(after),
+        }
+    }
+}
+
+fn each(layer: &Layer, visit: &mut impl FnMut(LayerId)) {
+    visit(layer.id);
+    if let LayerKind::Group(group) = &layer.kind {
+        for child in &group.children {
+            each(child, visit);
+        }
+    }
+}
 
 struct Entry {
     label: String,
@@ -30,6 +143,7 @@ pub struct History {
     next_state: u64,
     saved: Option<StateId>,
     revision: u64,
+    layers: LayerRevisions,
 }
 
 impl History {
@@ -45,7 +159,12 @@ impl History {
             next_state: 1,
             saved: saved.then_some(state),
             revision: 0,
+            layers: LayerRevisions::default(),
         }
+    }
+
+    pub fn layer_revisions(&self) -> &LayerRevisions {
+        &self.layers
     }
 
     pub fn document(&self) -> &Document {
@@ -111,6 +230,7 @@ impl History {
         }
         undo.reverse();
         let changes: Vec<Change> = undo.into_iter().flatten().collect();
+        self.layers.note(&self.document, &changes);
         let before = self.state;
         self.state = StateId(self.next_state);
         self.next_state += 1;
@@ -173,6 +293,7 @@ impl History {
                     Outcome::Committed(reverse) => reverse,
                     Outcome::NoChange => Vec::new(),
                 };
+                self.layers.note(&self.document, &reverse);
                 self.state = if backwards { before } else { after };
                 self.revision += 1;
                 Ok(Entry {
@@ -228,8 +349,8 @@ impl Group<'_> {
 mod tests {
     use super::*;
     use crate::command::{add_paint_layer, draw, update_layer};
-    use crate::document::LayerId;
     use crate::ops::Rgba8;
+    use crate::ops::{PaintLayer, Wobble};
     use crate::store::{Brush, BrushEngine, Point, Stroke};
 
     fn stroke(x: f32) -> Stroke {
@@ -398,5 +519,76 @@ mod tests {
             times[47],
             times[49]
         );
+    }
+
+    #[test]
+    fn layer_revisions_follow_what_each_layers_pixels_are_made_from() {
+        let mut history = History::new(Document::new([64, 64]), false);
+        history
+            .edit("Add layer", |document| {
+                add_paint_layer(document, None, 1, "Second".to_owned()).1
+            })
+            .unwrap();
+        let (first, second) = (LayerId(1), LayerId(2));
+        let revisions = |history: &History| {
+            let layers = history.layer_revisions();
+            (layers.of(first), layers.of(second))
+        };
+        let start = revisions(&history);
+
+        draw_at(&mut history, 4.0);
+        let drawn = revisions(&history);
+        assert_ne!(drawn.0, start.0);
+        assert_eq!(drawn.1, start.1);
+
+        // How the layer is put together does not change its pixels.
+        let set = |history: &mut History, update: &dyn Fn(&mut PaintLayer)| {
+            history
+                .edit("Layer", |document| {
+                    update_layer(document, second, |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            update(paint);
+                        }
+                    })
+                    .unwrap()
+                })
+                .unwrap();
+        };
+        set(&mut history, &|paint| {
+            paint.opacity = 0.5;
+            paint.blend = crate::ops::Blend::Multiply;
+        });
+        assert_eq!(revisions(&history), drawn);
+        set(&mut history, &|paint| {
+            paint.wobble = Some(Wobble::classic(0.0))
+        });
+        let still = revisions(&history);
+        assert_eq!(still.0, drawn.0);
+        assert_ne!(still.1, drawn.1);
+
+        // Undo makes a new revision rather than going back to an old one.
+        for _ in 0..3 {
+            history.undo().unwrap();
+        }
+        let undone = revisions(&history);
+        assert!(undone.0 != start.0 && undone.0 != drawn.0);
+        assert!(undone.1 != still.1 && undone.1 != drawn.1);
+
+        let mut settings = history.document().settings();
+        settings.frames = 12;
+        history
+            .edit("Frames", |_| vec![Change::SetSettings(settings.clone())])
+            .unwrap();
+        assert_eq!(revisions(&history), undone);
+        settings.wobble = Wobble::classic(3.0);
+        history
+            .edit("Wobble", |_| vec![Change::SetSettings(settings)])
+            .unwrap();
+        let wobbled = revisions(&history);
+        assert!(wobbled.0 > undone.0 && wobbled.1 > undone.1);
+
+        // Another document's layer 1 never shares a revision.
+        let other = History::new(Document::new([64, 64]), false);
+        assert_ne!(other.layer_revisions().of(first), wobbled.0);
     }
 }

@@ -12,8 +12,10 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use ugu_core::document::{Document, LayerId};
+use ugu_core::history::LayerRevisions;
 use ugu_render::compose::{Split, composite};
 use ugu_render::document::{DocumentRenderer, Purpose};
+use ugu_render::plan::RenderPlan;
 use vello_cpu::Pixmap;
 
 /// Which state of which open document a render shows. Revisions start
@@ -51,7 +53,7 @@ pub enum Rendered {
 #[derive(Default)]
 struct Queue {
     split: Option<(Key, Arc<Document>)>,
-    frames: VecDeque<(Version, u32, Arc<Document>)>,
+    frames: VecDeque<(Version, u32, Arc<Document>, Arc<LayerRevisions>)>,
     stop: bool,
 }
 
@@ -62,7 +64,7 @@ pub struct CacheWorker {
 
 enum Job {
     Split(Key, Arc<Document>),
-    Frame(Version, u32, Arc<Document>),
+    Frame(Version, u32, Arc<Document>, Arc<LayerRevisions>),
 }
 
 impl CacheWorker {
@@ -105,13 +107,15 @@ impl CacheWorker {
                                 display,
                             });
                         }
-                        Job::Frame(version, frame, document) => {
+                        Job::Frame(version, frame, document, layers) => {
                             let [width, height] = document.canvas.map(|edge| edge as u16);
                             let mut pixels = Pixmap::new(width, height);
-                            renderer.render(
+                            let plan = RenderPlan::new(&document, Purpose::Display);
+                            renderer.render_plan(
                                 &document,
+                                &plan,
                                 i64::from(frame),
-                                Purpose::Display,
+                                Some(&layers),
                                 &mut pixels,
                             );
                             tracing::debug!(
@@ -141,13 +145,20 @@ impl CacheWorker {
         wake.notify_one();
     }
 
-    /// Replaces the frames waiting to be rendered for playback.
-    pub fn request_frames(&self, version: Version, frames: &[u32], document: &Arc<Document>) {
+    /// Replaces the frames waiting to be rendered for playback. `layers`
+    /// lets layers that do not move be drawn once for all frames.
+    pub fn request_frames(
+        &self,
+        version: Version,
+        frames: &[u32],
+        document: &Arc<Document>,
+        layers: &Arc<LayerRevisions>,
+    ) {
         let (lock, wake) = &*self.queue;
         let mut queue = lock.lock().expect("queue lock");
         queue.frames = frames
             .iter()
-            .map(|&frame| (version, frame, document.clone()))
+            .map(|&frame| (version, frame, document.clone(), layers.clone()))
             .collect();
         wake.notify_one();
     }
@@ -164,8 +175,8 @@ fn next(queue: &(Mutex<Queue>, Condvar)) -> Option<Job> {
         if let Some((key, document)) = queue.split.take() {
             return Some(Job::Split(key, document));
         }
-        if let Some((version, frame, document)) = queue.frames.pop_front() {
-            return Some(Job::Frame(version, frame, document));
+        if let Some((version, frame, document, layers)) = queue.frames.pop_front() {
+            return Some(Job::Frame(version, frame, document, layers));
         }
         queue = wake.wait(queue).expect("queue lock");
     }

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use ugu_core::command;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
-use ugu_core::history::{History, StateId};
+use ugu_core::history::{History, LayerRevisions, StateId};
 use ugu_core::ops::{Rgba8, Wobble};
 use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 
@@ -160,6 +160,11 @@ impl Session {
     /// Goes up on every change, undo and redo included.
     pub fn revision(&self) -> u64 {
         self.history.revision()
+    }
+
+    /// What each layer's own pixels are made from.
+    pub fn layer_revisions(&self) -> &LayerRevisions {
+        self.history.layer_revisions()
     }
 
     pub fn state(&self) -> StateId {

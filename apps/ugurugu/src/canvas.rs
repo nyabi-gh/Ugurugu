@@ -375,7 +375,9 @@ impl Canvas {
                 .collect();
             playback.window = Some(cycle);
             let document = self.snapshot();
-            self.cache.request_frames(version, &missing, &document);
+            let layers = Arc::new(self.session.layer_revisions().clone());
+            self.cache
+                .request_frames(version, &missing, &document, &layers);
         }
         if shown {
             tracing::debug!(frame = cycle, "playback frame shown");
