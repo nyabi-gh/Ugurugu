@@ -67,8 +67,9 @@ impl LiveStroke {
         if samples.is_empty() {
             return None;
         }
-        // A sample is fixed once the one after it is a regular sample.
-        let fixed = self.resampler.settled().saturating_sub(1);
+        // A sample is fixed once the two after it are regular samples: its
+        // circle is cut by the band to the next, which turns with the one after.
+        let fixed = self.resampler.settled().saturating_sub(2);
         let mut dirty = None;
 
         if fixed > self.settled {
