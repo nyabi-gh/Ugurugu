@@ -107,6 +107,8 @@ pub struct RenderThread {
     display_latency: LatencyLog,
     needs_frame: bool,
     repaint_at: Option<Instant>,
+    /// Nothing is drawn, played or uploaded while the window is minimized.
+    minimized: bool,
 }
 
 /// Everything made with one GPU device, replaced together when it is lost.
@@ -220,6 +222,7 @@ impl RenderThread {
             display_latency: LatencyLog::default(),
             needs_frame: true,
             repaint_at: None,
+            minimized: false,
         })
     }
 
@@ -292,6 +295,10 @@ impl RenderThread {
             }
             if !self.apply_queued(messages) {
                 break;
+            }
+            if self.minimized {
+                self.needs_frame = false;
+                self.repaint_at = None;
             }
             if self.repaint_at.is_some_and(|at| at <= Instant::now()) {
                 self.needs_frame = true;
@@ -391,6 +398,8 @@ impl RenderThread {
             ToRender::Window(WindowEvent::RedrawRequested) => self.needs_frame = true,
             ToRender::Window(event) => {
                 if let WindowEvent::Resized(size) = &event {
+                    // Windows reports a minimized window as zero-sized.
+                    self.minimized = size.width == 0 || size.height == 0;
                     self.display
                         .presenter
                         .resize(&self.display.gpu.device, [size.width, size.height]);
@@ -530,6 +539,9 @@ impl RenderThread {
                 }
             }
             let upload = self.canvas.take_upload();
+            if let Some(rect) = upload {
+                tracing::debug!(?rect, "canvas uploaded");
+            }
             canvas_view.update(&gpu.device, &gpu.queue, self.canvas.display(), upload);
             let canvas_area = canvas_area.map(|edge| edge.max(0) as u32);
             let placement = self.canvas.placement();

@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Renders on a worker thread, so the render thread keeps showing the
-//! previous image and taking input while a frame is drawn: the canvas split
-//! for editing, and whole frames for playback. Only the newest split request
-//! matters, and it goes before any frame.
+//! Renders on one worker thread, so the render thread keeps showing the
+//! previous image and taking input while a frame is drawn, and renders never
+//! compete with each other for the processor.
+//!
+//! Work goes in this order: the canvas split for editing, playback frames
+//! (the one due first at the front), then export frames. Only the newest
+//! split and the newest list of playback frames matter; anything waiting
+//! that they replace is dropped. A render under way that is no longer wanted
+//! is stopped between layers or rows, and an export stopped that way starts
+//! again later.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -50,28 +58,70 @@ pub enum Rendered {
     },
 }
 
-#[derive(Default)]
-struct Queue {
-    split: Option<(Key, Arc<Document>, Arc<LayerRevisions>)>,
-    frames: VecDeque<(Version, u32, Arc<Document>, Arc<LayerRevisions>)>,
-    stop: bool,
-}
-
-pub struct CacheWorker {
-    queue: Arc<(Mutex<Queue>, Condvar)>,
-    thread: Option<JoinHandle<()>>,
+/// A document state handed to the worker, with what its layers are made
+/// from.
+#[derive(Clone)]
+pub struct Snapshot {
+    pub document: Arc<Document>,
+    pub layers: Arc<LayerRevisions>,
 }
 
 enum Job {
-    Split(Key, Arc<Document>, Arc<LayerRevisions>),
-    Frame(Version, u32, Arc<Document>, Arc<LayerRevisions>),
+    Split(Key, Snapshot),
+    Frame(Version, u32, Snapshot),
+    Export {
+        document: Arc<Document>,
+        frame: i64,
+        reply: Sender<Pixmap>,
+    },
+}
+
+/// What the worker is doing now.
+#[derive(Clone, Copy, PartialEq)]
+enum Running {
+    Split,
+    Frame(Version, u32),
+    Export,
+}
+
+#[derive(Default)]
+struct Queue {
+    split: Option<(Key, Snapshot)>,
+    frames: VecDeque<(Version, u32, Snapshot)>,
+    exports: VecDeque<Job>,
+    running: Option<Running>,
+    quit: bool,
+}
+
+struct Shared {
+    queue: Mutex<Queue>,
+    wake: Condvar,
+    /// Set to stop the render under way.
+    stop: Arc<AtomicBool>,
+}
+
+/// Hands work to the worker; cheap to clone.
+#[derive(Clone)]
+pub struct Renders {
+    shared: Arc<Shared>,
+}
+
+pub struct CacheWorker {
+    renders: Renders,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl CacheWorker {
-    /// `done` receives each finished render, on the worker thread.
+    /// `done` receives each finished split and playback frame, on the
+    /// worker thread.
     pub fn start(done: impl Fn(Rendered) + Send + 'static) -> Self {
-        let queue = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
-        let shared = queue.clone();
+        let shared = Arc::new(Shared {
+            queue: Mutex::new(Queue::default()),
+            wake: Condvar::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+        });
+        let worker = shared.clone();
+        // One thread is left for the render thread, which takes input.
         let threads = std::thread::available_parallelism()
             .map_or(1, |count| count.get().saturating_sub(1))
             .min(8) as u16;
@@ -79,112 +129,283 @@ impl CacheWorker {
             .name("canvas cache".to_owned())
             .spawn(move || {
                 let mut renderer = DocumentRenderer::new(threads);
-                while let Some(job) = next(&shared) {
-                    let started = Instant::now();
-                    match job {
-                        Job::Split(key, document, layers) => {
-                            let [width, height] = document.canvas.map(|edge| edge as u16);
-                            let mut display = Pixmap::new(width, height);
-                            let split = renderer.split(
-                                &document,
-                                key.layer,
-                                i64::from(key.frame),
-                                Some(&layers),
-                                &mut display,
-                            );
-                            tracing::debug!(
-                                ms = started.elapsed().as_secs_f64() * 1000.0,
-                                revision = key.version.revision,
-                                "canvas split rendered"
-                            );
-                            done(Rendered::Split {
-                                key,
-                                split,
-                                display,
-                            });
-                        }
-                        Job::Frame(version, frame, document, layers) => {
-                            let [width, height] = document.canvas.map(|edge| edge as u16);
-                            let mut pixels = Pixmap::new(width, height);
-                            let plan = RenderPlan::new(&document, Purpose::Display);
-                            renderer.render_plan(
-                                &document,
-                                &plan,
-                                i64::from(frame),
-                                Some(&layers),
-                                &mut pixels,
-                            );
-                            tracing::debug!(
-                                ms = started.elapsed().as_secs_f64() * 1000.0,
-                                frame,
-                                "playback frame rendered"
-                            );
-                            done(Rendered::Frame {
-                                version,
-                                frame,
-                                pixels: Arc::new(pixels),
-                            });
-                        }
+                renderer.set_stop(worker.stop.clone());
+                while let Some(job) = next(&worker) {
+                    if let Some(job) = run(&mut renderer, job, &done) {
+                        // An export stopped for other work goes first next.
+                        worker
+                            .queue
+                            .lock()
+                            .expect("queue lock")
+                            .exports
+                            .push_front(job);
                     }
+                    worker.queue.lock().expect("queue lock").running = None;
                 }
             })
             .expect("cannot start the canvas cache thread");
         Self {
-            queue,
+            renders: Renders { shared },
             thread: Some(thread),
         }
     }
 
-    pub fn request(&self, key: Key, document: Arc<Document>, layers: Arc<LayerRevisions>) {
-        let (lock, wake) = &*self.queue;
-        lock.lock().expect("queue lock").split = Some((key, document, layers));
-        wake.notify_one();
+    pub fn renders(&self) -> Renders {
+        self.renders.clone()
     }
 
-    /// Replaces the frames waiting to be rendered for playback. `layers`
-    /// lets layers that do not move be drawn once for all frames.
-    pub fn request_frames(
-        &self,
-        version: Version,
-        frames: &[u32],
-        document: &Arc<Document>,
-        layers: &Arc<LayerRevisions>,
-    ) {
-        let (lock, wake) = &*self.queue;
-        let mut queue = lock.lock().expect("queue lock");
-        queue.frames = frames
-            .iter()
-            .map(|&frame| (version, frame, document.clone(), layers.clone()))
-            .collect();
-        wake.notify_one();
+    pub fn request(&self, key: Key, snapshot: Snapshot) {
+        self.renders.shared.request(key, snapshot);
+    }
+
+    /// Replaces the playback frames waiting to be rendered, the first due
+    /// first. Layers that do not move are drawn once for all of them.
+    pub fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot) {
+        self.renders
+            .shared
+            .request_frames(version, frames, snapshot);
     }
 }
 
-/// The next job, splits first; `None` once stopped.
-fn next(queue: &(Mutex<Queue>, Condvar)) -> Option<Job> {
-    let (lock, wake) = queue;
-    let mut queue = lock.lock().expect("queue lock");
+impl Shared {
+    fn request(&self, key: Key, snapshot: Snapshot) {
+        let mut queue = self.queue.lock().expect("queue lock");
+        queue.split = Some((key, snapshot));
+        // Editing comes first: whatever is under way is no longer wanted
+        // now, or waits.
+        if queue.running.is_some() {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+        self.wake.notify_one();
+    }
+
+    fn request_frames(&self, version: Version, frames: &[u32], snapshot: &Snapshot) {
+        let mut queue = self.queue.lock().expect("queue lock");
+        queue.frames = frames
+            .iter()
+            .map(|&frame| (version, frame, snapshot.clone()))
+            .collect();
+        if let Some(Running::Frame(running, frame)) = queue.running
+            && !(running == version && frames.contains(&frame))
+        {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+        self.wake.notify_one();
+    }
+}
+
+impl Renders {
+    /// Renders `frame` of `document` for export, after the canvas's own
+    /// work; waits for it. `None` when the worker has stopped.
+    pub fn export(&self, document: Arc<Document>, frame: i64) -> Option<Pixmap> {
+        let (reply, answer) = channel();
+        let shared = &self.shared;
+        shared
+            .queue
+            .lock()
+            .expect("queue lock")
+            .exports
+            .push_back(Job::Export {
+                document,
+                frame,
+                reply,
+            });
+        shared.wake.notify_one();
+        answer.recv().ok()
+    }
+}
+
+/// The next job by priority, marked as running; `None` once quitting.
+fn next(shared: &Shared) -> Option<Job> {
+    let mut queue = shared.queue.lock().expect("queue lock");
     loop {
-        if queue.stop {
+        if queue.quit {
             return None;
         }
-        if let Some((key, document, layers)) = queue.split.take() {
-            return Some(Job::Split(key, document, layers));
+        let job = if let Some((key, snapshot)) = queue.split.take() {
+            Some((Running::Split, Job::Split(key, snapshot)))
+        } else if let Some((version, frame, snapshot)) = queue.frames.pop_front() {
+            Some((
+                Running::Frame(version, frame),
+                Job::Frame(version, frame, snapshot),
+            ))
+        } else {
+            queue.exports.pop_front().map(|job| (Running::Export, job))
+        };
+        if let Some((running, job)) = job {
+            queue.running = Some(running);
+            shared.stop.store(false, Ordering::Relaxed);
+            return Some(job);
         }
-        if let Some((version, frame, document, layers)) = queue.frames.pop_front() {
-            return Some(Job::Frame(version, frame, document, layers));
-        }
-        queue = wake.wait(queue).expect("queue lock");
+        queue = shared.wake.wait(queue).expect("queue lock");
     }
+}
+
+/// Runs `job`; returns an export that was stopped, to run again.
+fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> Option<Job> {
+    let started = Instant::now();
+    let ms = || started.elapsed().as_secs_f64() * 1000.0;
+    match job {
+        Job::Split(key, snapshot) => {
+            let document = &snapshot.document;
+            let [width, height] = document.canvas.map(|edge| edge as u16);
+            let mut display = Pixmap::new(width, height);
+            let Some(split) = renderer.split(
+                document,
+                key.layer,
+                i64::from(key.frame),
+                Some(&snapshot.layers),
+                &mut display,
+            ) else {
+                tracing::debug!(ms = ms(), "canvas split stopped");
+                return None;
+            };
+            tracing::debug!(
+                ms = ms(),
+                revision = key.version.revision,
+                "canvas split rendered"
+            );
+            done(Rendered::Split {
+                key,
+                split,
+                display,
+            });
+        }
+        Job::Frame(version, frame, snapshot) => {
+            let document = &snapshot.document;
+            let [width, height] = document.canvas.map(|edge| edge as u16);
+            let mut pixels = Pixmap::new(width, height);
+            let plan = RenderPlan::new(document, Purpose::Display);
+            let finished = renderer.render_plan(
+                document,
+                &plan,
+                i64::from(frame),
+                Some(&snapshot.layers),
+                &mut pixels,
+            );
+            if !finished {
+                tracing::debug!(ms = ms(), frame, "playback frame stopped");
+                return None;
+            }
+            tracing::debug!(ms = ms(), frame, "playback frame rendered");
+            done(Rendered::Frame {
+                version,
+                frame,
+                pixels: Arc::new(pixels),
+            });
+        }
+        Job::Export {
+            document,
+            frame,
+            reply,
+        } => {
+            let [width, height] = document.canvas.map(|edge| edge as u16);
+            let mut pixels = Pixmap::new(width, height);
+            let plan = RenderPlan::new(&document, Purpose::Export);
+            if !renderer.render_plan(&document, &plan, frame, None, &mut pixels) {
+                tracing::debug!(ms = ms(), "export frame stopped");
+                return Some(Job::Export {
+                    document,
+                    frame,
+                    reply,
+                });
+            }
+            tracing::debug!(ms = ms(), "export frame rendered");
+            let _ = reply.send(pixels);
+        }
+    }
+    None
 }
 
 impl Drop for CacheWorker {
     fn drop(&mut self) {
-        let (lock, wake) = &*self.queue;
-        lock.lock().expect("queue lock").stop = true;
-        wake.notify_one();
+        let shared = &self.renders.shared;
+        shared.queue.lock().expect("queue lock").quit = true;
+        shared.stop.store(true, Ordering::Relaxed);
+        shared.wake.notify_one();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot(document: Document) -> Snapshot {
+        Snapshot {
+            document: Arc::new(document),
+            layers: Arc::new(LayerRevisions::default()),
+        }
+    }
+
+    fn shared() -> Shared {
+        Shared {
+            queue: Mutex::new(Queue::default()),
+            wake: Condvar::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn a_split_goes_before_frames_and_frames_before_exports() {
+        let shared = shared();
+        let version = Version {
+            document: 0,
+            revision: 0,
+        };
+        let state = snapshot(Document::new([8, 8]));
+        {
+            let mut queue = shared.queue.lock().unwrap();
+            let (reply, _) = channel();
+            queue.exports.push_back(Job::Export {
+                document: state.document.clone(),
+                frame: 0,
+                reply,
+            });
+            queue.frames.push_back((version, 3, state.clone()));
+            queue.split = Some((
+                Key {
+                    version,
+                    layer: LayerId(1),
+                    frame: 0,
+                },
+                state,
+            ));
+        }
+        let order: Vec<_> = (0..3)
+            .map(|_| match next(&shared).unwrap() {
+                Job::Split(..) => "split",
+                Job::Frame(..) => "frame",
+                Job::Export { .. } => "export",
+            })
+            .collect();
+        assert_eq!(order, ["split", "frame", "export"]);
+    }
+
+    #[test]
+    fn a_new_split_stops_the_render_under_way() {
+        let shared = shared();
+        let state = snapshot(Document::new([8, 8]));
+        let version = Version {
+            document: 0,
+            revision: 0,
+        };
+        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2));
+        // A list that still has the frame keeps it going; one without stops it.
+        shared.request_frames(version, &[2, 3], &state);
+        assert!(!shared.stop.load(Ordering::Relaxed));
+        shared.request_frames(version, &[3], &state);
+        assert!(shared.stop.load(Ordering::Relaxed));
+        shared.stop.store(false, Ordering::Relaxed);
+        let key = Key {
+            version,
+            layer: LayerId(1),
+            frame: 0,
+        };
+        shared.queue.lock().unwrap().running = Some(Running::Export);
+        shared.request(key, state);
+        assert!(shared.stop.load(Ordering::Relaxed));
     }
 }

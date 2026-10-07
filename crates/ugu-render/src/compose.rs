@@ -118,7 +118,7 @@ impl Split {
 impl DocumentRenderer {
     /// Draws `frame` into `display`, which must have the canvas size, and
     /// keeps what it was made from for editing `layer`. With `revisions`,
-    /// layers drawn before are reused.
+    /// layers drawn before are reused. `None` when the stop flag ended it.
     pub fn split(
         &mut self,
         document: &Document,
@@ -126,9 +126,11 @@ impl DocumentRenderer {
         frame: i64,
         revisions: Option<&LayerRevisions>,
         display: &mut Pixmap,
-    ) -> Split {
+    ) -> Option<Split> {
         let plan = RenderPlan::new(document, Purpose::Display);
-        self.render_plan(document, &plan, frame, revisions, display);
+        if !self.render_plan(document, &plan, frame, revisions, display) {
+            return None;
+        }
         let surfaces = plan
             .layers
             .iter()
@@ -137,13 +139,13 @@ impl DocumentRenderer {
         // The edited layer's pixels change in place from now on, so this
         // renderer does not keep a share of them.
         self.forget(layer);
-        Split {
+        Some(Split {
             layer,
             frame: ugu_core::motion::frame_in_cycle(frame, document.frames),
             plan,
             background: premultiplied(document.background.0),
             surfaces,
-        }
+        })
     }
 }
 
@@ -173,7 +175,7 @@ pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out:
             } else {
                 1
             };
-            composite::evaluate(&split.plan, background, &surfaces, rect, out, threads);
+            composite::evaluate(&split.plan, background, &surfaces, rect, out, threads, None);
         }
     }
 }
@@ -430,13 +432,15 @@ mod tests {
 
     fn split(history: &History, layer: LayerId, frame: i64) -> (Split, Pixmap) {
         let mut display = Pixmap::new(120, 80);
-        let split = DocumentRenderer::new(0).split(
-            history.document(),
-            layer,
-            frame,
-            Some(history.layer_revisions()),
-            &mut display,
-        );
+        let split = DocumentRenderer::new(0)
+            .split(
+                history.document(),
+                layer,
+                frame,
+                Some(history.layer_revisions()),
+                &mut display,
+            )
+            .expect("nothing stops it");
         (split, display)
     }
 

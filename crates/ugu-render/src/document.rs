@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
@@ -117,6 +118,7 @@ pub struct DocumentRenderer {
     cache: HashMap<LayerId, Cached>,
     /// Layers the last render drew.
     drawn: usize,
+    stop: Option<Arc<AtomicBool>>,
     tile_edge: u32,
     timings: Timings,
 }
@@ -130,15 +132,17 @@ struct Cached {
     surface: Arc<TiledSurface>,
 }
 
-/// A layer to draw: its id, operations, revision, frame (`None` when it does
-/// not move) and the surface to draw on.
-type Work<'a> = (
-    LayerId,
-    &'a PaintLayer,
-    Option<u64>,
-    Option<u32>,
-    TiledSurface,
-);
+/// A layer to draw, and the surface to draw it on.
+struct Work<'a> {
+    id: LayerId,
+    paint: &'a PaintLayer,
+    revision: Option<u64>,
+    /// `None` when the layer does not move.
+    frame: Option<u32>,
+    surface: TiledSurface,
+    /// Whether it was drawn before a stop.
+    drawn: bool,
+}
 
 /// Where the last render spent its time. With layers drawn at once, the
 /// layer stages add up the time of every thread.
@@ -198,6 +202,7 @@ impl DocumentRenderer {
             threads: usize::from(threads.max(1)),
             cache: HashMap::new(),
             drawn: 0,
+            stop: None,
             tile_edge: TILE_EDGE,
             timings: Timings::default(),
         }
@@ -250,7 +255,8 @@ impl DocumentRenderer {
 
     /// Draws `frame` as `plan`, made from `document`, says. With `revisions`
     /// of the document, a layer whose pixels are as when it was last drawn
-    /// here is reused.
+    /// here is reused. Returns `false` when the stop flag ended it early;
+    /// `pixmap` is then not finished, and the layers drawn are kept.
     pub fn render_plan(
         &mut self,
         document: &Document,
@@ -258,7 +264,7 @@ impl DocumentRenderer {
         frame: i64,
         revisions: Option<&LayerRevisions>,
         pixmap: &mut Pixmap,
-    ) {
+    ) -> bool {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
@@ -286,24 +292,41 @@ impl DocumentRenderer {
                 .remove(id)
                 .and_then(|cached| Arc::try_unwrap(cached.surface).ok())
                 .unwrap_or_else(|| TiledSurface::new(document.canvas, edge));
-            work.push((*id, paint, revision, at, surface));
+            work.push(Work {
+                id: *id,
+                paint,
+                revision,
+                frame: at,
+                surface,
+                drawn: false,
+            });
         }
         self.drawn = work.len();
         self.timings = Timings::default();
         if work.len() >= self.threads && self.threads > 1 {
             self.draw_at_once(document, &mut work, frame);
         } else {
-            for (_, paint, _, _, surface) in &mut work {
-                self.timings += self.main.draw_layer(document, frame, paint, surface);
+            for each in &mut work {
+                if self.stopped() {
+                    break;
+                }
+                self.timings +=
+                    self.main
+                        .draw_layer(document, frame, each.paint, &mut each.surface);
+                each.drawn = true;
             }
         }
-        for (id, _, revision, frame, surface) in work {
+        let complete = work.iter().all(|each| each.drawn);
+        for each in work.into_iter().filter(|each| each.drawn) {
             let cached = Cached {
-                revision,
-                frame,
-                surface: Arc::new(surface),
+                revision: each.revision,
+                frame: each.frame,
+                surface: Arc::new(each.surface),
             };
-            self.cache.insert(id, cached);
+            self.cache.insert(each.id, cached);
+        }
+        if !complete {
+            return false;
         }
         let started = std::time::Instant::now();
         let surfaces: Vec<Option<&TiledSurface>> = plan
@@ -313,15 +336,29 @@ impl DocumentRenderer {
             .collect();
         let background = premultiplied(document.background.0);
         let rect = [0, 0, u32::from(width), u32::from(height)];
-        composite::evaluate(
+        let finished = composite::evaluate(
             plan,
             Some(background),
             &surfaces,
             rect,
             pixmap,
             self.threads,
+            self.stop.as_deref(),
         );
         self.timings.composite = started.elapsed();
+        finished
+    }
+
+    /// Stops renders early, between layers and between rows put together,
+    /// once `stop` is set.
+    pub fn set_stop(&mut self, stop: Arc<AtomicBool>) {
+        self.stop = Some(stop);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop
+            .as_ref()
+            .is_some_and(|stop| stop.load(Ordering::Relaxed))
     }
 
     /// Draws each layer on one thread, as many layers at once as there are
@@ -333,6 +370,7 @@ impl DocumentRenderer {
         let next = std::sync::atomic::AtomicUsize::new(0);
         let slots: Vec<std::sync::Mutex<&mut Work<'_>>> =
             work.iter_mut().map(std::sync::Mutex::new).collect();
+        let stop = self.stop.as_deref();
         let timings = std::thread::scope(|scope| {
             let workers: Vec<_> = self
                 .singles
@@ -342,13 +380,18 @@ impl DocumentRenderer {
                     scope.spawn(move || {
                         let mut timings = Timings::default();
                         loop {
-                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+                                return timings;
+                            }
+                            let index = next.fetch_add(1, Ordering::Relaxed);
                             let Some(slot) = slots.get(index) else {
                                 return timings;
                             };
                             let mut slot = slot.lock().expect("one worker per layer");
-                            let (_, paint, _, _, surface) = &mut **slot;
-                            timings += raster.draw_layer(document, frame, paint, surface);
+                            let each = &mut **slot;
+                            timings +=
+                                raster.draw_layer(document, frame, each.paint, &mut each.surface);
+                            each.drawn = true;
                         }
                     })
                 })
@@ -1123,5 +1166,25 @@ mod tests {
         history.undo().unwrap();
         history.undo().unwrap();
         assert_eq!(render_now(&mut renderer, &history), 1);
+    }
+
+    #[test]
+    fn a_stopped_render_keeps_nothing_half_drawn() {
+        let document = many_layers();
+        let revisions = LayerRevisions::default();
+        let plan = RenderPlan::new(&document, Purpose::Display);
+        for threads in [0, 8] {
+            let stop = Arc::new(AtomicBool::new(true));
+            let mut renderer = DocumentRenderer::new(threads);
+            renderer.set_stop(stop.clone());
+            let mut pixmap = Pixmap::new(96, 48);
+            assert!(!renderer.render_plan(&document, &plan, 1, Some(&revisions), &mut pixmap));
+            assert_eq!(renderer.surface_bytes(), 0);
+            stop.store(false, Ordering::Relaxed);
+            assert_eq!(
+                cached(&mut renderer, &document, 1, &revisions),
+                plan.layers.len()
+            );
+        }
     }
 }

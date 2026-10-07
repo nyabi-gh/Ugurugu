@@ -27,7 +27,7 @@ use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
-use crate::cache::{CacheWorker, Key, Rendered, Version};
+use crate::cache::{CacheWorker, Key, Rendered, Renders, Snapshot, Version};
 use crate::input::{CanvasInput, Gesture};
 
 /// Shown around the document, opaque straight RGBA.
@@ -91,7 +91,7 @@ pub struct Canvas {
     /// Counts documents opened, so renders of an earlier one are told apart.
     generation: u64,
     /// The document as last handed to the worker, shared by its jobs.
-    snapshot: Option<(u64, Arc<Document>)>,
+    snapshot: Option<(u64, Snapshot)>,
 }
 
 fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
@@ -161,7 +161,7 @@ impl Canvas {
 
     /// The document as it is now, shared with work off this thread.
     pub fn snapshot_now(&mut self) -> Arc<Document> {
-        self.snapshot()
+        self.snapshot().document
     }
 
     pub fn mark_saved(&mut self, state: ugu_core::history::StateId) {
@@ -245,16 +245,24 @@ impl Canvas {
         }
     }
 
-    fn snapshot(&mut self) -> Arc<Document> {
+    fn snapshot(&mut self) -> Snapshot {
         let revision = self.session.revision();
         match &self.snapshot {
-            Some((at, document)) if *at == revision => document.clone(),
+            Some((at, snapshot)) if *at == revision => snapshot.clone(),
             _ => {
-                let document = Arc::new(self.session.document().clone());
-                self.snapshot = Some((revision, document.clone()));
-                document
+                let snapshot = Snapshot {
+                    document: Arc::new(self.session.document().clone()),
+                    layers: Arc::new(self.session.layer_revisions().clone()),
+                };
+                self.snapshot = Some((revision, snapshot.clone()));
+                snapshot
             }
         }
+    }
+
+    /// Where renders for export go, after the canvas's own.
+    pub fn renders(&self) -> Renders {
+        self.cache.renders()
     }
 
     /// Asks for a new split when the shown one no longer matches. Playback
@@ -266,9 +274,8 @@ impl Canvas {
         let key = self.key();
         if self.split.as_ref().map(|(shown, _)| *shown) != Some(key) && self.requested != Some(key)
         {
-            let document = self.snapshot();
-            let layers = Arc::new(self.session.layer_revisions().clone());
-            self.cache.request(key, document, layers);
+            let snapshot = self.snapshot();
+            self.cache.request(key, snapshot);
             self.requested = Some(key);
         }
     }
@@ -375,10 +382,8 @@ impl Canvas {
                 .filter(|at| !playback.frames.contains_key(at))
                 .collect();
             playback.window = Some(cycle);
-            let document = self.snapshot();
-            let layers = Arc::new(self.session.layer_revisions().clone());
-            self.cache
-                .request_frames(version, &missing, &document, &layers);
+            let snapshot = self.snapshot();
+            self.cache.request_frames(version, &missing, &snapshot);
         }
         if shown {
             tracing::debug!(frame = cycle, "playback frame shown");

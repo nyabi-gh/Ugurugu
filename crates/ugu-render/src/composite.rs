@@ -9,6 +9,8 @@
 //! both in one scene. Multiply, Screen and Overlay are the W3C separable
 //! formulas on premultiplied values, rounded to the nearest level.
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
 use ugu_core::ops::Blend;
 use vello_cpu::Pixmap;
 
@@ -106,7 +108,8 @@ const STRIPE: usize = 16;
 
 /// Puts `surfaces` (one per paint layer of `plan`, in plan order; `None` is
 /// transparent) together over `background` within `rect` of `out`, on up to
-/// `threads` threads.
+/// `threads` threads. Returns `false` when `stop` was set before every row
+/// was done.
 pub fn evaluate(
     plan: &RenderPlan,
     background: Option<Pixel>,
@@ -114,12 +117,13 @@ pub fn evaluate(
     rect: PixelRect,
     out: &mut Pixmap,
     threads: usize,
-) {
+    stop: Option<&AtomicBool>,
+) -> bool {
     assert_eq!(surfaces.len(), plan.layers.len());
     let width = usize::from(out.width());
     let [left, top, right, bottom] = rect.map(|value| value as usize);
     if left >= right || top >= bottom {
-        return;
+        return true;
     }
     let needed = bases_needed(&plan.steps);
     let row_bytes = width * 4;
@@ -141,31 +145,37 @@ pub fn evaluate(
             line.copy_from_slice(&levels[0].row);
         }
     };
-    if threads <= 1 || bottom - top <= STRIPE {
-        stripe(top, data, &mut Vec::new());
-        return;
-    }
     let stripes: Vec<std::sync::Mutex<&mut [u8]>> = data
         .chunks_mut(STRIPE * row_bytes)
         .map(std::sync::Mutex::new)
         .collect();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for _ in 0..threads.min(stripes.len()) {
-            let (stripe, stripes, next) = (&stripe, &stripes, &next);
-            scope.spawn(move || {
-                let mut levels = Vec::new();
-                loop {
-                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(target) = stripes.get(index) else {
-                        return;
-                    };
-                    let mut target = target.lock().expect("one thread per stripe");
-                    stripe(top + index * STRIPE, &mut target, &mut levels);
-                }
-            });
+    let next = AtomicUsize::new(0);
+    let stopped = AtomicBool::new(false);
+    let work = || {
+        let mut levels = Vec::new();
+        loop {
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(target) = stripes.get(index) else {
+                return;
+            };
+            if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+                stopped.store(true, Ordering::Relaxed);
+                return;
+            }
+            let mut target = target.lock().expect("one thread per stripe");
+            stripe(top + index * STRIPE, &mut target, &mut levels);
         }
-    });
+    };
+    if threads <= 1 || stripes.len() < 2 {
+        work();
+    } else {
+        std::thread::scope(|scope| {
+            for _ in 0..threads.min(stripes.len()) {
+                scope.spawn(work);
+            }
+        });
+    }
+    !stopped.load(Ordering::Relaxed)
 }
 
 /// Something drawn on one layer's pixels as they are put together, such as

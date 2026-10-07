@@ -16,9 +16,9 @@ use std::sync::mpsc::{Sender, channel};
 
 use ugu_core::document::Document;
 use ugu_core::history::StateId;
-use ugu_render::document::{DocumentRenderer, Purpose as RenderPurpose};
 use ugu_win::dialog::{Dialog, FileType};
 
+use crate::cache::Renders;
 use crate::canvas::Canvas;
 
 const DOCUMENT_TYPE: FileType = FileType {
@@ -72,6 +72,7 @@ enum Job {
         document: Arc<Document>,
         frame: i64,
         path: PathBuf,
+        renders: Renders,
     },
 }
 
@@ -249,6 +250,7 @@ impl Files {
             document: canvas.snapshot_now(),
             frame: canvas.session().frame(),
             path,
+            renders: canvas.renders(),
         });
     }
 
@@ -391,9 +393,10 @@ fn run(job: Job) -> FileEvent {
             document,
             frame,
             path,
+            renders,
         } => {
             let started = std::time::Instant::now();
-            let result = export(&document, frame, &path);
+            let result = export(document, frame, &path, &renders);
             tracing::info!(
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 ok = result.is_ok(),
@@ -419,14 +422,18 @@ fn run(job: Job) -> FileEvent {
     }
 }
 
-/// Renders `frame` without reference layers at the document's size.
-fn export(document: &Document, frame: i64, path: &Path) -> Result<(), String> {
+/// Renders `frame` without reference layers at the document's size, on the
+/// render worker after the canvas's own work.
+fn export(
+    document: Arc<Document>,
+    frame: i64,
+    path: &Path,
+    renders: &Renders,
+) -> Result<(), String> {
     let [width, height] = document.canvas;
-    let mut pixmap = vello_cpu::Pixmap::new(width as u16, height as u16);
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |count| count.get().saturating_sub(1))
-        .min(8) as u16;
-    DocumentRenderer::new(threads).render(document, frame, RenderPurpose::Export, &mut pixmap);
+    let pixmap = renders
+        .export(document, frame)
+        .ok_or("the render worker has stopped")?;
     ugu_io::image::export_png(
         pixmap.data_as_u8_slice(),
         [width, height],
@@ -611,7 +618,8 @@ mod tests {
         document.layers.push(reference);
 
         let path = folder("export").join("frame.png");
-        export(&document, 5, &path).unwrap();
+        let worker = crate::cache::CacheWorker::start(|_| {});
+        export(Arc::new(document.clone()), 5, &path, &worker.renders()).unwrap();
         let file = std::fs::File::open(&path).unwrap();
         let mut decoder = png::Decoder::new(std::io::BufReader::new(file))
             .read_info()
@@ -619,6 +627,7 @@ mod tests {
         let mut decoded = vec![0; decoder.output_buffer_size().unwrap()];
         decoder.next_frame(&mut decoded).unwrap();
 
+        use ugu_render::document::{DocumentRenderer, Purpose as RenderPurpose};
         let mut expected = vello_cpu::Pixmap::new(64, 40);
         DocumentRenderer::new(0).render(&document, 5, RenderPurpose::Export, &mut expected);
         let straight: Vec<u8> = expected

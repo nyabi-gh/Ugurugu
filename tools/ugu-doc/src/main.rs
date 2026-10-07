@@ -18,6 +18,8 @@
 //!   can open a fixture to measure with.
 //! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
+//! - `ugu-doc stop <file.ugu2>`: times how long a frame render on 8 threads
+//!   takes to end once it is told to stop, at points spread over the render.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -30,7 +32,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2>";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | stop <file.ugu2>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,6 +47,7 @@ fn main() -> ExitCode {
         ["render", file] => render(Path::new(file), 8, None),
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
+        ["stop", file] => stop(Path::new(file)),
         ["render", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -404,6 +407,51 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     Ok(())
 }
 
+fn stop(path: &Path) -> Result<(), String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::plan::RenderPlan;
+
+    let mut document = open(path)?;
+    to_pens(&mut document);
+    let plan = RenderPlan::new(&document, Purpose::Display);
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    let flag = Arc::new(AtomicBool::new(false));
+    // Without reuse, so every render draws every layer.
+    let mut renderer = DocumentRenderer::new(8);
+    renderer.set_stop(flag.clone());
+    let started = Instant::now();
+    renderer.render_plan(&document, &plan, 0, None, &mut pixmap);
+    let whole = started.elapsed();
+    let rounds = 40;
+    let mut waits = Vec::new();
+    for round in 0..rounds {
+        flag.store(false, Ordering::Relaxed);
+        let delay = whole.mul_f64(f64::from(round) / f64::from(rounds));
+        let finished = std::thread::scope(|scope| {
+            let setter = scope.spawn(|| {
+                std::thread::sleep(delay);
+                flag.store(true, Ordering::Relaxed);
+                Instant::now()
+            });
+            renderer.render_plan(&document, &plan, i64::from(round), None, &mut pixmap);
+            let returned = Instant::now();
+            let set = setter.join().expect("the stop setter ran");
+            returned.checked_duration_since(set)
+        });
+        if let Some(wait) = finished {
+            waits.push(wait.as_secs_f64() * 1000.0);
+        }
+    }
+    println!(
+        "whole render {:.1} ms; from stop to return: {}",
+        whole.as_secs_f64() * 1000.0,
+        percentiles(&mut waits)
+    );
+    Ok(())
+}
+
 /// Times the editing split on frame 0: the first one, which draws every
 /// layer, and one per shown layer after a stroke on it, which draws that
 /// layer only. Each layer then takes a stroke at pen-up, timed as the app
@@ -448,13 +496,15 @@ fn splits(document: &Document, threads: u16) {
         };
         let wobble = paint.wobble.unwrap_or(history.document().wobble).amount;
         let started = Instant::now();
-        let mut split = renderer.split(
-            history.document(),
-            layer,
-            0,
-            Some(history.layer_revisions()),
-            &mut display,
-        );
+        let mut split = renderer
+            .split(
+                history.document(),
+                layer,
+                0,
+                Some(history.layer_revisions()),
+                &mut display,
+            )
+            .expect("nothing stops it");
         later.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
         if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble) {
