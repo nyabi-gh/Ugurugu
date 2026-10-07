@@ -38,14 +38,19 @@ const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
 /// when they come up.
 const PLAYBACK_BUDGET: usize = 512 * 1024 * 1024;
 
+/// Frames play in order, none skipped. A frame not rendered yet holds the
+/// one on screen, and the timing starts again from when it arrives, so a
+/// cold start plays slowly instead of standing still until frames that were
+/// due long ago come round again.
 struct Playback {
-    started: Instant,
-    /// The frame shown when playback started.
-    first: i64,
-    /// Frames of one revision, by frame within the cycle.
+    /// The next frame to show, as a frame number.
+    next: i64,
+    /// When it is due.
+    due: Instant,
+    /// Frames of one document state, by frame within the cycle.
     frames: HashMap<u32, Arc<Pixmap>>,
     version: Version,
-    /// The frame on screen, and whether it is uploaded.
+    /// The frame on screen.
     shown: Option<(u32, Arc<Pixmap>)>,
     /// The first frame of the frames asked for, which run as far as the
     /// budget allows.
@@ -314,8 +319,8 @@ impl Canvas {
         self.edit(|_| ());
         tracing::debug!("playback started");
         self.playback = Some(Playback {
-            started: Instant::now(),
-            first: self.session.frame(),
+            next: self.session.frame() + 1,
+            due: Instant::now(),
             frames: HashMap::new(),
             version: self.version(),
             shown: None,
@@ -323,11 +328,12 @@ impl Canvas {
         });
     }
 
-    /// Moves playback to the frame due at `now` and returns when the next
-    /// one is due; `None` when not playing.
+    /// Shows the next frame if it is due and rendered, and returns when to
+    /// look again; `None` when not playing.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
         let document = self.session.document();
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
+        let period = Duration::from_secs_f64(1.0 / fps);
         let version = self.version();
         let bytes = usize::from(self.display.width()) * usize::from(self.display.height()) * 4;
         let ahead = (PLAYBACK_BUDGET / bytes.max(1)).clamp(1, frames as usize) as u32;
@@ -338,26 +344,28 @@ impl Canvas {
             playback.version = version;
             playback.window = None;
         }
-        let elapsed = now
-            .saturating_duration_since(playback.started)
-            .as_secs_f64();
-        let step = (elapsed * fps).floor() as i64;
-        let frame = playback.first + step;
-        let cycle = frame_in_cycle(frame, frames);
-        let next = playback.started + Duration::from_secs_f64((step + 1) as f64 / fps);
+        let cycle = frame_in_cycle(playback.next, frames);
         let covered = playback
             .window
             .is_some_and(|start| (cycle + frames - start) % frames < ahead);
-        let shown = match playback.frames.get(&cycle) {
-            Some(pixels) if playback.shown.as_ref().is_none_or(|(at, _)| *at != cycle) => {
-                playback.shown = Some((cycle, pixels.clone()));
-                true
-            }
-            _ => false,
-        };
+        let mut shown = false;
+        if now >= playback.due
+            && let Some(pixels) = playback.frames.get(&cycle)
+        {
+            playback.shown = Some((cycle, pixels.clone()));
+            playback.next += 1;
+            // Keep the cadence unless a wait for rendering put it behind.
+            playback.due = if now - playback.due < period {
+                playback.due + period
+            } else {
+                now + period
+            };
+            shown = true;
+        }
+        let wake = playback.due.max(now + Duration::from_millis(1));
 
         if !covered {
-            // From the frame due now onwards, as far as the budget allows;
+            // From the next frame onwards, as far as the budget allows;
             // frames outside that window are let go.
             let wanted: Vec<u32> = (0..ahead).map(|offset| (cycle + offset) % frames).collect();
             playback.frames.retain(|at, _| wanted.contains(at));
@@ -370,12 +378,12 @@ impl Canvas {
             self.cache.request_frames(version, &missing, &document);
         }
         if shown {
-            // Keeps showing the last frame until the due one is ready.
             tracing::debug!(frame = cycle, "playback frame shown");
-            self.session.set_frame(frame);
+            let next = self.playback.as_ref().expect("playing").next;
+            self.session.set_frame(next - 1);
             self.upload_all();
         }
-        Some(next)
+        Some(wake)
     }
 
     /// Puts `rect` of the display back together, with the stroke being drawn.

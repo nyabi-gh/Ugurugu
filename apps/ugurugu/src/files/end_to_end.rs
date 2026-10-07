@@ -181,3 +181,30 @@ fn a_render_of_the_document_before_an_open_is_not_taken() {
     stroke(&mut canvas, &renders, 80.0, 0.0);
     assert_eq!(canvas.session().document().store.strokes.len(), 1);
 }
+
+#[test]
+fn playback_shows_every_frame_in_order_as_soon_as_it_is_ready() {
+    let (to_test, renders) = channel();
+    let mut canvas = Canvas::new(Document::new(SIZE), move |rendered| {
+        let _ = to_test.send(rendered);
+    });
+    stroke(&mut canvas, &renders, 80.0, 0.0);
+    canvas.edit(|session| session.set_frame(28));
+    canvas.toggle_playback();
+    // A clock that runs far ahead of rendering: the frames still come one
+    // after another, none skipped, each as soon as it is there.
+    let mut now = std::time::Instant::now();
+    let mut seen = Vec::new();
+    while seen.len() < 6 {
+        canvas.tick(now);
+        let frame = canvas.session().frame();
+        if seen.last() != Some(&frame) {
+            seen.push(frame);
+        }
+        now += Duration::from_millis(500);
+        if let Ok(rendered) = renders.recv_timeout(Duration::from_millis(200)) {
+            canvas.adopt(rendered);
+        }
+    }
+    assert_eq!(seen, [28, 29, 30, 31, 32, 33]);
+}
