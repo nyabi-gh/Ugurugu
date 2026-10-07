@@ -185,36 +185,39 @@ pub fn bounds(points: &[Point], pen: &Pen) -> [f64; 4] {
 
 /// Samples moved by the motion of `frame`.
 pub fn displaced(samples: &[Sample], pen: &Pen, frame: u32) -> Vec<[f64; 2]> {
+    (0..samples.len())
+        .map(|index| displaced_at(samples, index, pen, frame))
+        .collect()
+}
+
+/// Sample `index` moved by the motion of `frame`. It depends on the samples
+/// on either side, which give its direction.
+pub fn displaced_at(samples: &[Sample], index: usize, pen: &Pen, frame: u32) -> [f64; 2] {
+    let sample = &samples[index];
     let amplitude = classic::amplitude(f64::from(pen.width), pen.wobble);
     if amplitude == 0.0 {
-        return samples.iter().map(|sample| sample.position).collect();
+        return sample.position;
     }
-    let last = samples.len().saturating_sub(1);
-    (0..samples.len())
-        .map(|index| {
-            let before = samples[index.saturating_sub(1)].position;
-            let after = samples[(index + 1).min(last)].position;
-            let length = distance(before, after);
-            let tangent = if length > 1e-9 {
-                [
-                    (after[0] - before[0]) / length,
-                    (after[1] - before[1]) / length,
-                ]
-            } else {
-                [1.0, 0.0]
-            };
-            let sample = &samples[index];
-            classic::displace(
-                sample.position,
-                sample.pressure,
-                tangent,
-                sample.arc,
-                amplitude,
-                pen.seed,
-                frame,
-            )
-        })
-        .collect()
+    let before = samples[index.saturating_sub(1)].position;
+    let after = samples[(index + 1).min(samples.len() - 1)].position;
+    let length = distance(before, after);
+    let tangent = if length > 1e-9 {
+        [
+            (after[0] - before[0]) / length,
+            (after[1] - before[1]) / length,
+        ]
+    } else {
+        [1.0, 0.0]
+    };
+    classic::displace(
+        sample.position,
+        sample.pressure,
+        tangent,
+        sample.arc,
+        amplitude,
+        pen.seed,
+        frame,
+    )
 }
 
 /// The stroke's outline on `frame`, to fill with the non-zero rule; `None`
@@ -223,19 +226,63 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
     if samples.is_empty() {
         return None;
     }
-    let points = displaced(samples, pen, frame);
+    let pieces = pieces(samples, pen, frame, 0..samples.len(), 0..samples.len() - 1);
+    Some(pieces.path)
+}
+
+/// Part of an outline.
+pub struct Pieces {
+    pub path: BezPath,
+    /// Left, top, right, bottom; empty (inverted) with no pieces.
+    pub bounds: [f64; 4],
+}
+
+/// The circles of samples in `circles` and the bands from each sample in
+/// `bands` to the next, so an outline can be drawn a part at a time.
+pub fn pieces(
+    samples: &[Sample],
+    pen: &Pen,
+    frame: u32,
+    circles: std::ops::Range<usize>,
+    bands: std::ops::Range<usize>,
+) -> Pieces {
     let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
     let radius = |sample: &Sample| (base * pen.pressure_scale(sample.pressure)).max(0.5) * 0.5;
     let point = |[x, y]: [f64; 2]| kurbo::Point::new(x, y);
+    let first = circles.start.min(bands.start);
+    let last = circles.end.max(bands.end + 1).min(samples.len());
+    let centers: Vec<[f64; 2]> = (first..last)
+        .map(|index| displaced_at(samples, index, pen, frame))
+        .collect();
+    let center = |index: usize| centers[index - first];
 
     let mut path = BezPath::new();
-    for (sample, &center) in samples.iter().zip(&points) {
-        path.extend(Circle::new(point(center), radius(sample)).path_elements(TOLERANCE));
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    let mut grow = |[x, y]: [f64; 2], radius: f64| {
+        bounds = [
+            bounds[0].min(x - radius),
+            bounds[1].min(y - radius),
+            bounds[2].max(x + radius),
+            bounds[3].max(y + radius),
+        ];
+    };
+    for index in circles {
+        let radius = radius(&samples[index]);
+        grow(center(index), radius);
+        path.extend(Circle::new(point(center(index)), radius).path_elements(TOLERANCE));
     }
     let reverse = *BANDS_REVERSED;
-    for (pair, centers) in samples.windows(2).zip(points.windows(2)) {
-        let radii = [radius(&pair[0]), radius(&pair[1])];
-        if let Some(mut corners) = band(centers[0], centers[1], radii) {
+    for index in bands {
+        let radii = [radius(&samples[index]), radius(&samples[index + 1])];
+        let ends = [center(index), center(index + 1)];
+        if let Some(mut corners) = band(ends[0], ends[1], radii) {
+            grow(ends[0], radii[0]);
+            grow(ends[1], radii[1]);
             if reverse {
                 corners.reverse();
             }
@@ -246,7 +293,7 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
             path.close_path();
         }
     }
-    Some(path)
+    Pieces { path, bounds }
 }
 
 /// Whether `band`'s corners run against kurbo's circles. Rotating, moving

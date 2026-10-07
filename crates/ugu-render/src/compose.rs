@@ -19,6 +19,7 @@ use vello_cpu::kurbo::Affine;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
 use crate::document::DocumentRenderer;
+use crate::live::LiveStroke;
 use crate::raster::{PixelRect, document_level};
 use crate::stroke::{self, Pen, Resampler};
 
@@ -128,7 +129,7 @@ impl DocumentRenderer {
 
 /// Puts the shown image back together within `rect`, drawing `live` (a
 /// stroke being drawn, `None` for none) on the surface first.
-pub fn composite(split: &Split, live: Option<&Live<'_>>, rect: PixelRect, out: &mut Pixmap) {
+pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out: &mut Pixmap) {
     let width = usize::from(out.width());
     let opacity = (split.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     let [left, top, right, bottom] = rect.map(|value| value as usize);
@@ -150,30 +151,6 @@ pub fn composite(split: &Split, live: Option<&Live<'_>>, rect: PixelRect, out: &
             }
             src_over(&mut pixel, &above[at..at + 4]);
             out[at..at + 4].copy_from_slice(&pixel);
-        }
-    }
-}
-
-/// A stroke in progress as coverage, to show over the surface.
-pub struct Live<'a> {
-    /// Premultiplied colour of the stroke with full coverage.
-    pub color: [u8; 4],
-    pub erase: bool,
-    /// Alpha is the stroke's coverage; one pixel per document pixel.
-    pub coverage: &'a Pixmap,
-}
-
-impl Live<'_> {
-    fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
-        let at = (y * usize::from(self.coverage.width()) + x) * 4 + 3;
-        let cover = self.coverage.data_as_u8_slice()[at];
-        if cover == 0 {
-            return;
-        }
-        if self.erase {
-            erase(layer, self.color, cover);
-        } else {
-            paint(layer, self.color, cover);
         }
     }
 }
