@@ -153,7 +153,11 @@ fn tree(layers: &[Layer], depth: usize) {
             layer.blend(),
             layer.opacity() * 100.0,
             if layer.visible { "" } else { " hidden" },
-            if layer.clip_to_below() { " clipped" } else { "" },
+            if layer.clip_to_below() {
+                " clipped"
+            } else {
+                ""
+            },
             if layer.reference { " reference" } else { "" },
             indent = depth * 2
         );
