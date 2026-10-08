@@ -6,23 +6,22 @@
 //! up. The shapes, sizes, alphas and particle positions are 2.2.13's
 //! (`drawAirbrushDab`, `drawSprayDab`); the samples move with the stroke's
 //! motion like a pen's.
-
-use ugu_core::motion::noise;
-use ugu_core::store::{Brush, BrushEngine, TipShape};
-use vello_cpu::RenderContext;
-use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::{BezPath, Circle, Point, Rect, Shape};
-use vello_cpu::peniko::{ColorStop, Gradient};
+//!
+//! A stroke's dabs are painted here into a buffer of its own rather than
+//! drawn as Vello paths, which costs about half (docs/rust/m4-plan.md M4-6):
+//! a path has a fixed cost that a one-pixel particle never pays back, and
+//! Vello makes a gradient table for every soft dab. Aliased pixels are those
+//! whose centres the shape covers, as Qt paints them for 2.2.13.
 
 use crate::stroke::{self, Pen, Sample};
+use ugu_core::motion::noise;
+use ugu_core::store::{Brush, BrushEngine, TipShape};
 
 /// Samples of an airbrush or spray stroke, as in 2.2.13.
 pub const MAX_DABS: usize = 50_000;
 const MAX_PARTICLES: usize = 250_000;
-/// Curve flattening tolerance, in pixels.
-const TOLERANCE: f64 = 0.05;
-/// The coverage over which an aliased dab paints a pixel.
-const ALIASING_THRESHOLD: u8 = 128;
+/// Steps of the soft falloff, by squared distance from the middle.
+const FALLOFF_STEPS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dab {
@@ -134,56 +133,273 @@ pub fn dabs_into(samples: &[Sample], pen: &Pen, frame: u32, alpha: u8, out: &mut
     }
 }
 
-/// Draws `dabs` in `rgb`, one after another, in the current transform.
-/// `scratch` is reused for their outlines.
-pub fn draw(
-    context: &mut RenderContext,
-    dabs: &[Dab],
-    look: Look,
-    [r, g, b]: [u8; 3],
-    scratch: &mut BezPath,
-) {
-    match look {
-        Look::Solid { square, antialias } => {
-            context.set_aliasing_threshold((!antialias).then_some(ALIASING_THRESHOLD));
-            for dab in dabs {
-                context.set_paint(AlphaColor::from_rgba8(r, g, b, dab.alpha));
-                let [x, y] = dab.center;
-                let half = dab.diameter * 0.5;
-                if square {
-                    context.fill_rect(&Rect::new(x - half, y - half, x + half, y + half));
-                } else {
-                    circle(scratch, dab);
-                    context.fill_path(scratch);
+/// Paints dabs over each other into a premultiplied RGBA buffer.
+#[derive(Default)]
+pub struct Painter {
+    /// The soft falloff for `falloff_of`'s hardness: how much of the dab's
+    /// alpha is left, out of 255, by squared distance.
+    falloff: Vec<u8>,
+    falloff_of: Option<u64>,
+}
+
+impl Painter {
+    /// Paints `dabs`, given in the buffer's pixels, in `rgb` over what
+    /// `buffer` holds; it is `width` pixels wide.
+    pub fn paint(
+        &mut self,
+        buffer: &mut [u8],
+        width: usize,
+        dabs: &[Dab],
+        look: Look,
+        rgb: [u8; 3],
+    ) {
+        let height = buffer.len() / 4 / width.max(1);
+        let size = [width, height];
+        match look {
+            Look::Solid {
+                square: false,
+                antialias: false,
+            } => dabs.iter().for_each(|dab| round(buffer, size, dab, rgb)),
+            Look::Solid {
+                square: true,
+                antialias: false,
+            } => dabs.iter().for_each(|dab| square(buffer, size, dab, rgb)),
+            Look::Solid {
+                square: false,
+                antialias: true,
+            } => dabs
+                .iter()
+                .for_each(|dab| smooth_round(buffer, size, dab, rgb)),
+            Look::Solid {
+                square: true,
+                antialias: true,
+            } => dabs
+                .iter()
+                .for_each(|dab| smooth_square(buffer, size, dab, rgb)),
+            Look::Soft { hardness } => {
+                self.prepare(hardness);
+                for dab in dabs {
+                    soft(buffer, size, dab, rgb, &self.falloff);
                 }
             }
-            context.set_aliasing_threshold(None);
         }
-        Look::Soft { hardness } => {
-            for dab in dabs {
-                let color = AlphaColor::from_rgba8(r, g, b, dab.alpha);
-                let clear = AlphaColor::from_rgba8(r, g, b, 0);
-                let [x, y] = dab.center;
-                let mut stops = vec![ColorStop::from((0.0, color))];
-                if hardness > 0.001 {
-                    stops.push(ColorStop::from((hardness as f32, color)));
-                }
-                stops.push(ColorStop::from((1.0, clear)));
-                let gradient = Gradient::new_radial(Point::new(x, y), (dab.diameter * 0.5) as f32)
-                    .with_stops(stops.as_slice());
-                context.set_paint(gradient);
-                circle(scratch, dab);
-                context.fill_path(scratch);
+    }
+
+    /// 2.2.13's radial gradient: the full alpha to `hardness` of the radius,
+    /// then linearly to none at the edge.
+    fn prepare(&mut self, hardness: f64) {
+        if self.falloff_of == Some(hardness.to_bits()) {
+            return;
+        }
+        self.falloff_of = Some(hardness.to_bits());
+        self.falloff.clear();
+        self.falloff.extend((0..FALLOFF_STEPS).map(|step| {
+            let t = ((step as f64 + 0.5) / FALLOFF_STEPS as f64).sqrt();
+            let left = if t <= hardness {
+                1.0
+            } else {
+                1.0 - (t - hardness) / (1.0 - hardness)
+            };
+            (left * 255.0).round() as u8
+        }));
+    }
+}
+
+/// `a × b / 255`, rounded.
+#[inline]
+fn mul(a: u16, b: u16) -> u16 {
+    let value = a * b + 128;
+    (value + (value >> 8)) >> 8
+}
+
+/// `rgb` at `alpha`, premultiplied.
+#[inline]
+fn premultiplied([r, g, b]: [u8; 3], alpha: u16) -> [u16; 4] {
+    [
+        mul(r.into(), alpha),
+        mul(g.into(), alpha),
+        mul(b.into(), alpha),
+        alpha,
+    ]
+}
+
+/// `source` over every pixel of `run`, a byte at a time so that it
+/// vectorises.
+#[inline]
+fn over_run(run: &mut [u8], source: [u16; 4]) {
+    let left = 255 - source[3];
+    let pattern: [u16; 16] = std::array::from_fn(|index| source[index & 3]);
+    let (chunks, rest) = run.as_chunks_mut::<16>();
+    for chunk in chunks {
+        for (byte, add) in chunk.iter_mut().zip(pattern) {
+            *byte = (add + mul((*byte).into(), left)) as u8;
+        }
+    }
+    for (byte, add) in rest.iter_mut().zip(pattern) {
+        *byte = (add + mul((*byte).into(), left)) as u8;
+    }
+}
+
+/// `source` over one pixel.
+#[inline]
+fn over(pixel: &mut [u8], source: [u16; 4]) {
+    let left = 255 - source[3];
+    for (byte, add) in pixel.iter_mut().zip(source) {
+        *byte = (add + mul((*byte).into(), left)) as u8;
+    }
+}
+
+/// The rows from `top` to `bottom` that lie in `height`.
+fn rows(top: f64, bottom: f64, height: usize) -> std::ops::Range<usize> {
+    let first = top.floor().max(0.0) as usize;
+    let last = bottom.ceil().clamp(0.0, height as f64) as usize;
+    first..last.max(first)
+}
+
+/// The pixels whose centres are within `left..=right`, clamped to `width`.
+fn centres(left: f64, right: f64, width: usize) -> std::ops::Range<usize> {
+    let first = (left - 0.5).ceil().max(0.0);
+    let last = ((right - 0.5).floor() + 1.0).min(width as f64);
+    if last <= first {
+        return 0..0;
+    }
+    first as usize..last as usize
+}
+
+fn row(buffer: &mut [u8], width: usize, y: usize) -> &mut [u8] {
+    &mut buffer[y * width * 4..(y + 1) * width * 4]
+}
+
+fn round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+    let radius = dab.diameter * 0.5;
+    let [x, y] = dab.center;
+    let source = premultiplied(rgb, dab.alpha.into());
+    for line in rows(y - radius, y + radius, height) {
+        let dy = line as f64 + 0.5 - y;
+        let reach = radius * radius - dy * dy;
+        if reach < 0.0 {
+            continue;
+        }
+        let half = reach.sqrt();
+        let span = centres(x - half, x + half, width);
+        over_run(
+            &mut row(buffer, width, line)[span.start * 4..span.end * 4],
+            source,
+        );
+    }
+}
+
+fn square(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+    let half = dab.diameter * 0.5;
+    let [x, y] = dab.center;
+    let source = premultiplied(rgb, dab.alpha.into());
+    let span = centres(x - half, x + half, width);
+    for line in centres(y - half, y + half, height) {
+        over_run(
+            &mut row(buffer, width, line)[span.start * 4..span.end * 4],
+            source,
+        );
+    }
+}
+
+/// A round dab whose edge pixels are covered by how far inside it their
+/// centres are, up to half a pixel either way.
+fn smooth_round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+    let radius = dab.diameter * 0.5;
+    let [x, y] = dab.center;
+    let alpha = u16::from(dab.alpha);
+    let full = premultiplied(rgb, alpha);
+    // A dab under a pixel covers at most its own area.
+    let most = (std::f64::consts::PI * radius * radius).min(1.0);
+    let outer = radius + 0.5;
+    let inner = radius - 0.5;
+    for line in rows(y - outer, y + outer, height) {
+        let dy = line as f64 + 0.5 - y;
+        let reach = outer * outer - dy * dy;
+        if reach <= 0.0 {
+            continue;
+        }
+        let span = centres(x - reach.sqrt(), x + reach.sqrt(), width);
+        let inside = if inner > 0.0 && inner * inner - dy * dy >= 0.0 && most >= 1.0 {
+            let half = (inner * inner - dy * dy).sqrt();
+            let inside = centres(x - half, x + half, width);
+            if inside.is_empty() {
+                span.start..span.start
+            } else {
+                inside
+            }
+        } else {
+            span.start..span.start
+        };
+        let pixels = row(buffer, width, line);
+        over_run(&mut pixels[inside.start * 4..inside.end * 4], full);
+        for column in span.clone().filter(|column| !inside.contains(column)) {
+            let dx = column as f64 + 0.5 - x;
+            let covered = (outer - dx.hypot(dy)).clamp(0.0, most);
+            let alpha = (f64::from(alpha) * covered).round() as u16;
+            if alpha > 0 {
+                over(
+                    &mut pixels[column * 4..column * 4 + 4],
+                    premultiplied(rgb, alpha),
+                );
             }
         }
     }
 }
 
-/// `dab`'s circle into `path`, replacing what it held.
-fn circle(path: &mut BezPath, dab: &Dab) {
+/// How much of the pixel from `start` to `start + 1` lies within
+/// `low..high`.
+fn overlap(start: f64, low: f64, high: f64) -> f64 {
+    ((start + 1.0).min(high) - start.max(low)).max(0.0)
+}
+
+/// A square dab whose edge pixels are covered by the area of them it covers.
+fn smooth_square(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+    let half = dab.diameter * 0.5;
     let [x, y] = dab.center;
-    path.truncate(0);
-    path.extend(Circle::new((x, y), dab.diameter * 0.5).path_elements(TOLERANCE));
+    let alpha = f64::from(dab.alpha);
+    let [left, right, top, bottom] = [x - half, x + half, y - half, y + half];
+    let columns = rows(left, right, width);
+    for line in rows(top, bottom, height) {
+        let tall = overlap(line as f64, top, bottom);
+        let pixels = row(buffer, width, line);
+        for column in columns.clone() {
+            let covered = tall * overlap(column as f64, left, right);
+            let alpha = (alpha * covered).round() as u16;
+            if alpha > 0 {
+                over(
+                    &mut pixels[column * 4..column * 4 + 4],
+                    premultiplied(rgb, alpha),
+                );
+            }
+        }
+    }
+}
+
+fn soft(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3], falloff: &[u8]) {
+    let radius = dab.diameter * 0.5;
+    let [x, y] = dab.center;
+    let alpha = u16::from(dab.alpha);
+    let step = FALLOFF_STEPS as f64 / (radius * radius);
+    let columns = rows(x - radius, x + radius, width);
+    for line in rows(y - radius, y + radius, height) {
+        let dy = line as f64 + 0.5 - y;
+        let dy2 = dy * dy;
+        let pixels = row(buffer, width, line);
+        for column in columns.clone() {
+            let dx = column as f64 + 0.5 - x;
+            let Some(&left) = falloff.get(((dx * dx + dy2) * step) as usize) else {
+                continue;
+            };
+            let alpha = mul(alpha, left.into());
+            if alpha > 0 {
+                over(
+                    &mut pixels[column * 4..column * 4 + 4],
+                    premultiplied(rgb, alpha),
+                );
+            }
+        }
+    }
 }
 
 /// Left, top, right, bottom of `dabs`; empty (inverted) without any.
@@ -196,8 +412,9 @@ pub fn bounds(dabs: &[Dab]) -> [f64; 4] {
             f64::NEG_INFINITY,
         ],
         |[left, top, right, bottom], dab| {
-            // A square's corner, at most.
-            let reach = dab.diameter * std::f64::consts::FRAC_1_SQRT_2;
+            // A square's corner at most, and the half pixel an antialiased
+            // edge covers.
+            let reach = dab.diameter * std::f64::consts::FRAC_1_SQRT_2 + 0.5;
             let [x, y] = dab.center;
             [
                 left.min(x - reach),
@@ -263,6 +480,110 @@ mod tests {
         assert!(dabs(&no_motion, 0) == dabs(&no_motion, 1));
         // round(1.2 × 6) particles per sample.
         assert_eq!(dabs(&animated, 0).len() % 7, 0);
+    }
+
+    /// `dab` alone on a clear buffer of `size`.
+    fn painted(dab: Dab, look: Look, size: usize) -> Vec<u8> {
+        let mut buffer = vec![0; size * size * 4];
+        Painter::default().paint(&mut buffer, size, &[dab], look, [255, 255, 255]);
+        buffer
+    }
+
+    fn alphas(buffer: &[u8]) -> Vec<u8> {
+        buffer.chunks(4).map(|pixel| pixel[3]).collect()
+    }
+
+    #[test]
+    fn aliased_dabs_paint_the_pixels_whose_centres_they_cover() {
+        let dab = Dab {
+            center: [9.3, 8.6],
+            diameter: 11.0,
+            alpha: 200,
+        };
+        for square in [false, true] {
+            let look = Look::Solid {
+                square,
+                antialias: false,
+            };
+            let buffer = painted(dab, look, 20);
+            for (index, alpha) in alphas(&buffer).into_iter().enumerate() {
+                let [dx, dy] = [
+                    (index % 20) as f64 + 0.5 - 9.3,
+                    (index / 20) as f64 + 0.5 - 8.6,
+                ];
+                let inside = if square {
+                    dx.abs() <= 5.5 && dy.abs() <= 5.5
+                } else {
+                    dx.hypot(dy) <= 5.5
+                };
+                assert_eq!(alpha, if inside { 200 } else { 0 }, "{index} {square}");
+            }
+        }
+    }
+
+    #[test]
+    fn antialiased_dabs_cover_about_their_area() {
+        for (square, area) in [(false, std::f64::consts::PI * 30.25), (true, 121.0)] {
+            let dab = Dab {
+                center: [10.25, 9.7],
+                diameter: 11.0,
+                alpha: 255,
+            };
+            let look = Look::Solid {
+                square,
+                antialias: true,
+            };
+            let alphas = alphas(&painted(dab, look, 22));
+            let covered: f64 = alphas.iter().map(|&alpha| f64::from(alpha) / 255.0).sum();
+            assert!(
+                (covered - area).abs() < area * 0.01,
+                "{square} {covered} {area}"
+            );
+            assert!(alphas.iter().any(|&alpha| alpha > 0 && alpha < 255));
+        }
+    }
+
+    #[test]
+    fn a_soft_dab_keeps_its_alpha_to_the_hardness_then_fades() {
+        let dab = Dab {
+            center: [16.0, 16.0],
+            diameter: 30.0,
+            alpha: 240,
+        };
+        let alphas = alphas(&painted(dab, Look::Soft { hardness: 0.4 }, 32));
+        let row: Vec<u8> = alphas[16 * 32 + 16..16 * 32 + 32].to_vec();
+        // Pixel centres 0.5 to 5.5 from the middle are within 0.4 × 15.
+        assert!(row[..6].iter().all(|&alpha| alpha == 240), "{row:?}");
+        assert!(
+            row[6..].windows(2).all(|pair| pair[0] >= pair[1]),
+            "{row:?}"
+        );
+        // Past the hardness, what is left falls linearly to the edge.
+        let t = 11.5f64.hypot(0.5) / 15.0;
+        let expected = (240.0 * (1.0 - (t - 0.4) / 0.6)).round() as u8;
+        assert!(row[11].abs_diff(expected) <= 2, "{row:?} {expected}");
+        assert_eq!(row[15], 0);
+        assert_eq!(alphas[0], 0);
+    }
+
+    #[test]
+    fn overlapping_dabs_add_up_like_source_over() {
+        let dab = Dab {
+            center: [4.0, 4.0],
+            diameter: 6.0,
+            alpha: 128,
+        };
+        let look = Look::Solid {
+            square: false,
+            antialias: false,
+        };
+        let mut buffer = vec![0; 8 * 8 * 4];
+        Painter::default().paint(&mut buffer, 8, &[dab, dab], look, [255, 0, 0]);
+        // 128 + 128 × 127 / 255.
+        assert_eq!(
+            &buffer[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 4],
+            [192, 0, 0, 192]
+        );
     }
 
     #[test]

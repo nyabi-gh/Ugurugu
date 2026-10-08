@@ -134,8 +134,33 @@ struct Raster {
     paths: Vec<BezPath>,
     /// Likewise the dabs of airbrush and spray strokes, one list per stroke.
     dabs: Vec<Vec<Dab>>,
-    /// For each dab's outline.
-    scratch: BezPath,
+    /// One for each thread.
+    painters: Vec<dab::Painter>,
+    /// Dab strokes' dabs in target pixels.
+    placed: Vec<Vec<Dab>>,
+    /// The buffers dab strokes are painted into, the first `used` of them
+    /// handed to Vello for the run being drawn; the rest are kept for later
+    /// runs.
+    buffers: Vec<Arc<Pixmap>>,
+    used: usize,
+    /// Dab strokes painted ahead of drawing, by their place among the
+    /// layer's strokes; `None` when one paints nothing on the target.
+    ready: std::collections::VecDeque<(usize, Option<Painted>)>,
+    /// Bytes of `buffers` the run holds, and how many it may hold before
+    /// the run is drawn and the next goes on over it.
+    held: usize,
+    dab_budget: usize,
+}
+
+/// Bytes of dab stroke buffers a run may hold; Vello keeps them all until
+/// it draws the run.
+const DAB_BUDGET: usize = 256 * 1024 * 1024;
+
+/// A dab stroke painted into a buffer whose top left is at `origin` on the
+/// target.
+struct Painted {
+    origin: [u16; 2],
+    buffer: Arc<Pixmap>,
 }
 
 /// Bytes the layers' own surfaces may take until `set_surface_budget`; the
@@ -696,7 +721,13 @@ impl Raster {
             threads: usize::from(threads.max(1)),
             paths: Vec::new(),
             dabs: Vec::new(),
-            scratch: BezPath::new(),
+            painters: Vec::new(),
+            placed: Vec::new(),
+            buffers: Vec::new(),
+            used: 0,
+            ready: std::collections::VecDeque::new(),
+            held: 0,
+            dab_budget: DAB_BUDGET,
         }
     }
 
@@ -791,7 +822,7 @@ impl Raster {
         let mut dabs = std::mem::take(&mut self.dabs);
         self.outlines(steps, frame, detail, &mut paths, &mut dabs);
         timings.outlines += started.elapsed();
-        let mut outlines = paths.iter().zip(&dabs);
+        let mut next_draw = 0;
 
         // A run after a moved selection or a resample draws over what the
         // run before drew, so buffers take turns instead of copying: one
@@ -814,6 +845,8 @@ impl Raster {
             let started = std::time::Instant::now();
             // Vello lets go of the previous scene's images here.
             self.context.reset_and_resize(width, height);
+            (self.used, self.held) = (0, 0);
+            debug_assert!(self.ready.is_empty());
             if let Some(used) = drawn_from.take() {
                 free.extend(Arc::try_unwrap(used).ok());
             }
@@ -845,29 +878,50 @@ impl Raster {
             let mut here = base * shift * cuts.shifts[part];
             self.context.set_transform(here);
             let mut taken = 0;
+            let mut depth = 0;
             for step in rest {
                 if (taken > 0 || fresh) && matches!(step, Step::Move { .. }) {
+                    break;
+                }
+                if taken > 0
+                    && depth == 0
+                    && matches!(step, Step::Draw { .. })
+                    && !self.is_ready(next_draw)
+                    && self.held + dab_bytes(&dabs[next_draw], here, area.size) > self.dab_budget
+                {
                     break;
                 }
                 taken += 1;
                 match step {
                     Step::Push(opacity) => {
+                        depth += 1;
                         self.context
                             .push_layer(None, None, Some(*opacity), None, None);
                     }
-                    Step::Pop => self.context.pop_layer(),
+                    Step::Pop => {
+                        depth -= 1;
+                        self.context.pop_layer();
+                    }
                     Step::Draw {
                         stroke,
                         erase,
                         clip,
                         ..
                     } => {
-                        let (path, dabs) = outlines.next().expect("one outline per stroke");
+                        let index = next_draw;
+                        next_draw += 1;
                         let clip = clip.as_ref().map(|clip| &clip.area);
-                        if !path.is_empty() {
-                            self.draw(stroke, *erase, path, clip);
-                        } else if !dabs.is_empty() {
-                            self.draw_dabs(stroke, *erase, dabs, clip);
+                        if !paths[index].is_empty() {
+                            self.draw(stroke, *erase, &paths[index], clip);
+                        } else if !dabs[index].is_empty() {
+                            if !self.is_ready(index) {
+                                let ahead = &rest[taken - 1..];
+                                self.paint_ahead(ahead, index, &dabs, here, area.size);
+                            }
+                            let (_, painted) = self.ready.pop_front().expect("painted above");
+                            if let Some(painted) = painted {
+                                self.lay_dabs(&painted, *erase, clip, here);
+                            }
                         }
                     }
                     Step::Fill {
@@ -1092,17 +1146,123 @@ impl Raster {
         }
     }
 
-    /// Draws an airbrush or spray stroke's dabs over each other on a surface
-    /// of their own, which then goes over what is there, or is erased from
-    /// it, within `clip`; so drawn, a stroke added at pen-up is within a
-    /// level of the same stroke drawn here.
-    fn draw_dabs(&mut self, stroke: &Stroke, erase: bool, dabs: &[Dab], clip: Option<&BezPath>) {
-        let mode = erase.then(|| BlendMode::new(Mix::Normal, Compose::DestOut));
-        self.context.push_layer(clip, mode, None, None, None);
-        let [r, g, b, _] = if erase { [0; 4] } else { stroke.color.0 };
-        let look = dab::look(&stroke.brush);
-        dab::draw(&mut self.context, dabs, look, [r, g, b], &mut self.scratch);
-        self.context.pop_layer();
+    fn is_ready(&self, index: usize) -> bool {
+        self.ready.front().is_some_and(|(at, _)| *at == index)
+    }
+
+    /// Paints the dab strokes from the one at `first`, the first of
+    /// `ahead`, to the next change of canvas or moved selection, while their
+    /// buffers fit the budget (the first always does), on as many threads as
+    /// this raster has. `here` takes them to the target, which is `size`
+    /// pixels.
+    fn paint_ahead(
+        &mut self,
+        ahead: &[Step<'_>],
+        first: usize,
+        dabs: &[Vec<Dab>],
+        here: Affine,
+        size: [u16; 2],
+    ) {
+        let mut jobs = Vec::new();
+        let mut index = first;
+        for step in ahead {
+            match step {
+                Step::Draw { stroke, erase, .. } => {
+                    let list = &dabs[index];
+                    if !list.is_empty() {
+                        if !jobs.is_empty()
+                            && self.held + dab_bytes(list, here, size) > self.dab_budget
+                        {
+                            break;
+                        }
+                        let slot = jobs.len();
+                        if slot == self.placed.len() {
+                            self.placed.push(Vec::new());
+                        }
+                        let placement = placed(list, here, size, &mut self.placed[slot]);
+                        if let Some((_, [width, height])) = placement {
+                            self.held += usize::from(width) * usize::from(height) * 4;
+                        }
+                        let [r, g, b, _] = if *erase { [0; 4] } else { stroke.color.0 };
+                        let look = dab::look(&stroke.brush);
+                        jobs.push((index, placement, look, [r, g, b]));
+                    }
+                    index += 1;
+                }
+                Step::Move { .. } | Step::Canvas(_) => break,
+                _ => {}
+            }
+        }
+        let painting = jobs.iter().filter(|job| job.1.is_some()).count();
+        while self.buffers.len() < self.used + painting {
+            self.buffers.push(Arc::new(Pixmap::new(1, 1)));
+        }
+        let mut buffers = self.buffers[self.used..self.used + painting].iter_mut();
+        let mut tasks = Vec::new();
+        for (slot, (_, placement, look, rgb)) in jobs.iter().enumerate() {
+            let Some((_, [width, height])) = placement else {
+                continue;
+            };
+            let buffer = buffers.next().expect("one for each");
+            if Arc::get_mut(buffer).is_none() {
+                *buffer = Arc::new(Pixmap::new(1, 1));
+            }
+            let pixels = Arc::get_mut(buffer).expect("just made");
+            pixels.resize(*width, *height);
+            let task = (pixels, &self.placed[slot], *look, *rgb);
+            tasks.push(std::sync::Mutex::new(task));
+        }
+        let threads = self.threads.min(tasks.len()).max(1);
+        self.painters
+            .resize_with(threads.max(self.painters.len()), Default::default);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let work = |painter: &mut dab::Painter| {
+            while let Some(task) = tasks.get(next.fetch_add(1, Ordering::Relaxed)) {
+                let mut task = task.lock().expect("no panic while painting");
+                let (pixels, placed, look, rgb) = &mut *task;
+                let width = usize::from(pixels.width());
+                let bytes = pixels.data_as_u8_slice_mut();
+                bytes.fill(0);
+                painter.paint(bytes, width, placed, *look, *rgb);
+            }
+        };
+        if threads == 1 {
+            work(&mut self.painters[0]);
+        } else {
+            std::thread::scope(|scope| {
+                for painter in &mut self.painters[..threads] {
+                    scope.spawn(|| work(painter));
+                }
+            });
+        }
+        drop(tasks);
+        for (index, placement, ..) in jobs {
+            let painted = placement.map(|(origin, _)| {
+                self.used += 1;
+                Painted {
+                    origin,
+                    buffer: self.buffers[self.used - 1].clone(),
+                }
+            });
+            self.ready.push_back((index, painted));
+        }
+    }
+
+    /// Lays a painted dab stroke over what is there, or erases it from it,
+    /// within `clip`.
+    fn lay_dabs(&mut self, painted: &Painted, erase: bool, clip: Option<&BezPath>, here: Affine) {
+        let layer = erase || clip.is_some();
+        if layer {
+            let mode = erase.then(|| BlendMode::new(Mix::Normal, Compose::DestOut));
+            self.context.push_layer(clip, mode, None, None, None);
+        }
+        let [left, top] = painted.origin.map(f64::from);
+        self.context.set_transform(Affine::translate((left, top)));
+        self.put_image(&painted.buffer, ImageQuality::Low);
+        self.context.set_transform(here);
+        if layer {
+            self.context.pop_layer();
+        }
     }
 
     /// Removes what is under `area`.
@@ -1201,6 +1361,55 @@ fn pen(stroke: &Stroke, wobble: Wobble) -> Pen {
         seed: stroke.seed,
         wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
     }
+}
+
+/// `dabs` taken by `here` into `placed`, in pixels of a target of `size`,
+/// with the top left and size of the pixels they can paint there.
+fn placed(
+    dabs: &[Dab],
+    here: Affine,
+    size: [u16; 2],
+    placed: &mut Vec<Dab>,
+) -> Option<([u16; 2], [u16; 2])> {
+    // Layers are drawn scaled and moved, never turned.
+    let [scale, _, _, _, dx, dy] = here.as_coeffs();
+    placed.clear();
+    placed.extend(dabs.iter().map(|dab| Dab {
+        center: [dab.center[0] * scale + dx, dab.center[1] * scale + dy],
+        diameter: dab.diameter * scale,
+        alpha: dab.alpha,
+    }));
+    let [left, top, right, bottom] = dab::bounds(placed);
+    let [width, height] = size.map(f64::from);
+    let left = left.floor().clamp(0.0, width);
+    let top = top.floor().clamp(0.0, height);
+    let right = right.ceil().clamp(0.0, width);
+    let bottom = bottom.ceil().clamp(0.0, height);
+    if right <= left || bottom <= top {
+        return None;
+    }
+    for dab in placed.iter_mut() {
+        dab.center = [dab.center[0] - left, dab.center[1] - top];
+    }
+    Some((
+        [left as u16, top as u16],
+        [(right - left) as u16, (bottom - top) as u16],
+    ))
+}
+
+/// Bytes of the buffer the stroke of `dabs` is painted into.
+fn dab_bytes(dabs: &[Dab], here: Affine, size: [u16; 2]) -> usize {
+    if dabs.is_empty() {
+        return 0;
+    }
+    let [scale, _, _, _, dx, dy] = here.as_coeffs();
+    let [left, top, right, bottom] = dab::bounds(dabs);
+    let [width, height] = size.map(f64::from);
+    let wide =
+        ((right * scale + dx).ceil().min(width) - (left * scale + dx).floor().max(0.0)).max(0.0);
+    let tall =
+        ((bottom * scale + dy).ceil().min(height) - (top * scale + dy).floor().max(0.0)).max(0.0);
+    (wide * tall) as usize * 4
 }
 
 /// Where the steps that add pixels reach, in document pixels. Erasing and
@@ -2981,6 +3190,57 @@ mod tests {
         let [center, middle, edge] = [40, 52, 64].map(|x| at(&result, x, 40)[3]);
         assert!(center > middle && middle > edge, "{center} {middle} {edge}");
         assert!(center > 0 && center < 255);
+    }
+
+    #[test]
+    fn dab_strokes_past_the_budget_draw_the_same_in_runs() {
+        let mut document = Document::new([96, 72]);
+        document.wobble = Wobble::classic(1.0);
+        let mut ops = Vec::new();
+        let hard = Brush {
+            engine: BrushEngine::Airbrush,
+            antialias: true,
+            ..Brush::DEFAULT
+        };
+        let brushes = [
+            ugu_core::brush::find("soft-airbrush").unwrap().brush,
+            ugu_core::brush::find("pixel-spray").unwrap().brush,
+            hard,
+        ];
+        for (index, brush) in brushes.into_iter().enumerate() {
+            let y = 12.0 + 18.0 * index as f32;
+            let color = [200, 40, 60 * index as u8, 255];
+            let dabs = brushed(
+                &mut document,
+                brush,
+                20.0,
+                color,
+                &[(8.0, y, 0.5), (88.0, y, 1.0)],
+            );
+            let pen = line(&mut document, 8.0, 88.0, y + 6.0, BLUE, true);
+            ops.extend([paint(dabs), paint(pen)]);
+        }
+        let eraser = ugu_core::brush::find("soft-eraser").unwrap().brush;
+        let rub = brushed(
+            &mut document,
+            eraser,
+            24.0,
+            [0, 0, 0, 255],
+            &[(48.0, 4.0, 1.0), (48.0, 68.0, 1.0)],
+        );
+        ops.push(Op::Erase {
+            stroke: rub,
+            clip: None,
+        });
+        let document = with_ops(&document, ops);
+        let whole = render(&document, 2, 1);
+        let mut runs = Pixmap::new(96, 72);
+        let mut renderer = DocumentRenderer::new(1);
+        renderer.main.dab_budget = 1;
+        renderer.render(&document, 2, Purpose::Display, &mut runs);
+        assert!(runs.data_as_u8_slice() == whole.data_as_u8_slice());
+        // One layer on many threads paints its dab strokes side by side.
+        assert!(render(&document, 2, 8).data_as_u8_slice() == whole.data_as_u8_slice());
     }
 
     #[test]
