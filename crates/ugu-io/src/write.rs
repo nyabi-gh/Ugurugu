@@ -230,11 +230,21 @@ impl Used {
 }
 
 fn wobble(wobble: Wobble) -> WobbleDto {
+    let motion = wobble.motion;
     WobbleDto {
         amount: wobble.amount,
-        style: match wobble.style {
+        style: match motion.style {
             MotionStyle::Classic => MotionStyleDto::Classic,
+            MotionStyle::Smooth => MotionStyleDto::Smooth,
+            MotionStyle::Stepped => MotionStyleDto::Stepped,
         },
+        poses: motion.poses,
+        detail: motion.detail,
+        linked: motion.linked,
+        randomness: motion.randomness,
+        broken: motion.broken,
+        break_amount: motion.break_amount,
+        break_range: motion.break_range,
     }
 }
 

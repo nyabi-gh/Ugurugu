@@ -16,7 +16,7 @@ use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{self, AssetId, MaskId, Op, PaintLayer, Sampling, Wobble};
-use ugu_core::store::{BrushEngine, Mask, Store, Stroke};
+use ugu_core::store::{BrushEngine, Mask, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
@@ -1307,9 +1307,8 @@ fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &DrawCache
     let mut size = paint.initial_size;
     collect(
         &paint.ops,
-        &document.store,
+        document,
         masks,
-        document.wobble,
         paint.wobble.unwrap_or(document.wobble),
         &mut size,
         &mut steps,
@@ -1350,15 +1349,6 @@ fn moved_bounds(bounds: [f64; 4], transform: Affine) -> [f64; 4] {
         xs.into_iter().fold(f64::NEG_INFINITY, f64::max),
         ys.into_iter().fold(f64::NEG_INFINITY, f64::max),
     ]
-}
-
-fn pen(stroke: &Stroke, wobble: Wobble) -> Pen {
-    Pen {
-        width: stroke.width,
-        brush: stroke.brush,
-        seed: stroke.seed,
-        wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
-    }
 }
 
 /// `dabs` taken by `here` into `placed`, in pixels of a target of `size`,
@@ -1453,17 +1443,20 @@ fn step_bounds(steps: &[Step<'_>], out: &mut Vec<[f64; 4]>) {
 /// without reading mask bits; a fill may cover less.
 fn op_bounds(
     ops: &[Op],
-    store: &Store,
-    document_wobble: Wobble,
+    document: &Document,
     wobble: Wobble,
     size: &mut [u32; 2],
     out: &mut Vec<[f64; 4]>,
 ) {
+    let store = &document.store;
     for op in ops {
         match op {
             Op::Paint { stroke, .. } => {
                 if let Some(stroke) = store.strokes.get(stroke) {
-                    out.push(stroke::bounds(&stroke.points, &pen(stroke, wobble)));
+                    out.push(stroke::bounds(
+                        &stroke.points,
+                        &Pen::new(stroke, wobble, document.frames),
+                    ));
                 }
             }
             Op::Fill {
@@ -1520,9 +1513,8 @@ fn op_bounds(
             }
             Op::Isolated(section) => op_bounds(
                 &section.ops,
-                store,
-                document_wobble,
-                section.wobble.unwrap_or(document_wobble),
+                document,
+                section.wobble.unwrap_or(document.wobble),
                 size,
                 out,
             ),
@@ -1598,8 +1590,7 @@ pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edg
             let mut size = paint.initial_size;
             op_bounds(
                 &paint.ops,
-                &document.store,
-                document.wobble,
+                document,
                 paint.wobble.unwrap_or(document.wobble),
                 &mut size,
                 &mut bounds,
@@ -1800,13 +1791,13 @@ fn moves_selection(ops: &[Op]) -> bool {
 
 fn collect<'a>(
     ops: &[Op],
-    store: &'a Store,
+    document: &'a Document,
     masks: &DrawCache,
-    document_wobble: Wobble,
     wobble: Wobble,
     size: &mut [u32; 2],
     steps: &mut Vec<Step<'a>>,
 ) {
+    let store = &document.store;
     for op in ops {
         match op {
             Op::Paint { stroke, clip } | Op::Erase { stroke, clip } => {
@@ -1820,7 +1811,7 @@ fn collect<'a>(
                     .map(|mask| masks.area(mask));
                 steps.push(Step::Draw {
                     stroke,
-                    pen: pen(stroke, wobble),
+                    pen: Pen::new(stroke, wobble, document.frames),
                     erase: matches!(op, Op::Erase { .. }),
                     clip,
                 });
@@ -1889,33 +1880,17 @@ fn collect<'a>(
                 }
             }
             Op::Isolated(section) => {
-                let wobble = section.wobble.unwrap_or(document_wobble);
+                let wobble = section.wobble.unwrap_or(document.wobble);
                 if moves_selection(&section.ops) {
                     let mut inner = Vec::new();
-                    collect(
-                        &section.ops,
-                        store,
-                        masks,
-                        document_wobble,
-                        wobble,
-                        size,
-                        &mut inner,
-                    );
+                    collect(&section.ops, document, masks, wobble, size, &mut inner);
                     steps.push(Step::Section {
                         steps: inner,
                         opacity: section.opacity,
                     });
                 } else {
                     steps.push(Step::Push(section.opacity));
-                    collect(
-                        &section.ops,
-                        store,
-                        masks,
-                        document_wobble,
-                        wobble,
-                        size,
-                        steps,
-                    );
+                    collect(&section.ops, document, masks, wobble, size, steps);
                     steps.push(Step::Pop);
                 }
             }
@@ -1934,7 +1909,8 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use ugu_core::document::{Layer, LayerId};
-    use ugu_core::ops::{Blend, Rgba8, Section, StrokeId, merge_down};
+    use ugu_core::motion::stepped_pose;
+    use ugu_core::ops::{Blend, Motion, MotionStyle, Rgba8, Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
 
     const RED: [u8; 4] = [220, 30, 30, 255];
@@ -2153,6 +2129,68 @@ mod tests {
         assert!(max_difference(&first, &render(&document, 1, 0)) > 0);
         let wrapped = render(&document, i64::from(document.frames), 0);
         assert!(first.data_as_u8_slice() == wrapped.data_as_u8_slice());
+    }
+
+    #[test]
+    fn stepped_poses_hold_smooth_ones_blend_and_both_break_alike_everywhere() {
+        let (document, mut below, above) = two_layers();
+        below.wobble = Some(Wobble::classic(0.0));
+        for style in [MotionStyle::Stepped, MotionStyle::Smooth] {
+            let motion = Motion {
+                style,
+                poses: 6,
+                broken: true,
+                break_amount: 0.4,
+                break_range: 4.0,
+                ..Motion::DEFAULT
+            };
+            let moving = PaintLayer {
+                wobble: Some(Wobble {
+                    amount: 4.0,
+                    motion,
+                }),
+                ..above.clone()
+            };
+            let under = render(&with_layers(&document, &[below.clone()]), 0, 0);
+            let document = with_layers(&document, &[below.clone(), moving]);
+            let frames = document.frames;
+            let shown: Vec<Pixmap> = (0..frames)
+                .map(|frame| render(&document, frame.into(), 0))
+                .collect();
+            for frame in 0..frames {
+                // Some of the broken line shows on every pose.
+                assert!(max_difference(&shown[frame as usize], &under) > 0);
+                let next = (frame + 1) % frames;
+                let same = shown[frame as usize].data_as_u8_slice()
+                    == shown[next as usize].data_as_u8_slice();
+                let held = style == MotionStyle::Stepped
+                    && stepped_pose(frame.into(), frames, 6)
+                        == stepped_pose(next.into(), frames, 6);
+                assert_eq!(same, held, "{style:?} from frame {frame}");
+            }
+            let whole = Motion {
+                broken: false,
+                ..motion
+            };
+            let unbroken = PaintLayer {
+                wobble: Some(Wobble {
+                    amount: 4.0,
+                    motion: whole,
+                }),
+                ..above.clone()
+            };
+            let unbroken = render(&with_layers(&document, &[below.clone(), unbroken]), 7, 0);
+            assert!(max_difference(&unbroken, &shown[7]) > 0);
+            for frame in [0, 7] {
+                let single = &shown[frame];
+                let threads = render(&document, frame as i64, 8);
+                assert!(threads.data_as_u8_slice() == single.data_as_u8_slice());
+                for edge in [16, 64] {
+                    let tiled = render_tiled(&document, frame as i64, edge, 8);
+                    assert!(max_difference(&tiled, single) <= 1);
+                }
+            }
+        }
     }
 
     #[test]

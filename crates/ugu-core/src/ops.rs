@@ -45,20 +45,61 @@ pub struct Rgba8(pub [u8; 4]);
 pub enum MotionStyle {
     /// Every frame is its own pose.
     Classic,
+    /// A loop of poses, each blending into the next and the last into the
+    /// first.
+    Smooth,
+    /// A loop of poses, each held for its share of the frames.
+    Stepped,
+}
+
+/// How strokes move, besides how far. Every field is kept whatever the
+/// style, so switching styles loses nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Motion {
+    pub style: MotionStyle,
+    /// Poses in a loop, for Smooth and Stepped. A loop has at most one pose
+    /// per frame, so only that many are used.
+    pub poses: u32,
+    /// From 1, long bends, to 24, short ones; for Smooth and Stepped.
+    pub detail: u32,
+    /// From 0, every stroke moving its own way, to 1, all moving alike.
+    pub linked: f32,
+    /// From 0, smooth bends, to 1, each sample moving on its own.
+    pub randomness: f32,
+    /// Hides pieces of each stroke, other pieces on each pose.
+    pub broken: bool,
+    /// The share of pieces hidden, from 0 to 1.
+    pub break_amount: f32,
+    /// The length of a piece along the stroke, in pixels.
+    pub break_range: f32,
+}
+
+impl Motion {
+    /// 2.2.13's defaults.
+    pub const DEFAULT: Self = Self {
+        style: MotionStyle::Classic,
+        poses: 8,
+        detail: 12,
+        linked: 1.0,
+        randomness: 0.0,
+        broken: false,
+        break_amount: 0.35,
+        break_range: 24.0,
+    };
 }
 
 /// How much and how a layer's or section's strokes move.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wobble {
     pub amount: f32,
-    pub style: MotionStyle,
+    pub motion: Motion,
 }
 
 impl Wobble {
     pub const fn classic(amount: f32) -> Self {
         Self {
             amount,
-            style: MotionStyle::Classic,
+            motion: Motion::DEFAULT,
         }
     }
 }

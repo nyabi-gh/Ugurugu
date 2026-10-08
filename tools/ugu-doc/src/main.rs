@@ -532,12 +532,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     let resampled = started.elapsed().as_secs_f64() * 1000.0;
     let started = Instant::now();
     for (stroke, samples) in &all_samples {
-        let pen = ugu_render::stroke::Pen {
-            width: stroke.width,
-            brush: stroke.brush,
-            seed: stroke.seed,
-            wobble: f64::from(document.wobble.amount),
-        };
+        let pen = ugu_render::stroke::Pen::new(stroke, document.wobble, document.frames);
         std::hint::black_box(ugu_render::stroke::displaced(samples, &pen, 1));
     }
     println!(
@@ -547,12 +542,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     let started = Instant::now();
     let mut elements = 0;
     for (stroke, samples) in &all_samples {
-        let pen = ugu_render::stroke::Pen {
-            width: stroke.width,
-            brush: stroke.brush,
-            seed: stroke.seed,
-            wobble: f64::from(document.wobble.amount),
-        };
+        let pen = ugu_render::stroke::Pen::new(stroke, document.wobble, document.frames);
         if let Some(path) = ugu_render::stroke::outline(samples, &pen, 1) {
             elements += path.elements().len();
         }
@@ -758,7 +748,7 @@ fn splits(document: &Document, threads: u16) {
         }) else {
             continue;
         };
-        let wobble = paint.wobble.unwrap_or(history.document().wobble).amount;
+        let wobble = paint.wobble.unwrap_or(history.document().wobble);
         // As the app does whenever its worker runs out of work, to time it.
         if std::env::var_os("UGU_RELEASE_SCRATCH").is_some() {
             renderer.release_scratch();
@@ -775,7 +765,8 @@ fn splits(document: &Document, threads: u16) {
             .expect("nothing stops it");
         later.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
-        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble) {
+        let frames = history.document().frames;
+        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble, frames) {
             composite(&split, None, rect, &mut display);
         }
         pen_ups.push(started.elapsed().as_secs_f64() * 1000.0);

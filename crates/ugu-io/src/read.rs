@@ -15,7 +15,7 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use ugu_core::document::{Document, DocumentError, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{
-    Affine, AssetId, Blend, MaskId, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
+    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
     StrokeId, Wobble,
 };
 use ugu_core::store::{self, Asset, Brush, BrushEngine, Mask, Point, Store, Stroke, TipShape};
@@ -403,8 +403,19 @@ fn parse_masks(bytes: &[u8]) -> Option<BTreeMap<u32, Mask>> {
 fn wobble(dto: &WobbleDto) -> Wobble {
     Wobble {
         amount: dto.amount,
-        style: match dto.style {
-            MotionStyleDto::Classic => MotionStyle::Classic,
+        motion: Motion {
+            style: match dto.style {
+                MotionStyleDto::Classic => MotionStyle::Classic,
+                MotionStyleDto::Smooth => MotionStyle::Smooth,
+                MotionStyleDto::Stepped => MotionStyle::Stepped,
+            },
+            poses: dto.poses,
+            detail: dto.detail,
+            linked: dto.linked,
+            randomness: dto.randomness,
+            broken: dto.broken,
+            break_amount: dto.break_amount,
+            break_range: dto.break_range,
         },
     }
 }

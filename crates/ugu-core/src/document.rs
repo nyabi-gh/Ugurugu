@@ -7,7 +7,7 @@
 //! validation checks only what the types cannot: limits, unique ids and the
 //! canvas each paint layer ends on.
 
-use crate::ops::{Blend, Op, PaintLayer, Rgba8, Wobble};
+use crate::ops::{Blend, Motion, Op, PaintLayer, Rgba8, Wobble};
 use crate::store::{Store, StoreError};
 
 /// Limits a document must stay within. The same as 2.2.13's, plus the depth
@@ -17,6 +17,10 @@ pub mod limits {
     pub const FRAMES: std::ops::RangeInclusive<u32> = 2..=60;
     pub const FRAMES_PER_SECOND: std::ops::RangeInclusive<f32> = 1.0..=50.0;
     pub const WOBBLE_AMOUNT: std::ops::RangeInclusive<f32> = 0.0..=12.0;
+    /// Poses in a motion loop; a loop uses at most one per frame.
+    pub const MOTION_POSES: std::ops::RangeInclusive<u32> = 1..=*FRAMES.end();
+    pub const MOTION_DETAIL: std::ops::RangeInclusive<u32> = 1..=24;
+    pub const BREAK_RANGE: std::ops::RangeInclusive<f32> = 2.0..=256.0;
     pub const LAYERS: usize = 256;
     /// Nesting of groups; a top-level layer is at depth 1.
     pub const LAYER_DEPTH: usize = 8;
@@ -95,6 +99,7 @@ pub enum DocumentError {
     Frames(u32),
     FramesPerSecond(f32),
     Wobble(f32),
+    Motion(Motion),
     Opacity(LayerId, f32),
     TooManyLayers(usize),
     TooDeep(LayerId),
@@ -119,6 +124,7 @@ impl std::fmt::Display for DocumentError {
                 write!(f, "{fps} frames per second is outside the limits")
             }
             Self::Wobble(amount) => write!(f, "wobble {amount} is outside the limits"),
+            Self::Motion(motion) => write!(f, "motion {motion:?} is outside the limits"),
             Self::Opacity(id, opacity) => write!(f, "layer {} has opacity {opacity}", id.0),
             Self::TooManyLayers(count) => write!(f, "{count} layers is over the limit"),
             Self::TooDeep(id) => write!(f, "layer {} is nested too deeply", id.0),
@@ -205,10 +211,21 @@ impl Document {
 
 fn check_wobble(wobble: Wobble) -> Result<(), DocumentError> {
     // `contains` is false for NaN.
-    if limits::WOBBLE_AMOUNT.contains(&wobble.amount) {
+    if !limits::WOBBLE_AMOUNT.contains(&wobble.amount) {
+        return Err(DocumentError::Wobble(wobble.amount));
+    }
+    let motion = wobble.motion;
+    let share = 0.0..=1.0;
+    if limits::MOTION_POSES.contains(&motion.poses)
+        && limits::MOTION_DETAIL.contains(&motion.detail)
+        && share.contains(&motion.linked)
+        && share.contains(&motion.randomness)
+        && share.contains(&motion.break_amount)
+        && limits::BREAK_RANGE.contains(&motion.break_range)
+    {
         Ok(())
     } else {
-        Err(DocumentError::Wobble(wobble.amount))
+        Err(DocumentError::Motion(motion))
     }
 }
 
@@ -392,9 +409,28 @@ mod tests {
         ));
         let wobble = Document {
             wobble: Wobble::classic(12.5),
-            ..base
+            ..base.clone()
         };
         assert_eq!(wobble.validate(), Err(DocumentError::Wobble(12.5)));
+        let at = |change: fn(&mut Motion)| {
+            let mut document = base.clone();
+            change(&mut document.wobble.motion);
+            document.validate()
+        };
+        assert_eq!(at(|motion| motion.poses = 60), Ok(()));
+        assert_eq!(at(|motion| motion.break_range = 2.0), Ok(()));
+        let outside: [fn(&mut Motion); 7] = [
+            |motion| motion.poses = 0,
+            |motion| motion.poses = 61,
+            |motion| motion.detail = 25,
+            |motion| motion.linked = 1.5,
+            |motion| motion.randomness = f32::NAN,
+            |motion| motion.break_amount = -0.1,
+            |motion| motion.break_range = 1.0,
+        ];
+        for change in outside {
+            assert!(matches!(at(change), Err(DocumentError::Motion(_))));
+        }
     }
 
     #[test]

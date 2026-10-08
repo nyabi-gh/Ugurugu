@@ -11,7 +11,11 @@
 //!
 //! An airbrush or spray keeps its painted dabs instead of a coverage, as
 //! the renderer paints them, and lays them on the layer as it does.
+//!
+//! A broken line's shown segments are measured along the moved samples, so
+//! they too are walked once up to the samples that no longer move.
 
+use ugu_core::motion::{Breaks, Walk};
 use ugu_core::store::{BrushEngine, Point};
 use vello_cpu::Pixmap;
 use vello_cpu::color::{AlphaColor, Srgb};
@@ -51,6 +55,16 @@ pub struct LiveStroke {
     stamp: Stamp,
     painter: dab::Painter,
     placed: Vec<Dab>,
+    /// Where a broken line breaks; `None` when it shows whole.
+    breaks: Option<Breaks>,
+    /// The walk along the moved samples that no longer move.
+    walk: Walk,
+    /// Samples in `walk`.
+    walked: usize,
+    /// `stroke::shown` for the samples so far; the first `fixed_shown` no
+    /// longer change.
+    shown: Vec<bool>,
+    fixed_shown: usize,
 }
 
 impl LiveStroke {
@@ -91,7 +105,42 @@ impl LiveStroke {
             stamp: Stamp::default(),
             painter: dab::Painter::default(),
             placed: Vec::new(),
+            breaks: pen.motion.breaks(pen.seed, frame),
+            walk: Walk::default(),
+            walked: 0,
+            shown: Vec::new(),
+            fixed_shown: 0,
         }
+    }
+
+    /// Brings `shown` up to `samples`. The moved sample `i` depends on
+    /// sample `i + 1`, so it no longer moves once that is a regular sample.
+    fn walk(&mut self, samples: &[stroke::Sample]) {
+        let Some(breaks) = self.breaks else {
+            return;
+        };
+        self.shown.truncate(self.fixed_shown);
+        let fixed = self
+            .resampler
+            .settled()
+            .saturating_sub(1)
+            .min(samples.len());
+        let mut moved = stroke::Moved::new(samples, &self.pen, self.frame);
+        for index in self.walked..fixed {
+            self.shown
+                .extend(breaks.step(&mut self.walk, moved.at(index)));
+        }
+        self.walked = self.walked.max(fixed);
+        self.fixed_shown = self.shown.len();
+        let mut walk = self.walk;
+        for index in self.walked..samples.len() {
+            self.shown.extend(breaks.step(&mut walk, moved.at(index)));
+        }
+    }
+
+    /// `shown` as `stroke::pieces` and `dab::dabs_of` take it.
+    fn shown(&self) -> Option<&[bool]> {
+        (!self.shown.is_empty()).then_some(&self.shown[..])
     }
 
     /// The coverage cleared again, for the next stroke's `new`.
@@ -124,6 +173,7 @@ impl LiveStroke {
         if samples.is_empty() {
             return None;
         }
+        self.walk(&samples);
         if let Some(look) = self.dabs {
             return self.update_dabs(&samples, look);
         }
@@ -139,6 +189,7 @@ impl LiveStroke {
                 self.frame,
                 self.settled..fixed,
                 self.settled.saturating_sub(1)..fixed.saturating_sub(1),
+                self.shown(),
             );
             if let Some(rect) = clamp(pieces.bounds, self.size()) {
                 let piece = self.draw(rect, &pieces.path);
@@ -156,6 +207,7 @@ impl LiveStroke {
             self.frame,
             self.settled..samples.len(),
             self.settled.saturating_sub(1)..samples.len() - 1,
+            self.shown(),
         );
         if let Some(rect) = clamp(pieces.bounds, self.size()) {
             let piece = self.draw(rect, &pieces.path);
@@ -172,20 +224,24 @@ impl LiveStroke {
     }
 
     /// `update` for an airbrush or spray. A sample's dabs no longer move once
-    /// the sample after it is a regular sample.
+    /// the sample after it is a regular sample; on a broken line, once the
+    /// segment after it no longer changes either.
     fn update_dabs(&mut self, samples: &[stroke::Sample], look: Look) -> Option<PixelRect> {
-        let fixed = self.resampler.settled().saturating_sub(1);
+        let waits = if self.breaks.is_some() { 2 } else { 1 };
+        let fixed = self.resampler.settled().saturating_sub(waits);
         let [r, g, b, alpha] = self.color;
         let mut dirty = None;
         if fixed > self.settled {
             self.placed.clear();
             let range = self.settled..fixed;
+            let shown = (!self.shown.is_empty()).then_some(&self.shown[..]);
             dab::dabs_of(
                 samples,
                 range,
                 &self.pen,
                 self.frame,
                 alpha,
+                shown,
                 &mut self.placed,
             );
             if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
@@ -202,12 +258,14 @@ impl LiveStroke {
         let old_tail = self.tail.take().map(|(rect, _)| rect);
         self.placed.clear();
         let range = self.settled..samples.len();
+        let shown = (!self.shown.is_empty()).then_some(&self.shown[..]);
         dab::dabs_of(
             samples,
             range,
             &self.pen,
             self.frame,
             alpha,
+            shown,
             &mut self.placed,
         );
         if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
@@ -348,7 +406,9 @@ fn add_coverage(target: &mut Pixmap, piece: &Pixmap, [left, top, right, bottom]:
 mod tests {
     use super::*;
     use crate::stroke::Resampler;
-    use ugu_core::store::{Brush, BrushEngine};
+    use ugu_core::motion::Mover;
+    use ugu_core::ops::{Motion, MotionStyle};
+    use ugu_core::store::{Brush, BrushEngine, TipShape};
 
     fn pen(antialias: bool) -> Pen {
         Pen {
@@ -364,7 +424,20 @@ mod tests {
             },
             seed: 77,
             wobble: 3.0,
+            motion: Mover::new(Motion::DEFAULT, 30),
         }
+    }
+
+    /// A broken line of `style` that hides about half of a stroke.
+    fn broken(style: MotionStyle) -> Mover {
+        let motion = Motion {
+            style,
+            broken: true,
+            break_amount: 0.45,
+            break_range: 14.0,
+            ..Motion::DEFAULT
+        };
+        Mover::new(motion, 30)
     }
 
     fn points() -> Vec<Point> {
@@ -405,8 +478,20 @@ mod tests {
 
     #[test]
     fn drawn_point_by_point_it_covers_what_the_whole_stroke_covers() {
-        for antialias in [true, false] {
-            let pen = pen(antialias);
+        let whole_line = Mover::new(Motion::DEFAULT, 30);
+        let cases = [
+            (true, whole_line, TipShape::Round),
+            (false, whole_line, TipShape::Round),
+            (true, broken(MotionStyle::Smooth), TipShape::Round),
+            (false, broken(MotionStyle::Stepped), TipShape::Round),
+            (true, broken(MotionStyle::Classic), TipShape::Square),
+        ];
+        for (antialias, motion, tip) in cases {
+            let mut pen = Pen {
+                motion,
+                ..pen(antialias)
+            };
+            pen.brush.tip = tip;
             let points = points();
             let mut live = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
             let mut seen: Option<PixelRect> = None;
@@ -415,6 +500,18 @@ mod tests {
             }
             let covered = live_coverage(&live);
             let expected = whole(&pen, &points);
+            if motion != whole_line {
+                let full = whole(
+                    &Pen {
+                        motion: whole_line,
+                        ..pen
+                    },
+                    &points,
+                );
+                let sum = |coverage: &[u8]| coverage.iter().map(|&a| u32::from(a)).sum::<u32>();
+                let shown = f64::from(sum(&expected)) / f64::from(sum(&full));
+                assert!((0.2..0.8).contains(&shown), "{shown} of the line shows");
+            }
             for (index, (&a, &b)) in covered.iter().zip(&expected).enumerate() {
                 let at = (index % 200, index / 200);
                 if antialias {
@@ -486,13 +583,23 @@ mod tests {
 
     #[test]
     fn dabs_drawn_point_by_point_are_the_whole_stroke_painted() {
-        for id in ["soft-airbrush", "pixel-spray", "rough-spray", "soft-eraser"] {
+        let ids = ["soft-airbrush", "pixel-spray", "rough-spray", "soft-eraser"];
+        let motions = [
+            Mover::new(Motion::DEFAULT, 30),
+            broken(MotionStyle::Smooth),
+            broken(MotionStyle::Stepped),
+        ];
+        for (id, motion) in ids
+            .into_iter()
+            .flat_map(|id| motions.map(|motion| (id, motion)))
+        {
             let preset = ugu_core::brush::find(id).unwrap();
             let pen = Pen {
                 width: 24.0,
                 brush: preset.brush,
                 seed: 77,
                 wobble: 3.0,
+                motion,
             };
             let points = points();
             let color = [30, 120, 200, 230];
@@ -503,6 +610,20 @@ mod tests {
             }
             let mut dabs = Vec::new();
             dab::stroke_dabs(&points, &pen, 2, color[3], &mut dabs);
+            if motion.motion().broken {
+                let mut all = Vec::new();
+                let whole_line = Mover::new(Motion::DEFAULT, 30);
+                let unbroken = Pen {
+                    motion: whole_line,
+                    ..pen
+                };
+                dab::stroke_dabs(&points, &unbroken, 2, color[3], &mut all);
+                let shown = dabs.len() as f64 / all.len() as f64;
+                assert!(
+                    (0.2..0.8).contains(&shown),
+                    "{id}: {shown} of the dabs show"
+                );
+            }
             let mut whole = vec![0; 200 * 120 * 4];
             let look = dab::look(&pen.brush);
             dab::Painter::default().paint(&mut whole, 200, &dabs, look, [30, 120, 200]);

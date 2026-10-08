@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
+use ugu_core::ops::Wobble;
 use ugu_core::store::{BrushEngine, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
@@ -103,12 +104,14 @@ impl Split {
         stamp: &mut Stamp,
         stroke: &Stroke,
         erase: bool,
-        wobble: f32,
+        wobble: Wobble,
+        frames: u32,
     ) -> Option<PixelRect> {
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
         };
-        stamp.apply_stroke(Arc::make_mut(surface), stroke, erase, wobble, self.frame)
+        let pen = Pen::new(stroke, wobble, frames);
+        stamp.apply_stroke(Arc::make_mut(surface), stroke, erase, &pen, self.frame)
     }
 
     fn sources(&self) -> Vec<Source<'_>> {
@@ -261,21 +264,15 @@ impl Stamp {
         surface: &mut TiledSurface,
         stroke: &Stroke,
         erase: bool,
-        wobble: f32,
+        pen: &Pen,
         frame: u32,
     ) -> Option<PixelRect> {
-        let pen = Pen {
-            width: stroke.width,
-            brush: stroke.brush,
-            seed: stroke.seed,
-            wobble: f64::from(wobble) * f64::from(stroke.brush.wobble_scale),
-        };
         if stroke.brush.engine != BrushEngine::Line {
-            return self.apply_dabs(surface, stroke, erase, &pen, frame);
+            return self.apply_dabs(surface, stroke, erase, pen, frame);
         }
-        let rect = clamp(stroke::bounds(&stroke.points, &pen), surface.size())?;
+        let rect = clamp(stroke::bounds(&stroke.points, pen), surface.size())?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
-        let path = stroke::outline(&samples, &pen, frame)?;
+        let path = stroke::outline(&samples, pen, frame)?;
         let coverage = self.draw(rect, |context| {
             context.set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
             context.set_paint(AlphaColor::<vello_cpu::color::Srgb>::WHITE);
@@ -399,7 +396,7 @@ mod tests {
     use ugu_core::document::LayerKind;
     use ugu_core::edit::Change;
     use ugu_core::history::History;
-    use ugu_core::ops::{Blend, Rgba8, Wobble};
+    use ugu_core::ops::{Blend, Motion, MotionStyle, Rgba8, Wobble};
     use ugu_core::store::{Brush, BrushEngine, Point};
 
     fn stroke(from: [f32; 2], to: [f32; 2], color: [u8; 4], seed: u64) -> Stroke {
@@ -485,6 +482,30 @@ mod tests {
             stroke([60.0, 0.0], [60.0, 80.0], [0, 0, 0, 255], 99),
             true,
         );
+        // Two layers move their own ways, as broken lines.
+        for (layer, style) in [(clipped, MotionStyle::Stepped), (top, MotionStyle::Smooth)] {
+            let motion = Motion {
+                style,
+                broken: true,
+                break_amount: 0.4,
+                break_range: 10.0,
+                ..Motion::DEFAULT
+            };
+            history
+                .edit("Wobble", |document| {
+                    command::update_layer(document, layer, |layer| match &mut layer.kind {
+                        LayerKind::Paint(paint) => {
+                            paint.wobble = Some(Wobble {
+                                amount: 3.0,
+                                motion,
+                            });
+                        }
+                        LayerKind::Group(_) => unreachable!("a paint layer"),
+                    })
+                    .unwrap()
+                })
+                .unwrap();
+        }
         // A selection: a fill in it under the first layer's stroke's end,
         // and a clear in it on the Multiply layer.
         let [width, height] = [70, 50];
@@ -650,6 +671,13 @@ mod tests {
         [history(), reframed]
     }
 
+    fn layer_wobble(document: &Document, layer: LayerId) -> Wobble {
+        match document.layer(layer).map(|layer| &layer.kind) {
+            Some(LayerKind::Paint(paint)) => paint.wobble.unwrap_or(document.wobble),
+            _ => document.wobble,
+        }
+    }
+
     fn canvas(document: &Document) -> Pixmap {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         Pixmap::new(width, height)
@@ -733,9 +761,15 @@ mod tests {
                     let (mut split, _) = split(&history, layer, 4);
                     let mut new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
                     new.brush = brush;
-                    let wobble = history.document().wobble.amount;
+                    let document = history.document();
                     let rect = split
-                        .stamp(&mut Stamp::default(), &new, erase, wobble)
+                        .stamp(
+                            &mut Stamp::default(),
+                            &new,
+                            erase,
+                            layer_wobble(document, layer),
+                            document.frames,
+                        )
                         .unwrap();
                     let mut shown = canvas(history.document());
                     composite(&split, None, whole(history.document()), &mut shown);
@@ -795,9 +829,15 @@ mod tests {
             assert!(split.sources.len() < 6);
 
             let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], 600);
-            let wobble = history.document().wobble.amount;
+            let document = history.document();
             split
-                .stamp(&mut Stamp::default(), &new, false, wobble)
+                .stamp(
+                    &mut Stamp::default(),
+                    &new,
+                    false,
+                    layer_wobble(document, layer),
+                    document.frames,
+                )
                 .unwrap();
             let mut shown = canvas(history.document());
             composite(&split, None, whole(history.document()), &mut shown);

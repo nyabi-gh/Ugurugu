@@ -73,31 +73,38 @@ pub fn stroke_dabs(points: &[Point], pen: &Pen, frame: u32, alpha: u8, out: &mut
 }
 
 /// The dabs of `samples` on `frame` into `out`, for a stroke whose colour
-/// has `alpha`. Dabs that would paint nothing are left out.
+/// has `alpha`. Dabs that would paint nothing, or a broken line hides, are
+/// left out.
 pub fn dabs_into(samples: &[Sample], pen: &Pen, frame: u32, alpha: u8, out: &mut Vec<Dab>) {
     out.clear();
-    dabs_of(samples, 0..samples.len(), pen, frame, alpha, out);
+    let shown = stroke::shown(samples, pen, frame);
+    let range = 0..samples.len();
+    dabs_of(samples, range, pen, frame, alpha, shown.as_deref(), out);
 }
 
 /// The dabs of the samples in `range` added to `out`. A sample's dabs
 /// depend on the samples on either side of it, which give its direction.
+/// `shown` is `stroke::shown`'s for the samples so far.
 pub fn dabs_of(
     samples: &[Sample],
     range: std::ops::Range<usize>,
     pen: &Pen,
     frame: u32,
     alpha: u8,
+    shown: Option<&[bool]>,
     out: &mut Vec<Dab>,
 ) {
     let brush = &pen.brush;
-    let base = ugu_core::motion::classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+    let base = pen.width_on(frame);
     let alpha_at = |pressure: f64| {
         let fade = stroke::pressure_scale(brush.opacity_dynamics, pressure);
         scaled(alpha, f64::from(brush.opacity * brush.flow) * fade)
     };
-    let center = |index: usize| stroke::displaced_at(samples, index, pen, frame);
+    let mut moved = stroke::Moved::new(samples, pen, frame);
+    let mut center = |index: usize| moved.at(index);
     match brush.engine {
         BrushEngine::Airbrush => {
+            let range = range.filter(|&index| stroke::sample_shown(shown, index));
             out.extend(range.filter_map(|index| {
                 let sample = &samples[index];
                 let alpha = alpha_at(sample.pressure);
@@ -123,7 +130,7 @@ pub fn dabs_of(
                 if index * count >= MAX_PARTICLES {
                     return;
                 }
-                if alpha == 0 {
+                if alpha == 0 || !stroke::sample_shown(shown, index) {
                     continue;
                 }
                 let [x, y] = center(index);
@@ -448,6 +455,8 @@ pub fn bounds(dabs: &[Dab]) -> [f64; 4] {
 mod tests {
     use super::*;
     use ugu_core::brush::find;
+    use ugu_core::motion::Mover;
+    use ugu_core::ops::Motion;
     use ugu_core::store::Point as Input;
 
     fn pen(preset: &str, wobble: f64) -> Pen {
@@ -457,6 +466,7 @@ mod tests {
             brush: preset.brush,
             seed: 0x1234_5678_9abc_def0,
             wobble,
+            motion: Mover::new(Motion::DEFAULT, 30),
         }
     }
 

@@ -13,9 +13,11 @@
 //! a small change in pressure never changes how a stroke is drawn. A square
 //! tip takes the same kind of union with square ends and mitred corners.
 //! Airbrush and spray strokes are dabs instead (`crate::dab`).
+//! A broken line draws only the samples on its shown segments (`shown`).
 
-use ugu_core::motion::classic;
-use ugu_core::store::{Brush, BrushEngine, Point, TipShape};
+use ugu_core::motion::{Displacer, Mover, classic};
+use ugu_core::ops::Wobble;
+use ugu_core::store::{Brush, BrushEngine, Point, Stroke, TipShape};
 use vello_cpu::kurbo::{self, BezPath, Circle, Shape};
 
 /// Resampling never makes more samples than this; longer strokes are sampled
@@ -172,6 +174,7 @@ pub struct Pen {
     pub seed: u64,
     /// The layer's wobble amount times the brush's wobble scale.
     pub wobble: f64,
+    pub motion: Mover,
 }
 
 /// 2.2.13's `pressureScale`.
@@ -181,6 +184,17 @@ pub fn pressure_scale(dynamics: f32, pressure: f64) -> f64 {
 }
 
 impl Pen {
+    /// The pen of `stroke` moved by `wobble` in a loop of `frames`.
+    pub fn new(stroke: &Stroke, wobble: Wobble, frames: u32) -> Self {
+        Self {
+            width: stroke.width,
+            brush: stroke.brush,
+            seed: stroke.seed,
+            wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
+            motion: Mover::new(wobble.motion, frames),
+        }
+    }
+
     pub(crate) fn pressure_scale(&self, pressure: f64) -> f64 {
         pressure_scale(self.brush.size_dynamics, pressure)
     }
@@ -188,7 +202,7 @@ impl Pen {
     /// No part of the stroke reaches further than this from its raw points.
     pub fn reach(&self) -> f64 {
         let width = f64::from(self.width);
-        // `classic::width` varies the width by at most 2.5%.
+        // `Mover::width` varies the width by at most 2.5%.
         let widest = (width * 1.025).max(0.5);
         let brush = &self.brush;
         let square = brush.tip == TipShape::Square;
@@ -215,8 +229,13 @@ impl Pen {
     /// Spacing of samples on `frame` for an airbrush or spray: a share of the
     /// width drawn on that frame, as in 2.2.13.
     pub fn dab_spacing(&self, frame: u32) -> f64 {
-        let base = classic::width(f64::from(self.width), self.seed, frame, self.wobble);
-        (base * f64::from(self.brush.spacing)).max(0.5)
+        (self.width_on(frame) * f64::from(self.brush.spacing)).max(0.5)
+    }
+
+    /// The width drawn on `frame`, before pressure.
+    pub fn width_on(&self, frame: u32) -> f64 {
+        self.motion
+            .width(f64::from(self.width), self.seed, frame, self.wobble)
     }
 }
 
@@ -248,39 +267,78 @@ pub fn bounds(points: &[Point], pen: &Pen) -> [f64; 4] {
 
 /// Samples moved by the motion of `frame`.
 pub fn displaced(samples: &[Sample], pen: &Pen, frame: u32) -> Vec<[f64; 2]> {
-    (0..samples.len())
-        .map(|index| displaced_at(samples, index, pen, frame))
-        .collect()
+    displaced_range(samples, 0..samples.len(), pen, frame)
 }
 
-/// Sample `index` moved by the motion of `frame`. It depends on the samples
-/// on either side, which give its direction.
-pub fn displaced_at(samples: &[Sample], index: usize, pen: &Pen, frame: u32) -> [f64; 2] {
-    let sample = &samples[index];
-    let amplitude = classic::amplitude(f64::from(pen.width), pen.wobble);
-    if amplitude == 0.0 {
-        return sample.position;
+/// The samples in `range` moved by the motion of `frame`.
+pub fn displaced_range(
+    samples: &[Sample],
+    range: std::ops::Range<usize>,
+    pen: &Pen,
+    frame: u32,
+) -> Vec<[f64; 2]> {
+    let mut moved = Moved::new(samples, pen, frame);
+    range.map(|index| moved.at(index)).collect()
+}
+
+/// The samples of a stroke moved by the motion of a frame, one at a time;
+/// taken in order along the stroke, they share the motion's noise.
+pub struct Moved<'a> {
+    samples: &'a [Sample],
+    /// `None` when nothing moves.
+    displacer: Option<Displacer>,
+}
+
+impl<'a> Moved<'a> {
+    pub fn new(samples: &'a [Sample], pen: &Pen, frame: u32) -> Self {
+        let amplitude = classic::amplitude(f64::from(pen.width), pen.wobble);
+        Self {
+            samples,
+            displacer: (amplitude != 0.0).then(|| pen.motion.displacer(pen.seed, frame, amplitude)),
+        }
     }
-    let before = samples[index.saturating_sub(1)].position;
-    let after = samples[(index + 1).min(samples.len() - 1)].position;
-    let length = distance(before, after);
-    let tangent = if length > 1e-9 {
-        [
-            (after[0] - before[0]) / length,
-            (after[1] - before[1]) / length,
-        ]
-    } else {
-        [1.0, 0.0]
-    };
-    classic::displace(
-        sample.position,
-        sample.pressure,
-        tangent,
-        sample.arc,
-        amplitude,
-        pen.seed,
-        frame,
-    )
+
+    /// Sample `index` moved. It depends on the samples on either side, which
+    /// give its direction.
+    pub fn at(&mut self, index: usize) -> [f64; 2] {
+        let samples = self.samples;
+        let sample = &samples[index];
+        let Some(displacer) = &mut self.displacer else {
+            return sample.position;
+        };
+        let before = samples[index.saturating_sub(1)].position;
+        let after = samples[(index + 1).min(samples.len() - 1)].position;
+        let length = distance(before, after);
+        let tangent = if length > 1e-9 {
+            [
+                (after[0] - before[0]) / length,
+                (after[1] - before[1]) / length,
+            ]
+        } else {
+            [1.0, 0.0]
+        };
+        displacer.displace(sample.position, sample.pressure, tangent, sample.arc, index)
+    }
+}
+
+/// Which segments between samples show on `frame`, segment `i` joining
+/// samples `i` and `i + 1`; `None` when the whole stroke shows.
+pub fn shown(samples: &[Sample], pen: &Pen, frame: u32) -> Option<Vec<bool>> {
+    let breaks = pen.motion.breaks(pen.seed, frame)?;
+    breaks.segments(&displaced(samples, pen, frame))
+}
+
+/// Whether sample `index` is drawn: it ends a shown segment, or every
+/// segment shows.
+pub fn sample_shown(shown: Option<&[bool]>, index: usize) -> bool {
+    shown.is_none_or(|shown| {
+        (index > 0 && shown[index - 1]) || shown.get(index).copied().unwrap_or(false)
+    })
+}
+
+/// Whether the segment from sample `index` to the next shows.
+fn joined(shown: Option<&[bool]>, index: usize) -> bool {
+    shown.is_none_or(|shown| shown[index])
 }
 
 /// The stroke's outline on `frame`, to fill with the non-zero rule; `None`
@@ -300,26 +358,45 @@ pub fn outline_into(samples: &[Sample], pen: &Pen, frame: u32, path: &mut BezPat
         return;
     }
     if pen.brush.tip == TipShape::Square {
+        let shown = shown(samples, pen, frame);
         let all = 0..samples.len();
-        square_pieces(samples, pen, frame, all, 0..samples.len() - 1, path);
+        square_pieces(
+            samples,
+            pen,
+            frame,
+            all,
+            0..samples.len() - 1,
+            shown.as_deref(),
+            path,
+        );
         return;
     }
-    let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+    let base = pen.width_on(frame);
     let radii: Vec<f64> = samples
         .iter()
         .map(|sample| radius(base, pen, sample))
         .collect();
     let centers = displaced(samples, pen, frame);
+    let shown = pen
+        .motion
+        .breaks(pen.seed, frame)
+        .and_then(|breaks| breaks.segments(&centers));
+    let shown = shown.as_deref();
     let side = |a: usize, b: usize| left_by_band(centers[a], centers[b], [radii[a], radii[b]]);
     let mut halves = Vec::new();
     let mut start = 0;
     while start < samples.len() {
-        // A run of samples joined by bands; a circle inside its neighbour
-        // ends one.
+        if !sample_shown(shown, start) {
+            start += 1;
+            continue;
+        }
+        // A run of samples joined by bands; a hidden segment or a circle
+        // inside its neighbour ends one.
         let mut end = start;
         halves.clear();
         halves.push([None, None]);
         while end + 1 < samples.len()
+            && joined(shown, end)
             && let (Some(ahead), Some(behind)) = (side(end, end + 1), side(end + 1, end))
         {
             halves[end - start][1] = Some(ahead);
@@ -467,26 +544,26 @@ pub struct Pieces {
 /// The circles of samples in `circles`, less what the bands on either side
 /// cover, and the bands from each sample in `bands` to the next, so an
 /// outline can be drawn a part at a time. A circle's part depends on the
-/// samples on either side and their neighbours.
+/// samples on either side and their neighbours. `shown` is `shown`'s for
+/// the samples so far.
 pub fn pieces(
     samples: &[Sample],
     pen: &Pen,
     frame: u32,
     circles: std::ops::Range<usize>,
     bands: std::ops::Range<usize>,
+    shown: Option<&[bool]>,
 ) -> Pieces {
     if pen.brush.tip == TipShape::Square {
         let mut path = BezPath::new();
-        let bounds = square_pieces(samples, pen, frame, circles, bands, &mut path);
+        let bounds = square_pieces(samples, pen, frame, circles, bands, shown, &mut path);
         return Pieces { path, bounds };
     }
-    let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+    let base = pen.width_on(frame);
     let radius = |sample: &Sample| radius(base, pen, sample);
     let first = circles.start.saturating_sub(1).min(bands.start);
     let last = (circles.end + 1).max(bands.end + 1).min(samples.len());
-    let centers: Vec<[f64; 2]> = (first..last)
-        .map(|index| displaced_at(samples, index, pen, frame))
-        .collect();
+    let centers = displaced_range(samples, first..last, pen, frame);
     let center = |index: usize| centers[index - first];
 
     let mut path = BezPath::new();
@@ -505,6 +582,9 @@ pub fn pieces(
         ];
     };
     for index in circles {
+        if !sample_shown(shown, index) {
+            continue;
+        }
         let radius = radius(&samples[index]);
         grow(center(index), radius);
         let side = |other: usize| {
@@ -512,15 +592,18 @@ pub fn pieces(
             left_by_band(center(index), center(other), radii)
         };
         let keep = [
-            index.checked_sub(1).and_then(side),
-            (index + 1 < samples.len())
+            index
+                .checked_sub(1)
+                .filter(|&previous| joined(shown, previous))
+                .and_then(side),
+            (index + 1 < samples.len() && joined(shown, index))
                 .then(|| side(index + 1))
                 .flatten(),
         ];
         cap(&mut path, center(index), radius, keep);
     }
     let reverse = *BANDS_REVERSED;
-    for index in bands {
+    for index in bands.filter(|&index| joined(shown, index)) {
         let radii = [radius(&samples[index]), radius(&samples[index + 1])];
         let ends = [center(index), center(index + 1)];
         if let Some(mut corners) = band(ends[0], ends[1], radii) {
@@ -552,14 +635,13 @@ fn square_pieces(
     frame: u32,
     corners: std::ops::Range<usize>,
     bands: std::ops::Range<usize>,
+    shown: Option<&[bool]>,
     path: &mut BezPath,
 ) -> [f64; 4] {
-    let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+    let base = pen.width_on(frame);
     let first = corners.start.saturating_sub(1).min(bands.start);
     let last = (corners.end + 1).max(bands.end + 1).min(samples.len());
-    let centers: Vec<[f64; 2]> = (first..last)
-        .map(|index| displaced_at(samples, index, pen, frame))
-        .collect();
+    let centers = displaced_range(samples, first..last, pen, frame);
     let center = |index: usize| centers[index - first];
     let half = |index: usize| radius(base, pen, &samples[index]);
     let direction = |from: usize, to: usize| {
@@ -607,11 +689,15 @@ fn square_pieces(
         [x + dx * along - dy * across, y + dy * along + dx * across]
     };
     for index in corners {
+        if !sample_shown(shown, index) {
+            continue;
+        }
         let (c, r) = (center(index), half(index));
         let before = index
             .checked_sub(1)
+            .filter(|&previous| joined(shown, previous))
             .and_then(|previous| direction(previous, index));
-        let after = (index + 1 < samples.len())
+        let after = (index + 1 < samples.len() && joined(shown, index))
             .then(|| direction(index, index + 1))
             .flatten();
         match (before, after) {
@@ -657,7 +743,7 @@ fn square_pieces(
             }
         }
     }
-    for index in bands {
+    for index in bands.filter(|&index| joined(shown, index)) {
         let Some(d) = direction(index, index + 1) else {
             continue;
         };
@@ -837,6 +923,7 @@ fn band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2]) -> Option<[kurbo::Point; 4
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ugu_core::ops::{Motion, MotionStyle};
     use ugu_core::store::BrushEngine;
     use vello_cpu::kurbo::{Cap, Join, Stroke};
     use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
@@ -855,6 +942,7 @@ mod tests {
             },
             seed: 0x5eed,
             wobble,
+            motion: Mover::new(Motion::DEFAULT, 30),
         }
     }
 
@@ -993,7 +1081,7 @@ mod tests {
                 line.line_to(at);
             }
         }
-        let width = classic::width(12.0, pen.seed, 3, pen.wobble) * pen.pressure_scale(0.7);
+        let width = pen.motion.width(12.0, pen.seed, 3, pen.wobble) * pen.pressure_scale(0.7);
         let stroked = rasterize(&line, Some(width), [0, 0, 0, 255]);
         assert!(stroked.chunks(4).filter(|pixel| pixel[3] == 255).count() > 1000);
 
@@ -1034,7 +1122,7 @@ mod tests {
         let pen = pen(0.8, 6.0);
         let samples = Resampler::whole(&points, spacing(pen.width));
         let all = 0..samples.len();
-        let path = pieces(&samples, &pen, 4, all.clone(), 0..samples.len() - 1).path;
+        let path = pieces(&samples, &pen, 4, all.clone(), 0..samples.len() - 1, None).path;
         let mut signs = Vec::new();
         let mut piece = BezPath::new();
         for element in path.elements() {
@@ -1051,9 +1139,77 @@ mod tests {
         assert_eq!(whole.area().signum(), signs[0]);
     }
 
+    #[test]
+    fn a_broken_line_draws_only_its_shown_segments() {
+        let points = wave(70, |index| 0.3 + (index % 7) as f32 / 10.0);
+        for tip in [TipShape::Round, TipShape::Square] {
+            let mut pen = pen(0.8, 6.0);
+            pen.brush.tip = tip;
+            pen.motion = Mover::new(
+                Motion {
+                    style: MotionStyle::Smooth,
+                    broken: true,
+                    break_amount: 0.5,
+                    break_range: 12.0,
+                    ..Motion::DEFAULT
+                },
+                30,
+            );
+            let samples = Resampler::whole(&points, spacing(pen.width));
+            let shown = shown(&samples, &pen, 4).unwrap();
+            assert!(shown.contains(&true) && shown.contains(&false));
+            let color = [0, 0, 0, 255];
+            let whole = rasterize(&outline(&samples, &pen, 4).unwrap(), None, color);
+            let all = 0..samples.len();
+            let parts = pieces(&samples, &pen, 4, all, 0..samples.len() - 1, Some(&shown));
+            let parts = rasterize(&parts.path, None, color);
+            let most = whole
+                .iter()
+                .zip(&parts)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            assert!(most <= 1, "{tip:?}: the pieces differ by {most}");
+
+            // A hidden sample far from every drawn one is left empty.
+            let centers = displaced(&samples, &pen, 4);
+            let drawn: Vec<[f64; 2]> = (0..samples.len())
+                .filter(|&index| sample_shown(Some(&shown), index))
+                .map(|index| centers[index])
+                .collect();
+            let reach = f64::from(pen.width) * 1.5;
+            let empty: Vec<[f64; 2]> = (0..samples.len())
+                .filter(|&index| !sample_shown(Some(&shown), index))
+                .map(|index| centers[index])
+                .filter(|&[x, y]| drawn.iter().all(|&[dx, dy]| (x - dx).hypot(y - dy) > reach))
+                .collect();
+            assert!(!empty.is_empty());
+            for [x, y] in empty {
+                let at = (y as usize * 256 + x as usize) * 4 + 3;
+                assert_eq!(whole[at], 0, "{tip:?}: drawn at {x}, {y}");
+            }
+        }
+        // Everything hidden draws nothing; a lone sample still shows.
+        let mut pen = pen(0.8, 6.0);
+        pen.motion = Mover::new(
+            Motion {
+                broken: true,
+                break_amount: 1.0,
+                ..Motion::DEFAULT
+            },
+            30,
+        );
+        let samples = Resampler::whole(&points, spacing(pen.width));
+        assert!(outline(&samples, &pen, 4).unwrap().elements().is_empty());
+        let one = Resampler::whole(&points[..1], spacing(pen.width));
+        assert!(!outline(&one, &pen, 4).unwrap().elements().is_empty());
+    }
+
     /// The union as M2 drew it: a circle per sample and a band per pair.
     fn circles_and_bands(samples: &[Sample], pen: &Pen, frame: u32) -> BezPath {
-        let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+        let base = pen
+            .motion
+            .width(f64::from(pen.width), pen.seed, frame, pen.wobble);
         let radius = |sample: &Sample| (base * pen.pressure_scale(sample.pressure)).max(0.5) * 0.5;
         let centers = displaced(samples, pen, frame);
         let mut path = BezPath::new();
@@ -1142,7 +1298,9 @@ mod tests {
                 };
                 let samples = Resampler::whole(&points, spacing(pen.width));
                 let traced = outline(&samples, &pen, 3).unwrap();
-                let base = classic::width(f64::from(pen.width), pen.seed, 3, pen.wobble);
+                let base = pen
+                    .motion
+                    .width(f64::from(pen.width), pen.seed, 3, pen.wobble);
                 let centers = displaced(&samples, &pen, 3);
                 let radii: Vec<f64> = samples
                     .iter()

@@ -36,7 +36,7 @@ const NEW_CANVAS: [u32; 2] = [1024, 768];
 pub enum FileEvent {
     /// A dialog closed: the chosen path, or `None` when cancelled.
     Picked(Purpose, Option<PathBuf>),
-    Opened(PathBuf, Result<(Document, [u8; 16]), String>),
+    Opened(PathBuf, Result<(Box<Document>, [u8; 16]), String>),
     Saved {
         path: PathBuf,
         state: StateId,
@@ -282,7 +282,7 @@ impl Files {
             }
             FileEvent::Opened(path, result) => match result {
                 Ok((document, id)) => {
-                    canvas.replace(document, true);
+                    canvas.replace(*document, true);
                     self.path = Some(path);
                     self.id = id;
                     self.message = None;
@@ -402,6 +402,7 @@ fn run(job: Job) -> FileEvent {
                 .map_err(|error| error.to_string())
                 .and_then(|file| {
                     ugu_io::read::read(std::io::BufReader::new(file))
+                        .map(|(document, id)| (Box::new(document), id))
                         .map_err(|error| error.to_string())
                 });
             tracing::info!(

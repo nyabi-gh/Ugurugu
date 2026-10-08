@@ -5,7 +5,8 @@ use std::io::{Cursor, Read};
 
 use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{
-    Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, Section, StrokeId, Wobble,
+    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
+    StrokeId, Wobble,
 };
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
@@ -114,7 +115,19 @@ pub(crate) fn sample() -> Document {
                 clip: None,
             }],
             opacity: 0.5,
-            wobble: Some(Wobble::classic(2.0)),
+            wobble: Some(Wobble {
+                amount: 2.0,
+                motion: Motion {
+                    style: MotionStyle::Stepped,
+                    poses: 5,
+                    detail: 3,
+                    linked: 0.25,
+                    randomness: 0.75,
+                    broken: true,
+                    break_amount: 0.5,
+                    break_range: 10.0,
+                },
+            }),
         })),
         Op::Crop {
             offset: [-2, 3],

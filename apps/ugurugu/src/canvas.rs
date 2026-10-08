@@ -595,13 +595,11 @@ impl Canvas {
         }
         let live = self.session.live().expect("a stroke has begun");
         let document = self.session.document();
-        let pen = Pen {
-            width: live.template.width,
-            brush: live.template.brush,
-            seed: live.template.seed,
-            wobble: f64::from(wobble_of(document, live.layer))
-                * f64::from(live.template.brush.wobble_scale),
-        };
+        let pen = Pen::new(
+            &live.template,
+            wobble_of(document, live.layer),
+            document.frames,
+        );
         let size = document.canvas.map(|edge| edge as u16);
         let mut stroke = LiveStroke::new(
             size,
@@ -659,7 +657,8 @@ impl Canvas {
             Some((key, split)) if *key == before && after.layer == before.layer => {
                 last_stroke(document, after.layer).and_then(|(stroke, erase)| {
                     let wobble = wobble_of(document, after.layer);
-                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble);
+                    let frames = document.frames;
+                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble, frames);
                     *key = after;
                     changed
                 })
@@ -799,11 +798,11 @@ fn preview_shrink(scale: f64) -> u32 {
     shrink
 }
 
-/// The wobble amount of strokes on `layer`.
-fn wobble_of(document: &Document, layer: ugu_core::document::LayerId) -> f32 {
+/// The wobble of strokes on `layer`.
+fn wobble_of(document: &Document, layer: ugu_core::document::LayerId) -> ugu_core::ops::Wobble {
     match document.layer(layer).map(|layer| &layer.kind) {
-        Some(LayerKind::Paint(paint)) => paint.wobble.unwrap_or(document.wobble).amount,
-        _ => document.wobble.amount,
+        Some(LayerKind::Paint(paint)) => paint.wobble.unwrap_or(document.wobble),
+        _ => document.wobble,
     }
 }
 

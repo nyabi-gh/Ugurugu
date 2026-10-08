@@ -60,12 +60,21 @@ pub struct DocumentDto {
 pub struct WobbleDto {
     pub amount: f32,
     pub style: MotionStyleDto,
+    pub poses: u32,
+    pub detail: u32,
+    pub linked: f32,
+    pub randomness: f32,
+    pub broken: bool,
+    pub break_amount: f32,
+    pub break_range: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MotionStyleDto {
     Classic,
+    Smooth,
+    Stepped,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
