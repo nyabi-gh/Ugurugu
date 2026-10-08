@@ -35,6 +35,7 @@ use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Versi
 use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
+mod clipboard;
 mod transform;
 
 pub use transform::{Grip, HANDLES};
@@ -1363,5 +1364,103 @@ mod tests {
             canvas.display().data_as_u8_slice(),
             applied.data_as_u8_slice()
         );
+    }
+
+    fn layer_render(document: &Document, layer: LayerId, frame: i64) -> Pixmap {
+        let plan = RenderPlan::reference(document, Reference::Layer(layer));
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut pixels = Pixmap::new(width, height);
+        ugu_render::document::DocumentRenderer::new(0).render_plan(
+            document,
+            &plan,
+            frame,
+            None,
+            &mut pixels,
+        );
+        pixels
+    }
+
+    #[test]
+    fn pasted_strokes_keep_moving_inside_the_selection_on_any_canvas() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([200, 120]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(point([10.0, 60.0], 0.0)).unwrap();
+            for step in 1..=60 {
+                let x = 10.0 + 3.0 * f64::from(step);
+                session.extend_stroke(point(
+                    [x, 60.0 + (x / 9.0).sin() * 20.0],
+                    f64::from(step) * 4.0,
+                ));
+            }
+            session.end_stroke(point([190.0, 60.0], 250.0)).unwrap();
+            session.selection_shape = ugu_session::ShapeKind::Rectangle;
+            session.begin_selection([50.0, 20.0], Combine::Replace);
+            session.extend_selection([120.0, 100.0]);
+            session.end_selection([120.0, 100.0]).unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let source = canvas.session().current_layer();
+        let (clip, image) = canvas.copy().expect("copied");
+        assert_eq!(image.size, [70, 80]);
+        assert_eq!(image.straight.len(), 70 * 80 * 4);
+        assert!(image.straight.chunks(4).any(|pixel| pixel[3] == 255));
+
+        canvas.paste(&clip);
+        let pasted = canvas.session().current_layer();
+        assert_ne!(pasted, source);
+        assert!(canvas.session().pending().is_some());
+        canvas.apply_transform();
+        let document = canvas.session().document();
+        let inside = |x: usize, y: usize| (50..120).contains(&x) && (20..100).contains(&y);
+        let mut frames = Vec::new();
+        for frame in [0, 3] {
+            let original = layer_render(document, source, frame);
+            let copy = layer_render(document, pasted, frame);
+            for (index, (a, b)) in original
+                .data_as_u8_slice()
+                .chunks(4)
+                .zip(copy.data_as_u8_slice().chunks(4))
+                .enumerate()
+            {
+                let (x, y) = (index % 200, index / 200);
+                if inside(x, y) {
+                    assert_eq!(a, b, "frame {frame} at {x}, {y}");
+                } else {
+                    assert_eq!(b, [0; 4], "frame {frame} outside at {x}, {y}");
+                }
+            }
+            frames.push(copy);
+        }
+        assert_ne!(
+            frames[0].data_as_u8_slice(),
+            frames[1].data_as_u8_slice(),
+            "the pasted strokes move"
+        );
+
+        // Into a larger document: the strokes stay where they were.
+        canvas.replace(Document::new([300, 200]), false);
+        canvas.paste(&clip);
+        canvas.apply_transform();
+        let document = canvas.session().document();
+        assert!(document.validate().is_ok());
+        let wider = layer_render(document, canvas.session().current_layer(), 0);
+        let shown = |pixels: &Pixmap, width: usize| {
+            pixels
+                .data_as_u8_slice()
+                .chunks(4)
+                .enumerate()
+                .filter(|(_, pixel)| pixel[3] > 0)
+                .map(|(index, _)| (index % width, index / width))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown(&wider, 300), shown(&frames[0], 200));
     }
 }

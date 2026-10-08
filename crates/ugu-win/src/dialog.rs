@@ -20,11 +20,12 @@ use windows::Win32::UI::Shell::{
 use windows::core::{HRESULT, HSTRING, PCWSTR};
 
 /// A file type the dialog offers: a name such as "PNG image" and its
-/// extension without the dot.
+/// extensions without the dot, the first one added to a saved name that has
+/// none.
 #[derive(Clone, Copy, Debug)]
 pub struct FileType {
     pub name: &'static str,
-    pub extension: &'static str,
+    pub extensions: &'static [&'static str],
 }
 
 pub enum Dialog<'a> {
@@ -66,12 +67,18 @@ unsafe fn show(
         };
         let picker: IFileDialog = CoCreateInstance(class, None, CLSCTX_INPROC_SERVER)?;
         let name = HSTRING::from(file_type.name);
-        let pattern = HSTRING::from(format!("*.{}", file_type.extension));
+        let pattern = file_type
+            .extensions
+            .iter()
+            .map(|extension| format!("*.{extension}"))
+            .collect::<Vec<_>>()
+            .join(";");
+        let pattern = HSTRING::from(pattern);
         picker.SetFileTypes(&[COMDLG_FILTERSPEC {
             pszName: PCWSTR(name.as_ptr()),
             pszSpec: PCWSTR(pattern.as_ptr()),
         }])?;
-        let extension = HSTRING::from(file_type.extension);
+        let extension = HSTRING::from(file_type.extensions[0]);
         picker.SetDefaultExtension(&extension)?;
         let mut options = picker.GetOptions()? | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
         if let Dialog::Save { name } = dialog {

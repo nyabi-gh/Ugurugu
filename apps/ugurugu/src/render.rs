@@ -18,10 +18,12 @@ use ugu_render::view::{DocumentView, Placement};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::PointerEvent;
 use winit::event::WindowEvent;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Window;
 
 use crate::cache::Rendered;
 use crate::canvas::{self, Canvas};
+use crate::clipboard::{Clipboard, ClipboardEvent};
 use crate::files::{Action, FileEvent, Files};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
@@ -39,6 +41,8 @@ pub enum ToRender {
     Cache(Box<Rendered>),
     /// A file dialog or the file thread finished.
     File(Box<FileEvent>),
+    /// The clipboard thread finished.
+    Clipboard(Box<ClipboardEvent>),
     /// The user asked to close the window; unsaved changes come first.
     CloseRequested,
 }
@@ -109,6 +113,10 @@ pub struct RenderThread {
     ime: ImeProbe,
     panels: Panels,
     files: Files,
+    clipboard: Clipboard,
+    control_held: bool,
+    /// Ctrl+V since the last frame.
+    paste_pressed: bool,
     title: String,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
@@ -226,6 +234,14 @@ impl RenderThread {
                 let to_self = to_self.clone();
                 move |rendered| {
                     let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
+                }
+            }),
+            control_held: false,
+            paste_pressed: false,
+            clipboard: Clipboard::new({
+                let to_self = to_self.clone();
+                move |event| {
+                    let _ = to_self.send(ToRender::Clipboard(Box::new(event)));
                 }
             }),
             files: {
@@ -411,6 +427,10 @@ impl RenderThread {
                 self.files.request(Action::Close, &mut self.canvas);
                 self.needs_frame = true;
             }
+            ToRender::Clipboard(event) => {
+                self.clipboard.handle(*event, &mut self.canvas);
+                self.needs_frame = true;
+            }
             ToRender::File(event) => {
                 self.files.handle(*event, &mut self.canvas);
                 self.needs_frame = true;
@@ -469,6 +489,22 @@ impl RenderThread {
             // redraw forever, so a redraw request only schedules one frame.
             ToRender::Window(WindowEvent::RedrawRequested) => self.needs_frame = true,
             ToRender::Window(event) => {
+                match &event {
+                    WindowEvent::ModifiersChanged(modifiers) => {
+                        self.control_held = modifiers.state().control_key();
+                    }
+                    // egui-winit reports Ctrl+V only when the clipboard holds
+                    // text, and an image from another app is pasted too.
+                    WindowEvent::KeyboardInput { event, .. }
+                        if event.state.is_pressed()
+                            && !event.repeat
+                            && self.control_held
+                            && event.physical_key == PhysicalKey::Code(KeyCode::KeyV) =>
+                    {
+                        self.paste_pressed = true;
+                    }
+                    _ => {}
+                }
                 if let WindowEvent::Resized(size) = &event {
                     // Windows reports a minimized window as zero-sized.
                     self.minimized = size.width == 0 || size.height == 0;
@@ -493,6 +529,7 @@ impl RenderThread {
         let input = self.egui_state.take_egui_input(&self.window);
         let mut canvas_area = [0; 4];
         let mut shown_ants = None;
+        let paste = std::mem::take(&mut self.paste_pressed);
         let Self {
             display,
             canvas,
@@ -500,6 +537,7 @@ impl RenderThread {
             ime,
             panels,
             files,
+            clipboard,
             diagnostics,
             ..
         } = self;
@@ -508,7 +546,7 @@ impl RenderThread {
         let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
-            ui::shortcuts(ui.ctx(), canvas, files, panels);
+            ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, paste);
             files.confirm(ui.ctx(), canvas);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
@@ -523,7 +561,7 @@ impl RenderThread {
             egui::Panel::top("menu")
                 .frame(bar(theme::CHROME, 6, 2))
                 .show_separator_line(false)
-                .show(ui, |ui| ui::menu_bar(ui, canvas, files, panels));
+                .show(ui, |ui| ui::menu_bar(ui, canvas, files, clipboard, panels));
             egui::Panel::top("quick access")
                 .frame(bar(theme::CHROME, 10, 5))
                 .show(ui, |ui| ui::quick_access(ui, canvas, panels));

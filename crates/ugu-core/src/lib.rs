@@ -6,6 +6,7 @@
 //! pinned down by tests with a reference evaluator.
 
 pub mod brush;
+pub mod clip;
 pub mod command;
 pub mod document;
 pub mod edit;

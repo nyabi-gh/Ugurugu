@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! New, open, save, save as and close, and the question before unsaved
-//! changes are dropped.
+//! New, open, save, save as, close and inserting an image, and the
+//! question before unsaved changes are dropped.
 //!
 //! Dialogs run on threads of their own; reading and writing run in order on
 //! one file thread, so a later save never finishes before an earlier one to
@@ -16,18 +16,32 @@ use std::sync::mpsc::{Sender, channel};
 
 use ugu_core::document::Document;
 use ugu_core::history::StateId;
+use ugu_core::ops::AssetId;
+use ugu_core::store::Asset;
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::cache::Renders;
 use crate::canvas::Canvas;
+use crate::i18n::{tr, tr_with};
+
+fn args_name(name: String) -> fluent_bundle::FluentArgs<'static> {
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("name", name);
+    args
+}
 
 const DOCUMENT_TYPE: FileType = FileType {
     name: "Ugurugu document",
-    extension: "ugurugu",
+    extensions: &["ugurugu"],
 };
 const PNG_TYPE: FileType = FileType {
     name: "PNG image",
-    extension: "png",
+    extensions: &["png"],
+};
+/// What an image can be inserted from, as 2.2.13 offers.
+const IMAGE_TYPE: FileType = FileType {
+    name: "Image",
+    extensions: &["png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"],
 };
 /// 2.2.13's new document.
 const NEW_CANVAS: [u32; 2] = [1024, 768];
@@ -43,6 +57,8 @@ pub enum FileEvent {
         result: Result<(), String>,
     },
     Exported(PathBuf, Result<(), String>),
+    /// An image read to insert, as an asset.
+    Inserted(PathBuf, Result<(AssetId, Asset), String>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +66,7 @@ pub enum Purpose {
     Open,
     SaveAs,
     ExportPng,
+    InsertImage,
 }
 
 /// What waits for unsaved changes to be dealt with.
@@ -73,6 +90,11 @@ enum Job {
         frame: i64,
         path: PathBuf,
         renders: Renders,
+    },
+    /// Reads an image no larger than `fit`.
+    Insert {
+        path: PathBuf,
+        fit: [u32; 2],
     },
 }
 
@@ -202,7 +224,7 @@ impl Files {
     }
 
     pub fn save_as(&mut self) {
-        let name = format!("{}.{}", self.display_name(), DOCUMENT_TYPE.extension);
+        let name = format!("{}.{}", self.display_name(), DOCUMENT_TYPE.extensions[0]);
         self.pick(Purpose::SaveAs, Dialog::Save { name: &name });
     }
 
@@ -216,6 +238,7 @@ impl Files {
         let events = self.events.clone();
         let file_type = match purpose {
             Purpose::ExportPng => PNG_TYPE,
+            Purpose::InsertImage => IMAGE_TYPE,
             Purpose::Open | Purpose::SaveAs => DOCUMENT_TYPE,
         };
         let save_name = match dialog {
@@ -239,8 +262,12 @@ impl Files {
             .expect("cannot start the dialog thread");
     }
 
+    pub fn insert_image(&mut self) {
+        self.pick(Purpose::InsertImage, Dialog::Open);
+    }
+
     pub fn export_png(&mut self) {
-        let name = format!("{}.{}", self.display_name(), PNG_TYPE.extension);
+        let name = format!("{}.{}", self.display_name(), PNG_TYPE.extensions[0]);
         self.pick(Purpose::ExportPng, Dialog::Save { name: &name });
     }
 
@@ -283,6 +310,10 @@ impl Files {
                     Purpose::Open => self.open_path(path),
                     Purpose::SaveAs => self.start_save(path, canvas),
                     Purpose::ExportPng => self.start_export(path, canvas),
+                    Purpose::InsertImage => {
+                        let fit = canvas.session().document().canvas;
+                        let _ = self.to_worker.send(Job::Insert { path, fit });
+                    }
                 }
             }
             FileEvent::Opened(path, result) => match result {
@@ -293,6 +324,18 @@ impl Files {
                     self.message = None;
                 }
                 Err(error) => self.message = Some(format!("{}: {error}", path.display())),
+            },
+            FileEvent::Inserted(path, result) => match result {
+                Ok((id, asset)) => {
+                    canvas.place_image(id, asset);
+                    let name = path
+                        .file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                    self.message = Some(tr_with("image-inserted", &args_name(name)));
+                }
+                Err(error) => {
+                    self.message = Some(format!("{}: {error}", tr("insert-image-failed")));
+                }
             },
             FileEvent::Exported(path, result) => {
                 self.message = Some(match result {
@@ -400,6 +443,20 @@ fn run(job: Job) -> FileEvent {
                 "frame exported"
             );
             FileEvent::Exported(path, result)
+        }
+        Job::Insert { path, fit } => {
+            let started = std::time::Instant::now();
+            let result = std::fs::read(&path)
+                .map_err(|error| error.to_string())
+                .and_then(|bytes| {
+                    ugu_io::import::decode(&bytes, fit).map_err(|error| error.to_string())
+                });
+            tracing::info!(
+                ms = started.elapsed().as_secs_f64() * 1000.0,
+                ok = result.is_ok(),
+                "image read to insert"
+            );
+            FileEvent::Inserted(path, result)
         }
         Job::Open(path) => {
             let started = std::time::Instant::now();
@@ -525,6 +582,53 @@ mod tests {
             paint.ops.last(),
             Some(ugu_core::ops::Op::TransformSelection { .. })
         ));
+    }
+
+    #[test]
+    fn an_inserted_image_becomes_a_layer_ready_to_move_or_says_why_not() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("insert");
+        let path = folder.join("picture.png");
+        let mut pixels = Vec::new();
+        for index in 0..(30 * 20) {
+            pixels.extend([(index % 256) as u8, 40, 200, 255]);
+        }
+        ugu_io::image::export_png(&pixels, [30, 20], &path, &ugu_win::file::replace_file).unwrap();
+        files.handle(
+            FileEvent::Picked(Purpose::InsertImage, Some(path)),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        let layer = canvas.session().current_layer();
+        let Some(LayerKind::Paint(paint)) = canvas
+            .session()
+            .document()
+            .layer(layer)
+            .map(|layer| &layer.kind)
+        else {
+            panic!("a paint layer");
+        };
+        assert!(matches!(
+            paint.ops[..],
+            [ugu_core::ops::Op::PlaceImage { .. }]
+        ));
+        assert!(canvas.session().pending().is_some());
+        let inserted = tr_with("image-inserted", &args_name("picture.png".to_owned()));
+        assert_eq!(files.message(), Some(inserted.as_str()));
+
+        let broken = folder.join("broken.png");
+        std::fs::write(&broken, b"not an image").unwrap();
+        files.handle(
+            FileEvent::Picked(Purpose::InsertImage, Some(broken)),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        assert!(
+            files
+                .message()
+                .unwrap()
+                .starts_with(tr("insert-image-failed"))
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod app;
 mod budget;
 mod cache;
 mod canvas;
+mod clipboard;
 mod files;
 mod i18n;
 mod icons;

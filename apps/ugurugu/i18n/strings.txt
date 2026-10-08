@@ -12,6 +12,9 @@ file-open | ugurugu::MainWindow | &Open…
 file-save | ugurugu::MainWindow | &Save
 file-save-as | ugurugu::MainWindow | Save &As…
 file-export-frame | ugurugu::MainWindow | Export current frame as &image…
+file-insert-image | ugurugu::MainWindow | Insert &image…
+insert-image-failed | ugurugu::MainWindow | Could not insert image
+image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
 file-quit | ugurugu::MainWindow | &Quit
 edit-undo | ugurugu::MainWindow | &Undo
 edit-redo | ugurugu::MainWindow | &Redo
@@ -58,6 +61,13 @@ transform-cancel-tip | ugurugu::MainWindow | Cancel selection transform (Esc)
 transform-duplicate | - | Duplicate | 복제 | 複製
 transform-duplicate-tip | - | Keep the selected part where it was too | 선택한 부분을 원래 자리에도 남깁니다 | 選択した部分を元の場所にも残します
 delete-selected | ugurugu::MainWindow | Delete selected content
+edit-copy | ugurugu::MainWindow | &Copy
+edit-copy-tip | - | Copy the selection to the clipboard | 선택 영역을 클립보드에 복사합니다 | 選択範囲をクリップボードにコピーします
+edit-cut | ugurugu::MainWindow | Cu&t
+edit-paste | ugurugu::MainWindow | &Paste
+edit-paste-tip | ugurugu::MainWindow | Paste the clipboard as a new layer
+paste-nothing | ugurugu::MainWindow | There is nothing to paste.
+paste-failed | ugurugu::MainWindow | The clipboard content could not be pasted.
 fill-reference | ugurugu::BucketPopoverPanel | REFERENCE
 reads-current | ugurugu::BucketPopoverPanel | Active layer
 reads-current-tip | ugurugu::BucketPopoverPanel | Use only the layer you are editing

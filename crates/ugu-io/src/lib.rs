@@ -6,6 +6,7 @@
 
 pub mod format;
 pub mod image;
+pub mod import;
 pub mod read;
 pub mod save;
 pub mod write;

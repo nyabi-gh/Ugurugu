@@ -9,6 +9,7 @@
 //! the pen lifts and is then committed as one edit; a cancelled stroke leaves
 //! nothing behind.
 
+mod clipboard;
 mod filling;
 mod selecting;
 pub mod stabilizer;

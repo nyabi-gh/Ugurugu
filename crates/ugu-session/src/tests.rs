@@ -1125,3 +1125,52 @@ fn flipping_turns_the_selected_part_over_in_place_along_its_own_sides() {
         "{x} {y}"
     );
 }
+
+#[test]
+fn a_paste_is_one_step_adding_a_selected_layer_ready_to_move() {
+    let mut session = session();
+    let source = session.current_layer();
+    draw(&mut session, 10.0, 150.0);
+    assert_eq!(session.copy().unwrap_err(), FillError::NoSelection);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [20.0, 30.0],
+        [80.0, 70.0],
+        Combine::Replace,
+    );
+    let selection = session.selection().cloned().unwrap();
+    let clip = session.copy().unwrap();
+    assert!(!session.is_dirty() || session.undo_label() != Some("Paste"));
+    let label = session.undo_label().map(str::to_owned);
+    session.paste(&clip).unwrap();
+    let pasted = session.current_layer();
+    assert_ne!(pasted, source);
+    assert_eq!(session.document().position(pasted).unwrap().1, 1);
+    assert_eq!(session.selection(), Some(&selection));
+    let pending = session.pending().expect("ready to move");
+    assert_eq!(pending.layer, pasted);
+    assert_eq!(session.undo_label(), Some("Paste"));
+    // Undo cancels the move, then takes the paste away.
+    assert!(session.undo().unwrap());
+    assert!(session.document().layer(pasted).is_some());
+    assert!(session.undo().unwrap());
+    assert!(session.document().layer(pasted).is_none());
+    assert_eq!(session.undo_label().map(str::to_owned), label);
+}
+
+#[test]
+fn a_placed_image_is_a_new_layer_selected_and_ready_to_move() {
+    let mut session = session();
+    let asset = ugu_core::store::Asset {
+        size: [40, 20],
+        png: std::sync::Arc::from(&b"png"[..]),
+    };
+    let id = ugu_core::ops::AssetId([5; 32]);
+    session.place_image(id, asset).unwrap();
+    let layer = session.current_layer();
+    assert!(matches!(ops(&session, layer)[..], [Op::PlaceImage { .. }]));
+    assert_eq!(session.selection().unwrap().mask().bounds, [80, 40, 40, 20]);
+    assert_eq!(session.pending().unwrap().layer, layer);
+    assert_eq!(session.undo_label(), Some("Place image"));
+}

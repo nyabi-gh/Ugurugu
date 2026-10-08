@@ -21,6 +21,7 @@ use ugu_core::selection::{Combine, Selection};
 use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
 use crate::canvas::{Canvas, Grip, HANDLES, ZOOM_RANGE};
+use crate::clipboard::Clipboard;
 use crate::files::{Action, Files};
 use crate::i18n::{tr, tr_with};
 use crate::icons::{self, Glyph};
@@ -94,7 +95,14 @@ impl Panels {
 
 /// Handles the canvas's shortcuts in this frame's input. Text fields keep
 /// their keys, Enter that commits a composition included.
-pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, panels: &mut Panels) {
+pub fn shortcuts(
+    ctx: &egui::Context,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    clipboard: &mut Clipboard,
+    panels: &mut Panels,
+    paste: bool,
+) {
     // Not `egui_wants_keyboard_input`, which also holds for a focused row or
     // button and would leave the shortcuts dead after clicking a layer.
     if ctx.text_edit_focused() {
@@ -141,6 +149,20 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, pa
     }
     if pressed(command, egui::Key::A) {
         canvas.edit(Session::select_all);
+    }
+    // egui turns Ctrl+C and X into these events rather than key presses.
+    let (copy, cut) = ctx.input(|input| {
+        let has = |wanted: &egui::Event| input.events.iter().any(|event| event == wanted);
+        (has(&egui::Event::Copy), has(&egui::Event::Cut))
+    });
+    if copy {
+        clipboard.copy(canvas);
+    }
+    if cut {
+        clipboard.cut(canvas);
+    }
+    if paste {
+        clipboard.paste(canvas);
     }
     if pressed(command_shift, egui::Key::I) {
         canvas.edit(Session::invert_selection);
@@ -232,7 +254,13 @@ fn window_items(ui: &mut egui::Ui, shown: &mut Shown) {
     }
 }
 
-pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panels: &mut Panels) {
+pub fn menu_bar(
+    ui: &mut egui::Ui,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    clipboard: &mut Clipboard,
+    panels: &mut Panels,
+) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button(tr("menu-file"), |ui| {
             if item(ui, tr("file-new"), "Ctrl+N") {
@@ -249,6 +277,9 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
                 files.save_as();
             }
             ui.separator();
+            if item(ui, tr("file-insert-image"), "") {
+                files.insert_image();
+            }
             if item(ui, tr("file-export-frame"), "Ctrl+Shift+E") {
                 files.export_png();
             }
@@ -283,6 +314,26 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
             }
             ui.separator();
             let selected = canvas.session().selection().is_some();
+            let cut = egui::Button::new(tr("edit-cut")).shortcut_text("Ctrl+X");
+            if ui.add_enabled(selected, cut).clicked() {
+                clipboard.cut(canvas);
+            }
+            let copy = egui::Button::new(tr("edit-copy")).shortcut_text("Ctrl+C");
+            if ui
+                .add_enabled(selected, copy)
+                .on_hover_text(tr("edit-copy-tip"))
+                .clicked()
+            {
+                clipboard.copy(canvas);
+            }
+            if ui
+                .add(egui::Button::new(tr("edit-paste")).shortcut_text("Ctrl+V"))
+                .on_hover_text(tr("edit-paste-tip"))
+                .clicked()
+            {
+                clipboard.paste(canvas);
+            }
+            ui.separator();
             if item(ui, tr("edit-select-all"), "Ctrl+A") {
                 canvas.edit(Session::select_all);
             }
