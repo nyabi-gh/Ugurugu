@@ -448,7 +448,9 @@ fn percentiles(times: &mut [f64]) -> String {
 /// first frame's time and p50 and max per frame of the later rounds.
 /// `UGU_SHRINK` (2, 4, 8) draws the frames smaller, as playback does.
 fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
-    use ugu_render::document::{DocumentRenderer, Purpose, scaled_size};
+    use ugu_render::document::{
+        DocumentRenderer, Purpose, TILE_EDGE, scaled_size, surface_estimate,
+    };
     use ugu_render::plan::RenderPlan;
 
     let mut document = open(path)?;
@@ -500,6 +502,13 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         "layer surfaces: {:.0} MiB in the last frame",
         renderer.surface_bytes() as f64 / (1024.0 * 1024.0)
     );
+    let estimates: Vec<String> = [1, 2, 4, 8]
+        .map(|shrink| {
+            let bytes = surface_estimate(&document, &plan, shrink, TILE_EDGE);
+            format!("1/{shrink} {:.0}", bytes as f64 / (1024.0 * 1024.0))
+        })
+        .into();
+    println!("layer surface estimate (MiB): {}", estimates.join(", "));
     let whole_peak = peak_working_set_mib();
     splits(&document, threads);
     println!(

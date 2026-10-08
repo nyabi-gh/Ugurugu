@@ -188,9 +188,8 @@ struct Raster {
     paths: Vec<BezPath>,
 }
 
-/// Bytes the layers' own surfaces may take by default: half of the working
-/// set budget (scope.md), the rest left for playback frames, the display
-/// and the program.
+/// Bytes the layers' own surfaces may take until `set_surface_budget`; the
+/// app sets it from the memory of the PC.
 pub const SURFACE_BUDGET: usize = 512 * 1024 * 1024;
 
 /// The size a canvas of `size` is drawn at with `shrink`.

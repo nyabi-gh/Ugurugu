@@ -13,7 +13,7 @@
 //! again later.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -25,6 +25,8 @@ use ugu_render::compose::Split;
 use ugu_render::document::{DocumentRenderer, FULL_DETAIL, Purpose, scaled_size};
 use ugu_render::plan::RenderPlan;
 use vello_cpu::Pixmap;
+
+use crate::budget::Budget;
 
 /// Which state of which open document a render shows. Revisions start
 /// again with each document opened, so they alone could match a render of
@@ -120,6 +122,10 @@ struct Shared {
     wake: Condvar,
     /// Set to stop the render under way.
     stop: Arc<AtomicBool>,
+    /// What the layers' own surfaces may take, from `Budget`.
+    surface_budget: AtomicUsize,
+    /// What they took after the last render.
+    surface_bytes: AtomicUsize,
 }
 
 /// Hands work to the worker; cheap to clone.
@@ -141,6 +147,8 @@ impl CacheWorker {
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
             stop: Arc::new(AtomicBool::new(false)),
+            surface_budget: AtomicUsize::new(Budget::now(0).surfaces),
+            surface_bytes: AtomicUsize::new(0),
         });
         let worker = shared.clone();
         // One thread is left for the render thread, which takes input.
@@ -160,6 +168,7 @@ impl CacheWorker {
                 let mut renderer = DocumentRenderer::new(threads);
                 renderer.set_stop(worker.stop.clone());
                 while let Some(job) = next(&worker) {
+                    renderer.set_surface_budget(worker.surface_budget.load(Ordering::Relaxed));
                     if let Some(job) = run(&mut renderer, job, &done) {
                         // An export stopped for other work goes first next.
                         worker
@@ -169,6 +178,9 @@ impl CacheWorker {
                             .exports
                             .push_front(job);
                     }
+                    worker
+                        .surface_bytes
+                        .store(renderer.surface_bytes(), Ordering::Relaxed);
                     let mut queue = worker.queue.lock().expect("queue lock");
                     queue.running = None;
                     let idle = queue.split.is_none()
@@ -191,6 +203,19 @@ impl CacheWorker {
 
     pub fn renders(&self) -> Renders {
         self.renders.clone()
+    }
+
+    /// Lets the layers' own surfaces take `bytes` from the next render on.
+    pub fn set_surface_budget(&self, bytes: usize) {
+        self.renders
+            .shared
+            .surface_budget
+            .store(bytes, Ordering::Relaxed);
+    }
+
+    /// What the layers' own surfaces took after the last render.
+    pub fn surface_bytes(&self) -> usize {
+        self.renders.shared.surface_bytes.load(Ordering::Relaxed)
     }
 
     pub fn request(&self, key: Key, snapshot: Snapshot) {
@@ -439,6 +464,8 @@ mod tests {
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
             stop: Arc::new(AtomicBool::new(false)),
+            surface_budget: AtomicUsize::new(0),
+            surface_bytes: AtomicUsize::new(0),
         }
     }
 

@@ -18,9 +18,7 @@ use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
 use ugu_render::compose::{Split, Stamp, composite, premultiplied, stroke_color};
-use ugu_render::document::{
-    FULL_DETAIL, Purpose, SURFACE_BUDGET, TILE_EDGE, scaled_size, surface_estimate,
-};
+use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::LiveStroke;
 use ugu_render::plan::RenderPlan;
 use ugu_render::raster::PixelRect;
@@ -31,6 +29,7 @@ use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
+use crate::budget::Budget;
 use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Version};
 use crate::input::{CanvasInput, Gesture};
 
@@ -38,9 +37,6 @@ use crate::input::{CanvasInput, Gesture};
 pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
 const ZOOM_STEP: f64 = 1.25;
 pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
-/// Memory for the layers' own surfaces and the playback frames rendered
-/// ahead together. Frames beyond it are rendered when they come up.
-const RENDER_BUDGET: usize = 768 * 1024 * 1024;
 
 /// Frames play in order, none skipped. A frame not rendered yet holds the
 /// one on screen, and the timing starts again from when it arrives, so a
@@ -358,6 +354,8 @@ impl Canvas {
         let key = self.key();
         if self.split.as_ref().map(|(shown, _)| *shown) != Some(key) && self.requested != Some(key)
         {
+            let budget = Budget::now(self.cache.surface_bytes() as u64);
+            self.cache.set_surface_budget(budget.surfaces);
             let snapshot = self.snapshot();
             self.cache.request(key, snapshot);
             self.requested = Some(key);
@@ -462,9 +460,11 @@ impl Canvas {
         let shrink = preview.shrink;
         let playback = self.playback.as_ref()?;
         if playback.version != version || playback.preview != preview || playback.ahead == 0 {
-            let ahead = frames_ahead(document, shrink);
+            // The frames held are given back first, so they count as free.
+            self.playback.as_mut()?.frames.clear();
+            let (ahead, surfaces) = frames_ahead(document, shrink);
+            self.cache.set_surface_budget(surfaces);
             let playback = self.playback.as_mut()?;
-            playback.frames.clear();
             playback.version = version;
             playback.preview = preview;
             playback.ahead = ahead;
@@ -761,14 +761,20 @@ impl Canvas {
 }
 
 /// How many playback frames of `document` drawn at 1/`shrink` fit in the
-/// render budget beside the layers' own surfaces; at least 2.
-fn frames_ahead(document: &Document, shrink: u32) -> u32 {
+/// budget for memory as it is now beside the layers' own surfaces, which the
+/// renderer keeps; at least 2. Also the surfaces' budget.
+fn frames_ahead(document: &Document, shrink: u32) -> (u32, usize) {
     let plan = RenderPlan::new(document, Purpose::Display);
-    let surfaces = surface_estimate(document, &plan, shrink, TILE_EDGE).min(SURFACE_BUDGET);
+    let estimate = surface_estimate(document, &plan, shrink, TILE_EDGE);
+    let budget = Budget::now(estimate as u64);
+    let surfaces = estimate.min(budget.surfaces);
     let [width, height] = scaled_size(document.canvas, shrink);
     let frame = width as usize * height as usize * 4;
-    let fit = (RENDER_BUDGET - surfaces) / frame.max(1);
-    fit.clamp(2, document.frames as usize) as u32
+    let fit = (budget.render - surfaces) / frame.max(1);
+    (
+        fit.clamp(2, document.frames as usize) as u32,
+        budget.surfaces,
+    )
 }
 
 /// How playback frames are drawn at `scale` (screen pixels per document
