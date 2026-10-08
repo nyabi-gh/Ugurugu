@@ -16,11 +16,11 @@ use ugu_core::document::{LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::motion::frame_in_cycle;
 
-use ugu_core::ops::{MotionStyle, Wobble};
+use ugu_core::ops::{Affine, MotionStyle, Sampling, Wobble};
 use ugu_core::selection::{Combine, Selection};
 use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
-use crate::canvas::{Canvas, ZOOM_RANGE};
+use crate::canvas::{Canvas, Grip, HANDLES, ZOOM_RANGE};
 use crate::files::{Action, Files};
 use crate::i18n::{tr, tr_with};
 use crate::icons::{self, Glyph};
@@ -114,26 +114,30 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, pa
         report_bool(canvas.edit(Session::redo));
     }
     if pressed(none, egui::Key::Enter) {
-        // Nothing on the canvas uses Enter yet; the IME test counts it.
+        // The IME test counts it.
         tracing::debug!("canvas Enter");
+        canvas.apply_transform();
     }
     if pressed(none, egui::Key::B) {
-        canvas.edit(|session| session.tool = Tool::Pen);
+        canvas.edit(|session| session.set_tool(Tool::Pen));
     }
     if pressed(none, egui::Key::E) {
-        canvas.edit(|session| session.tool = Tool::Eraser);
+        canvas.edit(|session| session.set_tool(Tool::Eraser));
     }
     if pressed(none, egui::Key::L) {
-        canvas.edit(|session| session.tool = Tool::Select);
+        canvas.edit(|session| session.set_tool(Tool::Select));
     }
     if pressed(none, egui::Key::W) {
-        canvas.edit(|session| session.tool = Tool::Wand);
+        canvas.edit(|session| session.set_tool(Tool::Wand));
     }
     if pressed(none, egui::Key::G) {
-        canvas.edit(|session| session.tool = Tool::Fill);
+        canvas.edit(|session| session.set_tool(Tool::Fill));
     }
     if pressed(egui::Modifiers::ALT, egui::Key::Delete) {
         canvas.fill_selection();
+    }
+    if pressed(none, egui::Key::Delete) {
+        canvas.delete_selected();
     }
     if pressed(command, egui::Key::A) {
         canvas.edit(Session::select_all);
@@ -163,6 +167,9 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, pa
         canvas.toggle_playback();
     }
     if pressed(command, egui::Key::T) {
+        canvas.begin_transform();
+    }
+    if pressed(command_shift, egui::Key::T) {
         panels.shown.animation_bar = !panels.shown.animation_bar;
     }
     if pressed(command, egui::Key::N) {
@@ -212,7 +219,7 @@ fn window_items(ui: &mut egui::Ui, shown: &mut Shown) {
         ui,
         &mut shown.animation_bar,
         tr("window-animation-bar"),
-        "Ctrl+T",
+        "Ctrl+Shift+T",
     );
     ui.separator();
     toggle_item(ui, &mut shown.tool_settings, tr("tool-settings"), "");
@@ -296,6 +303,36 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
             {
                 canvas.fill_selection();
             }
+            let delete = egui::Button::new(tr("delete-selected")).shortcut_text("Delete");
+            if ui.add_enabled(selected, delete).clicked() {
+                canvas.delete_selected();
+            }
+            ui.separator();
+            let pending = canvas.session().pending().is_some();
+            let transform = egui::Button::new(tr("transform-selection")).shortcut_text("Ctrl+T");
+            if ui.add_enabled(selected && !pending, transform).clicked() {
+                canvas.begin_transform();
+            }
+            if ui
+                .add_enabled(selected, egui::Button::new(tr("flip-horizontal")))
+                .clicked()
+            {
+                canvas.flip(true);
+            }
+            if ui
+                .add_enabled(selected, egui::Button::new(tr("flip-vertical")))
+                .clicked()
+            {
+                canvas.flip(false);
+            }
+            let apply = egui::Button::new(tr("transform-apply")).shortcut_text("Enter");
+            if ui.add_enabled(pending, apply).clicked() {
+                canvas.apply_transform();
+            }
+            let cancel = egui::Button::new(tr("transform-cancel")).shortcut_text("Esc");
+            if ui.add_enabled(pending, cancel).clicked() {
+                canvas.cancel_transform();
+            }
         });
         ui.menu_button(tr("menu-view"), |ui| {
             if item(ui, tr("view-zoom-in"), "Ctrl++") {
@@ -318,7 +355,7 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
             }
         });
         ui.menu_button(tr("menu-tools"), |ui| {
-            let tool = canvas.session().tool;
+            let tool = canvas.session().tool();
             for (each, key, shortcut) in [
                 (Tool::Pen, "tool-brush", "B"),
                 (Tool::Eraser, "tool-eraser", "E"),
@@ -330,7 +367,7 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
                     .add(egui::Button::selectable(tool == each, tr(key)).shortcut_text(shortcut))
                     .clicked()
                 {
-                    canvas.edit(|session| session.tool = each);
+                    canvas.edit(|session| session.set_tool(each));
                 }
             }
         });
@@ -362,7 +399,7 @@ pub fn quick_access(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels)
 /// The tool rail.
 pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
     ui.spacing_mut().item_spacing.y = 2.0;
-    let tool = canvas.session().tool;
+    let tool = canvas.session().tool();
     for (each, glyph, key, shortcut) in [
         (Tool::Pen, Glyph::Brush, "tool-brush", "B"),
         (Tool::Eraser, Glyph::Eraser, "tool-eraser", "E"),
@@ -371,7 +408,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (Tool::Fill, Glyph::Bucket, "tool-fill", "G"),
     ] {
         if widgets::tool_button(ui, glyph, tr(key), shortcut, tool == each).clicked() {
-            canvas.edit(|session| session.tool = each);
+            canvas.edit(|session| session.set_tool(each));
         }
     }
 }
@@ -420,7 +457,7 @@ fn slider_row(
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     dock_header(ui, tr("tool-settings"), &mut panels.shown.tool_settings);
-    let tool = canvas.session().tool;
+    let tool = canvas.session().tool();
     ui.add_space(4.0);
     match tool {
         Tool::Select => return selection_settings(ui, canvas),
@@ -500,6 +537,21 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             session.lasso_paints = paints;
             session.fill = fill;
         });
+    }
+    ui.add_space(6.0);
+    widgets::field_label(ui, tr("transform-method"));
+    let current = canvas.session().transform_sampling;
+    for (sampling, title, description) in [
+        (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
+        (Sampling::Nearest, "sampling-pixels", "sampling-pixels-tip"),
+    ] {
+        if ui
+            .radio(current == sampling, tr(title))
+            .on_hover_text(tr(description))
+            .clicked()
+        {
+            canvas.set_transform_sampling(sampling);
+        }
     }
     ui.add_space(6.0);
     widgets::field_label(ui, tr("selection-shape"));
@@ -613,9 +665,13 @@ fn shape_option(
 /// 2.2.13 draws them: a light line under a dark dashed one that moves every
 /// 120 ms. The shape is drawn by egui; the selection, which can be many small
 /// pieces, by the GPU (`ugu_render::ants`), so it is returned with the
-/// points its dashes have moved. Neither takes a document render or canvas
-/// upload, and both stop while the window is minimized.
-pub fn selection_overlay(ui: &mut egui::Ui, canvas: &Canvas) -> Option<(Arc<Selection>, f32)> {
+/// pending transform that moves it and the points its dashes have moved.
+/// Neither takes a document render or canvas upload, and both stop while the
+/// window is minimized. A pending transform also shows its box.
+pub fn selection_overlay(
+    ui: &mut egui::Ui,
+    canvas: &Canvas,
+) -> Option<(Arc<Selection>, Affine, f32)> {
     let session = canvas.session();
     let lasso = session.lasso();
     // A shape that will replace the selection hides it while dragged.
@@ -628,7 +684,184 @@ pub fn selection_overlay(ui: &mut egui::Ui, canvas: &Canvas) -> Option<(Arc<Sele
     if let Some(lasso) = lasso {
         ants(ui, canvas, &lasso_path(lasso), phase);
     }
-    selection.map(|selection| (selection.clone(), phase))
+    if let Some(corners) = canvas.transform_box() {
+        transform_box(ui, canvas, &corners);
+    }
+    let moved = session
+        .pending()
+        .map_or(Affine::IDENTITY, |pending| pending.transform);
+    selection.map(|selection| (selection.clone(), moved, phase))
+}
+
+/// Document pixels to points.
+fn to_screen(ui: &egui::Ui, canvas: &Canvas, [x, y]: [f64; 2]) -> egui::Pos2 {
+    let ppp = ui.ctx().pixels_per_point();
+    let placement = canvas.placement();
+    egui::pos2(
+        (placement.offset[0] + x as f32 * placement.scale) / ppp,
+        (placement.offset[1] + y as f32 * placement.scale) / ppp,
+    )
+}
+
+/// The box's sides and handles, and the pointer shape for what a drag from
+/// under the pointer would do.
+fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
+    let points = corners.map(|corner| to_screen(ui, canvas, corner));
+    let painter = ui.painter();
+    painter.add(egui::Shape::closed_line(
+        points[..4].to_vec(),
+        egui::Stroke::new(1.0, theme::ACCENT),
+    ));
+    for point in points {
+        painter.rect(
+            egui::Rect::from_center_size(point, egui::vec2(8.0, 8.0)),
+            egui::CornerRadius::same(1),
+            egui::Color32::WHITE,
+            egui::Stroke::new(1.0, theme::ACCENT_TEXT),
+            egui::StrokeKind::Middle,
+        );
+    }
+    let ppp = ui.ctx().pixels_per_point();
+    let Some(pointer) = ui
+        .input(|input| input.pointer.hover_pos())
+        .filter(|pointer| ui.max_rect().contains(*pointer))
+    else {
+        return;
+    };
+    let icon = match canvas.grip_at([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)]) {
+        Some(Grip::Move) => egui::CursorIcon::Move,
+        Some(Grip::Rotate) => egui::CursorIcon::Alias,
+        Some(Grip::Scale(handle)) => {
+            // The handle's direction from the middle, as the box is now.
+            let middle = points[..4]
+                .iter()
+                .fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2())
+                / 4.0;
+            let at = HANDLES.iter().position(|each| *each == handle).unwrap_or(0);
+            let direction = points[at].to_vec2() - middle;
+            let eighths = direction.y.atan2(direction.x) / std::f32::consts::FRAC_PI_4;
+            match eighths.round().rem_euclid(4.0) as u8 {
+                0 => egui::CursorIcon::ResizeHorizontal,
+                1 => egui::CursorIcon::ResizeNwSe,
+                2 => egui::CursorIcon::ResizeVertical,
+                _ => egui::CursorIcon::ResizeNeSw,
+            }
+        }
+        None => return,
+    };
+    ui.ctx().set_cursor_icon(icon);
+}
+
+/// The bar of selection actions under the selection, as 2.2.13's: transform,
+/// flip, apply and cancel, duplicate, delete and deselect. Hidden while a
+/// shape or the box is dragged.
+pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    const MARGIN: f32 = 8.0;
+    const GAP: f32 = 6.0;
+    let session = canvas.session();
+    if session.selection().is_none() || session.lasso().is_some() || canvas.is_dragging() {
+        return;
+    }
+    let pending = session.pending().map(|pending| pending.keep_source);
+    let Some([left, top, right, bottom]) = canvas.selection_bounds() else {
+        return;
+    };
+    let area = ui.max_rect();
+    let low = to_screen(ui, canvas, [left, bottom]);
+    let high = to_screen(ui, canvas, [right, top]);
+    let id = egui::Id::new("selection actions");
+    let size = ui
+        .ctx()
+        .memory(|memory| memory.area_rect(id))
+        .map_or(egui::vec2(300.0, 40.0), |rect| rect.size());
+    let x = ((low.x + high.x) / 2.0 - size.x / 2.0).clamp(
+        area.left() + MARGIN,
+        (area.right() - size.x - MARGIN).max(area.left() + MARGIN),
+    );
+    let mut y = low.y + GAP;
+    if y + size.y > area.bottom() - MARGIN {
+        y = high.y - size.y - GAP;
+    }
+    let y = y.clamp(
+        area.top() + MARGIN,
+        (area.bottom() - size.y - MARGIN).max(area.top() + MARGIN),
+    );
+    egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(x, y))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::same(4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| action_buttons(ui, canvas, pending));
+                });
+        });
+}
+
+/// `pending`: whether a transform is pending, and whether it duplicates.
+fn action_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, pending: Option<bool>) {
+    ui.spacing_mut().item_spacing.x = 2.0;
+    let button = |ui: &mut egui::Ui, glyph, name, tip| {
+        widgets::icon_button_tip(ui, glyph, 18.0, tr(name), tr(tip), true).clicked()
+    };
+    if pending.is_none()
+        && button(
+            ui,
+            Glyph::Scale,
+            "transform-selection",
+            "transform-selection-tip",
+        )
+    {
+        canvas.begin_transform();
+    }
+    if button(
+        ui,
+        Glyph::MirrorHorizontal,
+        "flip-horizontal",
+        "flip-horizontal",
+    ) {
+        canvas.flip(true);
+    }
+    if button(ui, Glyph::MirrorVertical, "flip-vertical", "flip-vertical") {
+        canvas.flip(false);
+    }
+    if pending.is_some() {
+        ui.separator();
+        if button(ui, Glyph::Confirm, "transform-apply", "transform-apply-tip") {
+            canvas.apply_transform();
+        }
+        if button(
+            ui,
+            Glyph::Cancel,
+            "transform-cancel",
+            "transform-cancel-tip",
+        ) {
+            canvas.cancel_transform();
+        }
+    }
+    ui.separator();
+    let duplicate = pending == Some(true);
+    let toggled = widgets::icon_toggle(
+        ui,
+        Glyph::Duplicate,
+        18.0,
+        tr("transform-duplicate"),
+        tr("transform-duplicate-tip"),
+        duplicate,
+    );
+    if toggled.clicked() {
+        canvas.set_duplicate(!duplicate);
+    }
+    if button(ui, Glyph::Delete, "delete-selected", "delete-selected") {
+        canvas.delete_selected();
+    }
+    ui.separator();
+    if button(ui, Glyph::Deselect, "edit-deselect", "edit-deselect") {
+        canvas.edit(Session::deselect);
+    }
 }
 
 /// Points the dashes have moved: a step every 120 ms over a cycle of 8.
@@ -666,21 +899,16 @@ fn lasso_path(lasso: &Lasso) -> Vec<[f64; 2]> {
 }
 
 fn ants(ui: &mut egui::Ui, canvas: &Canvas, path: &[[f64; 2]], offset: f32) {
-    let ppp = ui.ctx().pixels_per_point();
-    let placement = canvas.placement();
-    let to_screen = |&[x, y]: &[f64; 2]| {
-        egui::pos2(
-            (placement.offset[0] + x as f32 * placement.scale) / ppp,
-            (placement.offset[1] + y as f32 * placement.scale) / ppp,
-        )
-    };
     let light = egui::Stroke::new(
         1.8,
         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235),
     );
     let dark = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(20, 20, 20, 245));
     let painter = ui.painter();
-    let points: Vec<egui::Pos2> = path.iter().map(to_screen).collect();
+    let points: Vec<egui::Pos2> = path
+        .iter()
+        .map(|point| to_screen(ui, canvas, *point))
+        .collect();
     painter.add(egui::Shape::line(points.clone(), light));
     painter.extend(egui::Shape::dashed_line_with_offset(
         &points,

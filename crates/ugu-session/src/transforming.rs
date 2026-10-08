@@ -29,6 +29,15 @@ pub struct Pending {
     pub keep_source: bool,
 }
 
+/// How a pending transform ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// It is in the document as of this revision.
+    Applied { revision: u64 },
+    /// It left the document as it was.
+    Dropped,
+}
+
 impl Session {
     pub fn pending(&self) -> Option<&Pending> {
         self.pending.as_ref()
@@ -90,12 +99,13 @@ impl Session {
         let Some(pending) = self.pending.take() else {
             return Ok(Outcome::NoChange);
         };
+        self.ended = Some(Ended::Dropped);
         if pending.transform == Affine::IDENTITY {
             return Ok(Outcome::NoChange);
         }
         let sampling = self.transform_sampling;
         let moved = pending.selection.transformed(pending.transform);
-        self.history.group("Transform selection", |group| {
+        let outcome = self.history.group("Transform selection", |group| {
             let mask = selecting::stored_mask(group, &pending.selection)?;
             group.apply(|document| {
                 command::transform_selection(
@@ -109,12 +119,45 @@ impl Session {
             })?;
             group.select(moved);
             Ok(())
-        })
+        })?;
+        if let Outcome::Committed(_) = outcome {
+            self.ended = Some(Ended::Applied {
+                revision: self.history.revision(),
+            });
+        }
+        Ok(outcome)
     }
 
     /// Drops the pending transform; returns whether there was one.
     pub fn cancel_transform(&mut self) -> bool {
-        self.pending.take().is_some()
+        let cancelled = self.pending.take().is_some();
+        if cancelled {
+            self.ended = Some(Ended::Dropped);
+        }
+        cancelled
+    }
+
+    /// How the last pending transform ended, once.
+    pub fn take_ended(&mut self) -> Option<Ended> {
+        self.ended.take()
+    }
+
+    /// Flips the selected part about the middle of where it is now, starting
+    /// a pending transform when there is none.
+    pub fn flip(&mut self, horizontally: bool) -> Result<(), FillError> {
+        self.begin_transform()?;
+        let pending = self.pending.as_ref().expect("begun above");
+        let [left, top, width, height] = pending.selection.mask().bounds.map(f64::from);
+        let scale = if horizontally {
+            [-1.0, 1.0]
+        } else {
+            [1.0, -1.0]
+        };
+        // About the selection's own axes and middle, so a turned selection
+        // flips along its turned sides and stays where it is.
+        let local = Affine::scaling_about(scale, [left + width / 2.0, top + height / 2.0]);
+        self.set_transform(local.then(pending.transform));
+        Ok(())
     }
 
     /// Clears the selected part of the current layer, after the pending

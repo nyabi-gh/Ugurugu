@@ -35,6 +35,10 @@ use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Versi
 use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
+mod transform;
+
+pub use transform::{Grip, HANDLES};
+
 /// Shown around the document, opaque straight RGBA.
 pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
 const ZOOM_STEP: f64 = 1.25;
@@ -76,12 +80,21 @@ enum Interaction {
     },
     /// Dragging a shape with the selection tool; the session holds it.
     Selecting,
+    /// Dragging the transform box from `start` (document pixels), which had
+    /// `base` then.
+    Transforming {
+        grip: Grip,
+        start: [f64; 2],
+        base: ugu_core::ops::Affine,
+    },
 }
 
 pub struct Canvas {
     session: Session,
     cache: CacheWorker,
     split: Option<(Key, Split)>,
+    /// A pending transform shown on the split's layer.
+    preview: Option<transform::Preview>,
     requested: Option<Key>,
     /// The edited image; empty from playback until the next split.
     display: Pixmap,
@@ -102,6 +115,7 @@ pub struct Canvas {
     area: Option<[i32; 4]>,
     /// Physical pixels per document pixel.
     scale: f64,
+    pixels_per_point: f32,
     /// The document's top-left corner from the area's, in physical pixels.
     offset: [f64; 2],
     placed: bool,
@@ -144,6 +158,7 @@ impl Canvas {
             session: Session::new(document, false),
             cache: CacheWorker::start(cache_done),
             split: None,
+            preview: None,
             requested: None,
             display: Pixmap::new(width, height),
             held: None,
@@ -155,6 +170,7 @@ impl Canvas {
             reference: None,
             area: None,
             scale: 1.0,
+            pixels_per_point: 1.0,
             offset: [0.0, 0.0],
             placed: false,
             sample_count: 0,
@@ -178,6 +194,7 @@ impl Canvas {
         self.session = Session::new(document, saved);
         self.generation += 1;
         self.split = None;
+        self.preview = None;
         self.requested = None;
         self.display = Pixmap::new(width, height);
         self.held = None;
@@ -213,6 +230,7 @@ impl Canvas {
             self.recomposite(rect);
         }
         let before = self.session.document().canvas;
+        let key = self.key();
         let result = change(&mut self.session);
         if self.session.document().canvas != before {
             // The split is of the canvas before; what it shows stays until
@@ -220,6 +238,7 @@ impl Canvas {
             self.split = None;
             self.spare_coverage = None;
         }
+        self.follow_transform(key);
         result
     }
 
@@ -387,7 +406,9 @@ impl Canvas {
                 self.held = None;
                 self.display = display;
                 self.split = Some((key, split));
+                self.preview = None;
                 self.upload_all();
+                self.refresh_preview();
                 if let Interaction::Drawing { rect, .. } = &self.interaction {
                     let rect = *rect;
                     self.recomposite(rect);
@@ -435,7 +456,8 @@ impl Canvas {
             self.upload_all();
             return;
         }
-        self.edit(|_| ());
+        // Playing moves through frames, which applies a pending transform.
+        self.apply_transform();
         // Stopping asks for a split of the frame it stops on. Until then the
         // old one's layer surfaces would only keep the renderer from reusing
         // them for playback.
@@ -545,7 +567,11 @@ impl Canvas {
                     last: sample.position,
                 };
             }
-            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool == Tool::Select => {
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.pending().is_some() => {
+                self.sample_count += 1;
+                self.begin_transform_drag(sample.position);
+            }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool() == Tool::Select => {
                 self.sample_count += 1;
                 self.notice = None;
                 let point = self.to_document(sample.position);
@@ -553,7 +579,7 @@ impl Canvas {
                 self.interaction = Interaction::Selecting;
             }
             CanvasInput::Begin(Gesture::Draw, _, sample)
-                if matches!(self.session.tool, Tool::Wand | Tool::Fill) =>
+                if matches!(self.session.tool(), Tool::Wand | Tool::Fill) =>
             {
                 self.sample_count += 1;
                 let point = self.to_document(sample.position);
@@ -576,6 +602,7 @@ impl Canvas {
                         let point = self.to_document(sample.position);
                         self.session.extend_selection(point);
                     }
+                    Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::Idle => {}
                 }
             }
@@ -591,6 +618,7 @@ impl Canvas {
                             self.after_fill(before, ended);
                         }
                     }
+                    Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
             }
@@ -612,6 +640,10 @@ impl Canvas {
             Interaction::Selecting => {
                 self.session.cancel_selection();
             }
+            Interaction::Transforming { base, .. } => {
+                self.session.set_transform(base);
+                self.refresh_preview();
+            }
             Interaction::Panning { .. } => {}
             Interaction::Idle => return false,
         }
@@ -621,7 +653,7 @@ impl Canvas {
     /// Esc: ends the gesture under way without its result, else deselects.
     pub fn escape(&mut self) {
         if !self.cancel_gesture() {
-            self.session.escape();
+            self.edit(Session::escape);
         }
     }
 
@@ -653,7 +685,7 @@ impl Canvas {
             .filter(|_| read)
             .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
         let before = self.key();
-        if self.session.tool == Tool::Wand {
+        if self.session.tool() == Tool::Wand {
             let combine = self.combine();
             if let Err(error) = self.session.wand(point, combine, reference) {
                 self.fill_notice(&error);
@@ -745,7 +777,7 @@ impl Canvas {
             FillError::HiddenLayer => "The current layer is hidden".to_owned(),
             FillError::NoReference if reads == Reads::Marked => tr("fill-no-reference").to_owned(),
             FillError::NoReference => "Select a paint layer to draw on".to_owned(),
-            FillError::NothingThere if self.session.tool == Tool::Wand => {
+            FillError::NothingThere if self.session.tool() == Tool::Wand => {
                 tr("wand-nothing").to_owned()
             }
             FillError::NothingThere => tr("fill-nothing").to_owned(),
@@ -761,12 +793,12 @@ impl Canvas {
             self.upload_all();
         }
         // The eraser end of a pen erases whatever tool is chosen.
-        let tool = self.session.tool;
+        let tool = self.session.tool();
         if kind == PointerKind::Pen && sample.inverted {
-            self.session.tool = Tool::Eraser;
+            self.session.set_tool(Tool::Eraser);
         }
         let begun = self.session.begin_stroke(self.input_point(sample));
-        self.session.tool = tool;
+        self.session.set_tool(tool);
         match begun {
             Ok(()) => {}
             Err(StrokeRefused::HiddenLayer) => {
@@ -875,6 +907,7 @@ impl Canvas {
     pub fn layout(&mut self, ui: &mut egui::Ui) -> [i32; 4] {
         let rect = ui.max_rect();
         let pixels_per_point = ui.ctx().pixels_per_point();
+        self.pixels_per_point = pixels_per_point;
         let edge = |value: f32| (value * pixels_per_point).round() as i32;
         let area = [
             edge(rect.left()),
@@ -1193,7 +1226,7 @@ mod tests {
         });
         settle(&mut canvas, &renders);
 
-        canvas.session.tool = Tool::Wand;
+        canvas.session.set_tool(Tool::Wand);
         canvas.click_area([160.0, 100.0]);
         let from_split = canvas
             .session()
@@ -1207,7 +1240,7 @@ mod tests {
         canvas.edit(Session::deselect);
         settle(&mut canvas, &renders);
 
-        canvas.session.tool = Tool::Fill;
+        canvas.session.set_tool(Tool::Fill);
         canvas.session.pen.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
         canvas.click_area([160.0, 100.0]);
         assert_eq!(canvas.notice(), None);
@@ -1237,6 +1270,94 @@ mod tests {
         assert_eq!(
             &full.data_as_u8_slice()[middle..middle + 4],
             &[30, 120, 200, 255]
+        );
+    }
+
+    fn max_difference(a: &Pixmap, b: &Pixmap) -> u8 {
+        a.data_as_u8_slice()
+            .iter()
+            .zip(b.data_as_u8_slice())
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_dragged_transform_shows_at_once_and_applying_keeps_it_while_cancelling_puts_back() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(point([40.0, 40.0], 0.0)).unwrap();
+            for step in 1..=60 {
+                let t = f64::from(step) / 60.0;
+                let at = [40.0 + 200.0 * t, 40.0 + 100.0 * t + (t * 12.0).sin() * 20.0];
+                session.extend_stroke(point(at, f64::from(step) * 4.0));
+            }
+            session.end_stroke(point([240.0, 140.0], 250.0)).unwrap();
+            session.selection_shape = ugu_session::ShapeKind::Rectangle;
+            session.begin_selection([60.0, 50.0], Combine::Replace);
+            session.extend_selection([180.0, 130.0]);
+            session.end_selection([180.0, 130.0]).unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let before = canvas.display().clone();
+
+        canvas.begin_transform();
+        assert!(canvas.preview.is_some());
+        assert_eq!(canvas.grip_at([120.0, 90.0]), Some(Grip::Move));
+        assert_eq!(canvas.grip_at([180.0, 130.0]), Some(Grip::Scale([1, 1])));
+        assert_eq!(canvas.grip_at([300.0, 10.0]), Some(Grip::Rotate));
+        canvas.begin_transform_drag([120.0, 90.0]);
+        canvas.drag_transform([150.5, 97.25]);
+        canvas.interaction = Interaction::Idle;
+        canvas.begin_transform_drag([300.0, 10.0]);
+        canvas.drag_transform([310.0, 40.0]);
+        canvas.interaction = Interaction::Idle;
+        assert_ne!(
+            canvas.display().data_as_u8_slice(),
+            before.data_as_u8_slice()
+        );
+        let key = canvas.key();
+        canvas.apply_transform();
+        assert!(canvas.session().pending().is_none());
+        // Kept, not drawn again.
+        assert_ne!(canvas.key(), key);
+        assert_eq!(
+            canvas.split.as_ref().map(|(key, _)| *key),
+            Some(canvas.key())
+        );
+        let mut full = Pixmap::new(320, 200);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            canvas.session().document(),
+            canvas.session().frame(),
+            Purpose::Display,
+            &mut full,
+        );
+        let most = max_difference(canvas.display(), &full);
+        assert!(most <= 2, "shown differs by {most}");
+
+        let applied = canvas.display().clone();
+        canvas.begin_transform();
+        canvas.begin_transform_drag([150.0, 100.0]);
+        canvas.drag_transform([100.0, 60.0]);
+        canvas.interaction = Interaction::Idle;
+        assert_ne!(
+            canvas.display().data_as_u8_slice(),
+            applied.data_as_u8_slice()
+        );
+        canvas.escape();
+        assert!(canvas.session().pending().is_none());
+        assert!(canvas.session().selection().is_some());
+        assert_eq!(
+            canvas.display().data_as_u8_slice(),
+            applied.data_as_u8_slice()
         );
     }
 }

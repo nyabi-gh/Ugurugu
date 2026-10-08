@@ -170,7 +170,7 @@ fn a_layer_in_a_hidden_group_refuses_to_draw() {
 fn the_eraser_commits_an_erase_operation() {
     let mut session = session();
     draw(&mut session, 10.0, 60.0);
-    session.tool = Tool::Eraser;
+    session.set_tool(Tool::Eraser);
     draw(&mut session, 20.0, 30.0);
     let layer = session.current_layer();
     assert!(matches!(ops(&session, layer)[1], Op::Erase { .. }));
@@ -210,7 +210,7 @@ fn each_preset_keeps_its_width_and_stabilizer_and_draws_with_its_brush() {
         (find("soft-airbrush").size, 0.4)
     );
     // An eraser takes its preset's.
-    session.tool = Tool::Eraser;
+    session.set_tool(Tool::Eraser);
     session.choose_preset(Tool::Eraser, find("kneaded-eraser"));
     draw(&mut session, 20.0, 30.0);
     assert_eq!(brush(&session), find("kneaded-eraser").brush);
@@ -655,7 +655,7 @@ fn strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask() {
         Combine::Replace,
     );
     draw(&mut session, 10.0, 60.0);
-    session.tool = Tool::Eraser;
+    session.set_tool(Tool::Eraser);
     draw(&mut session, 10.0, 60.0);
     let clips: Vec<_> = ops(&session, layer)
         .iter()
@@ -674,7 +674,7 @@ fn strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask() {
     assert!(session.document().store.masks.is_empty());
     // A selection of everything cuts nothing.
     session.select_all();
-    session.tool = Tool::Pen;
+    session.set_tool(Tool::Pen);
     draw(&mut session, 10.0, 60.0);
     assert!(matches!(
         ops(&session, layer).last(),
@@ -1059,4 +1059,69 @@ fn deleting_clears_the_selected_part_after_a_pending_transform() {
         [50, 10, 20, 10]
     );
     assert_eq!(session.undo_label(), Some("Delete"));
+}
+
+#[test]
+fn escape_cancels_a_pending_transform_before_deselecting_and_changing_tool_applies_it() {
+    let mut session = session();
+    let layer = session.current_layer();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    assert_eq!(session.take_ended(), None);
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(5.0, 0.0));
+    assert!(session.escape());
+    assert_eq!(session.take_ended(), Some(Ended::Dropped));
+    assert_eq!(session.take_ended(), None);
+    assert!(session.selection().is_some(), "the selection stays");
+    assert!(transforms(&session, layer).is_empty());
+
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(5.0, 0.0));
+    session.set_tool(session.tool());
+    assert!(session.pending().is_some(), "the same tool keeps it");
+    session.set_tool(Tool::Fill);
+    assert_eq!(
+        session.take_ended(),
+        Some(Ended::Applied {
+            revision: session.revision()
+        })
+    );
+    assert_eq!(transforms(&session, layer).len(), 1);
+    // Applied unmoved, it leaves the document as it was.
+    session.begin_transform().unwrap();
+    session.apply_transform().unwrap();
+    assert_eq!(session.take_ended(), Some(Ended::Dropped));
+}
+
+#[test]
+fn flipping_turns_the_selected_part_over_in_place_along_its_own_sides() {
+    let mut session = session();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    let corner = |session: &Session, point| session.pending().unwrap().transform.apply(point);
+    session.flip(true).unwrap();
+    assert_eq!(corner(&session, [10.0, 10.0]), [30.0, 10.0]);
+    // Turned a quarter, a vertical flip follows the turned sides: the
+    // selection's top edge, now on the right, goes to the left.
+    let turned = Affine::rotation_about(std::f64::consts::FRAC_PI_2, [20.0, 15.0]);
+    session.set_transform(turned);
+    session.flip(false).unwrap();
+    let [x, y] = turned.apply([20.0, 10.0]);
+    assert!((x - 25.0).abs() < 1e-9 && (y - 15.0).abs() < 1e-9);
+    let [x, y] = corner(&session, [20.0, 10.0]);
+    assert!(
+        (x - 15.0).abs() < 1e-9 && (y - 15.0).abs() < 1e-9,
+        "{x} {y}"
+    );
 }

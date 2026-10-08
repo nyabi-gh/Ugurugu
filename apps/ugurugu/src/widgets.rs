@@ -103,6 +103,36 @@ pub fn icon_button_tip(
     response.on_hover_text(tip)
 }
 
+/// An icon button that stays filled with the accent while `checked`.
+pub fn icon_toggle(
+    ui: &mut Ui,
+    glyph: Glyph,
+    glyph_size: f32,
+    name: &str,
+    tip: &str,
+    checked: bool,
+) -> Response {
+    let side = glyph_size + 8.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, checked, name));
+    let (fill, ink) = match (checked, response.hovered()) {
+        (true, true) => (theme::ACCENT_PRESSED, theme::ACCENT_TEXT),
+        (true, false) => (theme::ACCENT, theme::ACCENT_TEXT),
+        (false, true) => (theme::HOVER, theme::TEXT),
+        (false, false) => (Color32::TRANSPARENT, theme::TEXT),
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(glyph_size)),
+        glyph,
+        ink,
+        0.0,
+    );
+    response.on_hover_text(tip)
+}
+
 /// A flat button with a small glyph and its text beside it, as 2.2.13's
 /// status bar and animation bar buttons.
 pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Response {

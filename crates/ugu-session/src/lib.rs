@@ -29,7 +29,7 @@ use ugu_core::store::{self, Brush, Point, Stroke};
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
-pub use crate::transforming::Pending;
+pub use crate::transforming::{Ended, Pending};
 use ugu_core::selection::Selection;
 
 /// Points closer than this to the last kept one are dropped, as in 2.2.13.
@@ -141,7 +141,7 @@ pub struct Session {
     history: History,
     layer: LayerId,
     frame: i64,
-    pub tool: Tool,
+    tool: Tool,
     pub pen: ToolSettings,
     pub eraser: ToolSettings,
     /// The width and stabilizer each preset had when another was chosen.
@@ -156,6 +156,7 @@ pub struct Session {
     /// How a transformed selection is resampled.
     pub transform_sampling: Sampling,
     pending: Option<Pending>,
+    ended: Option<Ended>,
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
@@ -180,6 +181,7 @@ impl Session {
             fill: FillSettings::DEFAULT,
             transform_sampling: Sampling::Smooth,
             pending: None,
+            ended: None,
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
@@ -188,6 +190,19 @@ impl Session {
 
     pub fn document(&self) -> &Document {
         self.history.document()
+    }
+
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// Changes the tool; a pending transform is applied first, as changing
+    /// tools ends it.
+    pub fn set_tool(&mut self, tool: Tool) {
+        if tool != self.tool {
+            self.settle();
+            self.tool = tool;
+        }
     }
 
     /// The history, with a pending transform applied first.

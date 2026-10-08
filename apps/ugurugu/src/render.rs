@@ -609,6 +609,7 @@ impl RenderThread {
                 .show(ui, |ui| {
                     canvas_area = canvas.layout(ui);
                     shown_ants = ui::selection_overlay(ui, canvas);
+                    ui::selection_actions(ui, canvas);
                     let ppp = f64::from(ui.ctx().pixels_per_point());
                     let area = ui.max_rect();
                     panels.pointer = ui
@@ -683,7 +684,10 @@ impl RenderThread {
             ants.show(
                 &gpu.device,
                 &gpu.queue,
-                shown_ants.as_ref().map(|(selection, _)| selection),
+                shown_ants.as_ref().map(|(selection, _, _)| selection),
+                shown_ants
+                    .as_ref()
+                    .map_or(ugu_core::ops::Affine::IDENTITY, |(_, moved, _)| *moved),
             );
             let canvas_area = canvas_area.map(|edge| edge.max(0) as u32);
             let placement = self.canvas.placement();
@@ -694,7 +698,7 @@ impl RenderThread {
                 presenter,
                 canvas_view,
                 ants,
-                shown_ants.map_or(0.0, |(_, phase)| phase),
+                shown_ants.map_or(0.0, |(_, _, phase)| phase),
                 canvas_area,
                 placement,
                 egui_renderer,

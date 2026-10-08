@@ -19,17 +19,25 @@ pub enum Glyph {
     Play = 4,
     Pause = 5,
     Add = 6,
+    Duplicate = 7,
     Remove = 9,
     MoveUp = 10,
     MoveDown = 11,
     EyeOpen = 12,
     EyeClosed = 13,
     FitView = 14,
+    MirrorHorizontal = 15,
     Lasso = 16,
     Wand = 17,
     Bucket = 18,
     Wobble = 21,
     Panels = 22,
+    Scale = 25,
+    MirrorVertical = 27,
+    Delete = 28,
+    Deselect = 29,
+    Confirm = 30,
+    Cancel = 31,
 }
 
 type Points = Vec<[f64; 2]>;
@@ -125,6 +133,16 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[12.0, 5.4], [12.0, 18.6]]);
             lines.push(vec![[5.4, 12.0], [18.6, 12.0]]);
         }
+        Glyph::Duplicate => {
+            lines.push(vec![[8.6, 6.4], [19.2, 6.4], [19.2, 15.2]]);
+            lines.push(vec![
+                [4.8, 9.0],
+                [15.2, 9.0],
+                [15.2, 19.4],
+                [4.8, 19.4],
+                [4.8, 9.0],
+            ]);
+        }
         Glyph::Remove => lines.push(vec![[6.0, 12.0], [18.0, 12.0]]),
         Glyph::MoveUp => lines.push(vec![[6.4, 14.6], [12.0, 8.6], [17.6, 14.6]]),
         Glyph::MoveDown => lines.push(vec![[6.4, 9.4], [12.0, 15.4], [17.6, 9.4]]),
@@ -145,6 +163,11 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[14.8, 4.6], [19.4, 4.6], [19.4, 9.2]]);
             lines.push(vec![[19.4, 14.8], [19.4, 19.4], [14.8, 19.4]]);
             lines.push(vec![[9.2, 19.4], [4.6, 19.4], [4.6, 14.8]]);
+        }
+        Glyph::MirrorHorizontal => {
+            lines.push(vec![[12.0, 3.8], [12.0, 20.2]]);
+            lines.push(vec![[10.0, 6.0], [4.2, 12.0], [10.0, 18.0], [10.0, 6.0]]);
+            lines.push(vec![[14.0, 6.0], [19.8, 12.0], [14.0, 18.0], [14.0, 6.0]]);
         }
         Glyph::Lasso => {
             lines.push(
@@ -196,6 +219,40 @@ fn shapes(glyph: Glyph) -> Shapes {
             ]);
             lines.push(vec![[13.2, 4.8], [13.2, 19.2]]);
             lines.push(vec![[13.2, 12.0], [19.6, 12.0]]);
+        }
+        Glyph::Scale => {
+            lines.push(vec![[6.0, 18.0], [18.0, 6.0]]);
+            arrow_head(&mut shapes, [18.0, 6.0], 45.0, 4.0);
+            arrow_head(&mut shapes, [6.0, 18.0], 225.0, 4.0);
+            shapes.lines.push(vec![[4.2, 9.0], [4.2, 4.2], [9.0, 4.2]]);
+            shapes
+                .lines
+                .push(vec![[15.0, 19.8], [19.8, 19.8], [19.8, 15.0]]);
+        }
+        Glyph::MirrorVertical => {
+            lines.push(vec![[3.8, 12.0], [20.2, 12.0]]);
+            lines.push(vec![[6.0, 10.0], [12.0, 4.2], [18.0, 10.0], [6.0, 10.0]]);
+            lines.push(vec![[6.0, 14.0], [12.0, 19.8], [18.0, 14.0], [6.0, 14.0]]);
+        }
+        Glyph::Delete => {
+            lines.push(vec![[5.0, 7.2], [19.0, 7.2]]);
+            lines.push(vec![[9.0, 4.6], [15.0, 4.6]]);
+            lines.push(vec![[7.2, 8.8], [8.2, 19.6], [15.8, 19.6], [16.8, 8.8]]);
+            lines.push(vec![[10.4, 10.2], [10.8, 17.4]]);
+            lines.push(vec![[13.6, 10.2], [13.2, 17.4]]);
+        }
+        Glyph::Deselect => {
+            lines.push(vec![[4.2, 9.0], [4.2, 4.2], [9.0, 4.2]]);
+            lines.push(vec![[15.0, 4.2], [19.8, 4.2], [19.8, 9.0]]);
+            lines.push(vec![[4.2, 15.0], [4.2, 19.8], [9.0, 19.8]]);
+            lines.push(vec![[15.0, 19.8], [19.8, 19.8], [19.8, 15.0]]);
+            lines.push(vec![[8.4, 8.4], [15.6, 15.6]]);
+            lines.push(vec![[15.6, 8.4], [8.4, 15.6]]);
+        }
+        Glyph::Confirm => lines.push(vec![[4.8, 12.4], [9.6, 17.2], [19.4, 6.8]]),
+        Glyph::Cancel => {
+            lines.push(vec![[6.0, 6.0], [18.0, 18.0]]);
+            lines.push(vec![[18.0, 6.0], [6.0, 18.0]]);
         }
     }
     shapes

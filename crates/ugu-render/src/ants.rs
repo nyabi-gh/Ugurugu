@@ -4,26 +4,33 @@
 //! Marching ants around the selection, drawn on the GPU over the canvas: a
 //! light line under a dark dashed one, as 2.2.13 draws them. The outline is
 //! uploaded once per selection as one instance per straight run, in document
-//! pixels; each frame only the placement and the dash phase change, so a
-//! selection of many small pieces costs no more per frame than a rectangle.
+//! pixels; each frame only the placement, the dash phase and a pending
+//! transform change, so a selection of many small pieces costs no more per
+//! frame than a rectangle, and moving it re-uploads nothing.
 
 use std::sync::Arc;
 
+use ugu_core::ops::Affine;
 use ugu_core::selection::Selection;
 
 use crate::view::Placement;
 
 const SHADER: &str = r"
 struct View {
-    // Target pixels of the document's top-left corner, target pixels per
-    // document pixel and per point.
-    offset: vec2<f32>,
-    scale: f32,
-    pixels_per_point: f32,
+    // From document pixels to target pixels, by rows.
+    x: vec4<f32>,
+    y: vec4<f32>,
     surface: vec2<f32>,
+    pixels_per_point: f32,
     // Points the dashes have moved.
     phase: f32,
-    _pad: f32,
+    // Target pixels per document pixel along the outline.
+    stretch: f32,
+}
+
+fn place(point: vec2<f32>) -> vec2<f32> {
+    let p = vec3<f32>(point, 1.0);
+    return vec2<f32>(dot(view.x.xyz, p), dot(view.y.xyz, p));
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -45,8 +52,8 @@ fn vertex(
     @location(0) ends: vec4<f32>,
     @location(1) start: f32,
 ) -> Varying {
-    let a = view.offset + ends.xy * view.scale;
-    let b = view.offset + ends.zw * view.scale;
+    let a = place(ends.xy);
+    let b = place(ends.zw);
     let span = distance(a, b);
     let direction = (b - a) / max(span, 1e-6);
     let normal = vec2<f32>(-direction.y, direction.x);
@@ -60,7 +67,7 @@ fn vertex(
     var out: Varying;
     out.position = vec4<f32>(at / view.surface * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
     out.across = side * half;
-    out.along = (start * view.scale + run) / view.pixels_per_point;
+    out.along = (start * view.stretch + run) / view.pixels_per_point;
     return out;
 }
 
@@ -103,7 +110,9 @@ pub struct Ants {
     bind_group: wgpu::BindGroup,
     /// The selection outlined, its runs and how many there are.
     traced: Option<(Arc<Selection>, wgpu::Buffer, u32)>,
-    uploaded: Option<[u32; 8]>,
+    /// Moves the outline, as a pending transform moves the selection.
+    moved: Affine,
+    uploaded: Option<[u32; 16]>,
 }
 
 impl Ants {
@@ -162,7 +171,7 @@ impl Ants {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("marching ants"),
-            size: 32,
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -179,18 +188,21 @@ impl Ants {
             uniform,
             bind_group,
             traced: None,
+            moved: Affine::IDENTITY,
             uploaded: None,
         }
     }
 
-    /// Shows the outline of `selection`, tracing and uploading it when it is
-    /// not the one shown; `None` shows nothing.
+    /// Shows the outline of `selection` moved by `moved`, tracing and
+    /// uploading it when it is not the one shown; `None` shows nothing.
     pub fn show(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         selection: Option<&Arc<Selection>>,
+        moved: Affine,
     ) {
+        self.moved = moved;
         let Some(selection) = selection else {
             self.traced = None;
             return;
@@ -240,16 +252,30 @@ impl Ants {
         if right <= area[0] || bottom <= area[1] {
             return;
         }
+        let [a, b, c, d, e, f] = self.moved.0;
+        let (scale, [x, y]) = (f64::from(placement.scale), placement.offset.map(f64::from));
+        // Lengths along the outline scale by the transform's mean stretch;
+        // exact unless it stretches one way more than the other.
+        let stretch = scale * (a * e - b * d).abs().sqrt();
         let values = [
-            placement.offset[0],
-            placement.offset[1],
-            placement.scale,
-            pixels_per_point,
-            target_size[0] as f32,
-            target_size[1] as f32,
-            phase,
+            scale * a,
+            scale * b,
+            scale * c + x,
             0.0,
-        ];
+            scale * d,
+            scale * e,
+            scale * f + y,
+            0.0,
+            f64::from(target_size[0]),
+            f64::from(target_size[1]),
+            f64::from(pixels_per_point),
+            f64::from(phase),
+            stretch,
+            0.0,
+            0.0,
+            0.0,
+        ]
+        .map(|value| value as f32);
         let bits = values.map(f32::to_bits);
         if self.uploaded != Some(bits) {
             let bytes: Vec<u8> = values
@@ -311,10 +337,10 @@ mod tests {
             scale: 4.0,
         };
         let target = [48, 36];
-        let shot = |phase: f32| {
+        let shot = |phase: f32, moved: Affine| {
             crate::view::tests::render_with(target, |device, queue, format| {
                 let mut ants = Ants::new(device, format);
-                ants.show(device, queue, Some(&selection));
+                ants.show(device, queue, Some(&selection), moved);
                 move |queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>| {
                     ants.draw(
                         queue,
@@ -328,7 +354,7 @@ mod tests {
                 }
             })
         };
-        let Some(first) = shot(0.0) else {
+        let Some(first) = shot(0.0, Affine::IDENTITY) else {
             eprintln!("skipped: no DX12 adapter");
             return;
         };
@@ -350,8 +376,13 @@ mod tests {
         assert_eq!(at(&first, 23, 17), [0; 3]);
         assert_eq!(at(&first, 23, 3), [0; 3]);
         assert_eq!(at(&first, 44, 30), [0; 3]);
-        let moved = shot(4.0).unwrap();
-        let moved_row: Vec<[u8; 3]> = (12..34).map(|x| at(&moved, x, 9)).collect();
-        assert_ne!(row, moved_row);
+        let later = shot(4.0, Affine::IDENTITY).unwrap();
+        let later_row: Vec<[u8; 3]> = (12..34).map(|x| at(&later, x, 9)).collect();
+        assert_ne!(row, later_row);
+        // A pending transform a document pixel down moves the edge 4 rows.
+        let moved = shot(0.0, Affine::translation(0.0, 1.0)).unwrap();
+        let moved_row: Vec<[u8; 3]> = (12..34).map(|x| at(&moved, x, 13)).collect();
+        assert_eq!(row, moved_row);
+        assert_eq!(at(&moved, 23, 9), [0; 3]);
     }
 }

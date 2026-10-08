@@ -244,7 +244,9 @@ impl Files {
         self.pick(Purpose::ExportPng, Dialog::Save { name: &name });
     }
 
+    /// Exports the frame with a pending transform applied.
     fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        canvas.apply_transform();
         self.message = Some(format!("Exporting {}...", path.display()));
         let _ = self.to_worker.send(Job::Export {
             document: canvas.snapshot_now(),
@@ -254,7 +256,10 @@ impl Files {
         });
     }
 
+    /// Saves with a pending transform applied, so what is saved is what is
+    /// shown and the saved state is the one after it.
     fn start_save(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        canvas.apply_transform();
         self.saving = true;
         self.message = Some(format!("Saving {}...", path.display()));
         let _ = self.to_worker.send(Job::Save {
@@ -492,6 +497,34 @@ mod tests {
         canvas.edit(Session::undo).unwrap();
         assert!(!canvas.session().is_dirty());
         assert_eq!(files.title(&canvas), "drawing - Ugurugu");
+    }
+
+    #[test]
+    fn a_pending_transform_is_applied_before_saving_and_asked_about_before_replacing() {
+        let (mut files, mut canvas, events) = setup();
+        let path = folder("pending").join("drawing.ugurugu");
+        canvas.edit(Session::select_all);
+        canvas.begin_transform();
+        canvas.edit(|session| session.set_transform(ugu_core::ops::Affine::translation(10.0, 0.0)));
+        assert!(canvas.session().is_dirty());
+        // New, open and close ask first.
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::New));
+        files.confirm = None;
+        files.path = Some(path.clone());
+        files.save(&mut canvas);
+        assert!(canvas.session().pending().is_none());
+        files.handle(next(&events), &mut canvas);
+        assert!(!canvas.session().is_dirty());
+        let file = std::fs::File::open(&path).unwrap();
+        let (saved, _) = ugu_io::read::read(std::io::BufReader::new(file)).unwrap();
+        let LayerKind::Paint(paint) = &saved.layers[0].kind else {
+            panic!("a paint layer");
+        };
+        assert!(matches!(
+            paint.ops.last(),
+            Some(ugu_core::ops::Op::TransformSelection { .. })
+        ));
     }
 
     #[test]

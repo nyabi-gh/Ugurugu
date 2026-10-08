@@ -99,12 +99,12 @@ fn draw_move_save_reopen_and_export() {
 
     // Draw, erase across it, then draw translucent ink on a second layer.
     stroke(&mut canvas, &renders, 80.0, 0.0);
-    canvas.edit(|session| session.tool = Tool::Eraser);
+    canvas.edit(|session| session.set_tool(Tool::Eraser));
     canvas.edit(|session| session.eraser.width = 14.0);
     stroke(&mut canvas, &renders, 90.0, 2.0);
     canvas.edit(Session::add_layer).unwrap();
     canvas.edit(|session| {
-        session.tool = Tool::Pen;
+        session.set_tool(Tool::Pen);
         session.pen.color = Rgba8([30, 90, 200, 140]);
         session.pen.antialias = true;
     });

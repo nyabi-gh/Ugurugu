@@ -24,6 +24,81 @@ window-animation-bar | ugurugu::MainWindow | Show &animation bar
 window-reset-layout | ugurugu::MainWindow | Reset panel layout
 tool-brush | ugurugu::MainWindow | Brush
 tool-eraser | ugurugu::MainWindow | Eraser
+tool-select | ugurugu::MainWindow | &Area select
+edit-select-all | ugurugu::CanvasWidget | Select all
+edit-invert-selection | ugurugu::CanvasWidget | Invert selection
+edit-deselect | ugurugu::CanvasWidget | Deselect
+selection-shape | ugurugu::LassoPopoverPanel | SHAPE
+shape-freehand | ugurugu::LassoPopoverPanel | Freehand
+shape-freehand-tip | ugurugu::LassoPopoverPanel | Draw freely around an area
+shape-rectangle | ugurugu::LassoPopoverPanel | Rectangle
+shape-rectangle-tip | ugurugu::LassoPopoverPanel | Drag between opposite corners
+shape-ellipse | ugurugu::LassoPopoverPanel | Ellipse
+shape-ellipse-tip | ugurugu::LassoPopoverPanel | Drag to fit an oval area
+tool-wand | ugurugu::MainWindow | Auto se&lect
+tool-fill | ugurugu::MainWindow | Paint &bucket
+edit-fill-selection | ugurugu::MainWindow | Fill selection
+edit-fill-selection-tip | ugurugu::MainWindow | Fill the selected area with the brush color
+lasso-mode | ugurugu::LassoPopoverPanel | MODE
+lasso-select | ugurugu::LassoPopoverPanel | Select
+lasso-paint | ugurugu::LassoPopoverPanel | Paint
+transform-method | ugurugu::LassoPopoverPanel | Transform method
+sampling-smooth | ugurugu::LassoPopoverPanel | Smooth
+sampling-smooth-tip | ugurugu::MainWindow | Interpolate neighboring pixels during selection transforms
+sampling-pixels | ugurugu::LassoPopoverPanel | Pixel-based
+sampling-pixels-tip | ugurugu::MainWindow | Skip interpolation without removing existing transparency; edges may look stepped
+transform-selection | ugurugu::DocumentController | Transform selection
+transform-selection-tip | - | Move, scale and turn the selection with handles (Ctrl+T) | 핸들로 선택 영역을 이동·크기 조절·회전합니다(Ctrl+T) | ハンドルで選択範囲を移動・拡大縮小・回転します(Ctrl+T)
+flip-horizontal | ugurugu::MainWindow | Flip selection horizontally
+flip-vertical | ugurugu::MainWindow | Flip selection vertically
+transform-apply | ugurugu::MainWindow | Apply transform
+transform-apply-tip | ugurugu::MainWindow | Apply selection transform (Enter)
+transform-cancel | ugurugu::MainWindow | Cancel transform
+transform-cancel-tip | ugurugu::MainWindow | Cancel selection transform (Esc)
+transform-duplicate | - | Duplicate | 복제 | 複製
+transform-duplicate-tip | - | Keep the selected part where it was too | 선택한 부분을 원래 자리에도 남깁니다 | 選択した部分を元の場所にも残します
+delete-selected | ugurugu::MainWindow | Delete selected content
+fill-reference | ugurugu::BucketPopoverPanel | REFERENCE
+reads-current | ugurugu::BucketPopoverPanel | Active layer
+reads-current-tip | ugurugu::BucketPopoverPanel | Use only the layer you are editing
+reads-marked | ugurugu::BucketPopoverPanel | Reference layers
+reads-marked-tip | ugurugu::BucketPopoverPanel | Use layers marked as references
+reads-visible | ugurugu::BucketPopoverPanel | All visible layers
+reads-visible-tip | ugurugu::BucketPopoverPanel | Combine every visible layer
+fill-comparison | ugurugu::BucketPopoverPanel | COMPARISON
+compare-alpha | ugurugu::BucketPopoverPanel | Alpha boundary
+compare-colour | ugurugu::BucketPopoverPanel | Color tolerance
+fill-tolerance | ugurugu::BucketPopoverPanel | Tolerance
+fill-antialias | ugurugu::BucketPopoverPanel | Antialias fill edge
+fill-no-reference | ugurugu::CanvasWidget | Set a visible paint layer as a reference layer first.
+wand-nothing | ugurugu::CanvasWidget | Click an empty area surrounded by lines to select it.
+fill-outside | ugurugu::CanvasWidget | Click inside the selected area to fill it.
+fill-nothing | ugurugu::CanvasWidget | No fillable area was found.
+fill-no-selection | - | Select an area to fill. | 채울 영역을 선택하세요. | 塗りつぶす範囲を選択してください。
+brush-pen | BrushPresets | Pen
+brush-marker | BrushPresets | Marker
+brush-airbrush | BrushPresets | Airbrush
+brush-spray | BrushPresets | Spray
+ink-pen | BrushPresets | Ink Pen
+g-pen | BrushPresets | G-Pen
+round-pen | BrushPresets | Round Pen
+monoline | BrushPresets | Monoline
+bold-ink | BrushPresets | Bold Ink
+opaque-marker | BrushPresets | Opaque Marker
+transparent-marker | BrushPresets | Transparent Marker
+highlighter | BrushPresets | Highlighter
+soft-airbrush | BrushPresets | Soft Airbrush
+hard-airbrush | BrushPresets | Hard Airbrush
+dense-airbrush | BrushPresets | Dense Airbrush
+fine-mist | BrushPresets | Fine Mist
+pixel-spray | BrushPresets | Pixel Spray
+rough-spray | BrushPresets | Rough Spray
+dust-spray | BrushPresets | Dust Spray
+droplet-spray | BrushPresets | Droplet Spray
+wobble-spray | BrushPresets | Wobble Spray
+hard-eraser | EraserPresets | Hard
+soft-eraser | EraserPresets | Soft
+kneaded-eraser | EraserPresets | Kneaded
 tools-rail | ugurugu::MainWindow | Tools
 quick-access | ugurugu::MainWindow | Quick access
 panels | ugurugu::MainWindow | Panels
@@ -74,6 +149,17 @@ wobble | ugurugu::WobblePopoverPanel | WOBBLE
 wobble-scope | - | Wobble applies to | 우글거림 적용 대상 | ゆらぎの適用先
 wobble-preview | ugurugu::WobblePreview | Wobble preview
 wobble-preview-tip | ugurugu::WobblePreview | Live preview of the wobble strength
+motion-style | ugurugu::WobblePopoverPanel | Motion style
+motion-classic | ugurugu::WobblePopoverPanel | Classic
+motion-smooth | ugurugu::LassoPopoverPanel | Smooth
+motion-stepped | ugurugu::WobblePopoverPanel | Stepped
+motion-poses | ugurugu::WobblePopoverPanel | Pose count
+motion-detail | ugurugu::WobblePopoverPanel | Detail
+motion-linked | ugurugu::WobblePopoverPanel | Linked
+motion-randomness | ugurugu::WobblePopoverPanel | Randomness
+motion-broken | ugurugu::WobblePopoverPanel | Broken line
+motion-break-amount | ugurugu::WobblePopoverPanel | Break amount
+motion-break-range | ugurugu::WobblePopoverPanel | Break range
 
 # Colour
 color-dock | ugurugu::ColorDock | Color
