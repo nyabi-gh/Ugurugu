@@ -39,7 +39,8 @@ use windows::core::BOOL;
 const SESSION: &str = "UguruguLatencyProbe";
 
 const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
-                     [--steps N] [--warmup N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH]";
+                     [--steps N] [--warmup N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH] \
+                     [--document PATH]";
 
 struct Options {
     exe: PathBuf,
@@ -55,6 +56,8 @@ struct Options {
     /// A key pressed once before measuring, such as the C++ app's playback toggle.
     key: Option<u8>,
     csv: PathBuf,
+    /// Opened by the app at launch; an empty canvas without it.
+    document: Option<PathBuf>,
 }
 
 fn parse() -> Option<Options> {
@@ -66,6 +69,7 @@ fn parse() -> Option<Options> {
     let mut window = Some([2560, 1600]);
     let mut key = None;
     let mut csv = std::env::temp_dir().join("latency-probe-presentmon.csv");
+    let mut document = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next()?;
@@ -85,6 +89,7 @@ fn parse() -> Option<Options> {
                 key = letter.is_ascii_alphanumeric().then_some(letter as u8);
             }
             "--csv" => csv = PathBuf::from(value),
+            "--document" => document = Some(PathBuf::from(value)),
             _ => return None,
         }
     }
@@ -97,6 +102,7 @@ fn parse() -> Option<Options> {
         window,
         key,
         csv,
+        document,
     })
 }
 
@@ -358,6 +364,7 @@ fn run(options: &Options) -> Result<(), String> {
     }
 
     let mut app = Command::new(&options.exe)
+        .args(&options.document)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
