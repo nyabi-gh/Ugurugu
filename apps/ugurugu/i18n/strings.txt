@@ -278,3 +278,19 @@ image-size-keep-aspect-fixed | ugurugu::ImageSizeDialog | No other size can keep
 image-size-scales | ugurugu::ImageSizeDialog | Width %1%  ·  Height %2% | args=horizontal,vertical
 image-size-distorted | ugurugu::ImageSizeDialog | The aspect ratio will change and the artwork will be distorted.
 image-size-sampling | - | Resampling | 리샘플링 | リサンプリング
+
+# Text tool
+tool-text | ugurugu::MainWindow | Te&xt
+tool-text-rail | ugurugu::MainWindow | Text
+text-content-label | ugurugu::TextPopoverPanel | TEXT
+text-content-hint | ugurugu::TextPopoverPanel | Type the text to place…
+text-font | ugurugu::TextPopoverPanel | FONT
+text-font-default | - | Default | 기본 | 既定
+text-size | ugurugu::TextPopoverPanel | Size
+text-filled | ugurugu::TextPopoverPanel | Fill the letters
+text-place | ugurugu::TextPopoverPanel | Place text
+text-cancel | ugurugu::TextPopoverPanel | Cancel
+text-hint | ugurugu::TextPopoverPanel | Click the canvas to place the text, then drag it into position. The letters use the brush color and width, and wobble like drawn lines.
+text-type-hint | ugurugu::CanvasWidget | Type in the Text panel to see it here.
+text-drag-hint | ugurugu::CanvasWidget | Drag to move · Enter applies · Esc cancels
+text-empty | ugurugu::CanvasWidget | Type some text to place it.

@@ -36,6 +36,7 @@ use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
 mod clipboard;
+mod text;
 mod transform;
 
 pub use transform::{Grip, HANDLES};
@@ -88,6 +89,12 @@ enum Interaction {
         start: [f64; 2],
         base: ugu_core::ops::Affine,
     },
+    /// Dragging placed text from `start` (document pixels), where its top
+    /// left was at `base`.
+    MovingText {
+        start: [f64; 2],
+        base: [f64; 2],
+    },
 }
 
 pub struct Canvas {
@@ -96,6 +103,9 @@ pub struct Canvas {
     split: Option<(Key, Split)>,
     /// A pending transform shown on the split's layer.
     preview: Option<transform::Preview>,
+    /// Placed text shown on the split's layer.
+    text_preview: Option<text::TextPreview>,
+    typesetter: text::Typesetter,
     requested: Option<Key>,
     /// The edited image; empty from playback until the next split.
     display: Pixmap,
@@ -160,6 +170,8 @@ impl Canvas {
             cache: CacheWorker::start(cache_done),
             split: None,
             preview: None,
+            text_preview: None,
+            typesetter: text::Typesetter::default(),
             requested: None,
             display: Pixmap::new(width, height),
             held: None,
@@ -196,6 +208,7 @@ impl Canvas {
         self.generation += 1;
         self.split = None;
         self.preview = None;
+        self.text_preview = None;
         self.requested = None;
         self.display = Pixmap::new(width, height);
         self.held = None;
@@ -379,6 +392,7 @@ impl Canvas {
     /// Playback shows whole frames instead of a split.
     pub fn sync(&mut self) {
         self.refresh_preview();
+        self.refresh_text_preview();
         self.sync_thumbnails();
         if self.playback.is_some() {
             return;
@@ -410,8 +424,10 @@ impl Canvas {
                 self.display = display;
                 self.split = Some((key, split));
                 self.preview = None;
+                self.text_preview = None;
                 self.upload_all();
                 self.refresh_preview();
+                self.refresh_text_preview();
                 if let Interaction::Drawing { rect, .. } = &self.interaction {
                     let rect = *rect;
                     self.recomposite(rect);
@@ -459,8 +475,9 @@ impl Canvas {
             self.upload_all();
             return;
         }
-        // Playing moves through frames, which applies a pending transform.
-        self.apply_transform();
+        // Playing moves through frames, which applies a pending transform or
+        // placed text.
+        self.apply_pending();
         // Stopping asks for a split of the frame it stops on. Until then the
         // old one's layer surfaces would only keep the renderer from reusing
         // them for playback.
@@ -581,6 +598,10 @@ impl Canvas {
                 self.session.begin_selection(point, self.combine());
                 self.interaction = Interaction::Selecting;
             }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool() == Tool::Text => {
+                self.sample_count += 1;
+                self.press_text(sample.position);
+            }
             CanvasInput::Begin(Gesture::Draw, _, sample)
                 if matches!(self.session.tool(), Tool::Wand | Tool::Fill) =>
             {
@@ -606,6 +627,7 @@ impl Canvas {
                         self.session.extend_selection(point);
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
+                    Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Idle => {}
                 }
             }
@@ -622,6 +644,11 @@ impl Canvas {
                         }
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
+                    moving @ Interaction::MovingText { .. } => {
+                        self.interaction = moving;
+                        self.drag_text(sample.position);
+                        self.interaction = Interaction::Idle;
+                    }
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
             }
@@ -646,6 +673,16 @@ impl Canvas {
             Interaction::Transforming { base, .. } => {
                 self.session.set_transform(base);
                 self.refresh_preview();
+            }
+            Interaction::MovingText { base, .. } => {
+                if let Some(outline) = self
+                    .session
+                    .placed_text()
+                    .map(|placed| placed.outline.clone())
+                {
+                    let _ = self.session.place_text(base, outline);
+                }
+                self.refresh_text_preview();
             }
             Interaction::Panning { .. } => {}
             Interaction::Idle => return false,
@@ -1431,6 +1468,83 @@ mod tests {
             assert!(most <= 2, "shown differs by {most} after undo");
         }
         assert_eq!(canvas.session().document().canvas, [320, 200]);
+    }
+
+    #[test]
+    fn placed_text_shows_as_applying_it_draws_and_cancelling_puts_back() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(point([20.0, 150.0], 0.0)).unwrap();
+            session.end_stroke(point([300.0, 60.0], 100.0)).unwrap();
+            session.set_tool(Tool::Text);
+            session.pen.width = 3.0;
+        });
+        canvas.set_text(|text, settings| {
+            *text = "Ug\n우글".to_owned();
+            settings.size = 64.0;
+            settings.filled = true;
+        });
+        settle(&mut canvas, &renders);
+        let before = canvas.display().clone();
+        let full = |canvas: &super::Canvas| {
+            let mut full = Pixmap::new(320, 200);
+            ugu_render::document::DocumentRenderer::new(0).render(
+                canvas.session().document(),
+                canvas.session().frame(),
+                Purpose::Display,
+                &mut full,
+            );
+            full
+        };
+
+        canvas.press_text([40.0, 30.0]);
+        canvas.drag_text([60.0, 40.0]);
+        canvas.interaction = Interaction::Idle;
+        canvas.sync();
+        assert!(canvas.text_preview.is_some());
+        assert_eq!(canvas.session().placed_text().unwrap().at, [60.0, 40.0]);
+        assert_ne!(
+            canvas.display().data_as_u8_slice(),
+            before.data_as_u8_slice()
+        );
+        // A press on the text moves it rather than placing it anew.
+        canvas.press_text([70.0, 50.0]);
+        assert!(matches!(canvas.interaction, Interaction::MovingText { .. }));
+        canvas.interaction = Interaction::Idle;
+        canvas.cancel_text();
+        assert_eq!(
+            canvas.display().data_as_u8_slice(),
+            before.data_as_u8_slice()
+        );
+
+        canvas.press_text([40.0, 30.0]);
+        canvas.interaction = Interaction::Idle;
+        canvas.sync();
+        let key = canvas.key();
+        canvas.apply_text();
+        assert!(canvas.session().placed_text().is_none());
+        // Kept, not drawn again.
+        assert_ne!(canvas.key(), key);
+        assert_eq!(
+            canvas.split.as_ref().map(|(key, _)| *key),
+            Some(canvas.key())
+        );
+        let most = max_difference(canvas.display(), &full(&canvas));
+        assert!(most <= 2, "shown differs by {most}");
+        canvas.edit(Session::undo).unwrap();
+        settle(&mut canvas, &renders);
+        assert_eq!(
+            canvas.display().data_as_u8_slice(),
+            before.data_as_u8_slice()
+        );
     }
 
     fn layer_render(document: &Document, layer: LayerId, frame: i64) -> Pixmap {

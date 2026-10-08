@@ -20,6 +20,7 @@ ugu-core.workspace = true
 ugu-io.workspace = true
 ugu-render.workspace = true
 ugu-session.workspace = true
+ugu-text.workspace = true
 ugu-win.workspace = true
 vello_cpu.workspace = true
 wgpu.workspace = true

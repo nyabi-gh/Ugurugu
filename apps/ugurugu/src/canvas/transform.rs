@@ -188,6 +188,13 @@ impl Canvas {
         }
     }
 
+    /// Applies a pending transform or placed text, as what comes next
+    /// would leave it out or end it.
+    pub fn apply_pending(&mut self) {
+        self.apply_transform();
+        self.apply_text();
+    }
+
     pub fn cancel_transform(&mut self) {
         self.edit(|session| session.cancel_transform());
     }
@@ -226,16 +233,24 @@ impl Canvas {
         self.refresh_preview();
     }
 
-    /// After the session changed: ends the preview of a transform that
-    /// ended, keeping its pixels when it was applied and nothing else changed
-    /// the split's layer and frame, and shows a pending one.
+    /// After the session changed: ends the preview of a transform or text
+    /// that ended, keeping its pixels when it was applied and nothing else
+    /// changed the split's layer and frame, and shows a pending one.
     pub(super) fn follow_transform(&mut self, before: Key) {
         match self.session.take_ended() {
             Some(Ended::Applied { revision }) => {
                 let after = self.key();
-                if let (Some(preview), Some((key, split))) = (self.preview.take(), &mut self.split)
+                let moving = self.preview.take().map(|preview| preview.moving);
+                let placing = self.text_preview.take().map(|preview| preview.placing);
+                if let Some((key, split)) = &mut self.split
+                    && (moving.is_some() || placing.is_some())
                 {
-                    split.end_move(preview.moving, true);
+                    if let Some(moving) = moving {
+                        split.end_move(moving, true);
+                    }
+                    if let Some(placing) = placing {
+                        split.end_place(placing, true);
+                    }
                     let unchanged = *key == before
                         && after.version.revision == revision
                         && after.layer == key.layer
@@ -250,10 +265,17 @@ impl Canvas {
                     let rect = split.end_move(preview.moving, false);
                     self.recomposite(rect);
                 }
+                if let (Some(preview), Some((_, split))) =
+                    (self.text_preview.take(), &mut self.split)
+                {
+                    let rect = split.end_place(preview.placing, false);
+                    self.recomposite(rect);
+                }
             }
             None => {}
         }
         self.refresh_preview();
+        self.refresh_text_preview();
     }
 
     /// Shows the pending transform on the split's layer, once the split of

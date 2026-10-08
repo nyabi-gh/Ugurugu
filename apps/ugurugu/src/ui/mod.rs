@@ -10,6 +10,7 @@ mod brushes;
 mod color;
 mod layers;
 mod resize;
+mod text;
 
 use fluent_bundle::FluentArgs;
 use std::sync::Arc;
@@ -127,7 +128,7 @@ pub fn shortcuts(
     if pressed(none, egui::Key::Enter) {
         // The IME test counts it.
         tracing::debug!("canvas Enter");
-        canvas.apply_transform();
+        canvas.apply_pending();
     }
     if pressed(none, egui::Key::B) {
         canvas.edit(|session| session.set_tool(Tool::Pen));
@@ -143,6 +144,9 @@ pub fn shortcuts(
     }
     if pressed(none, egui::Key::G) {
         canvas.edit(|session| session.set_tool(Tool::Fill));
+    }
+    if pressed(none, egui::Key::T) {
+        canvas.edit(|session| session.set_tool(Tool::Text));
     }
     if pressed(egui::Modifiers::ALT, egui::Key::Delete) {
         canvas.fill_selection();
@@ -427,6 +431,7 @@ pub fn menu_bar(
                 (Tool::Select, "tool-select", "L"),
                 (Tool::Wand, "tool-wand", "W"),
                 (Tool::Fill, "tool-fill", "G"),
+                (Tool::Text, "tool-text", "T"),
             ] {
                 if ui
                     .add(egui::Button::selectable(tool == each, tr(key)).shortcut_text(shortcut))
@@ -476,6 +481,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (Tool::Select, Glyph::Lasso, "tool-select", "L"),
         (Tool::Wand, Glyph::Wand, "tool-wand", "W"),
         (Tool::Fill, Glyph::Bucket, "tool-fill", "G"),
+        (Tool::Text, Glyph::Text, "tool-text-rail", "T"),
     ] {
         if widgets::tool_button(ui, glyph, tr(key), shortcut, tool == each).clicked() {
             canvas.edit(|session| session.set_tool(each));
@@ -532,19 +538,20 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     match tool {
         Tool::Select => return selection_settings(ui, canvas),
         Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
+        Tool::Text => return text::settings(ui, canvas),
         Tool::Pen | Tool::Eraser => {}
     }
     panels.presets.show(ui, canvas, tool);
     // Read after the presets: choosing one sets its width and stabilizer.
     let mut settings = match tool {
         Tool::Eraser => canvas.session().eraser,
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => canvas.session().pen,
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => canvas.session().pen,
     };
     let before = settings;
     ui.add_space(4.0);
     let size_name = match tool {
         Tool::Eraser => tr("eraser-size"),
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => tr("brush-size"),
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => tr("brush-size"),
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -579,7 +586,9 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if settings != before {
         canvas.edit(|session| match tool {
             Tool::Eraser => session.eraser = settings,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => session.pen = settings,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => {
+                session.pen = settings
+            }
         });
     }
 }
@@ -761,6 +770,47 @@ pub fn selection_overlay(
         .pending()
         .map_or(Affine::IDENTITY, |pending| pending.transform);
     selection.map(|selection| (selection.clone(), moved, phase))
+}
+
+/// A dashed frame around placed text and what to do with it, as 2.2.13
+/// draws them.
+pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
+    let Some([left, top, right, bottom]) = canvas.text_box() else {
+        return;
+    };
+    let pad = 6.0;
+    let rect = egui::Rect::from_min_max(
+        to_screen(ui, canvas, [left, top]) - egui::vec2(pad, pad),
+        to_screen(ui, canvas, [right, bottom]) + egui::vec2(pad, pad),
+    );
+    let painter = ui.painter();
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+        rect.left_top(),
+    ];
+    for side in corners.windows(2) {
+        painter.extend(egui::Shape::dashed_line(
+            side,
+            egui::Stroke::new(1.0, theme::ACCENT),
+            4.0,
+            3.0,
+        ));
+    }
+    let hint = if canvas.session().text_content.trim().is_empty() {
+        tr("text-type-hint")
+    } else {
+        tr("text-drag-hint")
+    };
+    painter.text(
+        rect.left_bottom() + egui::vec2(0.0, 4.0),
+        egui::Align2::LEFT_TOP,
+        hint,
+        egui::FontId::proportional(theme::SMALL),
+        theme::MUTED,
+    );
 }
 
 /// Document pixels to points.

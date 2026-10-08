@@ -63,11 +63,13 @@ impl Presets {
             self.scale = scale;
         }
         let current = match tool {
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => canvas.session().pen.preset,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => {
+                canvas.session().pen.preset
+            }
             Tool::Eraser => canvas.session().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => {
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => {
                 let shown = self.category.unwrap_or(current.category);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;

@@ -18,12 +18,17 @@ egui-wgpu = { version = "=0.36.2", default-features = false, features = ["winit"
 fluent-bundle = "=0.16.0"
 # Still images to import; the codecs 3.0 reads and nothing else.
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif", "tiff"] }
+# Placed text: Parley lays it out; Skrifa (as in egui) and Kurbo (as in Vello)
+# give its outlines.
+kurbo = "=0.13.1"
+parley = "=0.11.1"
 png = "=0.18.1"
 pollster = "=1.0.1"
 proptest = "=1.11.0"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.11.0"
+skrifa = "=0.44.0"
 tracing = "=0.1.44"
 tracing-appender = "=0.2.5"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
@@ -32,6 +37,7 @@ ugu-core = { path = "crates/ugu-core" }
 ugu-io = { path = "crates/ugu-io" }
 ugu-render = { path = "crates/ugu-render" }
 ugu-session = { path = "crates/ugu-session" }
+ugu-text = { path = "crates/ugu-text" }
 ugu-win = { path = "crates/ugu-win" }
 vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 # DX12 only: with Vulkan compiled in, wgpu would prefer a Vulkan adapter.

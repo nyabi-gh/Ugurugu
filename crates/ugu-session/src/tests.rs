@@ -1303,3 +1303,134 @@ fn a_canvas_change_ends_a_lasso_being_drawn() {
     assert!(session.lasso().is_none());
     assert_eq!(session.selection(), None);
 }
+
+/// A 20 × 10 box with a hole, as laid-out text would give.
+fn boxed_text() -> Arc<ugu_core::text::Outline> {
+    Arc::new(ugu_core::text::Outline {
+        contours: vec![
+            vec![[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [0.0, 10.0]],
+            vec![[5.0, 3.0], [5.0, 7.0], [15.0, 7.0], [15.0, 3.0]],
+        ],
+        size: [20.0, 10.0],
+    })
+}
+
+#[test]
+fn placed_text_is_applied_as_one_step_in_the_pen_colour() {
+    let mut session = session();
+    let layer = session.current_layer();
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 40.0], boxed_text()).unwrap();
+    assert!(session.is_dirty());
+    assert!(ops(&session, layer).is_empty());
+    // Moving keeps the seeds: the strokes move as they are.
+    let before = session.text_drawing().unwrap();
+    session.place_text([35.0, 40.0], boxed_text()).unwrap();
+    let after = session.text_drawing().unwrap();
+    assert_eq!(after.strokes.len(), 2);
+    for (a, b) in before.strokes.iter().zip(&after.strokes) {
+        assert_eq!(a.seed, b.seed);
+        assert_eq!(a.points[0].x + 5.0, b.points[0].x);
+    }
+    session.pen.color = Rgba8([10, 20, 30, 255]);
+    assert!(matches!(session.apply_text(), Ok(Outcome::Committed(_))));
+    assert_eq!(session.placed_text(), None);
+    assert_eq!(session.undo_label(), Some("Add text"));
+    let strokes: Vec<_> = session.document().store.strokes.values().collect();
+    assert_eq!(strokes.len(), 2);
+    assert!(
+        strokes
+            .iter()
+            .all(|stroke| stroke.color == Rgba8([10, 20, 30, 255]))
+    );
+    assert!(matches!(
+        &ops(&session, layer)[..],
+        [Op::Paint { clip: None, .. }, Op::Paint { clip: None, .. }]
+    ));
+    assert!(session.undo().unwrap());
+    assert!(ops(&session, layer).is_empty());
+    // Nothing to draw changes nothing.
+    session
+        .place_text([0.0, 0.0], Arc::new(ugu_core::text::Outline::default()))
+        .unwrap();
+    assert_eq!(session.apply_text(), Ok(Outcome::NoChange));
+}
+
+#[test]
+fn filled_text_fills_under_its_outlines_and_keeps_inside_the_selection() {
+    let mut session = session();
+    let layer = session.current_layer();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [0.0, 0.0],
+        [40.0, 50.0],
+        Combine::Replace,
+    );
+    session.text.filled = true;
+    session.place_text([30.0, 40.0], boxed_text()).unwrap();
+    let drawing = session.text_drawing().unwrap();
+    assert_eq!(
+        drawing.fill.as_ref().unwrap().mask().bounds,
+        [30, 40, 20, 10]
+    );
+    session.apply_text().unwrap();
+    let [
+        Op::Fill {
+            coverage,
+            clip: Some(fill_clip),
+            ..
+        },
+        Op::Paint {
+            clip: Some(first), ..
+        },
+        Op::Paint {
+            clip: Some(second), ..
+        },
+    ] = &ops(&session, layer)[..]
+    else {
+        panic!("a fill, then two outlines, cut to the selection");
+    };
+    assert!(fill_clip == first && first == second);
+    assert_eq!(
+        &session.document().store.masks[coverage],
+        drawing.fill.unwrap().mask()
+    );
+}
+
+#[test]
+fn placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 20.0], boxed_text()).unwrap();
+    let label = session.undo_label().map(str::to_owned);
+    assert!(session.undo().unwrap());
+    assert_eq!(session.placed_text(), None);
+    assert_eq!(session.undo_label().map(str::to_owned), label);
+    session.place_text([30.0, 20.0], boxed_text()).unwrap();
+    assert!(session.escape());
+    assert_eq!(session.placed_text(), None);
+    assert_eq!(ops(&session, layer).len(), 1);
+
+    // Changing tools or layers applies it.
+    session.place_text([30.0, 20.0], boxed_text()).unwrap();
+    session.set_tool(Tool::Pen);
+    assert_eq!(ops(&session, layer).len(), 3);
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 20.0], boxed_text()).unwrap();
+    session.add_layer().unwrap();
+    assert_eq!(ops(&session, layer).len(), 5);
+    assert_eq!(session.placed_text(), None);
+
+    // A hidden layer takes no text.
+    let hidden = session.current_layer();
+    session
+        .update_layer(hidden, "Hide", |layer| layer.visible = false)
+        .unwrap();
+    assert_eq!(
+        session.place_text([0.0, 0.0], boxed_text()),
+        Err(FillError::HiddenLayer)
+    );
+}

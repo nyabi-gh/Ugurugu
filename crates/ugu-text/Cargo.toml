@@ -1,0 +1,16 @@
+[package]
+name = "ugu-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+kurbo.workspace = true
+parley.workspace = true
+skrifa.workspace = true
+ugu-core.workspace = true
+
+[lints]
+workspace = true

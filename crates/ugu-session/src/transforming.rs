@@ -51,6 +51,7 @@ impl Session {
         }
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
+        self.settle();
         self.live = None;
         self.lasso = None;
         self.pending = Some(Pending {
@@ -173,9 +174,11 @@ impl Session {
         })?)
     }
 
-    /// Applies the pending transform before another edit. One that cannot
-    /// be applied is dropped; it was checked as it was set.
+    /// Applies the pending transform or placed text before another edit.
+    /// A transform cannot fail, as it was checked as it was set; text over
+    /// the document's limits is dropped.
     pub(crate) fn settle(&mut self) {
         let _ = self.apply_transform();
+        let _ = self.apply_text();
     }
 }

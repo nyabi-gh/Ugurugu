@@ -280,3 +280,19 @@ image-size-keep-aspect-fixed = No other size can keep this aspect ratio within t
 image-size-scales = Width { $horizontal }%  ·  Height { $vertical }%
 image-size-distorted = The aspect ratio will change and the artwork will be distorted.
 image-size-sampling = Resampling
+
+# Text tool
+tool-text = Text
+tool-text-rail = Text
+text-content-label = TEXT
+text-content-hint = Type the text to place…
+text-font = FONT
+text-font-default = Default
+text-size = Size
+text-filled = Fill the letters
+text-place = Place text
+text-cancel = Cancel
+text-hint = Click the canvas to place the text, then drag it into position. The letters use the brush color and width, and wobble like drawn lines.
+text-type-hint = Type in the Text panel to see it here.
+text-drag-hint = Drag to move · Enter applies · Esc cancels
+text-empty = Type some text to place it.

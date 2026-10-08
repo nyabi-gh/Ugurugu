@@ -150,10 +150,10 @@ impl Session {
         self.history_mut().select("Deselect", None)
     }
 
-    /// Esc: drops a shape being dragged, else a pending transform, else the
-    /// selection.
+    /// Esc: drops a shape being dragged, else a pending transform or placed
+    /// text, else the selection.
     pub fn escape(&mut self) -> bool {
-        self.cancel_selection() || self.cancel_transform() || self.deselect()
+        self.cancel_selection() || self.cancel_transform() || self.cancel_text() || self.deselect()
     }
 
     /// The selection a stroke begun now is cut to; `None` when it cuts

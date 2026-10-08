@@ -15,6 +15,7 @@ pub mod motion;
 pub mod ops;
 pub mod selection;
 pub mod store;
+pub mod text;
 
 #[cfg(test)]
 mod semantics;

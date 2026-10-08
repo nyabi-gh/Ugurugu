@@ -280,3 +280,19 @@ image-size-keep-aspect-fixed = キャンバスサイズの制限内でこの縦�
 image-size-scales = 幅 { $horizontal }%  ·  高さ { $vertical }%
 image-size-distorted = 縦横比が変わり、絵が歪みます。
 image-size-sampling = リサンプリング
+
+# Text tool
+tool-text = テキスト
+tool-text-rail = テキスト
+text-content-label = テキスト
+text-content-hint = 配置するテキストを入力…
+text-font = フォント
+text-font-default = 既定
+text-size = サイズ
+text-filled = 文字を塗りつぶす
+text-place = テキストを配置
+text-cancel = キャンセル
+text-hint = キャンバスをクリックしてテキストを置き、ドラッグで位置を調整します。文字はブラシの色と太さを使い、描いた線のようにうごうごします。
+text-type-hint = テキストパネルに入力すると、ここに表示されます。
+text-drag-hint = ドラッグで移動 · Enter で適用 · Esc でキャンセル
+text-empty = 配置するテキストを先に入力してください。

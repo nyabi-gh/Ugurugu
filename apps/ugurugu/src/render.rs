@@ -658,6 +658,7 @@ impl RenderThread {
                 .show(ui, |ui| {
                     canvas_area = canvas.layout(ui);
                     shown_ants = ui::selection_overlay(ui, canvas);
+                    ui::text_overlay(ui, canvas);
                     ui::selection_actions(ui, canvas);
                     let ppp = f64::from(ui.ctx().pixels_per_point());
                     let area = ui.max_rect();

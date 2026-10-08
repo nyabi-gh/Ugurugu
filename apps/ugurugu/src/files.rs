@@ -271,9 +271,9 @@ impl Files {
         self.pick(Purpose::ExportPng, Dialog::Save { name: &name });
     }
 
-    /// Exports the frame with a pending transform applied.
+    /// Exports the frame with a pending transform or placed text applied.
     fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
-        canvas.apply_transform();
+        canvas.apply_pending();
         self.message = Some(format!("Exporting {}...", path.display()));
         let _ = self.to_worker.send(Job::Export {
             document: canvas.snapshot_now(),
@@ -283,10 +283,10 @@ impl Files {
         });
     }
 
-    /// Saves with a pending transform applied, so what is saved is what is
-    /// shown and the saved state is the one after it.
+    /// Saves with a pending transform or placed text applied, so what is
+    /// saved is what is shown and the saved state is the one after it.
     fn start_save(&mut self, path: PathBuf, canvas: &mut Canvas) {
-        canvas.apply_transform();
+        canvas.apply_pending();
         self.saving = true;
         self.message = Some(format!("Saving {}...", path.display()));
         let _ = self.to_worker.send(Job::Save {
@@ -582,6 +582,38 @@ mod tests {
             paint.ops.last(),
             Some(ugu_core::ops::Op::TransformSelection { .. })
         ));
+    }
+
+    #[test]
+    fn placed_text_is_applied_before_saving() {
+        let (mut files, mut canvas, events) = setup();
+        let path = folder("placed-text").join("drawing.ugurugu");
+        canvas.edit(|session| {
+            session.set_tool(ugu_session::Tool::Text);
+            session.text_content = "Ug".to_owned();
+        });
+        canvas.edit(|session| {
+            let outline = std::sync::Arc::new(ugu_core::text::Outline {
+                contours: vec![vec![[0.0, 0.0], [20.0, 0.0], [20.0, 10.0]]],
+                size: [20.0, 10.0],
+            });
+            session.place_text([10.0, 10.0], outline).unwrap();
+        });
+        assert!(canvas.session().is_dirty());
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::Close));
+        files.confirm = None;
+        files.path = Some(path.clone());
+        files.save(&mut canvas);
+        assert!(canvas.session().placed_text().is_none());
+        files.handle(next(&events), &mut canvas);
+        assert!(!canvas.session().is_dirty());
+        let file = std::fs::File::open(&path).unwrap();
+        let (saved, _) = ugu_io::read::read(std::io::BufReader::new(file)).unwrap();
+        let LayerKind::Paint(paint) = &saved.layers[0].kind else {
+            panic!("a paint layer");
+        };
+        assert!(matches!(paint.ops[..], [ugu_core::ops::Op::Paint { .. }]));
     }
 
     #[test]

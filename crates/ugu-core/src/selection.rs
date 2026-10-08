@@ -235,6 +235,65 @@ impl Selection {
         pixels.selection()
     }
 
+    /// The canvas pixels whose centres `contours`, closed polygons, enclose
+    /// by the non-zero rule; `None` when none.
+    pub fn of_contours(contours: &[Vec<[f64; 2]>], canvas: [u32; 2]) -> Option<Self> {
+        let [width, height] = canvas.map(|edge| edge as usize);
+        let points = || contours.iter().flatten();
+        let low = points().map(|p| p[1]).fold(f64::MAX, f64::min);
+        let high = points().map(|p| p[1]).fold(f64::MIN, f64::max);
+        let left = points().map(|p| p[0]).fold(f64::MAX, f64::min);
+        let right = points().map(|p| p[0]).fold(f64::MIN, f64::max);
+        let (first_row, end_row) = centres(low, high, height);
+        let (first_column, end_column) = centres(left, right, width);
+        if first_row >= end_row || first_column >= end_column {
+            return None;
+        }
+        // Each edge crosses the rows whose centres it spans, upward or down.
+        let mut rows: Vec<Vec<(f64, i32)>> = vec![Vec::new(); end_row - first_row];
+        for contour in contours.iter().filter(|contour| contour.len() >= 3) {
+            for (index, a) in contour.iter().enumerate() {
+                let b = contour[(index + 1) % contour.len()];
+                let (from, to) = centres(a[1].min(b[1]), a[1].max(b[1]), height);
+                for y in from.max(first_row)..to.min(end_row) {
+                    let centre = y as f64 + 0.5;
+                    if (a[1] <= centre) != (b[1] <= centre) {
+                        let x = a[0] + (centre - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
+                        rows[y - first_row].push((x, if b[1] > a[1] { 1 } else { -1 }));
+                    }
+                }
+            }
+        }
+        let columns = (end_column - first_column) as i32;
+        let row_bytes = Mask::row_bytes(columns);
+        let mut bits = vec![0u8; row_bytes * rows.len()];
+        for (crossings, out) in rows.iter_mut().zip(bits.chunks_exact_mut(row_bytes)) {
+            crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut winding = 0;
+            for pair in crossings.windows(2) {
+                winding += pair[0].1;
+                if winding == 0 {
+                    continue;
+                }
+                let (first, end) = centres(pair[0].0, pair[1].0, width);
+                for x in first.max(first_column)..end.min(end_column) {
+                    let x = x - first_column;
+                    out[x / 8] |= 0x80 >> (x % 8);
+                }
+            }
+        }
+        tight(
+            canvas,
+            [
+                first_column as i32,
+                first_row as i32,
+                columns,
+                (end_row - first_row) as i32,
+            ],
+            bits,
+        )
+    }
+
     /// The pixels reached from `seed` through edge neighbours that `compare`
     /// lets through, in `pixels`: premultiplied rows of a canvas of
     /// `canvas`. `None` when the seed is outside or itself stops the fill.
@@ -806,6 +865,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn contours_fill_by_the_non_zero_rule() {
+        let star: Vec<[f64; 2]> = (0..5)
+            .map(|i| {
+                let turn = f64::from(i * 2) / 5.0 * std::f64::consts::TAU;
+                [20.0 + 15.0 * turn.sin(), 20.0 - 15.0 * turn.cos()]
+            })
+            .collect();
+        let canvas = [40, 40];
+        // A simple polygon fills alike by either rule.
+        let triangle = vec![[3.0, 3.0], [30.0, 8.0], [9.0, 27.5]];
+        assert_eq!(
+            Selection::of_contours(std::slice::from_ref(&triangle), canvas),
+            Selection::of_shape(&Shape::Freehand(triangle), canvas)
+        );
+        // A pentagram's middle winds twice: filled here, open by even-odd.
+        let filled = Selection::of_contours(std::slice::from_ref(&star), canvas).unwrap();
+        let even_odd = Selection::of_shape(&Shape::Freehand(star), canvas).unwrap();
+        assert!(filled.mask.contains(20, 20) && !even_odd.mask.contains(20, 20));
+        assert_eq!(filled.mask.bounds, even_odd.mask.bounds);
     }
 
     #[test]

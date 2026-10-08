@@ -126,6 +126,22 @@ def count(event):
     return sum(1 for line in log_lines() if event in line)
 
 
+def text_tool_field():
+    for line in reversed(log_lines()):
+        match = re.search(r"text tool field rect=\[([^\]]*)\]", line)
+        if match:
+            return [float(value) for value in match.group(1).split(",")]
+    raise SystemExit("no text tool field logged")
+
+
+def text_tool_content():
+    for line in reversed(log_lines()):
+        match = re.search(r'text tool content content=("(?:[^"\\]|\\.)*")', line)
+        if match:
+            return json.loads(match.group(1))
+    return ""
+
+
 def field_rects():
     for line in reversed(log_lines()):
         match = re.search(r"ime probe fields line=\[([^\]]*)\] text=\[([^\]]*)\]", line)
@@ -259,7 +275,7 @@ def japanese(results, line_rect, text_rect):
 # The probe fields are part of the diagnostics panel; canvas shortcuts are
 # logged by the UI module.
 env = dict(os.environ, UGURUGU_DIAGNOSTICS="1",
-           UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug")
+           UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug,ugurugu::ui::text=trace")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)
 HWND = None
@@ -296,6 +312,26 @@ try:
     results["5 canvas Enter"] = count("canvas Enter") - enter_before
     results["5 canvas Ctrl+Z"] = count("canvas Ctrl+Z") - undo_before
     results["5 text after shortcuts"] = last_texts()[1]
+
+    # 6. The text tool: compose in its field, where Enter commits the
+    # composition and neither starts a line nor applies; a click on the
+    # canvas places the text and Enter there applies it.
+    tap(ord("T"), 0.4)
+    click(*to_screen(text_tool_field()))
+    enter_before, applied_before = count("canvas Enter"), count("text applied")
+    if LANGUAGE == "ko":
+        type_keys("dntmf")
+        tap(VK_RETURN, 0.4)
+    else:
+        type_keys("moji")
+        tap(VK_SPACE, 0.4)
+        tap(VK_RETURN, 0.4)
+    results["6 text tool content"] = text_tool_content()
+    results["6 canvas Enter from text tool field"] = count("canvas Enter") - enter_before
+    click(origin.x + client.right // 2, origin.y + client.bottom // 2)
+    screenshot("text-placed.png")
+    tap(VK_RETURN, 0.5)
+    results["6 applied"] = count("text applied") - applied_before
     screenshot("final.png")
 finally:
     if HWND and ORIGINAL_LAYOUT and window_layout() != ORIGINAL_LAYOUT:

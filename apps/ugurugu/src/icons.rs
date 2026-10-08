@@ -30,6 +30,7 @@ pub enum Glyph {
     Lasso = 16,
     Wand = 17,
     Bucket = 18,
+    Text = 19,
     Wobble = 21,
     Panels = 22,
     Scale = 25,
@@ -194,6 +195,13 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[5.8, 9.6], [18.2, 9.6]]);
             lines.push(vec![[6.8, 9.6], [8.4, 19.2], [15.6, 19.2], [17.2, 9.6]]);
             shapes.fills.push(circle([20.2, 14.4], 1.4, 12));
+        }
+        Glyph::Text => {
+            lines.push(vec![[5.2, 5.6], [18.8, 5.6]]);
+            lines.push(vec![[5.2, 5.6], [5.2, 8.2]]);
+            lines.push(vec![[18.8, 5.6], [18.8, 8.2]]);
+            lines.push(vec![[12.0, 5.6], [12.0, 19.2]]);
+            lines.push(vec![[9.2, 19.2], [14.8, 19.2]]);
         }
         Glyph::Wobble => {
             // The shape the wobble preview animates, caught mid-wobble.

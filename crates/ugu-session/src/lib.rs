@@ -11,6 +11,7 @@
 
 mod clipboard;
 mod filling;
+mod placing;
 mod selecting;
 pub mod stabilizer;
 mod transforming;
@@ -28,6 +29,7 @@ use ugu_core::ops::{Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, Point, Stroke};
 
 pub use crate::filling::{FillError, FillSettings, Reads};
+pub use crate::placing::{Placed, TextDrawing, TextSettings};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
 pub use crate::transforming::{Ended, Pending};
@@ -43,6 +45,7 @@ pub enum Tool {
     Select,
     Wand,
     Fill,
+    Text,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -157,6 +160,10 @@ pub struct Session {
     /// How a transformed selection is resampled.
     pub transform_sampling: Sampling,
     pending: Option<Pending>,
+    /// The text tool's settings and the text it places.
+    pub text: TextSettings,
+    pub text_content: String,
+    placed: Option<Placed>,
     ended: Option<Ended>,
     lasso: Option<Lasso>,
     seeds: RandomState,
@@ -182,6 +189,9 @@ impl Session {
             fill: FillSettings::DEFAULT,
             transform_sampling: Sampling::Smooth,
             pending: None,
+            text: TextSettings::DEFAULT,
+            text_content: String::new(),
+            placed: None,
             ended: None,
             lasso: None,
             seeds: RandomState::new(),
@@ -197,8 +207,8 @@ impl Session {
         self.tool
     }
 
-    /// Changes the tool; a pending transform is applied first, as changing
-    /// tools ends it.
+    /// Changes the tool; a pending transform or placed text is applied
+    /// first, as changing tools ends it.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.settle();
@@ -218,7 +228,7 @@ impl Session {
     pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
             Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => &mut self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => &mut self.pen,
         };
         if settings.preset.id == preset.id {
             return;
@@ -252,9 +262,9 @@ impl Session {
         self.history.state()
     }
 
-    /// A pending transform counts as an unsaved change.
+    /// A pending transform or placed text counts as an unsaved change.
     pub fn is_dirty(&self) -> bool {
-        self.history.is_dirty() || self.pending.is_some()
+        self.history.is_dirty() || self.pending.is_some() || self.placed.is_some()
     }
 
     pub fn mark_saved(&mut self, state: StateId) {
@@ -300,7 +310,7 @@ impl Session {
     fn settings(&self) -> &ToolSettings {
         match self.tool {
             Tool::Eraser => &self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => &self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => &self.pen,
         }
     }
 
@@ -404,11 +414,12 @@ impl Session {
         self.live = None;
     }
 
-    /// Cancels a pending transform, else undoes the last change.
+    /// Cancels a pending transform or placed text, else undoes the last
+    /// change.
     pub fn undo(&mut self) -> Result<bool, EditError> {
         self.live = None;
         self.lasso = None;
-        if self.cancel_transform() {
+        if self.cancel_transform() || self.cancel_text() {
             return Ok(true);
         }
         let undone = self.history.undo()?;
@@ -416,11 +427,12 @@ impl Session {
         Ok(undone)
     }
 
-    /// Cancels a pending transform, else redoes the last change undone.
+    /// Cancels a pending transform or placed text, else redoes the last
+    /// change undone.
     pub fn redo(&mut self) -> Result<bool, EditError> {
         self.live = None;
         self.lasso = None;
-        if self.cancel_transform() {
+        if self.cancel_transform() || self.cancel_text() {
             return Ok(true);
         }
         let redone = self.history.redo()?;

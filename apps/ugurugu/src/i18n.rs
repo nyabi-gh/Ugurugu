@@ -19,6 +19,8 @@ const LANGUAGES: [(&str, &str); 3] = [
 ];
 
 struct Text {
+    /// The chosen language's code, as "ko".
+    language: &'static str,
     /// The chosen language, then English for what it lacks.
     bundles: Vec<FluentBundle<FluentResource>>,
     /// Messages without arguments, formatted once.
@@ -80,7 +82,7 @@ fn bundle(code: &str) -> (FluentBundle<FluentResource>, Vec<String>) {
     (bundle, ids)
 }
 
-fn load(code: &str) -> Text {
+fn load(code: &'static str) -> Text {
     let mut bundles = Vec::new();
     let mut ids = Vec::new();
     let order: &[&str] = if code == "en" { &["en"] } else { &[code, "en"] };
@@ -90,6 +92,7 @@ fn load(code: &str) -> Text {
         ids.extend(names);
     }
     let mut text = Text {
+        language: code,
         bundles,
         plain: HashMap::new(),
     };
@@ -132,6 +135,11 @@ fn format(
 }
 
 /// The text of message `id`.
+/// The interface language's code, as "ko".
+pub fn language() -> &'static str {
+    text().language
+}
+
 pub fn tr(id: &'static str) -> &'static str {
     text().plain.get(id).copied().unwrap_or_else(|| {
         tracing::warn!(id, "no interface text");

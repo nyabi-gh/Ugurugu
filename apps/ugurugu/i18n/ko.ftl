@@ -280,3 +280,19 @@ image-size-keep-aspect-fixed = 캔버스 크기 제한 안에서 이 가로세�
 image-size-scales = 너비 { $horizontal }%  ·  높이 { $vertical }%
 image-size-distorted = 가로세로 비율이 바뀌어 그림이 왜곡됩니다.
 image-size-sampling = 리샘플링
+
+# Text tool
+tool-text = 텍스트
+tool-text-rail = 텍스트
+text-content-label = 텍스트
+text-content-hint = 배치할 텍스트를 입력하세요…
+text-font = 글꼴
+text-font-default = 기본
+text-size = 크기
+text-filled = 글자 채우기
+text-place = 텍스트 배치
+text-cancel = 취소
+text-hint = 캔버스를 클릭해 텍스트를 놓고 드래그로 위치를 잡으세요. 글자는 브러시 색과 굵기를 사용하며, 그린 선처럼 우글거립니다.
+text-type-hint = 텍스트 패널에 입력하면 여기에 표시됩니다.
+text-drag-hint = 드래그로 이동 · Enter 적용 · Esc 취소
+text-empty = 배치할 텍스트를 먼저 입력하세요.
