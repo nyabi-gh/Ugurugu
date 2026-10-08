@@ -100,6 +100,17 @@ wobble = WOBBLE
 wobble-scope = Wobble applies to
 wobble-preview = Wobble preview
 wobble-preview-tip = Live preview of the wobble strength
+motion-style = Motion style
+motion-classic = Classic
+motion-smooth = Smooth
+motion-stepped = Stepped
+motion-poses = Pose count
+motion-detail = Detail
+motion-linked = Linked
+motion-randomness = Randomness
+motion-broken = Broken line
+motion-break-amount = Break amount
+motion-break-range = Break range
 
 # Colour
 color-dock = Color

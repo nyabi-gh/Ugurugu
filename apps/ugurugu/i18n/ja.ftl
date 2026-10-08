@@ -100,6 +100,17 @@ wobble = ウォブル
 wobble-scope = ゆらぎの適用先
 wobble-preview = ウォブルプレビュー
 wobble-preview-tip = 現在のウォブルの強さをリアルタイムで表示します
+motion-style = モーションスタイル
+motion-classic = クラシック
+motion-smooth = 滑らか
+motion-stepped = ステップ
+motion-poses = ポーズ数
+motion-detail = ディテール
+motion-linked = 連動
+motion-randomness = ランダム性
+motion-broken = 途切れ線
+motion-break-amount = 途切れ量
+motion-break-range = 途切れ範囲
 
 # Colour
 color-dock = 色

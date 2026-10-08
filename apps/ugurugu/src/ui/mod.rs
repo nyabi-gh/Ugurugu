@@ -14,7 +14,7 @@ use fluent_bundle::FluentArgs;
 use ugu_core::document::{LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::Wobble;
+use ugu_core::ops::{MotionStyle, Wobble};
 use ugu_session::{Session, Tool};
 
 use crate::canvas::{Canvas, ZOOM_RANGE};
@@ -34,8 +34,8 @@ pub struct Panels {
     pub shown: Shown,
     /// Frames and frames per second being edited.
     animation: Option<(f32, f32)>,
-    /// Wobble amount being dragged.
-    wobble: Option<f32>,
+    /// Wobble being edited, from a drag or typing.
+    wobble: Option<Wobble>,
     /// Whether the wobble panel edits the current layer instead of the
     /// whole drawing.
     wobble_layer: bool,
@@ -446,9 +446,9 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, tr("wobble-scope"))
         });
     let on_layer = panels.wobble_layer && layer_wobble.is_some();
-    let amount = match layer_wobble {
-        Some(Some(own)) if on_layer => own.amount,
-        _ => drawing.amount,
+    let shown = match layer_wobble {
+        Some(Some(own)) if on_layer => own,
+        _ => drawing,
     };
     if on_layer {
         let overridden = matches!(layer_wobble, Some(Some(_)));
@@ -466,43 +466,172 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         }
     }
     widgets::field_label(ui, tr("wobble"));
-    let mut value = panels.wobble.unwrap_or(amount);
+    let mut edited = panels.wobble.unwrap_or(shown);
+    // A drag commits when it stops, anything else at once.
+    let mut ended = false;
+    let mut track = |response: egui::Response| {
+        ended |= response.drag_stopped() || (response.changed() && !response.dragged());
+        response.changed()
+    };
     let (min, max) = (*limits::WOBBLE_AMOUNT.start(), *limits::WOBBLE_AMOUNT.end());
+    let mut amount = edited.amount;
     let response = ui
         .horizontal(|ui| {
-            let preview = wobble_preview(ui, value, ui.ctx().input(|input| input.time));
+            let preview = wobble_preview(ui, amount, ui.ctx().input(|input| input.time));
             preview.on_hover_text(tr("wobble-preview-tip"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let field =
-                    widgets::number(ui, &mut value, min..=max, " px", 1, 64.0, tr("wobble"));
+                    widgets::number(ui, &mut amount, min..=max, " px", 1, 64.0, tr("wobble"));
                 let width = ui.available_width().max(40.0);
-                widgets::slider(ui, &mut value, min..=max, tr("wobble"), width).union(field)
+                widgets::slider(ui, &mut amount, min..=max, tr("wobble"), width).union(field)
             })
             .inner
         })
         .inner;
-    value = (value * 10.0).round() / 10.0;
-    if response.changed() {
-        panels.wobble = Some(value);
+    let mut changed = track(response);
+    edited.amount = (amount * 10.0).round() / 10.0;
+
+    let motion = &mut edited.motion;
+    let style_name = |style: MotionStyle| match style {
+        MotionStyle::Classic => tr("motion-classic"),
+        MotionStyle::Smooth => tr("motion-smooth"),
+        MotionStyle::Stepped => tr("motion-stepped"),
+    };
+    let before = motion.style;
+    form_row(ui, tr("motion-style"), |ui| {
+        egui::ComboBox::from_id_salt("motion-style")
+            .width(ui.available_width())
+            .selected_text(style_name(motion.style))
+            .show_ui(ui, |ui| {
+                for style in [
+                    MotionStyle::Classic,
+                    MotionStyle::Smooth,
+                    MotionStyle::Stepped,
+                ] {
+                    ui.selectable_value(&mut motion.style, style, style_name(style));
+                }
+            })
+            .response
+            .widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, tr("motion-style"))
+            });
+    });
+    let restyled = motion.style != before;
+    // Poses, detail, linking and randomness move Smooth and Stepped only.
+    ui.add_enabled_ui(motion.style != MotionStyle::Classic, |ui| {
+        let mut poses = motion.poses.min(frames) as f32;
+        let response = form_row(ui, tr("motion-poses"), |ui| {
+            widgets::number(
+                ui,
+                &mut poses,
+                1.0..=frames as f32,
+                "",
+                0,
+                64.0,
+                tr("motion-poses"),
+            )
+        });
+        if track(response) {
+            changed = true;
+            motion.poses = poses.round() as u32;
+        }
+        let range = limits::MOTION_DETAIL;
+        let mut detail = motion.detail as f32;
+        let response = form_row(ui, tr("motion-detail"), |ui| {
+            let range = *range.start() as f32..=*range.end() as f32;
+            widgets::number(ui, &mut detail, range, "", 0, 64.0, tr("motion-detail"))
+        });
+        if track(response) {
+            changed = true;
+            motion.detail = detail.round() as u32;
+        }
+        changed |= track(percent_row(ui, tr("motion-linked"), &mut motion.linked));
+        changed |= track(percent_row(
+            ui,
+            tr("motion-randomness"),
+            &mut motion.randomness,
+        ));
+    });
+    if track(widgets::checkbox(
+        ui,
+        &mut motion.broken,
+        tr("motion-broken"),
+    )) {
+        changed = true;
     }
-    let ended = response.drag_stopped() || (response.changed() && !response.dragged());
+    ui.add_enabled_ui(motion.broken, |ui| {
+        changed |= track(percent_row(
+            ui,
+            tr("motion-break-amount"),
+            &mut motion.break_amount,
+        ));
+        let range = limits::BREAK_RANGE;
+        let mut length = motion.break_range;
+        let response = form_row(ui, tr("motion-break-range"), |ui| {
+            widgets::number(
+                ui,
+                &mut length,
+                range,
+                " px",
+                1,
+                64.0,
+                tr("motion-break-range"),
+            )
+        });
+        if track(response) {
+            changed = true;
+            motion.break_range = (length * 10.0).round() / 10.0;
+        }
+    });
+
+    if restyled {
+        changed = true;
+        ended = true;
+    }
+    if changed {
+        panels.wobble = Some(edited);
+    }
     if ended
         && let Some(value) = panels.wobble.take()
-        && value != amount
+        && value != shown
     {
         let result = if on_layer {
             canvas.edit(|session| {
                 session.update_layer(current, "Layer wobble", |layer| {
                     if let LayerKind::Paint(paint) = &mut layer.kind {
-                        paint.wobble = Some(Wobble::classic(value));
+                        paint.wobble = Some(value);
                     }
                 })
             })
         } else {
-            canvas.edit(|session| session.set_animation(frames, fps, Wobble::classic(value)))
+            canvas.edit(|session| session.set_animation(frames, fps, value))
         };
         panels.report(result);
     }
+}
+
+/// A caption on the left and `control` on the right, as 2.2.13's form rows.
+fn form_row<R>(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        widgets::field_label(ui, label);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control)
+            .inner
+    })
+    .inner
+}
+
+/// A share from 0 to 1 as a slider and a field of whole percent.
+fn percent_row(ui: &mut egui::Ui, label: &str, share: &mut f32) -> egui::Response {
+    let mut percent = *share * 100.0;
+    let response = form_row(ui, label, |ui| {
+        let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, label);
+        let width = ui.available_width().max(40.0);
+        widgets::slider(ui, &mut percent, 0.0..=100.0, label, width).union(field)
+    });
+    if response.changed() {
+        *share = percent.round() / 100.0;
+    }
+    response
 }
 
 /// A short line wobbling by `amount`, moving only while the pointer is on

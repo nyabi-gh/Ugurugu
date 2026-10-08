@@ -100,6 +100,17 @@ wobble = 우글거림
 wobble-scope = 우글거림 적용 대상
 wobble-preview = 우글거림 미리보기
 wobble-preview-tip = 현재 우글거림 강도를 실시간으로 보여줍니다
+motion-style = 모션 스타일
+motion-classic = 클래식
+motion-smooth = 부드럽게
+motion-stepped = 단계별
+motion-poses = 포즈 수
+motion-detail = 디테일
+motion-linked = 연결
+motion-randomness = 무작위성
+motion-broken = 끊어진 선
+motion-break-amount = 끊김 정도
+motion-break-range = 끊김 범위
 
 # Colour
 color-dock = 색상
