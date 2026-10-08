@@ -548,6 +548,7 @@ impl RenderThread {
             // Before the widgets run, so focus is what the key was pressed in.
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, paste);
             files.confirm(ui.ctx(), canvas);
+            ui::resize_dialog(ui.ctx(), canvas, panels);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             let bar = |fill, x, y| {

@@ -238,6 +238,7 @@ impl Canvas {
             // the split of the new one arrives.
             self.split = None;
             self.spare_coverage = None;
+            self.fit();
         }
         self.follow_transform(key);
         result
@@ -1364,6 +1365,72 @@ mod tests {
             canvas.display().data_as_u8_slice(),
             applied.data_as_u8_slice()
         );
+    }
+
+    #[test]
+    fn a_canvas_change_during_a_shown_transform_applies_it_and_shows_the_new_canvas() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(point([40.0, 40.0], 0.0)).unwrap();
+            for step in 1..=60 {
+                let t = f64::from(step) / 60.0;
+                session.extend_stroke(point([40.0 + 200.0 * t, 40.0 + 100.0 * t], t * 250.0));
+            }
+            session.end_stroke(point([240.0, 140.0], 250.0)).unwrap();
+            session.selection_shape = ugu_session::ShapeKind::Rectangle;
+            session.begin_selection([60.0, 50.0], Combine::Replace);
+            session.end_selection([180.0, 130.0]).unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let full = |canvas: &super::Canvas| {
+            let [width, height] = canvas.session().document().canvas.map(|edge| edge as u16);
+            let mut full = Pixmap::new(width, height);
+            ugu_render::document::DocumentRenderer::new(0).render(
+                canvas.session().document(),
+                canvas.session().frame(),
+                Purpose::Display,
+                &mut full,
+            );
+            full
+        };
+        for change in 0..2 {
+            canvas.begin_transform();
+            canvas.begin_transform_drag([120.0, 90.0]);
+            canvas.drag_transform([150.0, 100.0]);
+            canvas.sync();
+            canvas.interaction = Interaction::Idle;
+            assert!(canvas.preview.is_some());
+            if change == 0 {
+                canvas
+                    .edit(|session| session.crop_canvas([-20, 10], [300, 220]))
+                    .unwrap();
+            } else {
+                canvas
+                    .edit(|session| {
+                        session.resample_image([150, 110], ugu_core::ops::Sampling::Smooth)
+                    })
+                    .unwrap();
+            }
+            assert!(canvas.preview.is_none() && canvas.session().pending().is_none());
+            settle(&mut canvas, &renders);
+            let most = max_difference(canvas.display(), &full(&canvas));
+            assert!(most <= 2, "shown differs by {most}");
+        }
+        for _ in 0..4 {
+            canvas.edit(Session::undo).unwrap();
+            settle(&mut canvas, &renders);
+            let most = max_difference(canvas.display(), &full(&canvas));
+            assert!(most <= 2, "shown differs by {most} after undo");
+        }
+        assert_eq!(canvas.session().document().canvas, [320, 200]);
     }
 
     fn layer_render(document: &Document, layer: LayerId, frame: i64) -> Pixmap {

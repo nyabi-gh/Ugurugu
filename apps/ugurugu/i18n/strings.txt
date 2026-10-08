@@ -225,3 +225,56 @@ bar-hide | ugurugu::TimelineBar | Hide
 bar-hide-tip | ugurugu::TimelineBar | Hide animation bar (Ctrl+T)
 scrubber | ugurugu::FrameScrubber | Frame scrubber
 scrubber-frame | ugurugu::FrameScrubber | Frame %1 of %2 | args=frame,count
+
+# Canvas and image size
+edit-image-size | ugurugu::MainWindow | Change image size…
+edit-canvas-size | ugurugu::MainWindow | Change canvas size…
+dialog-ok | - | OK | 확인 | OK
+dialog-cancel | - | Cancel | 취소 | キャンセル
+size-width | ugurugu::CanvasSizeDialog | Width
+size-height | ugurugu::CanvasSizeDialog | Height
+size-change | ugurugu::CanvasSizeDialog | %1 × %2 px  →  %3 × %4 px | args=width,height,new_width,new_height
+canvas-size-title | ugurugu::CanvasSizeDialog | Change canvas size
+canvas-size-description | ugurugu::CanvasSizeDialog | Change the canvas bounds without scaling the artwork.
+canvas-size-preview | ugurugu::CanvasSizeDialog | Canvas size preview
+canvas-size-section | ugurugu::CanvasSizeDialog | CANVAS SIZE
+canvas-size-relative | ugurugu::CanvasSizeDialog | Relative size
+canvas-size-relative-tip | ugurugu::CanvasSizeDialog | Use relative canvas size
+canvas-size-width | ugurugu::CanvasSizeDialog | Canvas width
+canvas-size-height | ugurugu::CanvasSizeDialog | Canvas height
+canvas-size-width-change | ugurugu::CanvasSizeDialog | Width change
+canvas-size-height-change | ugurugu::CanvasSizeDialog | Height change
+canvas-size-width-change-name | ugurugu::CanvasSizeDialog | Canvas width change
+canvas-size-height-change-name | ugurugu::CanvasSizeDialog | Canvas height change
+canvas-size-anchor | ugurugu::CanvasSizeDialog | REFERENCE POINT
+anchor-top-left | ugurugu::CanvasSizeDialog | Top left
+anchor-top-center | ugurugu::CanvasSizeDialog | Top center
+anchor-top-right | ugurugu::CanvasSizeDialog | Top right
+anchor-middle-left | ugurugu::CanvasSizeDialog | Middle left
+anchor-center | ugurugu::CanvasSizeDialog | Center
+anchor-middle-right | ugurugu::CanvasSizeDialog | Middle right
+anchor-bottom-left | ugurugu::CanvasSizeDialog | Bottom left
+anchor-bottom-center | ugurugu::CanvasSizeDialog | Bottom center
+anchor-bottom-right | ugurugu::CanvasSizeDialog | Bottom right
+canvas-size-offset-x | ugurugu::CanvasSizeDialog | X offset
+canvas-size-offset-y | ugurugu::CanvasSizeDialog | Y offset
+canvas-size-offset-x-name | ugurugu::CanvasSizeDialog | Artwork horizontal offset
+canvas-size-offset-y-name | ugurugu::CanvasSizeDialog | Artwork vertical offset
+canvas-size-offset-summary | ugurugu::CanvasSizeDialog | Artwork offset: X %1, Y %2 | args=x,y
+canvas-size-outside | ugurugu::CanvasSizeDialog | The artwork is entirely outside the new canvas.
+canvas-size-clipped | ugurugu::CanvasSizeDialog | Artwork outside the new canvas will be clipped.
+canvas-size-expanded | ugurugu::CanvasSizeDialog | The expanded area uses the canvas background.
+canvas-size-unchanged | ugurugu::CanvasSizeDialog | The canvas and artwork bounds are unchanged.
+image-size-title | ugurugu::ImageSizeDialog | Change image size
+image-size-description | - | Resample the artwork to new pixel dimensions. | 그림을 새 픽셀 크기로 리샘플합니다. | 絵を新しいピクセルサイズにリサンプリングします。
+image-size-preview | ugurugu::ImageSizeDialog | Image size preview
+image-size-section | ugurugu::ImageSizeDialog | IMAGE SIZE
+image-size-width | ugurugu::ImageSizeDialog | Image width
+image-size-height | ugurugu::ImageSizeDialog | Image height
+image-size-scale | ugurugu::ImageSizeDialog | Uniform scale
+image-size-scale-tip | ugurugu::ImageSizeDialog | Changing this value scales both dimensions uniformly.
+image-size-keep-aspect | ugurugu::ImageSizeDialog | Keep aspect ratio
+image-size-keep-aspect-fixed | ugurugu::ImageSizeDialog | No other size can keep this aspect ratio within the canvas size limits.
+image-size-scales | ugurugu::ImageSizeDialog | Width %1%  ·  Height %2% | args=horizontal,vertical
+image-size-distorted | ugurugu::ImageSizeDialog | The aspect ratio will change and the artwork will be distorted.
+image-size-sampling | - | Resampling | 리샘플링 | リサンプリング

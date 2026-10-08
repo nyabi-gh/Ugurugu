@@ -405,44 +405,95 @@ impl Selection {
     /// The selection on the canvas left by moving the content by `offset`
     /// onto a canvas of `size`, as `Op::Crop` does.
     pub fn cropped(&self, offset: [i32; 2], size: [u32; 2]) -> Option<Self> {
-        let from = Canvas::of(self);
-        let mut to = Canvas::empty(size);
-        let [width, height] = to.size;
-        for y in 0..height {
-            for x in 0..width {
-                let source = [
-                    x as i64 - i64::from(offset[0]),
-                    y as i64 - i64::from(offset[1]),
-                ];
-                if source[0] >= 0
-                    && source[1] >= 0
-                    && (source[0] as usize) < from.size[0]
-                    && (source[1] as usize) < from.size[1]
-                {
-                    to.pixels[y * width + x] =
-                        from.pixels[source[1] as usize * from.size[0] + source[0] as usize];
-                }
-            }
+        let [left, top, width, height] = self.mask.bounds;
+        let [left, top] = [left + offset[0], top + offset[1]];
+        let [canvas_width, canvas_height] = size.map(|edge| edge as i32);
+        let [from_x, from_y] = [left.max(0), top.max(0)];
+        let [to_x, to_y] = [
+            (left + width).min(canvas_width),
+            (top + height).min(canvas_height),
+        ];
+        if from_x >= to_x || from_y >= to_y {
+            return None;
         }
-        to.selection()
+        if [from_x, from_y, to_x, to_y] == [left, top, left + width, top + height] {
+            return Some(Self {
+                canvas: size,
+                mask: Mask {
+                    bounds: [left, top, width, height],
+                    bits: self.mask.bits.clone(),
+                },
+            });
+        }
+        let source_bytes = Mask::row_bytes(width);
+        let kept = to_x - from_x;
+        let row_bytes = Mask::row_bytes(kept);
+        let mut bits = vec![0u8; row_bytes * (to_y - from_y) as usize];
+        for (y, out) in (from_y..to_y).zip(bits.chunks_exact_mut(row_bytes)) {
+            let row = (y - top) as usize * source_bytes;
+            copy_bits(
+                &self.mask.bits[row..row + source_bytes],
+                (from_x - left) as usize,
+                kept as usize,
+                out,
+            );
+        }
+        tight(size, [from_x, from_y, kept, to_y - from_y], bits)
     }
 
     /// The selection resampled to a canvas of `size` by the nearest pixel
     /// centre, as `Op::Resample` resamples with nearest sampling.
     pub fn resampled(&self, size: [u32; 2]) -> Option<Self> {
-        let from = Canvas::of(self);
-        let mut to = Canvas::empty(size);
-        let [width, height] = to.size;
-        let source = |index: usize, from_edge: usize, to_edge: usize| {
-            ((2 * index + 1) * from_edge / (2 * to_edge)).min(from_edge - 1)
+        let [left, top, width, height] = self.mask.bounds;
+        let source = |index: usize, from_edge: u32, to_edge: u32| {
+            let [from_edge, to_edge] = [from_edge as usize, to_edge as usize];
+            ((2 * index + 1) * from_edge / (2 * to_edge)).min(from_edge - 1) as i32
         };
-        for y in 0..height {
-            let row = source(y, from.size[1], height) * from.size[0];
-            for x in 0..width {
-                to.pixels[y * width + x] = from.pixels[row + source(x, from.size[0], width)];
+        // The target pixels whose source lies in the mask, along one axis.
+        let reach = |start: i32, length: i32, axis: usize| {
+            let inside = |index: &usize| {
+                (start..start + length).contains(&source(*index, self.canvas[axis], size[axis]))
+            };
+            let mut indices = 0..size[axis] as usize;
+            let first = indices.find(inside)?;
+            let last = indices.rfind(inside).unwrap_or(first);
+            Some((first, last + 1))
+        };
+        let (from_x, to_x) = reach(left, width, 0)?;
+        let (from_y, to_y) = reach(top, height, 1)?;
+        let columns: Vec<usize> = (from_x..to_x)
+            .map(|x| (source(x, self.canvas[0], size[0]) - left) as usize)
+            .collect();
+        let source_bytes = Mask::row_bytes(width);
+        let row_bytes = Mask::row_bytes(columns.len() as i32);
+        let mut bits = vec![0u8; row_bytes * (to_y - from_y)];
+        let mut previous = None;
+        for y in from_y..to_y {
+            let row = (source(y, self.canvas[1], size[1]) - top) as usize;
+            let at = (y - from_y) * row_bytes;
+            if previous == Some(row) {
+                bits.copy_within(at - row_bytes..at, at);
+                continue;
+            }
+            previous = Some(row);
+            let input = &self.mask.bits[row * source_bytes..(row + 1) * source_bytes];
+            let out = &mut bits[at..at + row_bytes];
+            for (x, &column) in columns.iter().enumerate() {
+                if input[column / 8] & (0x80 >> (column % 8)) != 0 {
+                    out[x / 8] |= 0x80 >> (x % 8);
+                }
             }
         }
-        to.selection()
+        tight(
+            size,
+            [
+                from_x as i32,
+                from_y as i32,
+                columns.len() as i32,
+                (to_y - from_y) as i32,
+            ],
+            bits,
+        )
     }
 
     pub fn canvas(&self) -> [u32; 2] {
@@ -464,6 +515,70 @@ impl Selection {
     pub fn outline(&self) -> Vec<Vec<[i32; 2]>> {
         self.mask.outline()
     }
+}
+
+/// Copies `width` bits from bit `from` of `source` to the start of `out`,
+/// leaving the bits after them clear.
+fn copy_bits(source: &[u8], from: usize, width: usize, out: &mut [u8]) {
+    let shift = from % 8;
+    for (index, byte) in out.iter_mut().enumerate().take(width.div_ceil(8)) {
+        let at = from / 8 + index;
+        let next = source.get(at + 1).copied().unwrap_or(0);
+        *byte = if shift == 0 {
+            source[at]
+        } else {
+            source[at] << shift | next >> (8 - shift)
+        };
+    }
+    if !width.is_multiple_of(8) {
+        out[width / 8] &= 0xff << (8 - width % 8);
+    }
+}
+
+/// The selection of the bits set in a mask at `bounds`, with the bounds
+/// narrowed to them; `None` when there are none.
+fn tight(canvas: [u32; 2], bounds: [i32; 4], bits: Vec<u8>) -> Option<Selection> {
+    let [left, top, width, _] = bounds;
+    let row_bytes = Mask::row_bytes(width);
+    let rows: Vec<&[u8]> = bits.chunks_exact(row_bytes).collect();
+    let set = |row: &&[u8]| row.iter().any(|&byte| byte != 0);
+    let first = rows.iter().position(set)?;
+    let last = rows.iter().rposition(set).unwrap_or(first) + 1;
+    let (mut from, mut to) = (usize::MAX, 0);
+    for row in &rows[first..last] {
+        if let Some(byte) = row.iter().position(|&byte| byte != 0) {
+            from = from.min(byte * 8 + row[byte].leading_zeros() as usize);
+        }
+        if let Some(byte) = row.iter().rposition(|&byte| byte != 0) {
+            to = to.max(byte * 8 + 8 - row[byte].trailing_zeros() as usize);
+        }
+    }
+    let narrowed = [
+        left + from as i32,
+        top + first as i32,
+        (to - from) as i32,
+        (last - first) as i32,
+    ];
+    let bits = if narrowed == bounds {
+        bits
+    } else {
+        let out_bytes = Mask::row_bytes(narrowed[2]);
+        let mut out = vec![0u8; out_bytes * (last - first)];
+        for (row, target) in rows[first..last]
+            .iter()
+            .zip(out.chunks_exact_mut(out_bytes))
+        {
+            copy_bits(row, from, to - from, target);
+        }
+        out
+    };
+    Some(Selection {
+        canvas,
+        mask: Mask {
+            bounds: narrowed,
+            bits: Arc::from(bits),
+        },
+    })
 }
 
 /// How far the convex `quad` reaches across the row of pixels from `y` to
@@ -607,6 +722,90 @@ mod tests {
         // Widths that are not whole bytes.
         let odd = Selection::all([13, 2]).unwrap();
         assert!(odd.mask.contains(12, 1) && !odd.mask.contains(13, 1));
+    }
+
+    /// The set pixels of `selection` anywhere on its canvas, and whether its
+    /// bounds are the least that hold them.
+    fn set_pixels(selection: &Selection) -> (Vec<[i32; 2]>, bool) {
+        let [width, height] = selection.canvas.map(|edge| edge as i32);
+        let set: Vec<[i32; 2]> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| [x, y]))
+            .filter(|&[x, y]| selection.mask.contains(x, y))
+            .collect();
+        let low = |axis: usize| set.iter().map(|p| p[axis]).min().unwrap();
+        let high = |axis: usize| set.iter().map(|p| p[axis]).max().unwrap() + 1;
+        let tight = selection.mask.bounds == [low(0), low(1), high(0) - low(0), high(1) - low(1)];
+        (set, tight)
+    }
+
+    #[test]
+    fn crops_and_resamples_match_moving_each_pixel() {
+        let canvas = [37, 29];
+        let star = Shape::Freehand(
+            (0..23)
+                .map(|i| {
+                    let turn = f64::from(i) / 23.0 * std::f64::consts::TAU;
+                    let reach = if i % 2 == 0 { 15.0 } else { 6.0 };
+                    [18.3 + reach * turn.cos(), 14.1 + reach * turn.sin()]
+                })
+                .collect(),
+        );
+        let shapes = [
+            star,
+            Shape::Ellipse([3.0, 2.0], [30.0, 27.0]),
+            Shape::Rectangle([0.0, 0.0], [37.0, 29.0]),
+            Shape::Rectangle([9.0, 4.0], [10.0, 25.0]),
+        ];
+        for shape in &shapes {
+            let selection = Selection::of_shape(shape, canvas).unwrap();
+            let (before, _) = set_pixels(&selection);
+            for (offset, size) in [
+                ([0, 0], canvas),
+                ([5, 3], [60, 40]),
+                ([-7, -3], [20, 21]),
+                ([-11, 6], [17, 9]),
+                ([-9, 0], [3, 29]),
+            ] {
+                let expected: Vec<[i32; 2]> = before
+                    .iter()
+                    .map(|&[x, y]| [x + offset[0], y + offset[1]])
+                    .filter(|&[x, y]| x >= 0 && y >= 0 && x < size[0] as i32 && y < size[1] as i32)
+                    .collect();
+                let mut expected = expected;
+                expected.sort_by_key(|&[x, y]| (y, x));
+                match selection.cropped(offset, size) {
+                    None => assert!(expected.is_empty()),
+                    Some(cropped) => {
+                        assert_eq!(cropped.canvas, size);
+                        assert_eq!(
+                            set_pixels(&cropped),
+                            (expected, true),
+                            "{offset:?} {size:?}"
+                        );
+                    }
+                }
+            }
+            for size in [[74, 58], [19, 14], [37, 7], [3, 61], [36, 30], [1, 1]] {
+                let source = |index: i32, from: u32, to: u32| {
+                    ((2 * index as u32 + 1) * from / (2 * to)).min(from - 1) as i32
+                };
+                let expected: Vec<[i32; 2]> = (0..size[1] as i32)
+                    .flat_map(|y| (0..size[0] as i32).map(move |x| [x, y]))
+                    .filter(|&[x, y]| {
+                        selection
+                            .mask
+                            .contains(source(x, canvas[0], size[0]), source(y, canvas[1], size[1]))
+                    })
+                    .collect();
+                match selection.resampled(size) {
+                    None => assert!(expected.is_empty()),
+                    Some(resampled) => {
+                        assert_eq!(resampled.canvas, size);
+                        assert_eq!(set_pixels(&resampled), (expected, true), "{size:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

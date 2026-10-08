@@ -9,6 +9,7 @@
 mod brushes;
 mod color;
 mod layers;
+mod resize;
 
 use fluent_bundle::FluentArgs;
 use std::sync::Arc;
@@ -47,6 +48,8 @@ pub struct Panels {
     pub pointer: Option<[f64; 2]>,
     /// Why the last edit from the panels was refused.
     refusal: Option<String>,
+    /// The canvas or image size dialog, while open.
+    resize: Option<resize::Dialog>,
 }
 
 /// Panels the Window menu opens and closes.
@@ -105,7 +108,7 @@ pub fn shortcuts(
 ) {
     // Not `egui_wants_keyboard_input`, which also holds for a focused row or
     // button and would leave the shortcuts dead after clicking a layer.
-    if ctx.text_edit_focused() {
+    if ctx.text_edit_focused() || ctx.memory(|memory| memory.top_modal_layer().is_some()) {
         return;
     }
     // A whole chord can arrive within one frame, so each key is matched with
@@ -221,8 +224,11 @@ fn report_bool(result: Result<bool, EditError>) {
 }
 
 fn item(ui: &mut egui::Ui, text: &str, shortcut: &str) -> bool {
-    ui.add(egui::Button::new(text).shortcut_text(shortcut))
-        .clicked()
+    let mut button = egui::Button::new(text);
+    if !shortcut.is_empty() {
+        button = button.shortcut_text(shortcut);
+    }
+    ui.add(button).clicked()
 }
 
 fn toggle_item(ui: &mut egui::Ui, value: &mut bool, text: &str, shortcut: &str) {
@@ -334,6 +340,14 @@ pub fn menu_bar(
                 clipboard.paste(canvas);
             }
             ui.separator();
+            let canvas_size = canvas.session().document().canvas;
+            if item(ui, tr("edit-image-size"), "") {
+                panels.resize = Some(resize::Dialog::Image(resize::ImageSize::new(canvas_size)));
+            }
+            if item(ui, tr("edit-canvas-size"), "") {
+                panels.resize = Some(resize::Dialog::Canvas(resize::CanvasSize::new(canvas_size)));
+            }
+            ui.separator();
             if item(ui, tr("edit-select-all"), "Ctrl+A") {
                 canvas.edit(Session::select_all);
             }
@@ -424,6 +438,11 @@ pub fn menu_bar(
         });
         ui.menu_button(tr("menu-window"), |ui| window_items(ui, &mut panels.shown));
     });
+}
+
+/// The canvas or image size dialog, while one is open.
+pub fn resize_dialog(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
+    resize::show(ctx, canvas, panels);
 }
 
 /// The quick access bar: panels on the left, undo and redo on the right.

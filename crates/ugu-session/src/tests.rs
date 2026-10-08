@@ -1174,3 +1174,132 @@ fn a_placed_image_is_a_new_layer_selected_and_ready_to_move() {
     assert_eq!(session.pending().unwrap().layer, layer);
     assert_eq!(session.undo_label(), Some("Place image"));
 }
+
+#[test]
+fn a_canvas_change_applies_a_pending_transform_first_and_moves_its_selection() {
+    for resample in [false, true] {
+        let mut session = session();
+        let layer = session.current_layer();
+        draw(&mut session, 10.0, 60.0);
+        drag(
+            &mut session,
+            ShapeKind::Rectangle,
+            [10.0, 40.0],
+            [30.0, 60.0],
+            Combine::Replace,
+        );
+        session.begin_transform().unwrap();
+        session.set_transform(Affine::translation(40.0, 0.0));
+        let moved = session
+            .selection()
+            .unwrap()
+            .transformed(Affine::translation(40.0, 0.0));
+        let changed = if resample {
+            session.resample_image([100, 50], Sampling::Nearest)
+        } else {
+            session.crop_canvas([-20, 10], [150, 100])
+        };
+        assert!(matches!(changed, Ok(Outcome::Committed(_))));
+        assert_eq!(session.pending(), None);
+        assert_eq!(
+            session.document().canvas,
+            if resample { [100, 50] } else { [150, 100] }
+        );
+        let kinds: Vec<_> = ops(&session, layer)
+            .iter()
+            .map(|op| match op {
+                Op::Paint { .. } => "paint",
+                Op::TransformSelection { .. } => "move",
+                Op::Crop {
+                    offset: [-20, 10],
+                    size: [150, 100],
+                } => "crop",
+                Op::Resample {
+                    size: [100, 50],
+                    sampling: Sampling::Nearest,
+                } => "resample",
+                _ => "other",
+            })
+            .collect();
+        let last = if resample { "resample" } else { "crop" };
+        assert_eq!(kinds, ["paint", "move", last]);
+        let expected = if resample {
+            moved.as_ref().and_then(|moved| moved.resampled([100, 50]))
+        } else {
+            moved
+                .as_ref()
+                .and_then(|moved| moved.cropped([-20, 10], [150, 100]))
+        };
+        assert_eq!(
+            session.selection().map(|selection| selection.as_ref()),
+            expected.as_ref()
+        );
+        // Two steps: the canvas change, then the transform.
+        assert!(session.undo().unwrap());
+        assert_eq!(session.document().canvas, [200, 100]);
+        assert_eq!(
+            session.selection().map(|selection| selection.as_ref()),
+            moved.as_ref()
+        );
+        assert_eq!(session.undo_label(), Some("Transform selection"));
+        assert!(session.undo().unwrap());
+        assert_eq!(selected(&session), Some([10, 40, 20, 20]));
+        assert_eq!(ops(&session, layer).len(), 1);
+        assert!(session.redo().unwrap() && session.redo().unwrap());
+        assert_eq!(
+            session.selection().map(|selection| selection.as_ref()),
+            expected.as_ref()
+        );
+    }
+}
+
+#[test]
+fn an_unchanged_canvas_is_no_step_and_a_refused_one_changes_nothing() {
+    let mut session = session();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 40.0],
+        [30.0, 60.0],
+        Combine::Replace,
+    );
+    let revision = session.revision();
+    let label = session.undo_label().map(str::to_owned);
+    assert_eq!(
+        session.crop_canvas([0, 0], [200, 100]),
+        Ok(Outcome::NoChange)
+    );
+    assert_eq!(
+        session.resample_image([200, 100], Sampling::Smooth),
+        Ok(Outcome::NoChange)
+    );
+    assert!(session.crop_canvas([0, 0], [0, 100]).is_err());
+    assert!(
+        session
+            .resample_image([5000, 100], Sampling::Smooth)
+            .is_err()
+    );
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.undo_label().map(str::to_owned), label);
+    assert_eq!(selected(&session), Some([10, 40, 20, 20]));
+    // The same size with the artwork moved is a change.
+    assert!(matches!(
+        session.crop_canvas([-5, 0], [200, 100]),
+        Ok(Outcome::Committed(_))
+    ));
+    assert_eq!(selected(&session), Some([5, 40, 20, 20]));
+    assert!(session.is_dirty());
+}
+
+#[test]
+fn a_canvas_change_ends_a_lasso_being_drawn() {
+    let mut session = session();
+    session.selection_shape = ShapeKind::Freehand;
+    session.begin_selection([10.0, 10.0], Combine::Replace);
+    session.extend_selection([40.0, 10.0]);
+    assert!(session.lasso().is_some());
+    session.crop_canvas([0, 0], [120, 80]).unwrap();
+    assert!(session.lasso().is_none());
+    assert_eq!(session.selection(), None);
+}
