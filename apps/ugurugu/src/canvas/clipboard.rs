@@ -21,6 +21,7 @@ impl Canvas {
     /// its pixels at this frame, cut to the selection's bounds, for other
     /// apps. `None` when there is nothing to copy.
     pub fn copy(&mut self) -> Option<(Arc<Clip>, Image)> {
+        let started = std::time::Instant::now();
         self.notice = None;
         let clip = match self.edit(|session| session.copy()) {
             Ok(clip) => clip,
@@ -46,6 +47,10 @@ impl Canvas {
                 straight.extend(ugu_io::image::unpremultiply(pixel));
             }
         }
+        tracing::debug!(
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            "selection copied"
+        );
         Some((
             clip,
             Image {
@@ -78,10 +83,12 @@ impl Canvas {
 
     /// Pastes `clip` as a new layer, ready to move.
     pub fn paste(&mut self, clip: &Clip) {
+        let started = std::time::Instant::now();
         self.notice = None;
         if let Err(error) = self.edit(|session| session.paste(clip)) {
             self.notice = Some(format!("{} {error}", crate::i18n::tr("paste-failed")));
         }
+        tracing::debug!(ms = started.elapsed().as_secs_f64() * 1000.0, "clip pasted");
     }
 
     /// Places `asset` as a new layer, ready to move.
