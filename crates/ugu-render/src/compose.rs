@@ -568,14 +568,47 @@ mod tests {
         history
     }
 
+    /// `history`, and the same cropped narrower and taller, drawn on, and
+    /// resampled larger.
+    fn histories() -> [History; 2] {
+        let mut reframed = history();
+        reframed
+            .edit("Crop", |document| {
+                command::crop_canvas(document, [-10, 6], [104, 90])
+            })
+            .unwrap();
+        let first = LayerId(1);
+        reframed
+            .edit("Draw", |document| {
+                let new = stroke([0.0, 85.0], [100.0, 5.0], [10, 140, 140, 230], 70);
+                command::draw(document, first, new, false, None)
+            })
+            .unwrap();
+        reframed
+            .edit("Resample", |document| {
+                command::resample_image(document, [130, 100], ugu_core::ops::Sampling::Smooth)
+            })
+            .unwrap();
+        [history(), reframed]
+    }
+
+    fn canvas(document: &Document) -> Pixmap {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        Pixmap::new(width, height)
+    }
+
+    fn whole(document: &Document) -> [u32; 4] {
+        [0, 0, document.canvas[0], document.canvas[1]]
+    }
+
     fn render(document: &Document, frame: i64) -> Pixmap {
-        let mut pixmap = Pixmap::new(120, 80);
+        let mut pixmap = canvas(document);
         DocumentRenderer::new(0).render(document, frame, Purpose::Display, &mut pixmap);
         pixmap
     }
 
     fn split(history: &History, layer: LayerId, frame: i64) -> (Split, Pixmap) {
-        let mut display = Pixmap::new(120, 80);
+        let mut display = canvas(history.document());
         let split = DocumentRenderer::new(0)
             .split(
                 history.document(),
@@ -607,52 +640,74 @@ mod tests {
 
     #[test]
     fn the_split_puts_back_the_full_frame() {
-        let history = history();
-        let full = render(history.document(), 3);
-        let layers = paint_layers(&history);
-        assert_eq!(layers.len(), 4);
-        for layer in layers {
-            let (split, display) = split(&history, layer, 3);
-            assert!(display.data_as_u8_slice() == full.data_as_u8_slice());
-            let mut shown = Pixmap::new(120, 80);
-            composite(&split, None, [0, 0, 120, 80], &mut shown);
-            assert!(
-                shown.data_as_u8_slice() == full.data_as_u8_slice(),
-                "layer {layer:?}"
-            );
+        for history in histories() {
+            let full = render(history.document(), 3);
+            let layers = paint_layers(&history);
+            assert_eq!(layers.len(), 4);
+            for layer in layers {
+                let (split, display) = split(&history, layer, 3);
+                assert!(display.data_as_u8_slice() == full.data_as_u8_slice());
+                let mut shown = canvas(history.document());
+                composite(&split, None, whole(history.document()), &mut shown);
+                assert!(
+                    shown.data_as_u8_slice() == full.data_as_u8_slice(),
+                    "layer {layer:?}"
+                );
+            }
         }
     }
 
     #[test]
     fn a_committed_stroke_stamped_on_any_layer_is_within_a_level_of_a_full_render() {
-        let mut history = history();
-        for layer in paint_layers(&history) {
-            for (erase, seed) in [(false, 500), (true, 501)] {
-                let (mut split, _) = split(&history, layer, 4);
-                let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
-                let wobble = history.document().wobble.amount;
-                let rect = split
-                    .stamp(&mut Stamp::default(), &new, erase, wobble)
-                    .unwrap();
-                let mut shown = Pixmap::new(120, 80);
-                composite(&split, None, [0, 0, 120, 80], &mut shown);
-                history
-                    .edit("Draw", |document| {
-                        command::draw(document, layer, new, erase, None)
-                    })
-                    .unwrap();
-                let most = max_difference(&shown, &render(history.document(), 4));
-                assert!(most <= 1, "{layer:?} erase {erase}: differs by {most}");
-                assert!(rect[2] > rect[0]);
+        for mut history in histories() {
+            for layer in paint_layers(&history) {
+                for (erase, seed) in [(false, 500), (true, 501)] {
+                    let (mut split, _) = split(&history, layer, 4);
+                    let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
+                    let wobble = history.document().wobble.amount;
+                    let rect = split
+                        .stamp(&mut Stamp::default(), &new, erase, wobble)
+                        .unwrap();
+                    let mut shown = canvas(history.document());
+                    composite(&split, None, whole(history.document()), &mut shown);
+                    history
+                        .edit("Draw", |document| {
+                            command::draw(document, layer, new, erase, None)
+                        })
+                        .unwrap();
+                    let mut renderer = DocumentRenderer::new(0);
+                    let mut full = canvas(history.document());
+                    let plan = RenderPlan::new(history.document(), Purpose::Display);
+                    renderer.render_plan(history.document(), &plan, 4, None, &mut full);
+                    let Held::Tiles(stamped) = &split.sources[split.edited.unwrap()] else {
+                        unreachable!("a paint layer's pixels are tiles");
+                    };
+                    let drawn = renderer.surface(layer).unwrap().to_pixmap();
+                    let most = max_difference(&stamped.to_pixmap(), &drawn);
+                    assert!(most <= 1, "{layer:?} erase {erase}: differs by {most}");
+                    // A level in a layer can round to two through the layers
+                    // over it.
+                    let most = max_difference(&shown, &full);
+                    assert!(
+                        most <= 2,
+                        "{layer:?} erase {erase}: shown differs by {most}"
+                    );
+                    assert!(rect[2] > rect[0]);
+                }
             }
         }
     }
 
     #[test]
     fn over_the_budget_the_split_keeps_every_layer_editable() {
-        let mut history = history();
+        for history in histories() {
+            over_the_budget(history);
+        }
+    }
+
+    fn over_the_budget(mut history: History) {
         for layer in paint_layers(&history) {
-            let mut display = Pixmap::new(120, 80);
+            let mut display = canvas(history.document());
             let mut renderer = DocumentRenderer::new(4);
             renderer.set_surface_budget(0);
             let mut split = renderer
@@ -671,8 +726,8 @@ mod tests {
             split
                 .stamp(&mut Stamp::default(), &new, false, wobble)
                 .unwrap();
-            let mut shown = Pixmap::new(120, 80);
-            composite(&split, None, [0, 0, 120, 80], &mut shown);
+            let mut shown = canvas(history.document());
+            composite(&split, None, whole(history.document()), &mut shown);
             history
                 .edit("Draw", |document| {
                     command::draw(document, layer, new, false, None)

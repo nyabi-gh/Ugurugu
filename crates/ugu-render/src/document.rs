@@ -19,7 +19,7 @@ use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{self, AssetId, MaskId, Op, PaintLayer, Sampling, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Store, Stroke};
 use vello_cpu::color::AlphaColor;
-use vello_cpu::kurbo::{Affine, BezPath, Point, Rect};
+use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
 use vello_cpu::{
     Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources,
@@ -36,8 +36,6 @@ use crate::tile::TiledSurface;
 /// Content this build cannot draw yet, and the milestone that adds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unsupported {
-    /// Crops and resizes (M4).
-    CanvasChange,
     /// Airbrush and spray (M4).
     Brush,
 }
@@ -45,7 +43,6 @@ pub enum Unsupported {
 impl std::fmt::Display for Unsupported {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::CanvasChange => "canvas crops or resizes",
             Self::Brush => "airbrush or spray strokes",
         })
     }
@@ -81,8 +78,9 @@ fn check_ops(ops: &[Op], store: &Store) -> Result<(), Unsupported> {
             Op::Fill { .. }
             | Op::ClearSelection { .. }
             | Op::PlaceImage { .. }
-            | Op::TransformSelection { .. } => {}
-            Op::Crop { .. } | Op::Resample { .. } => return Err(Unsupported::CanvasChange),
+            | Op::TransformSelection { .. }
+            | Op::Crop { .. }
+            | Op::Resample { .. } => {}
             Op::Isolated(section) => check_ops(&section.ops, store)?,
         }
     }
@@ -246,6 +244,127 @@ enum Step<'a> {
         steps: Vec<Step<'a>>,
         opacity: f32,
     },
+    /// Carries what is drawn so far to the next canvas, where the steps after
+    /// it draw. Drawing stops and starts again at a resample.
+    Canvas(Reframe),
+}
+
+/// A crop or resample.
+#[derive(Clone, Copy, Debug)]
+struct Reframe {
+    /// The canvas before and after.
+    from: [u32; 2],
+    to: [u32; 2],
+    /// From the canvas before to the canvas after, in document pixels.
+    map: Affine,
+    quality: ImageQuality,
+    resample: bool,
+}
+
+impl Reframe {
+    fn of(op: &Op, from: [u32; 2]) -> Option<Self> {
+        let (map, quality, resample, to) = match *op {
+            Op::Crop { offset, size } => (
+                Affine::translate((f64::from(offset[0]), f64::from(offset[1]))),
+                ImageQuality::Low,
+                false,
+                size,
+            ),
+            Op::Resample { size, sampling } => (
+                Affine::scale_non_uniform(
+                    f64::from(size[0]) / f64::from(from[0]),
+                    f64::from(size[1]) / f64::from(from[1]),
+                ),
+                match sampling {
+                    Sampling::Nearest => ImageQuality::Low,
+                    Sampling::Smooth => ImageQuality::Medium,
+                },
+                true,
+                size,
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            from,
+            to,
+            map,
+            quality,
+            resample,
+        })
+    }
+
+    /// Where what lies in `bounds` on the canvas before is on the canvas
+    /// after; `None` when it is outside the canvas before.
+    fn carry(&self, [left, top, right, bottom]: [f64; 4]) -> Option<[f64; 4]> {
+        let [width, height] = self.from.map(f64::from);
+        let mut kept = [
+            left.max(0.0),
+            top.max(0.0),
+            right.min(width),
+            bottom.min(height),
+        ];
+        if kept[0] >= kept[2] || kept[1] >= kept[3] {
+            return None;
+        }
+        if self.resample {
+            // Smooth sampling spreads a pixel into its neighbours.
+            kept = [kept[0] - 1.0, kept[1] - 1.0, kept[2] + 1.0, kept[3] + 1.0];
+        }
+        Some(moved_bounds(kept, self.map))
+    }
+}
+
+/// How the crops before a resample, or before the end, are drawn: without
+/// stopping, each part moved by the crops after it onto the last canvas.
+struct Crops {
+    /// From the canvas of each part, before each crop and after the last,
+    /// to the last canvas.
+    shifts: Vec<Affine>,
+    /// The canvas before each crop on the last canvas, where it cuts away
+    /// some of the last canvas; outside it nothing drawn before is kept.
+    clips: Vec<Option<BezPath>>,
+}
+
+/// The crops of each canvas `steps` resample to, the first canvas first.
+fn crops(steps: &[Step<'_>]) -> Vec<Crops> {
+    let mut canvases = vec![Vec::new()];
+    for step in steps {
+        match step {
+            Step::Canvas(reframe) if reframe.resample => canvases.push(Vec::new()),
+            Step::Canvas(reframe) => canvases.last_mut().expect("one at least").push(*reframe),
+            _ => {}
+        }
+    }
+    canvases
+        .into_iter()
+        .map(|reframes| {
+            let mut shifts = vec![Affine::IDENTITY; reframes.len() + 1];
+            let mut clips = vec![None; reframes.len()];
+            let Some(last) = reframes.last() else {
+                return Crops { shifts, clips };
+            };
+            let size = last.to.map(f64::from);
+            let mut moved = Vec2::ZERO;
+            for (index, reframe) in reframes.iter().enumerate().rev() {
+                moved += reframe.map.translation();
+                shifts[index] = Affine::translate(moved);
+                let from = reframe.from.map(f64::from);
+                let kept = Rect::new(moved.x, moved.y, moved.x + from[0], moved.y + from[1]);
+                let covers =
+                    kept.x0 <= 0.0 && kept.y0 <= 0.0 && kept.x1 >= size[0] && kept.y1 >= size[1];
+                clips[index] = (!covers).then(|| kept.to_path(0.1));
+            }
+            Crops { shifts, clips }
+        })
+        .collect()
+}
+
+/// Bounds in `out` carried over `reframe`.
+fn carry_all(out: &mut Vec<[f64; 4]>, reframe: &Reframe) {
+    *out = std::mem::take(out)
+        .into_iter()
+        .filter_map(|bounds| reframe.carry(bounds))
+        .collect();
 }
 
 impl DocumentRenderer {
@@ -269,7 +388,10 @@ impl DocumentRenderer {
             tile_edge: TILE_EDGE,
             detail: FULL_DETAIL,
             timings: Timings::default(),
-            masks: DrawCache::default(),
+            masks: DrawCache {
+                spare_count: usize::from(threads.max(1)),
+                ..DrawCache::default()
+            },
         }
     }
 
@@ -288,6 +410,11 @@ impl DocumentRenderer {
     pub fn release_scratch(&mut self) {
         self.main = Raster::new(self.level, self.main_threads);
         self.singles.clear();
+        self.masks
+            .spare
+            .get_mut()
+            .expect("no panic while holding it")
+            .clear();
     }
 
     pub fn timings(&self) -> Timings {
@@ -649,18 +776,20 @@ impl Raster {
             Some(pixmap) if [pixmap.width(), pixmap.height()] == extent => pixmap,
             _ => Pixmap::new(extent[0], extent[1]),
         };
-        let timings = self.draw_steps(&steps, at, origin, &mut pixmap);
+        let timings = self.draw_steps(&steps, at, origin, Affine::IDENTITY, &mut pixmap);
         surface.set(span, pixmap, reached);
         timings
     }
 
     /// Draws `steps` at 1/`shrink` of their size into `pixmap`, which covers
-    /// the scaled document from `origin`.
+    /// the scaled last canvas from `origin`; `shift` takes them to it. Steps
+    /// before a resample draw on the whole of their own canvas.
     fn draw_steps(
         &mut self,
         steps: &[Step<'_>],
         at: &Frame<'_>,
         origin: [u32; 2],
+        shift: Affine,
         pixmap: &mut Pixmap,
     ) -> Timings {
         let Frame {
@@ -670,17 +799,38 @@ impl Raster {
             masks: cache,
             ..
         } = *at;
-        let [width, height] = [pixmap.width(), pixmap.height()];
-        let base = Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
-            * Affine::scale(1.0 / f64::from(shrink));
+        let last = Area {
+            origin,
+            size: [pixmap.width(), pixmap.height()],
+        };
+        let areas: Vec<Area> = steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Canvas(reframe) if reframe.resample => Some(Area {
+                    origin: [0, 0],
+                    size: scaled_size(reframe.from, shrink).map(|edge| edge as u16),
+                }),
+                _ => None,
+            })
+            .chain([last])
+            .collect();
+        let crops = crops(steps);
         let mut timings = Timings::default();
         // Sections that move selections are drawn first, each on its own.
         let mut sections = Vec::new();
+        let (mut canvas, mut part) = (0, 0);
         for step in steps {
-            if let Step::Section { steps, .. } = step {
-                let mut section = Pixmap::new(width, height);
-                timings += self.draw_steps(steps, at, origin, &mut section);
-                sections.push(Arc::new(section));
+            match step {
+                Step::Section { steps, .. } => {
+                    let area = areas[canvas];
+                    let mut section = Pixmap::new(area.size[0], area.size[1]);
+                    let moved = shift * crops[canvas].shifts[part];
+                    timings += self.draw_steps(steps, at, area.origin, moved, &mut section);
+                    sections.push(Arc::new(section));
+                }
+                Step::Canvas(reframe) if reframe.resample => (canvas, part) = (canvas + 1, 0),
+                Step::Canvas(_) => part += 1,
+                _ => {}
             }
         }
         let mut sections = sections.into_iter();
@@ -691,33 +841,60 @@ impl Raster {
         timings.outlines += started.elapsed();
         let mut outlines = paths.iter();
 
-        // A run after a moved selection draws over what the run before drew,
-        // so two buffers take turns instead of copying: one drawn into, the
-        // other drawn from. The one left over is kept for the next layer.
-        let mut target = std::mem::replace(pixmap, Pixmap::new(1, 1));
-        let mut free = cache
-            .take_spare()
-            .filter(|spare| [spare.width(), spare.height()] == [width, height]);
+        // A run after a moved selection or a resample draws over what the
+        // run before drew, so buffers take turns instead of copying: one
+        // drawn into, the other drawn from. Those left over are kept for the
+        // next layers.
+        let mut free = vec![std::mem::replace(pixmap, Pixmap::new(1, 1))];
+        let (mut canvas, mut part) = (0, 0);
+        let mut target = take_buffer(&mut free, cache, areas[0].size);
         // What is drawn before the step that starts each run, and what the
         // run before that drew from.
         let mut so_far: Option<Arc<Pixmap>> = None;
         let mut drawn_from: Option<Arc<Pixmap>> = None;
+        // The resample that carries `so_far` to this run's canvas.
+        let mut carried: Option<Reframe> = None;
         let mut rest = steps;
         loop {
+            let area = areas[canvas];
+            let [width, height] = area.size;
+            let base = area.base(shrink);
             let started = std::time::Instant::now();
             // Vello lets go of the previous scene's images here.
             self.context.reset_and_resize(width, height);
             if let Some(used) = drawn_from.take() {
-                free = Arc::try_unwrap(used).ok().or(free);
+                free.extend(Arc::try_unwrap(used).ok());
             }
-            if let Some(so_far) = &so_far {
-                self.context.set_transform(Affine::IDENTITY);
-                self.put_image(so_far, ImageQuality::Low);
-            }
+            // What is drawn on a canvas a later crop makes smaller and a
+            // crop after that larger again stays cut away.
+            let cuts = &crops[canvas];
             self.context.set_transform(base);
+            for clip in cuts.clips[part..].iter().rev().flatten() {
+                self.context.push_layer(Some(clip), None, None, None, None);
+            }
+            // A selection moved right after a resample moves what was
+            // carried, which needs a run of its own first.
+            let fresh = carried.is_some();
+            if let Some(so_far) = &so_far {
+                match carried.take() {
+                    Some(reframe) => {
+                        let before = areas[canvas - 1].base(shrink);
+                        self.context
+                            .set_transform(base * reframe.map * before.inverse());
+                        self.put_image(so_far, reframe.quality);
+                    }
+                    None => {
+                        self.context.set_transform(Affine::IDENTITY);
+                        self.put_image(so_far, ImageQuality::Low);
+                    }
+                }
+            }
+            carried = None;
+            let mut here = base * shift * cuts.shifts[part];
+            self.context.set_transform(here);
             let mut taken = 0;
             for step in rest {
-                if taken > 0 && matches!(step, Step::Move { .. }) {
+                if (taken > 0 || fresh) && matches!(step, Step::Move { .. }) {
                     break;
                 }
                 taken += 1;
@@ -761,9 +938,9 @@ impl Raster {
                         transform,
                         quality,
                     } => {
-                        self.context.set_transform(base * *transform);
+                        self.context.set_transform(here * *transform);
                         self.put_image(image, *quality);
-                        self.context.set_transform(base);
+                        self.context.set_transform(here);
                     }
                     Step::Move {
                         ready,
@@ -778,14 +955,14 @@ impl Raster {
                         if !keep_source {
                             self.take_away(&ready.area);
                         }
-                        let moved = base * *transform;
+                        let moved = here * *transform;
                         self.context.set_transform(moved);
                         self.context
                             .push_layer(Some(&ready.area), None, None, None, None);
-                        self.context.set_transform(moved * base.inverse());
+                        self.context.set_transform(moved * here.inverse());
                         self.put_image(source, *quality);
                         self.context.pop_layer();
-                        self.context.set_transform(base);
+                        self.context.set_transform(here);
                     }
                     Step::Section { opacity, .. } => {
                         let section = sections.next().expect("drawn above");
@@ -794,9 +971,36 @@ impl Raster {
                             .push_layer(None, None, Some(*opacity), None, None);
                         self.put_image(&section, ImageQuality::Low);
                         self.context.pop_layer();
-                        self.context.set_transform(base);
+                        self.context.set_transform(here);
+                    }
+                    Step::Canvas(reframe) if reframe.resample => {
+                        carried = Some(*reframe);
+                        break;
+                    }
+                    Step::Canvas(_) => {
+                        if cuts.clips[part].is_some() {
+                            self.context.pop_layer();
+                        }
+                        part += 1;
+                        here = base * shift * cuts.shifts[part];
+                        self.context.set_transform(here);
                     }
                 }
+            }
+            for _ in cuts.clips[part..].iter().flatten() {
+                self.context.pop_layer();
+            }
+            let only_changes = rest[..taken]
+                .iter()
+                .all(|step| matches!(step, Step::Canvas(_)));
+            rest = &rest[taken..];
+            if carried.is_some() && so_far.is_none() && only_changes {
+                // Nothing is drawn on the canvas before, so nothing is carried.
+                carried = None;
+                (canvas, part) = (canvas + 1, 0);
+                let next = take_buffer(&mut free, cache, areas[canvas].size);
+                free.push(std::mem::replace(&mut target, next));
+                continue;
             }
             self.context.flush();
             let encoded = started.elapsed();
@@ -807,24 +1011,23 @@ impl Raster {
             );
             timings.encode += encoded;
             timings.rasterize += started.elapsed() - encoded;
-            rest = &rest[taken..];
-            if rest.is_empty() {
+            if rest.is_empty() && carried.is_none() {
                 break;
             }
-            let next = free.take().unwrap_or_else(|| Pixmap::new(width, height));
+            if carried.is_some() {
+                (canvas, part) = (canvas + 1, 0);
+            }
+            let next = take_buffer(&mut free, cache, areas[canvas].size);
             drawn_from = so_far.replace(Arc::new(std::mem::replace(&mut target, next)));
         }
         *pixmap = target;
         if so_far.is_some() {
-            self.context.reset_and_resize(width, height);
+            self.context.reset_and_resize(last.size[0], last.size[1]);
             let left = [so_far, drawn_from].into_iter().flatten();
-            free = left
-                .filter_map(|used| Arc::try_unwrap(used).ok())
-                .next_back()
-                .or(free);
+            free.extend(left.filter_map(|used| Arc::try_unwrap(used).ok()));
         }
-        if let Some(free) = free {
-            cache.keep_spare(free);
+        for left in free {
+            cache.keep_spare(left);
         }
         self.paths = paths;
         timings
@@ -921,15 +1124,45 @@ impl Raster {
     }
 }
 
+/// The scaled pixels a run of steps draws into.
+#[derive(Clone, Copy)]
+struct Area {
+    origin: [u32; 2],
+    size: [u16; 2],
+}
+
+impl Area {
+    /// From document pixels to this area's pixels.
+    fn base(self, shrink: u32) -> Affine {
+        Affine::translate((-f64::from(self.origin[0]), -f64::from(self.origin[1])))
+            * Affine::scale(1.0 / f64::from(shrink))
+    }
+}
+
+/// A buffer of `size` from `free`, or from those `cache` kept, or a new one.
+fn take_buffer(free: &mut Vec<Pixmap>, cache: &DrawCache, size: [u16; 2]) -> Pixmap {
+    match free
+        .iter()
+        .position(|buffer| [buffer.width(), buffer.height()] == size)
+    {
+        Some(index) => free.swap_remove(index),
+        None => cache
+            .take_spare(size)
+            .unwrap_or_else(|| Pixmap::new(size[0], size[1])),
+    }
+}
+
 /// What drawing `paint` takes, in order.
 fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &DrawCache) -> Vec<Step<'a>> {
     let mut steps = Vec::new();
+    let mut size = paint.initial_size;
     collect(
         &paint.ops,
         &document.store,
         masks,
         document.wobble,
         paint.wobble.unwrap_or(document.wobble),
+        &mut size,
         &mut steps,
     );
     steps
@@ -1012,6 +1245,7 @@ fn step_bounds(steps: &[Step<'_>], out: &mut Vec<[f64; 4]>) {
                     .map(|bounds| moved_bounds(bounds.map(f64::from), *transform)),
             ),
             Step::Section { steps, .. } => step_bounds(steps, out),
+            Step::Canvas(reframe) => carry_all(out, reframe),
             _ => {}
         }
     }
@@ -1024,6 +1258,7 @@ fn op_bounds(
     store: &Store,
     document_wobble: Wobble,
     wobble: Wobble,
+    size: &mut [u32; 2],
     out: &mut Vec<[f64; 4]>,
 ) {
     for op in ops {
@@ -1090,8 +1325,15 @@ fn op_bounds(
                 store,
                 document_wobble,
                 section.wobble.unwrap_or(document_wobble),
+                size,
                 out,
             ),
+            Op::Crop { .. } | Op::Resample { .. } => {
+                if let Some(reframe) = Reframe::of(op, *size) {
+                    carry_all(out, &reframe);
+                    *size = reframe.to;
+                }
+            }
             _ => {}
         }
     }
@@ -1155,11 +1397,13 @@ pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edg
         )
         .map(|paint| {
             let mut bounds = Vec::new();
+            let mut size = paint.initial_size;
             op_bounds(
                 &paint.ops,
                 &document.store,
                 document.wobble,
                 paint.wobble.unwrap_or(document.wobble),
+                &mut size,
                 &mut bounds,
             );
             let (span, _) = reach(bounds.into_iter(), shrink, &empty);
@@ -1209,9 +1453,12 @@ pub(crate) struct DrawCache {
     /// Decoded assets and the render each was last used in; `None` when an
     /// asset cannot be decoded, which validation should have kept out.
     images: std::sync::Mutex<HashMap<AssetId, Decoded>>,
-    /// One buffer left over from drawing a layer that moves a selection,
-    /// for the next such layer, whichever thread draws it.
-    spare: std::sync::Mutex<Option<Pixmap>>,
+    /// Buffers left over from drawing layers that move a selection or
+    /// resample, for the next such layers, whichever thread draws them,
+    /// until `release_scratch`.
+    spare: std::sync::Mutex<Vec<Pixmap>>,
+    /// How many `spare` keeps: one per layer drawn at once.
+    spare_count: usize,
     render: u64,
 }
 
@@ -1313,12 +1560,20 @@ impl DrawCache {
         image
     }
 
-    fn take_spare(&self) -> Option<Pixmap> {
-        self.spare.lock().expect("no panic while holding it").take()
+    fn take_spare(&self, size: [u16; 2]) -> Option<Pixmap> {
+        let mut spare = self.spare.lock().expect("no panic while holding it");
+        let index = spare
+            .iter()
+            .position(|buffer| [buffer.width(), buffer.height()] == size)?;
+        Some(spare.swap_remove(index))
     }
 
     fn keep_spare(&self, pixmap: Pixmap) {
-        *self.spare.lock().expect("no panic while holding it") = Some(pixmap);
+        let mut spare = self.spare.lock().expect("no panic while holding it");
+        spare.push(pixmap);
+        if spare.len() > self.spare_count {
+            spare.remove(0);
+        }
     }
 
     /// Starts a render, letting go of what the one before did not use.
@@ -1351,6 +1606,7 @@ fn collect<'a>(
     masks: &DrawCache,
     document_wobble: Wobble,
     wobble: Wobble,
+    size: &mut [u32; 2],
     steps: &mut Vec<Step<'a>>,
 ) {
     for op in ops {
@@ -1444,6 +1700,7 @@ fn collect<'a>(
                         masks,
                         document_wobble,
                         wobble,
+                        size,
                         &mut inner,
                     );
                     steps.push(Step::Section {
@@ -1452,12 +1709,24 @@ fn collect<'a>(
                     });
                 } else {
                     steps.push(Step::Push(section.opacity));
-                    collect(&section.ops, store, masks, document_wobble, wobble, steps);
+                    collect(
+                        &section.ops,
+                        store,
+                        masks,
+                        document_wobble,
+                        wobble,
+                        size,
+                        steps,
+                    );
                     steps.push(Step::Pop);
                 }
             }
-            // `check` refuses documents with anything else.
-            _ => {}
+            Op::Crop { .. } | Op::Resample { .. } => {
+                if let Some(reframe) = Reframe::of(op, *size) {
+                    *size = reframe.to;
+                    steps.push(Step::Canvas(reframe));
+                }
+            }
         }
     }
 }
@@ -1724,7 +1993,7 @@ mod tests {
             offset: [0, 0],
             size: [96, 48],
         }];
-        assert_eq!(check(&document), Err(Unsupported::CanvasChange));
+        assert_eq!(check(&document), Ok(()));
         let mask = ugu_core::ops::MaskId(0);
         let fill = Op::Fill {
             coverage: mask,
@@ -1768,7 +2037,7 @@ mod tests {
                 paint.clip_to_below = true
             })],
         )];
-        assert_eq!(check(&document), Err(Unsupported::CanvasChange));
+        assert_eq!(check(&document), Ok(()));
         let spray = line(&mut document, 0.0, 10.0, 5.0, RED, true);
         document.store.strokes.get_mut(&spray).unwrap().brush.engine = BrushEngine::Spray;
         document.layers = vec![tree_group(
@@ -2406,6 +2675,290 @@ mod tests {
         }
     }
 
+    /// `document` with its one layer drawing `ops` from a canvas of
+    /// `initial`, and the canvas those ops end on.
+    fn reframed(document: &Document, initial: [u32; 2], ops: Vec<Op>) -> Document {
+        let mut document = with_ops(document, ops);
+        let paint = paint_layer(&mut document);
+        paint.initial_size = initial;
+        document.canvas = paint.final_size();
+        document
+    }
+
+    fn crop(offset: [i32; 2], size: [u32; 2]) -> Op {
+        Op::Crop { offset, size }
+    }
+
+    fn resample(size: [u32; 2], sampling: ugu_core::ops::Sampling) -> Op {
+        Op::Resample { size, sampling }
+    }
+
+    /// `before`'s pixel that a crop by `offset` puts at `x`, `y`.
+    fn cropped_at(before: &Pixmap, offset: [i32; 2], x: u16, y: u16) -> [u8; 4] {
+        let (from_x, from_y) = (i32::from(x) - offset[0], i32::from(y) - offset[1]);
+        let inside = (0..i32::from(before.width())).contains(&from_x)
+            && (0..i32::from(before.height())).contains(&from_y);
+        if inside {
+            at(before, from_x as u16, from_y as u16)
+        } else {
+            [0; 4]
+        }
+    }
+
+    /// The pixel 2.2.13's `ImageResampler` makes at `x`, `y` when it resizes
+    /// `before` to `size`, in f64.
+    fn resampled_at(
+        before: &Pixmap,
+        size: [u32; 2],
+        sampling: ugu_core::ops::Sampling,
+        x: u16,
+        y: u16,
+    ) -> [f64; 4] {
+        let from = [before.width(), before.height()].map(f64::from);
+        let to = size.map(f64::from);
+        let source = [
+            (f64::from(x) + 0.5) * from[0] / to[0],
+            (f64::from(y) + 0.5) * from[1] / to[1],
+        ];
+        let tap = |x: f64, y: f64| {
+            let x = x.clamp(0.0, from[0] - 1.0) as u16;
+            let y = y.clamp(0.0, from[1] - 1.0) as u16;
+            at(before, x, y).map(f64::from)
+        };
+        if sampling == ugu_core::ops::Sampling::Nearest {
+            return tap(source[0].floor(), source[1].floor());
+        }
+        let [sx, sy] = source.map(|value| value - 0.5);
+        let (left, top) = (sx.floor(), sy.floor());
+        let (across, down) = (sx - left, sy - top);
+        let [a, b, c, d] = [
+            tap(left, top),
+            tap(left + 1.0, top),
+            tap(left, top + 1.0),
+            tap(left + 1.0, top + 1.0),
+        ];
+        std::array::from_fn(|channel| {
+            let upper = a[channel] * (1.0 - across) + b[channel] * across;
+            let lower = c[channel] * (1.0 - across) + d[channel] * across;
+            upper * (1.0 - down) + lower * down
+        })
+    }
+
+    #[test]
+    fn a_crop_carries_the_pixels_so_far_and_later_strokes_use_the_new_canvas() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, [220, 30, 30, 200], true);
+        let blue = line(&mut document, 30.0, 60.0, 30.0, BLUE, false);
+        let green = line(&mut document, 4.0, 40.0, 40.0, [30, 200, 30, 180], true);
+        let initial = document.canvas;
+        // Narrower and taller, moved left and down; then wider and moved
+        // right, which shows again where the first crop cut away.
+        let cases = [
+            vec![crop([-10, 6], [80, 56])],
+            vec![crop([-10, 6], [80, 56]), crop([20, 0], [110, 56])],
+        ];
+        for crops in cases {
+            for frame in [0, 3] {
+                let mut so_far = render(
+                    &with_ops(&document, vec![paint(red), paint(blue)]),
+                    frame,
+                    0,
+                );
+                let mut ops = vec![paint(red), paint(blue)];
+                for each in &crops {
+                    let Op::Crop { offset, size } = *each else {
+                        unreachable!()
+                    };
+                    ops.push(each.clone());
+                    let got = render(&reframed(&document, initial, ops.clone()), frame, 0);
+                    assert_eq!([got.width(), got.height()].map(u32::from), size);
+                    for y in 0..got.height() {
+                        for x in 0..got.width() {
+                            let expected = cropped_at(&so_far, offset, x, y);
+                            assert_eq!(at(&got, x, y), expected, "frame {frame} at {x}, {y}");
+                        }
+                    }
+                    so_far = got;
+                }
+                ops.push(paint(green));
+                let got = render(&reframed(&document, initial, ops), frame, 0);
+                let mut alone = document.clone();
+                alone.canvas = [u32::from(so_far.width()), u32::from(so_far.height())];
+                paint_layer(&mut alone).initial_size = alone.canvas;
+                let green_alone = render(&with_ops(&alone, vec![paint(green)]), frame, 0);
+                for y in 0..got.height() {
+                    for x in 0..got.width() {
+                        let expected = over(at(&green_alone, x, y), at(&so_far, x, y));
+                        assert!(near(at(&got, x, y), expected), "frame {frame} at {x}, {y}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_resample_scales_the_pixels_so_far_as_2_2_13_does() {
+        use ugu_core::ops::Sampling::{Nearest, Smooth};
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, [220, 30, 30, 200], true);
+        let blue = line(&mut document, 30.0, 60.0, 30.0, BLUE, false);
+        let green = line(&mut document, 4.0, 40.0, 20.0, [30, 200, 30, 180], true);
+        let initial = document.canvas;
+        // Nearest at 2/3, where no pixel centre falls on a pixel edge, is
+        // exact; smooth both ways larger and smaller, with 8-bit weights like
+        // 2.2.13's.
+        let cases = [
+            ([64, 32], Nearest, 0.0),
+            ([120, 70], Smooth, 2.0),
+            ([50, 31], Smooth, 2.0),
+        ];
+        for (size, sampling, limit) in cases {
+            for frame in [0, 3] {
+                let before = render(
+                    &with_ops(&document, vec![paint(red), paint(blue)]),
+                    frame,
+                    0,
+                );
+                let ops = vec![paint(red), paint(blue), resample(size, sampling)];
+                let got = render(&reframed(&document, initial, ops.clone()), frame, 0);
+                assert_eq!([got.width(), got.height()].map(u32::from), size);
+                for y in 0..got.height() {
+                    for x in 0..got.width() {
+                        let expected = resampled_at(&before, size, sampling, x, y);
+                        let pixel = at(&got, x, y);
+                        let most = (0..4)
+                            .map(|c| (f64::from(pixel[c]) - expected[c]).abs())
+                            .fold(0.0, f64::max);
+                        assert!(
+                            most <= limit,
+                            "{size:?} frame {frame} at {x}, {y}: {pixel:?} against {expected:?}"
+                        );
+                    }
+                }
+                let mut later = ops;
+                later.push(paint(green));
+                let with_green = render(&reframed(&document, initial, later), frame, 0);
+                let mut alone = document.clone();
+                alone.canvas = size;
+                paint_layer(&mut alone).initial_size = size;
+                let green_alone = render(&with_ops(&alone, vec![paint(green)]), frame, 0);
+                for y in 0..got.height() {
+                    for x in 0..got.width() {
+                        let expected = over(at(&green_alone, x, y), at(&got, x, y));
+                        // Both sides of the expectation are rounded.
+                        let pixel = at(&with_green, x, y);
+                        let most = (0..4).map(|c| pixel[c].abs_diff(expected[c])).max();
+                        assert!(most <= Some(2), "{size:?} at {x}, {y}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_selection_moved_right_after_a_crop_moves_the_cropped_pixels() {
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let blue = line(&mut document, 30.0, 60.0, 30.0, [30, 30, 220, 160], true);
+        // In the cropped canvas's pixels.
+        let mask = add_mask(&mut document, [20, 10, 40, 30], |x, y| {
+            (x - 40) * (x - 40) + (y - 24) * (y - 24) < 150
+        });
+        let bits = document.store.masks[&mask].clone();
+        let initial = document.canvas;
+        let cropped = vec![paint(red), paint(blue), crop([-6, 4], [90, 52])];
+        let mut moving = cropped.clone();
+        moving.push(moved(
+            mask,
+            [1.0, 0.0, 17.0, 0.0, 1.0, 9.0],
+            ugu_core::ops::Sampling::Nearest,
+            false,
+        ));
+        for frame in [0, 3] {
+            let before = render(&reframed(&document, initial, cropped.clone()), frame, 0);
+            let got = render(&reframed(&document, initial, moving.clone()), frame, 0);
+            for y in 0..got.height() {
+                for x in 0..got.width() {
+                    let (cx, cy) = (i32::from(x), i32::from(y));
+                    let base = if bits.contains(cx, cy) {
+                        [0; 4]
+                    } else {
+                        at(&before, x, y)
+                    };
+                    let (sx, sy) = (cx - 17, cy - 9);
+                    let source = if sx >= 0 && sy >= 0 && bits.contains(sx, sy) {
+                        at(&before, sx as u16, sy as u16)
+                    } else {
+                        [0; 4]
+                    };
+                    let expected = over(source, base);
+                    assert!(near(at(&got, x, y), expected), "frame {frame} at {x}, {y}");
+                }
+            }
+        }
+    }
+
+    /// Strokes, a fill and a moved selection across two crops and, with
+    /// `resamples`, two resamples, with an eraser after each change.
+    fn reframed_work(resamples: bool) -> Document {
+        use ugu_core::ops::Sampling::{Nearest, Smooth};
+        let mut document = document();
+        let red = line(&mut document, 8.0, 88.0, 24.0, RED, true);
+        let blue = line(&mut document, 30.0, 60.0, 14.0, [30, 30, 220, 160], true);
+        let green = line(&mut document, 4.0, 70.0, 40.0, [30, 200, 30, 220], true);
+        let eraser = line(&mut document, 20.0, 50.0, 30.0, [0, 0, 0, 255], true);
+        let mask = add_mask(&mut document, [20, 4, 50, 40], |x, y| {
+            (x - 40) * (x - 40) + (y - 20) * (y - 20) < 220
+        });
+        let fill = Op::Fill {
+            coverage: mask,
+            color: Rgba8([250, 200, 0, 200]),
+            antialias: true,
+            clip: None,
+        };
+        let erase = Op::Erase {
+            stroke: eraser,
+            clip: None,
+        };
+        let initial = document.canvas;
+        let mut ops = vec![
+            paint(red),
+            fill,
+            crop([-6, 4], [90, 60]),
+            moved(mask, [1.0, 0.0, 9.5, 0.0, 1.0, 4.25], Smooth, false),
+            paint(blue),
+            erase.clone(),
+            resample([140, 84], Smooth),
+            paint(green),
+            erase.clone(),
+            crop([13, -7], [120, 80]),
+            paint(red),
+            resample([100, 60], Nearest),
+            erase,
+        ];
+        if !resamples {
+            ops.retain(|op| !matches!(op, Op::Resample { .. }));
+        }
+        reframed(&document, initial, ops)
+    }
+
+    #[test]
+    fn crops_and_resamples_draw_alike_everywhere() {
+        for resamples in [false, true] {
+            let document = reframed_work(resamples);
+            document.validate().unwrap();
+            for frame in [0, 5] {
+                let single = render(&document, frame, 0);
+                assert!(single.data_as_u8_slice().iter().any(|value| *value > 0));
+                let threads = render(&document, frame, 8);
+                assert!(threads.data_as_u8_slice() == single.data_as_u8_slice());
+                for edge in [16, 64, 4096] {
+                    assert!(max_difference(&render_tiled(&document, frame, edge, 8), &single) <= 1);
+                }
+            }
+        }
+    }
+
     fn render_tiled(document: &Document, frame: i64, edge: u32, threads: u16) -> Pixmap {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixmap = Pixmap::new(width, height);
@@ -2565,6 +3118,10 @@ mod tests {
             (many_layers(), 20.0),
             (masked_work().0, 3.0),
             (moved_work(), 3.0),
+            (reframed_work(false), 3.0),
+            // Resampling what is drawn smaller is not resampling what is
+            // drawn at full size, as in 2.2.13: 5.4 at 1/2 and 8.5 at 1/4.
+            (reframed_work(true), 10.0),
         ];
         for (document, limit) in cases {
             let plan = RenderPlan::new(&document, Purpose::Display);
@@ -2665,7 +3222,13 @@ mod tests {
 
     #[test]
     fn a_frame_over_the_budget_is_the_same_frame() {
-        let document = many_layers();
+        for document in [many_layers(), reframed_work(true)] {
+            over_the_budget(&document);
+        }
+    }
+
+    fn over_the_budget(document: &Document) {
+        let document = document.clone();
         let plan = RenderPlan::new(&document, Purpose::Display);
         for shrink in [1, 2] {
             let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);

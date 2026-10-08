@@ -15,11 +15,13 @@
 //! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
-//!   drawn as pens and crops and resizes are left out, which keeps the amount
-//!   of work close and says so.
-//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens and leaves
-//!   out crops and resizes, keeping everything else, so the app can open a
-//!   fixture to measure with.
+//!   drawn as pens, which keeps the amount of work close and says so.
+//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens, keeping
+//!   everything else, so the app can open a fixture to measure with.
+//! - `ugu-doc reframe <in.ugu2> <out.ugu2> <crop|resample|both>`: makes
+//!   brushes pens and puts in the middle of every layer a crop to 7/8 of the
+//!   canvas around its middle, a smooth resample to 3/4, or both one after
+//!   the other, to measure what canvas changes cost to draw.
 //! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
 //! - `ugu-doc fills <in.ugu2> <out.ugu2>`: adds a large clipped fill and a
@@ -40,7 +42,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | many <operations> <layers> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | fills <in.ugu2> <out.ugu2> | stop <file.ugu2> | layers <file.ugu2> <threads>";
+     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | fills <in.ugu2> <out.ugu2> | reframe <in.ugu2> <out.ugu2> <crop|resample|both> | stop <file.ugu2> | layers <file.ugu2> <threads>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -67,6 +69,7 @@ fn main() -> ExitCode {
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["fills", from, to] => fills(Path::new(from), Path::new(to)),
+        ["reframe", from, to, which] => reframe(Path::new(from), Path::new(to), which),
         ["stop", file] => stop(Path::new(file)),
         ["layers", file, threads] => threads
             .parse()
@@ -222,8 +225,7 @@ fn bench(path: &Path, rounds: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes every brush a pen and drops what the renderer cannot draw yet
-/// (crops and resizes), keeping everything else.
+/// Makes every brush a pen, keeping everything else.
 fn to_pens(document: &mut Document) {
     let mut changed = 0;
     for stroke in document.store.strokes.values_mut() {
@@ -232,50 +234,49 @@ fn to_pens(document: &mut Document) {
             changed += 1;
         }
     }
-    let mut dropped = 0;
-    let mut used = Used::default();
-    each_paint(&mut document.layers, &mut |paint| {
-        strip(&mut paint.ops, &mut dropped, &mut used);
-    });
-    document.store.masks.retain(|id, _| used.masks.contains(id));
-    document
-        .store
-        .assets
-        .retain(|id, _| used.assets.contains(id));
-    if changed + dropped > 0 {
-        println!("{changed} brushes made pens, {dropped} crops or resizes dropped");
+    if changed > 0 {
+        println!("{changed} brushes made pens");
     }
 }
 
-/// The masks and images operations use.
-#[derive(Default)]
-struct Used {
-    masks: std::collections::HashSet<MaskId>,
-    assets: std::collections::HashSet<AssetId>,
-}
-
-/// Drops crops and resizes from `ops` and gathers what the rest use.
-fn strip(ops: &mut Vec<Op>, dropped: &mut usize, used: &mut Used) {
-    let before = ops.len();
-    ops.retain(|op| !matches!(op, Op::Crop { .. } | Op::Resample { .. }));
-    *dropped += before - ops.len();
-    for op in ops {
-        match op {
-            Op::Paint { clip, .. } | Op::Erase { clip, .. } => used.masks.extend(*clip),
-            Op::Fill { coverage, clip, .. } => {
-                used.masks.insert(*coverage);
-                used.masks.extend(*clip);
-            }
-            Op::ClearSelection { mask } | Op::TransformSelection { mask, .. } => {
-                used.masks.insert(*mask);
-            }
-            Op::PlaceImage { asset, .. } => {
-                used.assets.insert(*asset);
-            }
-            Op::Isolated(section) => strip(&mut section.ops, dropped, used),
-            _ => {}
+/// Puts canvas changes in the middle of every layer; see the module notes.
+fn reframe(from: &Path, to: &Path, which: &str) -> Result<(), String> {
+    let mut document = open(from)?;
+    to_pens(&mut document);
+    let [width, height] = document.canvas;
+    let cropped = [width * 7 / 8, height * 7 / 8];
+    let crop = Op::Crop {
+        offset: [-(width as i32 / 16), -(height as i32 / 16)],
+        size: cropped,
+    };
+    let (changes, canvas) = match which {
+        "crop" => (vec![crop], cropped),
+        "resample" => {
+            let size = [width * 3 / 4, height * 3 / 4];
+            let resample = Op::Resample {
+                size,
+                sampling: Sampling::Smooth,
+            };
+            (vec![resample], size)
         }
-    }
+        "both" => {
+            let size = [cropped[0] * 3 / 4, cropped[1] * 3 / 4];
+            let resample = Op::Resample {
+                size,
+                sampling: Sampling::Smooth,
+            };
+            (vec![crop, resample], size)
+        }
+        _ => return Err(USAGE.to_owned()),
+    };
+    each_paint(&mut document.layers, &mut |paint| {
+        let middle = paint.ops.len() / 2;
+        paint.ops.splice(middle..middle, changes.iter().cloned());
+    });
+    document.canvas = canvas;
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)?;
+    info(to)
 }
 
 /// Adds to every paint layer a fill of a disc a third of the canvas wide,

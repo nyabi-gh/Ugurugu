@@ -48,6 +48,11 @@ fn settle(canvas: &mut Canvas, renders: &Receiver<Rendered>) {
 /// the window's corner, so client pixels are document pixels.
 fn stroke(canvas: &mut Canvas, renders: &Receiver<Rendered>, y: f64, phase: f64) {
     settle(canvas, renders);
+    wave(canvas, y, phase);
+}
+
+/// `stroke` without waiting for renders first.
+fn wave(canvas: &mut Canvas, y: f64, phase: f64) {
     let point = |step: u32| {
         let x = 20.0 + f64::from(step) * 7.0;
         [x, y + (f64::from(step) * 0.3 + phase).sin() * 25.0]
@@ -160,6 +165,49 @@ fn draw_move_save_reopen_and_export() {
         .collect();
     assert!(decoded == expected);
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// The canvas shows what a full render of its document gives, within the
+/// rounding of the split and the strokes added to it.
+fn shows_the_document(canvas: &Canvas) {
+    let document = canvas.session().document();
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut full = vello_cpu::Pixmap::new(width, height);
+    DocumentRenderer::new(0).render(document, 0, RenderPurpose::Display, &mut full);
+    let shown = canvas.display();
+    assert_eq!([shown.width(), shown.height()], [width, height]);
+    let most = largest_difference(shown.data_as_u8_slice(), full.data_as_u8_slice());
+    assert!(most <= 3, "the canvas differs from a full render by {most}");
+}
+
+#[test]
+fn strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas() {
+    let (to_test, renders) = channel();
+    let mut canvas = Canvas::new(Document::new(SIZE), move |rendered| {
+        let _ = to_test.send(rendered);
+    });
+    stroke(&mut canvas, &renders, 80.0, 0.0);
+    canvas
+        .edit(|session| session.crop_canvas([-30, 20], [260, 240]))
+        .unwrap();
+    // Before the split of the new canvas arrives, partly below the canvas
+    // before.
+    wave(&mut canvas, 210.0, 1.0);
+    settle(&mut canvas, &renders);
+    shows_the_document(&canvas);
+    canvas
+        .edit(|session| session.resample_image([390, 300], ugu_core::ops::Sampling::Smooth))
+        .unwrap();
+    stroke(&mut canvas, &renders, 200.0, 2.0);
+    settle(&mut canvas, &renders);
+    shows_the_document(&canvas);
+    assert_eq!(canvas.session().document().store.strokes.len(), 3);
+    for _ in 0..4 {
+        assert!(canvas.edit(Session::undo).unwrap());
+    }
+    settle(&mut canvas, &renders);
+    assert_eq!(canvas.session().document().canvas, SIZE);
+    shows_the_document(&canvas);
 }
 
 #[test]

@@ -206,7 +206,15 @@ impl Canvas {
             self.session.cancel_stroke();
             self.recomposite(rect);
         }
-        change(&mut self.session)
+        let before = self.session.document().canvas;
+        let result = change(&mut self.session);
+        if self.session.document().canvas != before {
+            // The split is of the canvas before; what it shows stays until
+            // the split of the new one arrives.
+            self.split = None;
+            self.spare_coverage = None;
+        }
+        result
     }
 
     /// Zooms around the middle of the canvas area.
@@ -870,5 +878,38 @@ mod tests {
         }
         assert_eq!(canvas.display().width(), 320);
         assert_eq!(canvas.placement().scale, 0.5);
+    }
+
+    #[test]
+    fn playback_follows_a_canvas_change() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.scale = 0.5;
+        canvas.toggle_playback();
+        let mut now = Instant::now();
+        let mut play_until = |canvas: &mut super::Canvas, width: u16| {
+            while canvas.display().width() != width {
+                canvas.tick(now);
+                now += Duration::from_millis(500);
+                if let Ok(rendered) = renders.recv_timeout(Duration::from_secs(10)) {
+                    canvas.adopt(rendered);
+                }
+            }
+        };
+        play_until(&mut canvas, 160);
+        canvas
+            .edit(|session| session.crop_canvas([-20, 10], [200, 150]))
+            .unwrap();
+        canvas.take_upload();
+        play_until(&mut canvas, 100);
+        assert_eq!(canvas.display().height(), 75);
+        assert_eq!(canvas.take_upload(), Some([0, 0, 100, 75]));
+        canvas
+            .edit(|session| session.resample_image([300, 225], ugu_core::ops::Sampling::Smooth))
+            .unwrap();
+        play_until(&mut canvas, 150);
+        assert_eq!(canvas.display().height(), 113);
     }
 }

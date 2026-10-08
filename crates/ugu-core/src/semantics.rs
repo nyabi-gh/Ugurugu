@@ -224,12 +224,13 @@ impl World {
                     }
                     *surface = cropped;
                 }
+                // Nearest by pixel centres, as 2.2.13's `ImageResampler`.
                 Op::Resample { size, .. } => {
                     let mut resampled = Surface::new(*size);
                     for y in 0..size[1] {
                         for x in 0..size[0] {
-                            let from_x = x * surface.size[0] / size[0];
-                            let from_y = y * surface.size[1] / size[1];
+                            let from_x = (2 * x + 1) * surface.size[0] / (2 * size[0]);
+                            let from_y = (2 * y + 1) * surface.size[1] / (2 * size[1]);
                             resampled.set(
                                 x as i32,
                                 y as i32,
@@ -588,7 +589,7 @@ fn an_image_goes_over_what_came_before_and_under_what_follows() {
 fn a_crop_moves_the_canvas_and_a_resample_scales_what_came_before() {
     let mut world = World::default();
     let first = world.stroke([0, 0, 2, 2], RED);
-    let after_crop = world.stroke([0, 0, 1, 1], BLUE);
+    let after_crop = world.stroke([0, 0, 2, 2], BLUE);
     let after_resample = world.stroke([2, 2, 3, 3], GREEN);
     let ops = vec![
         paint(first),

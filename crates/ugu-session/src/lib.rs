@@ -18,7 +18,7 @@ use ugu_core::command;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::history::{History, LayerRevisions, StateId};
-use ugu_core::ops::{Rgba8, Wobble};
+use ugu_core::ops::{Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 
 use crate::stabilizer::Stabilizer;
@@ -464,6 +464,31 @@ impl Session {
             self.layer = below;
         }
         Ok(outcome)
+    }
+
+    /// Changes the canvas size; what is drawn keeps its pixels and moves by
+    /// `offset`.
+    pub fn crop_canvas(&mut self, offset: [i32; 2], size: [u32; 2]) -> Result<Outcome, EditError> {
+        if offset == [0, 0] && size == self.document().canvas {
+            return Ok(Outcome::NoChange);
+        }
+        self.history.edit("Canvas size", |document| {
+            command::crop_canvas(document, offset, size)
+        })
+    }
+
+    /// Resizes the image: everything drawn so far is resampled to `size`.
+    pub fn resample_image(
+        &mut self,
+        size: [u32; 2],
+        sampling: Sampling,
+    ) -> Result<Outcome, EditError> {
+        if size == self.document().canvas {
+            return Ok(Outcome::NoChange);
+        }
+        self.history.edit("Image size", |document| {
+            command::resample_image(document, size, sampling)
+        })
     }
 
     /// Changes the frame count, playback speed and wobble together.
