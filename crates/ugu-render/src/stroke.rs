@@ -150,13 +150,18 @@ fn lerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
 /// the brush opacity and, as 2.2.13 does for a stroke of one pressure, by
 /// the first point's pressure.
 pub fn line_alpha(stroke: &ugu_core::store::Stroke) -> u8 {
-    let [_, _, _, a] = stroke.color.0;
     let pressure = stroke
         .points
         .first()
         .map_or(1.0, |point| f64::from(point.pressure));
-    let fade = pressure_scale(stroke.brush.opacity_dynamics, pressure) as f32;
-    (f32::from(a) * (stroke.brush.opacity * fade).clamp(0.0, 1.0)).round() as u8
+    line_alpha_at(stroke.color.0[3], &stroke.brush, pressure)
+}
+
+/// `line_alpha` of a colour's `alpha` drawn with `brush` from a first point
+/// of `pressure`.
+pub fn line_alpha_at(alpha: u8, brush: &Brush, pressure: f64) -> u8 {
+    let fade = pressure_scale(brush.opacity_dynamics, pressure) as f32;
+    (f32::from(alpha) * (brush.opacity * fade).clamp(0.0, 1.0)).round() as u8
 }
 
 /// What decides a stroke's shape on a frame besides its samples.

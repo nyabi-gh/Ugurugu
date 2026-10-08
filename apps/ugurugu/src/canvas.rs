@@ -17,7 +17,7 @@ use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
-use ugu_render::compose::{Split, Stamp, composite, premultiplied, stroke_color};
+use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::LiveStroke;
 use ugu_render::plan::RenderPlan;
@@ -603,12 +603,11 @@ impl Canvas {
                 * f64::from(live.template.brush.wobble_scale),
         };
         let size = document.canvas.map(|edge| edge as u16);
-        let color = premultiplied(stroke_color(&live.template, live.erase));
         let mut stroke = LiveStroke::new(
             size,
             pen,
             self.key().frame,
-            color,
+            live.template.color.0,
             live.erase,
             self.spare_coverage.take(),
         );

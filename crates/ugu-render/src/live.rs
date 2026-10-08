@@ -8,12 +8,16 @@
 //! samples move as points arrive. Pieces of samples that can no longer move
 //! are added to `coverage` once; the rest, the tail, are drawn again on every
 //! update over a copy of `coverage` and replace the previous tail.
+//!
+//! An airbrush or spray keeps its painted dabs instead of a coverage, as
+//! the renderer paints them, and lays them on the layer as it does.
 
-use ugu_core::store::Point;
+use ugu_core::store::{BrushEngine, Point};
 use vello_cpu::Pixmap;
 use vello_cpu::color::{AlphaColor, Srgb};
 
-use crate::compose::{Stamp, clamp, erase, paint};
+use crate::compose::{Stamp, clamp, dest_out, erase, paint, premultiplied, src_over};
+use crate::dab::{self, Dab, Look};
 use crate::raster::PixelRect;
 use crate::stroke::{self, Pen, Resampler};
 
@@ -24,25 +28,33 @@ const ALIASING_THRESHOLD: u8 = 128;
 pub struct LiveStroke {
     pen: Pen,
     frame: u32,
-    /// Premultiplied colour at full coverage.
+    /// The stroke's own colour, straight; black for an eraser's dabs.
     color: [u8; 4],
+    /// A pen's premultiplied colour at full coverage, known from the first
+    /// point.
+    line: [u8; 4],
     erase: bool,
+    /// How an airbrush or spray paints; `None` for a pen.
+    dabs: Option<Look>,
     resampler: Resampler,
     /// Raw points taken so far.
     points: usize,
     /// Samples whose pieces are in `coverage`.
     settled: usize,
-    /// Alpha is the settled pieces' coverage; document size.
+    /// Alpha is the settled pieces' coverage, or for dabs the settled dabs
+    /// painted; document size.
     coverage: Pixmap,
     /// Where `coverage` has been written.
     written: Option<PixelRect>,
     /// The tail over the settled coverage, and where it lies.
     tail: Option<(PixelRect, Pixmap)>,
     stamp: Stamp,
+    painter: dab::Painter,
+    placed: Vec<Dab>,
 }
 
 impl LiveStroke {
-    /// `color` is premultiplied, as the stroke paints or erases with it.
+    /// `color` is the stroke's own, straight.
     /// `spare` is a previous stroke's coverage from `into_spare`, used again
     /// when it has the document's size: allocating and freeing a document's
     /// worth of pixels for every stroke costs milliseconds on large canvases.
@@ -57,18 +69,28 @@ impl LiveStroke {
         let coverage = spare
             .filter(|spare| [spare.width(), spare.height()] == size)
             .unwrap_or_else(|| Pixmap::new(size[0], size[1]));
+        let dabs = (pen.brush.engine != BrushEngine::Line).then(|| dab::look(&pen.brush));
+        let spacing = match dabs {
+            Some(_) => pen.dab_spacing(frame),
+            None => stroke::spacing(pen.width),
+        };
+        let [r, g, b, a] = color;
         Self {
             pen,
             frame,
-            color,
+            color: if erase { [0, 0, 0, a] } else { [r, g, b, a] },
+            line: [0; 4],
             erase,
-            resampler: Resampler::new(stroke::spacing(pen.width)),
+            dabs,
+            resampler: Resampler::new(spacing),
             points: 0,
             settled: 0,
             coverage,
             written: None,
             tail: None,
             stamp: Stamp::default(),
+            painter: dab::Painter::default(),
+            placed: Vec::new(),
         }
     }
 
@@ -87,6 +109,13 @@ impl LiveStroke {
     /// Takes the points after those seen before and returns the pixels whose
     /// coverage changed.
     pub fn update(&mut self, points: &[Point]) -> Option<PixelRect> {
+        if self.points == 0
+            && let Some(first) = points.first()
+        {
+            let [r, g, b, a] = self.color;
+            let alpha = stroke::line_alpha_at(a, &self.pen.brush, f64::from(first.pressure));
+            self.line = premultiplied([r, g, b, alpha]);
+        }
         for point in &points[self.points.min(points.len())..] {
             self.resampler.push(*point);
         }
@@ -94,6 +123,9 @@ impl LiveStroke {
         let samples = self.resampler.samples_with_tail();
         if samples.is_empty() {
             return None;
+        }
+        if let Some(look) = self.dabs {
+            return self.update_dabs(&samples, look);
         }
         // A sample is fixed once the two after it are regular samples: its
         // circle is cut by the band to the next, which turns with the one after.
@@ -139,6 +171,67 @@ impl LiveStroke {
         union(dirty, old_tail)
     }
 
+    /// `update` for an airbrush or spray. A sample's dabs no longer move once
+    /// the sample after it is a regular sample.
+    fn update_dabs(&mut self, samples: &[stroke::Sample], look: Look) -> Option<PixelRect> {
+        let fixed = self.resampler.settled().saturating_sub(1);
+        let [r, g, b, alpha] = self.color;
+        let mut dirty = None;
+        if fixed > self.settled {
+            self.placed.clear();
+            let range = self.settled..fixed;
+            dab::dabs_of(
+                samples,
+                range,
+                &self.pen,
+                self.frame,
+                alpha,
+                &mut self.placed,
+            );
+            if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
+                let width = usize::from(self.coverage.width());
+                let pixels = self.coverage.data_as_u8_slice_mut();
+                self.painter
+                    .paint(pixels, width, &self.placed, look, [r, g, b]);
+                self.written = union(self.written, Some(rect));
+                dirty = Some(rect);
+            }
+            self.settled = fixed;
+        }
+
+        let old_tail = self.tail.take().map(|(rect, _)| rect);
+        self.placed.clear();
+        let range = self.settled..samples.len();
+        dab::dabs_of(
+            samples,
+            range,
+            &self.pen,
+            self.frame,
+            alpha,
+            &mut self.placed,
+        );
+        if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
+            let mut tail = copy(&self.coverage, rect);
+            for dab in &mut self.placed {
+                dab.center = [
+                    dab.center[0] - f64::from(rect[0]),
+                    dab.center[1] - f64::from(rect[1]),
+                ];
+            }
+            let width = usize::from(tail.width());
+            self.painter.paint(
+                tail.data_as_u8_slice_mut(),
+                width,
+                &self.placed,
+                look,
+                [r, g, b],
+            );
+            self.tail = Some((rect, tail));
+            dirty = union(dirty, Some(rect));
+        }
+        union(dirty, old_tail)
+    }
+
     /// Antialiased coverage even for an aliased pen: thresholding each
     /// batch alone would drop pixels that two batches share.
     fn draw(&mut self, rect: PixelRect, path: &vello_cpu::kurbo::BezPath) -> Pixmap {
@@ -148,16 +241,25 @@ impl LiveStroke {
         })
     }
 
-    fn cover(&self, x: usize, y: usize) -> u8 {
-        let mut cover =
-            self.coverage.data_as_u8_slice()[(y * usize::from(self.coverage.width()) + x) * 4 + 3];
-        if let Some(([left, top, right, bottom], tail)) = &self.tail {
-            let (x32, y32) = (x as u32, y as u32);
-            if (*left..*right).contains(&x32) && (*top..*bottom).contains(&y32) {
-                let at = ((y32 - top) * u32::from(tail.width()) + x32 - left) as usize * 4 + 3;
-                cover = tail.data_as_u8_slice()[at];
+    /// The pixel at `x`, `y`: the tail's where it lies, else the settled one.
+    fn pixel(&self, x: usize, y: usize) -> [u8; 4] {
+        let (x32, y32) = (x as u32, y as u32);
+        let (pixels, at) = match &self.tail {
+            Some(([left, top, right, bottom], tail))
+                if (*left..*right).contains(&x32) && (*top..*bottom).contains(&y32) =>
+            {
+                let at = ((y32 - top) * u32::from(tail.width()) + x32 - left) as usize;
+                (tail, at)
             }
-        }
+            _ => (&self.coverage, y * usize::from(self.coverage.width()) + x),
+        };
+        pixels.data_as_u8_slice()[at * 4..at * 4 + 4]
+            .try_into()
+            .expect("four bytes")
+    }
+
+    fn cover(&self, x: usize, y: usize) -> u8 {
+        let cover = self.pixel(x, y)[3];
         match self.pen.brush.antialias {
             true => cover,
             // Vello paints an aliased pixel whose coverage is over the
@@ -173,14 +275,24 @@ impl LiveStroke {
     }
 
     pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
+        if self.dabs.is_some() {
+            let pixel = self.pixel(x, y);
+            if pixel[3] == 0 {
+            } else if self.erase {
+                dest_out(layer, pixel[3]);
+            } else {
+                src_over(layer, &pixel);
+            }
+            return;
+        }
         let cover = self.cover(x, y);
         if cover == 0 {
             return;
         }
         if self.erase {
-            erase(layer, self.color, cover);
+            erase(layer, self.line, cover);
         } else {
-            paint(layer, self.color, cover);
+            paint(layer, self.line, cover);
         }
     }
 }
@@ -235,7 +347,6 @@ fn add_coverage(target: &mut Pixmap, piece: &Pixmap, [left, top, right, bottom]:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compose::premultiplied;
     use crate::stroke::Resampler;
     use ugu_core::store::{Brush, BrushEngine};
 
@@ -374,10 +485,45 @@ mod tests {
     }
 
     #[test]
+    fn dabs_drawn_point_by_point_are_the_whole_stroke_painted() {
+        for id in ["soft-airbrush", "pixel-spray", "rough-spray", "soft-eraser"] {
+            let preset = ugu_core::brush::find(id).unwrap();
+            let pen = Pen {
+                width: 24.0,
+                brush: preset.brush,
+                seed: 77,
+                wobble: 3.0,
+            };
+            let points = points();
+            let color = [30, 120, 200, 230];
+            let mut live = LiveStroke::new([200, 120], pen, 2, color, false, None);
+            let mut seen: Option<PixelRect> = None;
+            for count in 1..=points.len() {
+                seen = union(seen, live.update(&points[..count]));
+            }
+            let mut dabs = Vec::new();
+            dab::stroke_dabs(&points, &pen, 2, color[3], &mut dabs);
+            let mut whole = vec![0; 200 * 120 * 4];
+            let look = dab::look(&pen.brush);
+            dab::Painter::default().paint(&mut whole, 200, &dabs, look, [30, 120, 200]);
+            let [left, top, right, bottom] = seen.unwrap();
+            for y in 0..120 {
+                for x in 0..200 {
+                    let expected = &whole[(y * 200 + x) * 4..(y * 200 + x) * 4 + 4];
+                    assert_eq!(live.pixel(x, y), expected, "{id} at {x}, {y}");
+                    if expected[3] > 0 {
+                        let (x, y) = (x as u32, y as u32);
+                        assert!(x >= left && x < right && y >= top && y < bottom);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_translucent_live_stroke_does_not_darken_where_it_overlaps() {
         let pen = pen(true);
-        let color = premultiplied([200, 0, 0, 100]);
-        let mut live = LiveStroke::new([200, 120], pen, 2, color, false, None);
+        let mut live = LiveStroke::new([200, 120], pen, 2, [200, 0, 0, 100], false, None);
         let points = points();
         for count in 1..=points.len() {
             live.update(&points[..count]);
@@ -390,6 +536,6 @@ mod tests {
                 darkest = darkest.max(layer[3]);
             }
         }
-        assert_eq!(darkest, color[3]);
+        assert_eq!(darkest, 100);
     }
 }

@@ -15,7 +15,7 @@
 
 use crate::stroke::{self, Pen, Sample};
 use ugu_core::motion::noise;
-use ugu_core::store::{Brush, BrushEngine, TipShape};
+use ugu_core::store::{Brush, BrushEngine, Point, TipShape};
 
 /// Samples of an airbrush or spray stroke, as in 2.2.13.
 pub const MAX_DABS: usize = 50_000;
@@ -65,35 +65,48 @@ fn scaled(alpha: u8, factor: f64) -> u8 {
     (f64::from(alpha) * factor.clamp(0.0, 1.0)).round() as u8
 }
 
+/// A whole stroke's dabs on `frame` into `out`, for a stroke whose colour
+/// has `alpha`, sampled as the renderer samples them.
+pub fn stroke_dabs(points: &[Point], pen: &Pen, frame: u32, alpha: u8, out: &mut Vec<Dab>) {
+    let samples = stroke::Resampler::at_most(points, pen.dab_spacing(frame), MAX_DABS);
+    dabs_into(&samples, pen, frame, alpha, out);
+}
+
 /// The dabs of `samples` on `frame` into `out`, for a stroke whose colour
 /// has `alpha`. Dabs that would paint nothing are left out.
 pub fn dabs_into(samples: &[Sample], pen: &Pen, frame: u32, alpha: u8, out: &mut Vec<Dab>) {
     out.clear();
-    if samples.is_empty() {
-        return;
-    }
+    dabs_of(samples, 0..samples.len(), pen, frame, alpha, out);
+}
+
+/// The dabs of the samples in `range` added to `out`. A sample's dabs
+/// depend on the samples on either side of it, which give its direction.
+pub fn dabs_of(
+    samples: &[Sample],
+    range: std::ops::Range<usize>,
+    pen: &Pen,
+    frame: u32,
+    alpha: u8,
+    out: &mut Vec<Dab>,
+) {
     let brush = &pen.brush;
     let base = ugu_core::motion::classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
-    let centers = stroke::displaced(samples, pen, frame);
     let alpha_at = |pressure: f64| {
         let fade = stroke::pressure_scale(brush.opacity_dynamics, pressure);
         scaled(alpha, f64::from(brush.opacity * brush.flow) * fade)
     };
+    let center = |index: usize| stroke::displaced_at(samples, index, pen, frame);
     match brush.engine {
         BrushEngine::Airbrush => {
-            out.extend(
-                samples
-                    .iter()
-                    .zip(&centers)
-                    .filter_map(|(sample, &center)| {
-                        let alpha = alpha_at(sample.pressure);
-                        (alpha > 0).then(|| Dab {
-                            center,
-                            diameter: (base * pen.pressure_scale(sample.pressure)).max(0.5),
-                            alpha,
-                        })
-                    }),
-            );
+            out.extend(range.filter_map(|index| {
+                let sample = &samples[index];
+                let alpha = alpha_at(sample.pressure);
+                (alpha > 0).then(|| Dab {
+                    center: center(index),
+                    diameter: (base * pen.pressure_scale(sample.pressure)).max(0.5),
+                    alpha,
+                })
+            }));
         }
         BrushEngine::Spray => {
             let count = ((f64::from(brush.density) * 6.0).round() as usize).clamp(1, 24);
@@ -104,17 +117,22 @@ pub fn dabs_into(samples: &[Sample], pen: &Pen, frame: u32, alpha: u8, out: &mut
             };
             let scatter = f64::from(brush.scatter) * base * 0.5;
             let jitter = f64::from(brush.size_jitter) * 0.75;
-            for (index, (sample, &[x, y])) in samples.iter().zip(&centers).enumerate() {
+            for index in range {
+                let sample = &samples[index];
                 let alpha = alpha_at(sample.pressure);
+                if index * count >= MAX_PARTICLES {
+                    return;
+                }
+                if alpha == 0 {
+                    continue;
+                }
+                let [x, y] = center(index);
                 let size =
                     base * f64::from(brush.particle_size) * pen.pressure_scale(sample.pressure);
                 for particle in 0..count {
                     let emitted = index * count + particle;
                     if emitted >= MAX_PARTICLES {
                         return;
-                    }
-                    if alpha == 0 {
-                        continue;
                     }
                     let at = emitted as i64;
                     let angle =

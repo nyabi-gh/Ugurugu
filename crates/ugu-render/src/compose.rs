@@ -14,12 +14,13 @@ use std::sync::Arc;
 
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
-use ugu_core::store::Stroke;
+use ugu_core::store::{BrushEngine, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
 use crate::composite::{self, Overlay, Put, Source};
+use crate::dab::{self, Dab};
 use crate::document::{DocumentRenderer, Purpose};
 use crate::live::LiveStroke;
 use crate::plan::RenderPlan;
@@ -226,6 +227,10 @@ pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out:
 pub struct Stamp {
     context: RenderContext,
     resources: Resources,
+    painter: dab::Painter,
+    dabs: Vec<Dab>,
+    /// A dab stroke's pixels, premultiplied.
+    buffer: Vec<u8>,
 }
 
 impl Default for Stamp {
@@ -240,6 +245,9 @@ impl Default for Stamp {
                 },
             ),
             resources: Resources::new(),
+            painter: dab::Painter::default(),
+            dabs: Vec::new(),
+            buffer: Vec::new(),
         }
     }
 }
@@ -262,6 +270,9 @@ impl Stamp {
             seed: stroke.seed,
             wobble: f64::from(wobble) * f64::from(stroke.brush.wobble_scale),
         };
+        if stroke.brush.engine != BrushEngine::Line {
+            return self.apply_dabs(surface, stroke, erase, &pen, frame);
+        }
         let rect = clamp(stroke::bounds(&stroke.points, &pen), surface.size())?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
         let path = stroke::outline(&samples, &pen, frame)?;
@@ -285,6 +296,57 @@ impl Stamp {
                     self::erase(target, color, cover);
                 } else {
                     paint(target, color, cover);
+                }
+            }
+        }
+        Some(rect)
+    }
+
+    /// `apply_stroke` for an airbrush or spray: its dabs painted over each
+    /// other, then over, or erased from, what is there, as the renderer lays
+    /// them.
+    fn apply_dabs(
+        &mut self,
+        surface: &mut TiledSurface,
+        stroke: &Stroke,
+        erase: bool,
+        pen: &Pen,
+        frame: u32,
+    ) -> Option<PixelRect> {
+        dab::stroke_dabs(
+            &stroke.points,
+            pen,
+            frame,
+            stroke.color.0[3],
+            &mut self.dabs,
+        );
+        let rect = clamp(dab::bounds(&self.dabs), surface.size())?;
+        let [left, top, right, _] = rect;
+        let width = (right - left) as usize;
+        for dab in &mut self.dabs {
+            dab.center = [
+                dab.center[0] - f64::from(left),
+                dab.center[1] - f64::from(top),
+            ];
+        }
+        self.buffer.clear();
+        self.buffer.resize(width * (rect[3] - top) as usize * 4, 0);
+        let [r, g, b, _] = if erase { [0; 4] } else { stroke.color.0 };
+        let look = dab::look(&stroke.brush);
+        self.painter
+            .paint(&mut self.buffer, width, &self.dabs, look, [r, g, b]);
+        surface.ensure(rect);
+        for (y, line) in surface.rows_mut(rect) {
+            let from = (y - top) as usize * width;
+            for (x, target) in line.iter_mut().enumerate() {
+                let source = &self.buffer[(from + x) * 4..(from + x) * 4 + 4];
+                if source[3] == 0 {
+                    continue;
+                }
+                if erase {
+                    dest_out(target, source[3]);
+                } else {
+                    src_over(target, source);
                 }
             }
         }
@@ -323,16 +385,11 @@ pub fn clamp([left, top, right, bottom]: [f64; 4], size: [u32; 2]) -> Option<Pix
     (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
 }
 
-/// The straight colour a stroke is drawn in: an eraser's is black, and the
-/// brush opacity scales the alpha.
+/// The straight colour a pen or marker stroke is drawn in: an eraser's is
+/// black, and the alpha is `stroke::line_alpha`.
 pub fn stroke_color(stroke: &Stroke, erase: bool) -> [u8; 4] {
-    let [r, g, b, a] = if erase {
-        [0, 0, 0, stroke.color.0[3]]
-    } else {
-        stroke.color.0
-    };
-    let alpha = (f32::from(a) * stroke.brush.opacity.clamp(0.0, 1.0)).round() as u8;
-    [r, g, b, alpha]
+    let [r, g, b, _] = if erase { [0; 4] } else { stroke.color.0 };
+    [r, g, b, stroke::line_alpha(stroke)]
 }
 
 #[cfg(test)]
@@ -660,11 +717,22 @@ mod tests {
 
     #[test]
     fn a_committed_stroke_stamped_on_any_layer_is_within_a_level_of_a_full_render() {
-        for mut history in histories() {
+        let pen = stroke([0.0; 2], [1.0; 2], [0; 4], 0).brush;
+        let fading = Brush {
+            opacity_dynamics: 0.7,
+            ..pen
+        };
+        let find = |id| ugu_core::brush::find(id).unwrap().brush;
+        let brushes = [pen, fading, find("soft-airbrush"), find("rough-spray")];
+        for (mut history, brush) in brushes
+            .into_iter()
+            .flat_map(|brush| histories().map(|history| (history, brush)))
+        {
             for layer in paint_layers(&history) {
                 for (erase, seed) in [(false, 500), (true, 501)] {
                     let (mut split, _) = split(&history, layer, 4);
-                    let new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
+                    let mut new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
+                    new.brush = brush;
                     let wobble = history.document().wobble.amount;
                     let rect = split
                         .stamp(&mut Stamp::default(), &new, erase, wobble)
@@ -685,7 +753,11 @@ mod tests {
                     };
                     let drawn = renderer.surface(layer).unwrap().to_pixmap();
                     let most = max_difference(&stamped.to_pixmap(), &drawn);
-                    assert!(most <= 1, "{layer:?} erase {erase}: differs by {most}");
+                    assert!(
+                        most <= 1,
+                        "{layer:?} {:?} erase {erase}: differs by {most}",
+                        brush.engine
+                    );
                     // A level in a layer can round to two through the layers
                     // over it.
                     let most = max_difference(&shown, &full);

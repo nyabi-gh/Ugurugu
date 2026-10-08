@@ -1091,9 +1091,7 @@ impl Raster {
             } else {
                 // Spacing is part of how dabs add up, so it keeps full detail.
                 path.truncate(0);
-                let samples =
-                    Resampler::at_most(&stroke.points, pen.dab_spacing(frame), dab::MAX_DABS);
-                dab::dabs_into(&samples, pen, frame, stroke.color.0[3], dabs);
+                dab::stroke_dabs(&stroke.points, pen, frame, stroke.color.0[3], dabs);
             }
         };
         let run = draws.len().div_ceil(self.threads).max(1);
