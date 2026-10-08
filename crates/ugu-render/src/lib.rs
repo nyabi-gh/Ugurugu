@@ -3,6 +3,7 @@
 
 //! Rendering and presentation of the canvas.
 
+pub mod ants;
 pub mod compose;
 pub mod composite;
 pub mod dab;

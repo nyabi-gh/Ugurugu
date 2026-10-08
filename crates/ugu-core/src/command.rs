@@ -8,7 +8,7 @@
 
 use crate::document::{Document, Group, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError};
-use crate::ops::{self, Blend, MaskId, Op, PaintLayer, Sampling, StrokeId};
+use crate::ops::{self, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
 use crate::store::Stroke;
 
 /// A stroke id not in use. Ids freed by undo may be reused, because a new
@@ -62,6 +62,30 @@ pub fn draw(
         Change::InsertStroke(id, stroke),
         Change::InsertOp { layer, index, op },
     ]
+}
+
+/// Fills `coverage`, a stored mask, with `color` on top of `layer`'s
+/// operations.
+pub fn fill(
+    document: &Document,
+    layer: LayerId,
+    coverage: MaskId,
+    color: Rgba8,
+    antialias: bool,
+    clip: Option<MaskId>,
+) -> Vec<Change> {
+    let index = match document.layer(layer).map(|layer| &layer.kind) {
+        Some(LayerKind::Paint(paint)) => paint.ops.len(),
+        // The commit reports the missing or wrong layer.
+        _ => 0,
+    };
+    let op = Op::Fill {
+        coverage,
+        color,
+        antialias,
+        clip,
+    };
+    vec![Change::InsertOp { layer, index, op }]
 }
 
 /// An empty paint layer at `index` in `parent` (`None` for the top level).

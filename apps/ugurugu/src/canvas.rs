@@ -21,17 +21,18 @@ use ugu_core::selection::Combine;
 use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::LiveStroke;
-use ugu_render::plan::RenderPlan;
+use ugu_render::plan::{Reference, RenderPlan};
 use ugu_render::raster::PixelRect;
 use ugu_render::stroke::Pen;
 use ugu_render::view::Placement;
-use ugu_session::{InputPoint, Session, StrokeRefused, Tool};
+use ugu_session::{FillError, InputPoint, Reads, Session, StrokeRefused, Tool};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
 use crate::budget::Budget;
 use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Version};
+use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
 /// Shown around the document, opaque straight RGBA.
@@ -95,6 +96,8 @@ pub struct Canvas {
     modifiers: (bool, bool),
     /// The last stroke's coverage, cleared, for the next stroke.
     spare_coverage: Option<Pixmap>,
+    /// What the wand and the bucket last read, kept for the next click.
+    reference: Option<Pixmap>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
     area: Option<[i32; 4]>,
     /// Physical pixels per document pixel.
@@ -149,6 +152,7 @@ impl Canvas {
             interaction: Interaction::Idle,
             modifiers: (false, false),
             spare_coverage: None,
+            reference: None,
             area: None,
             scale: 1.0,
             offset: [0.0, 0.0],
@@ -543,15 +547,17 @@ impl Canvas {
             }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool == Tool::Select => {
                 self.sample_count += 1;
-                // As in 2.2.13: Shift adds, Alt takes away, both replace.
-                let combine = match self.modifiers {
-                    (true, false) => Combine::Add,
-                    (false, true) => Combine::Subtract,
-                    _ => Combine::Replace,
-                };
+                self.notice = None;
                 let point = self.to_document(sample.position);
-                self.session.begin_selection(point, combine);
+                self.session.begin_selection(point, self.combine());
                 self.interaction = Interaction::Selecting;
+            }
+            CanvasInput::Begin(Gesture::Draw, _, sample)
+                if matches!(self.session.tool, Tool::Wand | Tool::Fill) =>
+            {
+                self.sample_count += 1;
+                let point = self.to_document(sample.position);
+                self.click_area(point);
             }
             CanvasInput::Begin(Gesture::Draw, kind, sample) => {
                 self.sample_count += 1;
@@ -579,7 +585,11 @@ impl Canvas {
                     Interaction::Drawing { live, rect } => self.end_stroke(&sample, live, rect),
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
-                        self.session.end_selection(point);
+                        let before = self.key();
+                        let ended = self.session.end_selection(point);
+                        if self.session.lasso_paints {
+                            self.after_fill(before, ended);
+                        }
                     }
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
@@ -618,6 +628,131 @@ impl Canvas {
     /// The modifier keys held, which decide how a dragged shape selects.
     pub fn set_modifiers(&mut self, shift: bool, alt: bool) {
         self.modifiers = (shift, alt);
+    }
+
+    /// As in 2.2.13: Shift adds, Alt takes away, both replace.
+    fn combine(&self) -> Combine {
+        match self.modifiers {
+            (true, false) => Combine::Add,
+            (false, true) => Combine::Subtract,
+            _ => Combine::Replace,
+        }
+    }
+
+    /// A click with the wand or the bucket at `point`.
+    fn click_area(&mut self, point: [f64; 2]) {
+        let started = Instant::now();
+        self.notice = None;
+        if self.playback.take().is_some() {
+            self.upload_all();
+        }
+        let read = self.read_reference();
+        let reference = self
+            .reference
+            .as_ref()
+            .filter(|_| read)
+            .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
+        let before = self.key();
+        if self.session.tool == Tool::Wand {
+            let combine = self.combine();
+            if let Err(error) = self.session.wand(point, combine, reference) {
+                self.fill_notice(&error);
+            }
+        } else {
+            let filled = self.session.bucket(point, reference);
+            self.after_fill(before, filled.map(committed));
+        }
+        tracing::debug!(
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            "area click shown"
+        );
+    }
+
+    /// Fills the selection on the current layer.
+    pub fn fill_selection(&mut self) {
+        self.edit(|_| ());
+        self.notice = None;
+        let before = self.key();
+        let filled = self.session.fill_selection();
+        self.after_fill(before, filled.map(committed));
+    }
+
+    /// Draws `reference`'s pixels as the wand and the bucket read them into
+    /// `self.reference`: put together from the split when it shows this
+    /// frame and holds the layers, else drawn by the worker. `false` when
+    /// there is nothing to read.
+    fn read_reference(&mut self) -> bool {
+        let document = self.session.document();
+        let reference = match self.session.fill.reads {
+            Reads::Current => Reference::Layer(self.session.current_layer()),
+            Reads::Marked => Reference::Marked,
+            Reads::Visible => Reference::Visible,
+        };
+        let plan = RenderPlan::reference(document, reference);
+        if plan.layers.is_empty() {
+            return false;
+        }
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let pixels = match self.reference.take() {
+            Some(pixels) if pixels.width() == width && pixels.height() == height => pixels,
+            _ => Pixmap::new(width, height),
+        };
+        let mut pixels = pixels;
+        let key = self.key();
+        let threads = std::thread::available_parallelism().map_or(1, usize::from);
+        let from_split = self.split.as_ref().is_some_and(|(shown, split)| {
+            *shown == key && split.reference(&plan, &mut pixels, threads)
+        });
+        if from_split {
+            self.reference = Some(pixels);
+            return true;
+        }
+        let document = self.snapshot().document;
+        self.reference = self
+            .cache
+            .renders()
+            .render(document, plan, self.session.frame());
+        self.reference.is_some()
+    }
+
+    /// Shows a fill just committed (`Ok(true)`), added to the split's layer
+    /// when the split was of the state before; reports why there was none.
+    fn after_fill(&mut self, before: Key, result: Result<bool, FillError>) {
+        match result {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => return self.fill_notice(&error),
+        }
+        let after = self.key();
+        let document = self.session.document();
+        let added = match self.split.as_mut() {
+            Some((key, split)) if *key == before && after.layer == before.layer => {
+                last_fill(document, after.layer).and_then(|(coverage, clip, antialias, color)| {
+                    let changed = split.stamp_fill(coverage, clip, antialias, color);
+                    *key = after;
+                    changed
+                })
+            }
+            _ => None,
+        };
+        self.recomposite(added);
+    }
+
+    fn fill_notice(&mut self, error: &FillError) {
+        let reads = self.session.fill.reads;
+        self.notice = Some(match error {
+            FillError::NoLayer => "Select a paint layer to draw on".to_owned(),
+            FillError::HiddenLayer => "The current layer is hidden".to_owned(),
+            FillError::NoReference if reads == Reads::Marked => tr("fill-no-reference").to_owned(),
+            FillError::NoReference => "Select a paint layer to draw on".to_owned(),
+            FillError::NothingThere if self.session.tool == Tool::Wand => {
+                tr("wand-nothing").to_owned()
+            }
+            FillError::NothingThere => tr("fill-nothing").to_owned(),
+            FillError::OutsideSelection => tr("fill-outside").to_owned(),
+            FillError::NoSelection => tr("fill-no-selection").to_owned(),
+            FillError::Edit(error) => format!("The fill was not added: {error}"),
+        });
     }
 
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
@@ -885,6 +1020,41 @@ fn last_stroke(
         .map(|stroke| (stroke, erase, clip))
 }
 
+fn committed(outcome: Outcome) -> bool {
+    matches!(outcome, Outcome::Committed(_))
+}
+
+/// The coverage, clip, antialiasing and colour of the fill on top of
+/// `layer`'s operations.
+fn last_fill(
+    document: &Document,
+    layer: ugu_core::document::LayerId,
+) -> Option<(
+    &ugu_core::store::Mask,
+    Option<&ugu_core::store::Mask>,
+    bool,
+    [u8; 4],
+)> {
+    let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
+        return None;
+    };
+    let Op::Fill {
+        coverage,
+        color,
+        antialias,
+        clip,
+    } = paint.ops.last()?
+    else {
+        return None;
+    };
+    let masks = &document.store.masks;
+    let clip = match clip {
+        Some(mask) => Some(masks.get(mask)?),
+        None => None,
+    };
+    Some((masks.get(coverage)?, clip, *antialias, color.0))
+}
+
 /// Calls `each` with every paint layer's id, inside groups too.
 fn paint_layers(layers: &[ugu_core::document::Layer], each: &mut impl FnMut(LayerId)) {
     for layer in layers {
@@ -976,5 +1146,97 @@ mod tests {
             .unwrap();
         play_until(&mut canvas, 150);
         assert_eq!(canvas.display().height(), 113);
+    }
+
+    /// Waits for the split of the state shown.
+    fn settle(canvas: &mut super::Canvas, renders: &std::sync::mpsc::Receiver<Rendered>) {
+        canvas.sync();
+        while canvas.split.as_ref().map(|(key, _)| *key) != Some(canvas.key()) {
+            let rendered = renders
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the split renders");
+            canvas.adopt(rendered);
+        }
+    }
+
+    #[test]
+    fn a_bucket_fill_shows_at_once_as_a_full_render_and_the_wand_reads_alike_without_a_split() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        // A closed box of pen strokes.
+        let corners = [
+            [60.0, 40.0],
+            [260.0, 40.0],
+            [260.0, 160.0],
+            [60.0, 160.0],
+            [60.0, 40.0],
+        ];
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(point(corners[0], 0.0)).unwrap();
+            let mut time = 0.0;
+            for pair in corners.windows(2) {
+                for step in 1..=40 {
+                    let t = f64::from(step) / 40.0;
+                    time += 4.0;
+                    let at = [0, 1].map(|axis| pair[0][axis] + (pair[1][axis] - pair[0][axis]) * t);
+                    session.extend_stroke(point(at, time));
+                }
+            }
+            session.end_stroke(point(corners[4], time + 4.0)).unwrap();
+        });
+        settle(&mut canvas, &renders);
+
+        canvas.session.tool = Tool::Wand;
+        canvas.click_area([160.0, 100.0]);
+        let from_split = canvas
+            .session()
+            .selection()
+            .cloned()
+            .expect("the box's inside");
+        canvas.edit(Session::deselect);
+        canvas.split = None;
+        canvas.click_area([160.0, 100.0]);
+        assert_eq!(canvas.session().selection(), Some(&from_split));
+        canvas.edit(Session::deselect);
+        settle(&mut canvas, &renders);
+
+        canvas.session.tool = Tool::Fill;
+        canvas.session.pen.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
+        canvas.click_area([160.0, 100.0]);
+        assert_eq!(canvas.notice(), None);
+        // Added to the split, not drawn again.
+        assert_eq!(
+            canvas.split.as_ref().map(|(key, _)| *key),
+            Some(canvas.key())
+        );
+        let document = canvas.session().document();
+        let mut full = Pixmap::new(320, 200);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            document,
+            canvas.session().frame(),
+            Purpose::Display,
+            &mut full,
+        );
+        let most = canvas
+            .display()
+            .data_as_u8_slice()
+            .iter()
+            .zip(full.data_as_u8_slice())
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(most <= 2, "shown differs by {most}");
+        let middle = (100 * 320 + 160) * 4;
+        assert_eq!(
+            &full.data_as_u8_slice()[middle..middle + 4],
+            &[30, 120, 200, 255]
+        );
     }
 }

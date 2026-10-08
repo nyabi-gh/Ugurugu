@@ -37,6 +37,36 @@ pub enum Combine {
     Subtract,
 }
 
+/// Where a flood fill stops, as 2.2.13 `FloodFillMask` decides it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compare {
+    /// At pixels at least half opaque.
+    AlphaBoundary,
+    /// At pixels whose straight colour differs from the clicked one by more
+    /// than this in any channel, alpha included; 0 stops as `AlphaBoundary`.
+    Color(u8),
+}
+
+/// A premultiplied pixel as straight alpha, rounded as Qt's
+/// `qUnpremultiply`.
+fn straight(pixel: [u8; 4]) -> [u8; 4] {
+    let alpha = u32::from(pixel[3]);
+    match alpha {
+        255 => pixel,
+        0 => [0; 4],
+        _ => {
+            let inverse = 0x00ff_00ff / alpha;
+            let channel = |value: u8| ((u32::from(value) * inverse + 0x8000) >> 16) as u8;
+            [
+                channel(pixel[0]),
+                channel(pixel[1]),
+                channel(pixel[2]),
+                pixel[3],
+            ]
+        }
+    }
+}
+
 /// Pixels as one byte each over a whole canvas, for combining.
 struct Canvas {
     size: [usize; 2],
@@ -204,6 +234,70 @@ impl Selection {
         pixels.selection()
     }
 
+    /// The pixels reached from `seed` through edge neighbours that `compare`
+    /// lets through, in `pixels`: premultiplied rows of a canvas of
+    /// `canvas`. `None` when the seed is outside or itself stops the fill.
+    pub fn flood(
+        pixels: &[[u8; 4]],
+        canvas: [u32; 2],
+        seed: [u32; 2],
+        compare: Compare,
+    ) -> Option<Self> {
+        let [width, height] = canvas.map(|edge| edge as usize);
+        let [seed_x, seed_y] = seed.map(|at| at as usize);
+        if pixels.len() != width * height || seed_x >= width || seed_y >= height {
+            return None;
+        }
+        let target = straight(pixels[seed_y * width + seed_x]);
+        let open = |x: usize, y: usize| {
+            let pixel = pixels[y * width + x];
+            match compare {
+                Compare::AlphaBoundary | Compare::Color(0) => pixel[3] < 128,
+                Compare::Color(tolerance) => straight(pixel)
+                    .iter()
+                    .zip(target)
+                    .all(|(&channel, target)| channel.abs_diff(target) <= tolerance),
+            }
+        };
+        if !open(seed_x, seed_y) {
+            return None;
+        }
+        let mut reached = Canvas::empty(canvas);
+        let mut pending = vec![[seed_x, seed_y]];
+        while let Some([x, y]) = pending.pop() {
+            let row = y * width;
+            if reached.pixels[row + x] || !open(x, y) {
+                continue;
+            }
+            let mut left = x;
+            while left > 0 && !reached.pixels[row + left - 1] && open(left - 1, y) {
+                left -= 1;
+            }
+            let mut right = x;
+            while right + 1 < width && !reached.pixels[row + right + 1] && open(right + 1, y) {
+                right += 1;
+            }
+            reached.fill(y, left, right + 1);
+            for next in [y.wrapping_sub(1), y + 1] {
+                if next >= height {
+                    continue;
+                }
+                let row = next * width;
+                let mut x = left;
+                while x <= right {
+                    if !reached.pixels[row + x] && open(x, next) {
+                        pending.push([x, next]);
+                        while x < right && !reached.pixels[row + x + 1] && open(x + 1, next) {
+                            x += 1;
+                        }
+                    }
+                    x += 1;
+                }
+            }
+        }
+        reached.selection()
+    }
+
     /// `shape`'s pixels combined with `current` by `how`; `None` when no
     /// pixel is left.
     pub fn combine(current: Option<&Self>, shape: Option<Self>, how: Combine) -> Option<Self> {
@@ -296,73 +390,99 @@ impl Selection {
 
     /// The edges between selected and other pixels as closed loops of pixel
     /// corners, the selection on the right of each step; straight runs are
-    /// one step.
+    /// one step. Pixels touching only at a corner are kept apart.
     pub fn outline(&self) -> Vec<Vec<[i32; 2]>> {
         let [left, top, width, height] = self.mask.bounds;
-        let set = |x: i32, y: i32| self.mask.contains(x, y);
-        // Each edge from one corner to the next, keyed by where it starts.
-        let mut next: std::collections::HashMap<[i32; 2], Vec<[i32; 2]>> =
-            std::collections::HashMap::new();
-        let mut edge = |from: [i32; 2], to: [i32; 2]| next.entry(from).or_default().push(to);
-        for y in top..=top + height {
-            for x in left..left + width {
-                // The edge on top of pixel (x, y): going right with the
-                // selection below, left with it above.
-                match (set(x, y - 1), set(x, y)) {
-                    (false, true) => edge([x, y], [x + 1, y]),
-                    (true, false) => edge([x + 1, y], [x, y]),
-                    _ => {}
-                }
+        let [width, height] = [width as usize, height as usize];
+        let row_bytes = Mask::row_bytes(width as i32);
+        let bits = &self.mask.bits;
+        let set = |x: usize, y: usize| {
+            // Corners sit between pixels, so neighbours go one past either
+            // side; those wrap to large values and read as unset.
+            x < width && y < height && bits[y * row_bytes + x / 8] & (0x80 >> (x % 8)) != 0
+        };
+        // Whether each edge along a row (the top edges of rows 0..=height)
+        // was traced; loops are started only from those.
+        let mut traced = vec![false; (height + 1) * width];
+        let empty = vec![0u8; row_bytes];
+        let row = |y: usize| {
+            if y < height {
+                &bits[y * row_bytes..(y + 1) * row_bytes]
+            } else {
+                &empty[..]
             }
-        }
-        for x in left..=left + width {
-            for y in top..top + height {
-                match (set(x - 1, y), set(x, y)) {
-                    (false, true) => edge([x, y + 1], [x, y]),
-                    (true, false) => edge([x, y], [x, y + 1]),
-                    _ => {}
-                }
-            }
-        }
+        };
         let mut loops = Vec::new();
-        while let Some(&start) = next.keys().next() {
-            let mut corners = vec![start];
-            let mut at = start;
-            loop {
-                let ends = next.get_mut(&at).expect("every corner is left");
-                let to = ends.pop().expect("an edge leaves it");
-                if ends.is_empty() {
-                    next.remove(&at);
+        // Every loop has an edge along a row, found a byte at a time.
+        for y in 0..=height {
+            let (above, below) = (row(y.wrapping_sub(1)), row(y));
+            for (byte, (&a, &b)) in above.iter().zip(below).enumerate() {
+                let mut changed = a ^ b;
+                while changed != 0 {
+                    let bit = changed.leading_zeros() as usize;
+                    changed &= !(0x80 >> bit);
+                    let x = byte * 8 + bit;
+                    if x >= width || traced[y * width + x] {
+                        continue;
+                    }
+                    let (start, direction) = if b & (0x80 >> bit) != 0 {
+                        ([x, y], RIGHT)
+                    } else {
+                        ([x + 1, y], LEFT)
+                    };
+                    let mut corners = Vec::new();
+                    let (mut at, mut going) = (start, direction);
+                    loop {
+                        match going {
+                            RIGHT => traced[at[1] * width + at[0]] = true,
+                            LEFT => traced[at[1] * width + at[0] - 1] = true,
+                            _ => {}
+                        }
+                        at = [
+                            (at[0] as isize + STEP[going][0]) as usize,
+                            (at[1] as isize + STEP[going][1]) as usize,
+                        ];
+                        let [x, y] = at;
+                        let [top_left, top_right, bottom_left, bottom_right] = [
+                            set(x.wrapping_sub(1), y.wrapping_sub(1)),
+                            set(x, y.wrapping_sub(1)),
+                            set(x.wrapping_sub(1), y),
+                            set(x, y),
+                        ];
+                        let leaves = [
+                            bottom_right && !top_right,
+                            bottom_left && !bottom_right,
+                            top_left && !bottom_left,
+                            top_right && !top_left,
+                        ];
+                        // A right turn first keeps pixels that meet at a
+                        // corner in loops of their own.
+                        let turned = [1, 0, 3]
+                            .map(|turn| (going + turn) % 4)
+                            .into_iter()
+                            .find(|&next| leaves[next])
+                            .expect("an edge leaves every corner reached");
+                        if turned != going {
+                            corners.push([left + x as i32, top + y as i32]);
+                        }
+                        going = turned;
+                        if at == start && going == direction {
+                            break;
+                        }
+                    }
+                    loops.push(corners);
                 }
-                if to == start {
-                    break;
-                }
-                corners.push(to);
-                at = to;
             }
-            loops.push(straightened(corners));
         }
         loops
     }
 }
 
-/// `corners` without those in the middle of a straight run.
-fn straightened(corners: Vec<[i32; 2]>) -> Vec<[i32; 2]> {
-    let count = corners.len();
-    (0..count)
-        .filter(|&index| {
-            let [before, here, after] = [
-                corners[(index + count - 1) % count],
-                corners[index],
-                corners[(index + 1) % count],
-            ];
-            let turn = (here[0] - before[0]) * (after[1] - here[1])
-                - (here[1] - before[1]) * (after[0] - here[0]);
-            turn != 0
-        })
-        .map(|index| corners[index])
-        .collect()
-}
+/// Directions along pixel edges, clockwise on screen (y down), and the step
+/// each takes.
+const RIGHT: usize = 0;
+const LEFT: usize = 2;
+const STEP: [[isize; 2]; 4] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 
 #[cfg(test)]
 mod tests {
@@ -528,5 +648,138 @@ mod tests {
         .unwrap();
         let edges: usize = diagonal.outline().iter().map(Vec::len).sum();
         assert_eq!(edges, 8);
+    }
+
+    /// Every pixel edge between a selected and another pixel, from the
+    /// corner it starts at, the selection on the right.
+    fn boundary(selection: &Selection) -> Vec<([i32; 2], [i32; 2])> {
+        let set = |x: i32, y: i32| selection.mask.contains(x, y);
+        let mut edges = Vec::new();
+        for y in -1..=CANVAS[1] as i32 {
+            for x in -1..=CANVAS[0] as i32 {
+                match (set(x, y - 1), set(x, y)) {
+                    (false, true) => edges.push(([x, y], [x + 1, y])),
+                    (true, false) => edges.push(([x + 1, y], [x, y])),
+                    _ => {}
+                }
+                match (set(x - 1, y), set(x, y)) {
+                    (false, true) => edges.push(([x, y + 1], [x, y])),
+                    (true, false) => edges.push(([x, y], [x, y + 1])),
+                    _ => {}
+                }
+            }
+        }
+        edges.sort();
+        edges
+    }
+
+    #[test]
+    fn the_outline_takes_every_boundary_edge_once_in_closed_loops() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        for density in [2, 5, 8] {
+            let mut pixels = Canvas::empty(CANVAS);
+            for pixel in &mut pixels.pixels {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *pixel = state % 10 < density;
+            }
+            let selection = pixels.selection().unwrap();
+            let mut traced = Vec::new();
+            for corners in selection.outline() {
+                for (index, &from) in corners.iter().enumerate() {
+                    let to = corners[(index + 1) % corners.len()];
+                    // Runs are straight and turn at every corner.
+                    assert!(from[0] == to[0] || from[1] == to[1]);
+                    let next = corners[(index + 2) % corners.len()];
+                    assert!(next[0] != from[0] && next[1] != from[1] || corners.len() == 2);
+                    let step = [(to[0] - from[0]).signum(), (to[1] - from[1]).signum()];
+                    let mut at = from;
+                    while at != to {
+                        let end = [at[0] + step[0], at[1] + step[1]];
+                        traced.push((at, end));
+                        at = end;
+                    }
+                }
+            }
+            traced.sort();
+            assert_eq!(traced, boundary(&selection), "density {density}");
+        }
+    }
+
+    /// A transparent canvas with a closed square ring of opaque black, two
+    /// pixels thick, as 2.2.13's flood fill test draws it.
+    fn ring() -> (Vec<[u8; 4]>, [u32; 2]) {
+        let size = [24, 20];
+        let mut pixels = vec![[0; 4]; 24 * 20];
+        for y in 5..15 {
+            for x in 6..18 {
+                if !(8..16).contains(&x) || !(7..13).contains(&y) {
+                    pixels[y * 24 + x] = [0, 0, 0, 255];
+                }
+            }
+        }
+        (pixels, size)
+    }
+
+    #[test]
+    fn a_flood_fills_the_area_its_seed_is_in_up_to_the_lines() {
+        let (pixels, size) = ring();
+        let inside = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
+        assert_eq!(inside.mask.bounds, [8, 7, 8, 6]);
+        assert_eq!(
+            inside
+                .mask
+                .bits
+                .iter()
+                .map(|byte| byte.count_ones())
+                .sum::<u32>(),
+            48
+        );
+        // Colour with no tolerance stops as the alpha boundary does.
+        assert_eq!(
+            Selection::flood(&pixels, size, [10, 10], Compare::Color(0)),
+            Some(inside)
+        );
+        let outside = Selection::flood(&pixels, size, [0, 0], Compare::Color(32)).unwrap();
+        assert_eq!(outside.mask.bounds, [0, 0, 24, 20]);
+        assert!(!outside.mask.contains(6, 5) && !outside.mask.contains(10, 10));
+        // A seed on a line, or outside the canvas, selects nothing.
+        assert_eq!(
+            Selection::flood(&pixels, size, [6, 5], Compare::AlphaBoundary),
+            None
+        );
+        assert_eq!(
+            Selection::flood(&pixels, size, [24, 0], Compare::AlphaBoundary),
+            None
+        );
+    }
+
+    #[test]
+    fn a_colour_flood_compares_every_straight_channel_with_the_tolerance() {
+        let premultiplied = |[r, g, b, a]: [u8; 4]| {
+            let scale = |channel: u8| ((u32::from(channel) * u32::from(a) + 127) / 255) as u8;
+            [scale(r), scale(g), scale(b), a]
+        };
+        let pixels = [
+            [100, 100, 100, 255],
+            [105, 96, 103, 250],
+            [112, 100, 100, 255],
+            [100, 100, 100, 200],
+        ]
+        .map(premultiplied);
+        let tight = Selection::flood(&pixels, [4, 1], [0, 0], Compare::Color(5)).unwrap();
+        assert_eq!(tight.mask.bounds, [0, 0, 2, 1]);
+        let widest = Selection::flood(&pixels, [4, 1], [0, 0], Compare::Color(255)).unwrap();
+        assert_eq!(widest.mask.bounds, [0, 0, 4, 1]);
+    }
+
+    #[test]
+    fn unpremultiplying_rounds_as_qt_does() {
+        assert_eq!(straight([0, 0, 0, 0]), [0; 4]);
+        assert_eq!(straight([10, 20, 30, 255]), [10, 20, 30, 255]);
+        // Qt: (c · ⌊0xff00ff / a⌋ + 0x8000) >> 16.
+        assert_eq!(straight([1, 63, 127, 128]), [2, 126, 253, 128]);
+        assert_eq!(straight([1, 2, 3, 3]), [85, 170, 255, 3]);
     }
 }

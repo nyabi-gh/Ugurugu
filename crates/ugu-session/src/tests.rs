@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 use super::*;
-use ugu_core::ops::Op;
+use ugu_core::ops::{MaskId, Op, Rgba8};
 use ugu_core::selection::Combine;
 use ugu_core::store::BrushEngine;
 
@@ -492,7 +492,7 @@ fn drag(
     session.selection_shape = kind;
     session.begin_selection(from, how);
     session.extend_selection([(from[0] + to[0]) / 2.0, from[1]]);
-    session.end_selection(to)
+    session.end_selection(to).unwrap()
 }
 
 fn selected(session: &Session) -> Option<[i32; 4]> {
@@ -594,7 +594,7 @@ fn a_freehand_loop_takes_points_a_pixel_apart_and_stays_on_the_canvas() {
     let lasso = session.lasso().unwrap();
     assert_eq!(lasso.points[0], [0.0, 10.0]);
     assert_eq!(lasso.points[2], [60.0, 100.0]);
-    assert!(session.end_selection([10.0, 60.0]));
+    assert!(session.end_selection([10.0, 60.0]).unwrap());
     assert!(session.lasso().is_none());
     assert!(session.selection().unwrap().mask().contains(30, 30));
 }
@@ -708,4 +708,204 @@ fn the_selection_stays_across_layers_and_follows_canvas_changes() {
     assert_eq!(selected(&session), None);
     session.undo().unwrap();
     assert_eq!(selected(&session), Some([20, 10, 20, 20]));
+}
+
+/// A 200×100 reference: transparent with an opaque box outline around
+/// x 40..120, y 20..80, two pixels thick.
+fn boxed() -> Vec<[u8; 4]> {
+    let mut pixels = vec![[0; 4]; 200 * 100];
+    for y in 20..80 {
+        for x in 40..120 {
+            if !(42..118).contains(&x) || !(22..78).contains(&y) {
+                pixels[y * 200 + x] = [0, 0, 0, 255];
+            }
+        }
+    }
+    pixels
+}
+
+fn fills(session: &Session, layer: LayerId) -> Vec<(MaskId, Rgba8, bool, Option<MaskId>)> {
+    ops(session, layer)
+        .into_iter()
+        .filter_map(|op| match op {
+            Op::Fill {
+                coverage,
+                color,
+                antialias,
+                clip,
+            } => Some((coverage, color, antialias, clip)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_wand_selects_the_area_clicked_and_combines_like_a_shape() {
+    let mut session = session();
+    let reference = boxed();
+    let read = Some(reference.as_slice());
+    assert_eq!(session.wand([60.0, 50.0], Combine::Replace, read), Ok(true));
+    assert_eq!(selected(&session), Some([42, 22, 76, 56]));
+    assert_eq!(session.undo_label(), Some("Select area"));
+    // The outside, added, rings the box.
+    assert_eq!(session.wand([5.0, 5.0], Combine::Add, read), Ok(true));
+    assert_eq!(selected(&session), Some([0, 0, 200, 100]));
+    assert_eq!(
+        session.wand([60.0, 50.0], Combine::Subtract, read),
+        Ok(true)
+    );
+    assert!(!session.selection().unwrap().mask().contains(60, 50));
+    // On a line nothing is found: replacing deselects and says why, adding
+    // keeps the selection.
+    assert_eq!(
+        session.wand([40.5, 50.0], Combine::Add, read),
+        Err(FillError::NothingThere)
+    );
+    assert!(session.selection().is_some());
+    assert_eq!(
+        session.wand([40.5, 50.0], Combine::Replace, read),
+        Err(FillError::NothingThere)
+    );
+    assert!(session.selection().is_none());
+    assert_eq!(
+        session.wand([60.0, 50.0], Combine::Replace, None),
+        Err(FillError::NoReference)
+    );
+    // Off the canvas, as a click with the selection tool.
+    session.wand([60.0, 50.0], Combine::Replace, read).unwrap();
+    assert_eq!(session.wand([-3.0, 50.0], Combine::Replace, read), Ok(true));
+    assert!(session.selection().is_none());
+    // Colour comparison with a tolerance passes the line.
+    session.fill.by_colour = true;
+    session.fill.tolerance = 255;
+    session.wand([60.0, 50.0], Combine::Replace, read).unwrap();
+    assert_eq!(selected(&session), Some([0, 0, 200, 100]));
+}
+
+#[test]
+fn the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let reference = boxed();
+    let read = Some(reference.as_slice());
+    session.pen.color = Rgba8([200, 30, 30, 255]);
+    assert!(matches!(
+        session.bucket([60.0, 50.0], read),
+        Ok(Outcome::Committed(_))
+    ));
+    let [(coverage, color, antialias, clip)] = fills(&session, layer)[..] else {
+        panic!("one fill");
+    };
+    assert_eq!(
+        (color, antialias, clip),
+        (Rgba8([200, 30, 30, 255]), true, None)
+    );
+    assert_eq!(
+        session.document().store.masks[&coverage].bounds,
+        [42, 22, 76, 56]
+    );
+    assert_eq!(session.undo_label(), Some("Fill"));
+    assert!(session.undo().unwrap());
+    assert!(fills(&session, layer).is_empty());
+    assert!(session.document().store.masks.is_empty());
+    // With a selection, a click outside it fills nothing; inside, the fill
+    // is cut to it.
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [50.0, 30.0],
+        [90.0, 70.0],
+        Combine::Replace,
+    );
+    assert_eq!(
+        session.bucket([10.0, 10.0], read),
+        Err(FillError::OutsideSelection)
+    );
+    session.bucket([60.0, 50.0], read).unwrap();
+    let [(coverage, _, _, Some(clip))] = fills(&session, layer)[..] else {
+        panic!("one fill cut to the selection");
+    };
+    assert_ne!(coverage, clip);
+    assert_eq!(
+        &session.document().store.masks[&clip],
+        session.selection().unwrap().mask()
+    );
+    assert_eq!(
+        session.bucket([41.0, 50.0], read),
+        Err(FillError::OutsideSelection)
+    );
+    session.deselect();
+    assert_eq!(
+        session.bucket([41.0, 50.0], read),
+        Err(FillError::NothingThere)
+    );
+    assert_eq!(session.bucket([300.0, 50.0], read), Ok(Outcome::NoChange));
+    session
+        .update_layer(layer, "Hide layer", |layer| layer.visible = false)
+        .unwrap();
+    assert_eq!(
+        session.bucket([60.0, 50.0], read),
+        Err(FillError::HiddenLayer)
+    );
+}
+
+#[test]
+fn filling_the_selection_or_a_painted_shape_is_one_fill_cut_to_the_selection() {
+    let mut session = session();
+    let layer = session.current_layer();
+    assert_eq!(session.fill_selection(), Err(FillError::NoSelection));
+    drag(
+        &mut session,
+        ShapeKind::Ellipse,
+        [20.0, 20.0],
+        [80.0, 70.0],
+        Combine::Replace,
+    );
+    session.fill_selection().unwrap();
+    let [(coverage, _, _, Some(clip))] = fills(&session, layer)[..] else {
+        panic!("one fill cut to the selection");
+    };
+    // The selection is stored once, for both.
+    assert_eq!(coverage, clip);
+    assert_eq!(session.document().store.masks.len(), 1);
+    session.select_all();
+    session.fill_selection().unwrap();
+    assert!(matches!(fills(&session, layer)[1], (_, _, _, None)));
+    // Painting fills the shape and leaves the selection as it was.
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [50.0, 50.0],
+        Combine::Replace,
+    );
+    let before = session.selection().cloned();
+    session.lasso_paints = true;
+    assert!(drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [30.0, 30.0],
+        [90.0, 90.0],
+        Combine::Replace
+    ));
+    assert_eq!(session.selection().cloned(), before);
+    let (coverage, _, _, clip) = fills(&session, layer)[2];
+    assert_eq!(
+        session.document().store.masks[&coverage].bounds,
+        [30, 30, 60, 60]
+    );
+    assert_eq!(
+        session.document().store.masks[&clip.unwrap()],
+        *before.unwrap().mask()
+    );
+    assert_eq!(session.undo_label(), Some("Fill"));
+    // A click paints nothing.
+    assert!(!drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [30.0, 30.0],
+        [30.2, 30.2],
+        Combine::Replace
+    ));
+    assert_eq!(fills(&session, layer).len(), 3);
 }

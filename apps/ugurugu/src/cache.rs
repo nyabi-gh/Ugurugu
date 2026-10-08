@@ -91,6 +91,7 @@ enum Job {
     Frame(Version, u32, Preview, Snapshot),
     Export {
         document: Arc<Document>,
+        plan: RenderPlan,
         frame: i64,
         reply: Sender<Pixmap>,
     },
@@ -289,6 +290,13 @@ impl Renders {
     /// Renders `frame` of `document` for export, after the canvas's own
     /// work; waits for it. `None` when the worker has stopped.
     pub fn export(&self, document: Arc<Document>, frame: i64) -> Option<Pixmap> {
+        let plan = RenderPlan::new(&document, Purpose::Export);
+        self.render(document, plan, frame)
+    }
+
+    /// Renders `frame` of `document` as `plan` says, after the canvas's own
+    /// work; waits for it. `None` when the worker has stopped.
+    pub fn render(&self, document: Arc<Document>, plan: RenderPlan, frame: i64) -> Option<Pixmap> {
         let (reply, answer) = channel();
         let shared = &self.shared;
         shared
@@ -298,6 +306,7 @@ impl Renders {
             .exports
             .push_back(Job::Export {
                 document,
+                plan,
                 frame,
                 reply,
             });
@@ -399,16 +408,17 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
         }
         Job::Export {
             document,
+            plan,
             frame,
             reply,
         } => {
             let [width, height] = document.canvas.map(|edge| edge as u16);
             let mut pixels = Pixmap::new(width, height);
-            let plan = RenderPlan::new(&document, Purpose::Export);
             if !renderer.render_plan(&document, &plan, frame, None, &mut pixels) {
                 tracing::debug!(ms = ms(), "export frame stopped");
                 return Some(Job::Export {
                     document,
+                    plan,
                     frame,
                     reply,
                 });
@@ -487,6 +497,7 @@ mod tests {
             ));
             queue.exports.push_back(Job::Export {
                 document: state.document.clone(),
+                plan: RenderPlan::new(&state.document, Purpose::Export),
                 frame: 0,
                 reply,
             });

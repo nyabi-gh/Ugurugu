@@ -40,6 +40,9 @@ pub enum Purpose {
     Display,
     /// Visible layers except reference layers.
     Export,
+    /// What a tool that reads the frame sees (`RenderPlan::reference`),
+    /// over transparency instead of the background.
+    Reference,
 }
 
 pub struct DocumentRenderer {
@@ -615,7 +618,11 @@ impl DocumentRenderer {
                     .map_or(Source::Empty, |cached| Source::Tiles(&cached.surface))
             })
             .collect();
-        let background = premultiplied(document.background.0);
+        let background = if plan.purpose == Purpose::Reference {
+            [0; 4]
+        } else {
+            premultiplied(document.background.0)
+        };
         let rect = [0, 0, u32::from(width), u32::from(height)];
         let finished = composite::evaluate(
             &composite::program(plan),
@@ -1702,16 +1709,7 @@ impl DrawCache {
         };
         let bits: Vec<&Mask> = std::iter::once(coverage).chain(clip).collect();
         self.get(key, &bits, || {
-            let covered = Runs::from_mask(coverage);
-            let clip = clip.map(Runs::from_mask);
-            let cut = |runs: Runs| match &clip {
-                Some(clip) => runs.intersect(clip),
-                None => runs,
-            };
-            let fringe = antialias
-                .then(|| cut(covered.fringe()))
-                .filter(|fringe| !fringe.is_empty());
-            let area = cut(covered);
+            let (area, fringe) = Runs::fill(coverage, clip, antialias);
             let bounds = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
                 .into_iter()
                 .flatten()

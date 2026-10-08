@@ -9,12 +9,12 @@
 
 use std::sync::Arc;
 
-use ugu_core::edit::{Change, EditError};
+use ugu_core::edit::{Change, EditError, Outcome};
 use ugu_core::history::Group;
 use ugu_core::ops::MaskId;
 use ugu_core::selection::{Combine, Selection, Shape};
 
-use crate::Session;
+use crate::{FillError, Session};
 
 /// A freehand point is added once the pointer is this far from the last.
 const FREEHAND_STEP: f64 = 1.0;
@@ -101,24 +101,28 @@ impl Session {
         true
     }
 
-    /// Makes the dragged shape part of the selection; returns whether the
-    /// selection changed. A shape too small to select, as a click, clears
-    /// the selection when replacing and does nothing otherwise.
-    pub fn end_selection(&mut self, position: [f64; 2]) -> bool {
+    /// Makes the dragged shape part of the selection, or in paint mode
+    /// fills it; returns whether anything changed. A shape too small to
+    /// select, as a click, clears the selection when replacing and does
+    /// nothing otherwise.
+    pub fn end_selection(&mut self, position: [f64; 2]) -> Result<bool, FillError> {
         self.extend_selection(position);
         let Some(lasso) = self.lasso.take() else {
-            return false;
+            return Ok(false);
         };
         let shape = Selection::of_shape(&lasso.shape(), self.document().canvas);
+        if self.lasso_paints {
+            return Ok(matches!(self.fill_shape(shape)?, Outcome::Committed(_)));
+        }
         let label = match (lasso.combine, &shape) {
             (Combine::Replace, None) => "Deselect",
-            (_, None) => return false,
+            (_, None) => return Ok(false),
             (Combine::Replace, Some(_)) => "Select area",
             (Combine::Add, Some(_)) => "Add to selection",
             (Combine::Subtract, Some(_)) => "Subtract from selection",
         };
         let next = Selection::combine(self.selection().map(Arc::as_ref), shape, lasso.combine);
-        self.history.select(label, next)
+        Ok(self.history.select(label, next))
     }
 
     /// Drops the shape being dragged, leaving the selection as it was.

@@ -24,6 +24,7 @@ use crate::composite::{self, Overlay, Put, Source};
 use crate::dab::{self, Dab};
 use crate::document::{DocumentRenderer, Purpose};
 use crate::live::LiveStroke;
+use crate::mask::Runs;
 use crate::plan::RenderPlan;
 use crate::raster::{PixelRect, document_level};
 use crate::stream::Held;
@@ -40,6 +41,14 @@ pub fn src_over(target: &mut [u8], source: &[u8]) {
     let keep = 255 - source[3];
     for channel in 0..4 {
         target[channel] = source[channel] + mul(keep, target[channel]);
+    }
+}
+
+/// Premultiplied `source` behind `target`.
+pub fn dest_over(target: &mut [u8], source: [u8; 4]) {
+    let keep = 255 - target[3];
+    for channel in 0..4 {
+        target[channel] = target[channel].saturating_add(mul(keep, source[channel]));
     }
 }
 
@@ -98,6 +107,9 @@ pub struct Split {
     pub sources: Vec<Held>,
     /// The edited layer among the sources; `None` when it is not shown.
     pub edited: Option<usize>,
+    /// The paint layer of each source, in order; `None` when sources were
+    /// put together ahead of time.
+    pub layers: Option<Vec<LayerId>>,
 }
 
 impl Split {
@@ -119,6 +131,94 @@ impl Split {
         let pen = Pen::new(stroke, wobble, frames);
         let surface = Arc::make_mut(surface);
         stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip)
+    }
+
+    /// Puts `plan`'s layers (`RenderPlan::reference`) together into `out`,
+    /// which must have the canvas size, from the surfaces held: what a full
+    /// render of the plan gives. `false` when the plan has no layers or this
+    /// split does not hold one of them apart (a hidden layer, or sources put
+    /// together ahead of time); the caller then renders the plan.
+    pub fn reference(&self, plan: &RenderPlan, out: &mut Pixmap, threads: usize) -> bool {
+        let Some(layers) = &self.layers else {
+            return false;
+        };
+        let sources = self.sources();
+        let Some(read) = plan
+            .layers
+            .iter()
+            .map(|(id, _)| {
+                layers
+                    .iter()
+                    .position(|layer| layer == id)
+                    .map(|at| sources[at])
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return false;
+        };
+        let rect = [0, 0, u32::from(out.width()), u32::from(out.height())];
+        !read.is_empty()
+            && composite::evaluate(
+                &composite::program(plan),
+                None,
+                &read,
+                rect,
+                out,
+                threads,
+                None,
+            )
+    }
+
+    /// Adds a committed fill to the edited layer as drawing it again at
+    /// full size does: the covered pixels become `color` (straight), the
+    /// fringe goes behind what is there. Returns the pixels it changed.
+    pub fn stamp_fill(
+        &mut self,
+        coverage: &Mask,
+        clip: Option<&Mask>,
+        antialias: bool,
+        color: [u8; 4],
+    ) -> Option<PixelRect> {
+        let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        let surface = Arc::make_mut(surface);
+        let (area, fringe) = Runs::fill(coverage, clip, antialias);
+        let size = surface.size().map(|edge| edge as i32);
+        let [left, top, right, bottom] = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
+            .into_iter()
+            .flatten()
+            .reduce(|[l, t, r, b], [l2, t2, r2, b2]| {
+                [l.min(l2), t.min(t2), r.max(r2), b.max(b2)]
+            })?;
+        let rect = [
+            left.max(0),
+            top.max(0),
+            right.min(size[0]),
+            bottom.min(size[1]),
+        ];
+        if rect[0] >= rect[2] || rect[1] >= rect[3] {
+            return None;
+        }
+        let rect = rect.map(|edge| edge as u32);
+        let color = premultiplied(color);
+        surface.ensure(rect);
+        for (y, line) in surface.rows_mut(rect) {
+            let y = y as i32;
+            let [left, right] = [rect[0] as i32, rect[2] as i32];
+            let span = |&[from, to]: &[i32; 2]| {
+                (from.clamp(left, right) - left) as usize..(to.clamp(left, right) - left) as usize
+            };
+            for run in area.row(y) {
+                line[span(run)].fill(color);
+            }
+            for run in fringe.iter().flat_map(|fringe| fringe.row(y)) {
+                for target in &mut line[span(run)] {
+                    dest_over(target, color);
+                }
+            }
+        }
+        Some(rect)
     }
 
     fn sources(&self) -> Vec<Source<'_>> {
@@ -159,6 +259,7 @@ impl DocumentRenderer {
                 background: None,
                 sources: program.sources,
                 edited: program.edited,
+                layers: None,
             };
             let rect = [
                 0,
@@ -195,6 +296,7 @@ impl DocumentRenderer {
             puts: composite::program(&plan),
             background: Some(premultiplied(document.background.0)),
             sources,
+            layers: Some(plan.layers.iter().map(|(id, _)| *id).collect()),
         })
     }
 }
@@ -406,6 +508,7 @@ mod tests {
     use ugu_core::edit::Change;
     use ugu_core::history::History;
     use ugu_core::ops::{Blend, Motion, MotionStyle, Rgba8, Wobble};
+    use ugu_core::selection::{Combine, Selection, Shape};
     use ugu_core::store::{Brush, BrushEngine, Point};
 
     fn stroke(from: [f32; 2], to: [f32; 2], color: [u8; 4], seed: u64) -> Stroke {
@@ -734,6 +837,56 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_put_together_from_the_split_is_the_reference_drawn() {
+        use crate::plan::Reference;
+        let mut history = history();
+        let ids = paint_layers(&history);
+        let (marked, hidden) = (ids[1], ids[2]);
+        let change = |history: &mut History, id, change: fn(&mut ugu_core::document::Layer)| {
+            history
+                .edit("Change", |document| {
+                    command::update_layer(document, id, change).unwrap()
+                })
+                .unwrap();
+        };
+        change(&mut history, marked, |layer| layer.reference = true);
+        change(&mut history, hidden, |layer| layer.visible = false);
+        let document = history.document();
+        for frame in [0, 3] {
+            let (split, _) = split(&history, ids[0], frame);
+            let references = ids.iter().map(|id| Reference::Layer(*id));
+            for reference in references.chain([Reference::Marked, Reference::Visible]) {
+                let plan = RenderPlan::reference(document, reference);
+                let mut drawn = canvas(document);
+                DocumentRenderer::new(0).render_plan(document, &plan, frame, None, &mut drawn);
+                let mut read = canvas(document);
+                if split.reference(&plan, &mut read, 2) {
+                    assert_eq!(
+                        read.data_as_u8_slice(),
+                        drawn.data_as_u8_slice(),
+                        "{reference:?}, frame {frame}"
+                    );
+                } else {
+                    // A hidden layer is drawn for its own reference only.
+                    assert_eq!(reference, Reference::Layer(hidden));
+                    assert!(drawn.data_as_u8_slice().chunks(4).any(|pixel| pixel[3] > 0));
+                }
+            }
+        }
+        // The background is left out, and nothing marked reads as nothing.
+        let mut marked_only = canvas(document);
+        let plan = RenderPlan::reference(document, Reference::Marked);
+        DocumentRenderer::new(0).render_plan(document, &plan, 0, None, &mut marked_only);
+        assert_eq!(&marked_only.data_as_u8_slice()[..4], &[0; 4]);
+        change(&mut history, marked, |layer| layer.reference = false);
+        assert!(
+            RenderPlan::reference(history.document(), Reference::Marked)
+                .layers
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn the_split_puts_back_the_full_frame() {
         for history in histories() {
             let full = render(history.document(), 3);
@@ -817,6 +970,76 @@ mod tests {
                         "{layer:?} erase {erase}: shown differs by {most}"
                     );
                     assert!(rect[2] > rect[0]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fill_stamped_on_any_layer_is_within_a_level_of_a_full_render() {
+        // A ring of a fill, so the fringe falls inside and outside it.
+        let ring = Selection::combine(
+            Selection::of_shape(&Shape::Ellipse([20.0, 10.0], [100.0, 70.0]), [120, 80]).as_ref(),
+            Selection::of_shape(&Shape::Rectangle([45.0, 30.0], [75.0, 50.0]), [120, 80]),
+            Combine::Subtract,
+        )
+        .unwrap();
+        let coverage = ugu_core::ops::MaskId(40);
+        let selection = ugu_core::ops::MaskId(0);
+        for mut history in histories() {
+            if history.document().canvas != [120, 80] {
+                continue;
+            }
+            for layer in paint_layers(&history) {
+                for (antialias, clip) in [(true, None), (false, None), (true, Some(selection))] {
+                    let (mut split, _) = split(&history, layer, 4);
+                    let document = history.document();
+                    let color = [30, 140, 90, 200];
+                    let rect = split
+                        .stamp_fill(
+                            ring.mask(),
+                            clip.and_then(|id| document.store.masks.get(&id)),
+                            antialias,
+                            color,
+                        )
+                        .unwrap();
+                    assert!(rect[2] > rect[0]);
+                    let mut shown = canvas(document);
+                    composite(&split, None, whole(document), &mut shown);
+                    history
+                        .group("Fill", |group| {
+                            if !group.document().store.masks.contains_key(&coverage) {
+                                group.apply(|_| {
+                                    vec![Change::InsertMask(coverage, ring.mask().clone())]
+                                })?;
+                            }
+                            group.apply(|document| {
+                                command::fill(
+                                    document,
+                                    layer,
+                                    coverage,
+                                    Rgba8(color),
+                                    antialias,
+                                    clip,
+                                )
+                            })
+                        })
+                        .unwrap();
+                    let mut renderer = DocumentRenderer::new(0);
+                    let mut full = canvas(history.document());
+                    let plan = RenderPlan::new(history.document(), Purpose::Display);
+                    renderer.render_plan(history.document(), &plan, 4, None, &mut full);
+                    let Held::Tiles(stamped) = &split.sources[split.edited.unwrap()] else {
+                        unreachable!("a paint layer's pixels are tiles");
+                    };
+                    let drawn = renderer.surface(layer).unwrap().to_pixmap();
+                    let most = max_difference(&stamped.to_pixmap(), &drawn);
+                    assert!(
+                        most <= 1,
+                        "{layer:?} antialias {antialias} clip {clip:?}: differs by {most}"
+                    );
+                    let most = max_difference(&shown, &full);
+                    assert!(most <= 2, "{layer:?}: shown differs by {most}");
                 }
             }
         }

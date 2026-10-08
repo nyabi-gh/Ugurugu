@@ -327,7 +327,7 @@ impl DocumentView {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const WORKSPACE: [u8; 4] = [60, 62, 66, 255];
@@ -346,10 +346,25 @@ mod tests {
     /// Draws `document` into the whole of a `target`-sized image and reads
     /// it back.
     fn render(document: &Pixmap, placement: Placement, target: [u32; 2]) -> Option<Vec<u8>> {
+        render_with(target, |device, queue, format| {
+            let mut view = DocumentView::new(device, format, WORKSPACE);
+            view.update(device, queue, document, None);
+            move |queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>| {
+                view.draw(queue, pass, [0, 0, target[0], target[1]], placement, target);
+            }
+        })
+    }
+
+    /// Clears a `target`-sized RGBA8 image to black, runs what `prepare`
+    /// makes in one render pass over it and reads it back; `None` without a
+    /// DX12 adapter.
+    pub(crate) fn render_with<D: FnOnce(&wgpu::Queue, &mut wgpu::RenderPass<'_>)>(
+        target: [u32; 2],
+        prepare: impl FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat) -> D,
+    ) -> Option<Vec<u8>> {
         let (device, queue) = device()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut view = DocumentView::new(&device, format, WORKSPACE);
-        view.update(&device, &queue, document, None);
+        let draw = prepare(&device, &queue, format);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -390,13 +405,7 @@ mod tests {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            view.draw(
-                &queue,
-                &mut pass,
-                [0, 0, target[0], target[1]],
-                placement,
-                target,
-            );
+            draw(&queue, &mut pass);
         }
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),

@@ -37,6 +37,18 @@ pub enum Step {
     Paint(LayerId, Composite),
 }
 
+/// Which layers a tool that reads the frame sees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// This paint layer alone, as it is without its visibility, opacity,
+    /// blend mode, clipping and group.
+    Layer(LayerId),
+    /// The paint layers marked as references, put together.
+    Marked,
+    /// Every shown layer put together.
+    Visible,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderPlan {
     pub purpose: Purpose,
@@ -48,12 +60,47 @@ pub struct RenderPlan {
 
 impl RenderPlan {
     pub fn new(document: &Document, purpose: Purpose) -> Self {
+        Self::with(document, purpose, false)
+    }
+
+    /// What a tool reading `reference` sees, drawn over transparency. Has
+    /// no layers when there is nothing to read: no such paint layer, or no
+    /// marked layer shown.
+    pub fn reference(document: &Document, reference: Reference) -> Self {
+        match reference {
+            Reference::Layer(id) => {
+                let mut plan = Self {
+                    purpose: Purpose::Reference,
+                    steps: Vec::new(),
+                    layers: Vec::new(),
+                };
+                if let Some(LayerKind::Paint(paint)) = document.layer(id).map(|layer| &layer.kind) {
+                    let wobble = paint.wobble.unwrap_or(document.wobble);
+                    let moves = moves(&paint.ops, &document.store, document.wobble, wobble);
+                    plan.layers.push((id, moves));
+                    plan.steps.push(Step::Paint(
+                        id,
+                        Composite {
+                            blend: Blend::Normal,
+                            opacity: 1.0,
+                            clipped: false,
+                        },
+                    ));
+                }
+                plan
+            }
+            Reference::Marked => Self::with(document, Purpose::Reference, true),
+            Reference::Visible => Self::with(document, Purpose::Reference, false),
+        }
+    }
+
+    fn with(document: &Document, purpose: Purpose, references: bool) -> Self {
         let mut plan = Self {
             purpose,
             steps: Vec::new(),
             layers: Vec::new(),
         };
-        plan.add(&document.layers, document);
+        plan.add(&document.layers, document, references);
         plan
     }
 
@@ -65,22 +112,25 @@ impl RenderPlan {
             .map(|(_, moves)| *moves)
     }
 
-    fn shown(&self, layer: &Layer) -> bool {
-        let opacity = match &layer.kind {
-            LayerKind::Paint(paint) => paint.opacity,
-            LayerKind::Group(group) => group.opacity,
+    fn shown(&self, layer: &Layer, references: bool) -> bool {
+        let (opacity, paint) = match &layer.kind {
+            LayerKind::Paint(paint) => (paint.opacity, true),
+            LayerKind::Group(group) => (group.opacity, false),
         };
-        layer.visible && opacity > 0.0 && !(self.purpose == Purpose::Export && layer.reference)
+        layer.visible
+            && opacity > 0.0
+            && !(self.purpose == Purpose::Export && layer.reference)
+            && !(references && paint && !layer.reference)
     }
 
-    fn add(&mut self, layers: &[Layer], document: &Document) {
+    fn add(&mut self, layers: &[Layer], document: &Document, references: bool) {
         let mut has_base = false;
         for layer in layers {
             let (blend, opacity, clipped) = match &layer.kind {
                 LayerKind::Paint(paint) => (paint.blend, paint.opacity, paint.clip_to_below),
                 LayerKind::Group(group) => (group.blend, group.opacity, group.clip_to_below),
             };
-            if !self.shown(layer) {
+            if !self.shown(layer, references) {
                 if !clipped {
                     has_base = false;
                 }
@@ -104,7 +154,7 @@ impl RenderPlan {
                 }
                 LayerKind::Group(group) => {
                     self.steps.push(Step::Begin(layer.id));
-                    self.add(&group.children, document);
+                    self.add(&group.children, document, references);
                     self.steps.push(Step::End(layer.id, composite));
                 }
             }

@@ -18,7 +18,7 @@ use ugu_core::motion::frame_in_cycle;
 
 use ugu_core::ops::{MotionStyle, Wobble};
 use ugu_core::selection::{Combine, Selection};
-use ugu_session::{Lasso, Session, ShapeKind, Tool};
+use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
 use crate::canvas::{Canvas, ZOOM_RANGE};
 use crate::files::{Action, Files};
@@ -46,13 +46,6 @@ pub struct Panels {
     pub pointer: Option<[f64; 2]>,
     /// Why the last edit from the panels was refused.
     refusal: Option<String>,
-    ants: Option<Ants>,
-}
-
-/// The selection the marching ants were traced for, and their loops.
-struct Ants {
-    traced: Arc<Selection>,
-    loops: Vec<Vec<[i32; 2]>>,
 }
 
 /// Panels the Window menu opens and closes.
@@ -132,6 +125,15 @@ pub fn shortcuts(ctx: &egui::Context, canvas: &mut Canvas, files: &mut Files, pa
     }
     if pressed(none, egui::Key::L) {
         canvas.edit(|session| session.tool = Tool::Select);
+    }
+    if pressed(none, egui::Key::W) {
+        canvas.edit(|session| session.tool = Tool::Wand);
+    }
+    if pressed(none, egui::Key::G) {
+        canvas.edit(|session| session.tool = Tool::Fill);
+    }
+    if pressed(egui::Modifiers::ALT, egui::Key::Delete) {
+        canvas.fill_selection();
     }
     if pressed(command, egui::Key::A) {
         canvas.edit(Session::select_all);
@@ -286,6 +288,14 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
             if ui.add_enabled(selected, deselect).clicked() {
                 canvas.edit(Session::deselect);
             }
+            let fill = egui::Button::new(tr("edit-fill-selection")).shortcut_text("Alt+Delete");
+            if ui
+                .add_enabled(selected, fill)
+                .on_hover_text(tr("edit-fill-selection-tip"))
+                .clicked()
+            {
+                canvas.fill_selection();
+            }
         });
         ui.menu_button(tr("menu-view"), |ui| {
             if item(ui, tr("view-zoom-in"), "Ctrl++") {
@@ -313,6 +323,8 @@ pub fn menu_bar(ui: &mut egui::Ui, canvas: &mut Canvas, files: &mut Files, panel
                 (Tool::Pen, "tool-brush", "B"),
                 (Tool::Eraser, "tool-eraser", "E"),
                 (Tool::Select, "tool-select", "L"),
+                (Tool::Wand, "tool-wand", "W"),
+                (Tool::Fill, "tool-fill", "G"),
             ] {
                 if ui
                     .add(egui::Button::selectable(tool == each, tr(key)).shortcut_text(shortcut))
@@ -355,6 +367,8 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (Tool::Pen, Glyph::Brush, "tool-brush", "B"),
         (Tool::Eraser, Glyph::Eraser, "tool-eraser", "E"),
         (Tool::Select, Glyph::Lasso, "tool-select", "L"),
+        (Tool::Wand, Glyph::Wand, "tool-wand", "W"),
+        (Tool::Fill, Glyph::Bucket, "tool-fill", "G"),
     ] {
         if widgets::tool_button(ui, glyph, tr(key), shortcut, tool == each).clicked() {
             canvas.edit(|session| session.tool = each);
@@ -408,20 +422,22 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     dock_header(ui, tr("tool-settings"), &mut panels.shown.tool_settings);
     let tool = canvas.session().tool;
     ui.add_space(4.0);
-    if tool == Tool::Select {
-        return selection_settings(ui, canvas);
+    match tool {
+        Tool::Select => return selection_settings(ui, canvas),
+        Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
+        Tool::Pen | Tool::Eraser => {}
     }
     panels.presets.show(ui, canvas, tool);
     // Read after the presets: choosing one sets its width and stabilizer.
     let mut settings = match tool {
         Tool::Eraser => canvas.session().eraser,
-        Tool::Pen | Tool::Select => canvas.session().pen,
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => canvas.session().pen,
     };
     let before = settings;
     ui.add_space(4.0);
     let size_name = match tool {
         Tool::Eraser => tr("eraser-size"),
-        Tool::Pen | Tool::Select => tr("brush-size"),
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => tr("brush-size"),
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -456,13 +472,36 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if settings != before {
         canvas.edit(|session| match tool {
             Tool::Eraser => session.eraser = settings,
-            Tool::Pen | Tool::Select => session.pen = settings,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => session.pen = settings,
         });
     }
 }
 
-/// The selection tool's shapes, as 2.2.13's area select panel.
+/// The selection tool's mode and shapes, as 2.2.13's area select panel;
+/// painting also shows how fills look.
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    widgets::field_label(ui, tr("lasso-mode"));
+    let mut paints = canvas.session().lasso_paints;
+    ui.horizontal(|ui| {
+        ui.radio_value(&mut paints, false, tr("lasso-select"));
+        ui.radio_value(&mut paints, true, tr("lasso-paint"));
+    });
+    let mut fill = canvas.session().fill;
+    if paints {
+        widgets::check_row(
+            ui,
+            tr("fill-antialias"),
+            tr("fill-antialias"),
+            &mut fill.antialias,
+        );
+    }
+    if paints != canvas.session().lasso_paints || fill != canvas.session().fill {
+        canvas.edit(|session| {
+            session.lasso_paints = paints;
+            session.fill = fill;
+        });
+    }
+    ui.add_space(6.0);
     widgets::field_label(ui, tr("selection-shape"));
     let current = canvas.session().selection_shape;
     for (kind, title, description) in [
@@ -477,6 +516,52 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         if shape_option(ui, current == kind, tr(title), tr(description)).clicked() {
             canvas.edit(|session| session.selection_shape = kind);
         }
+    }
+}
+
+/// What the wand and the bucket read and how they compare, as 2.2.13's auto
+/// select and paint bucket panels; the bucket also sets how fills look.
+/// The wand shows the comparison too, as it uses it.
+fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
+    let mut fill: FillSettings = canvas.session().fill;
+    widgets::field_label(ui, tr("fill-reference"));
+    for (reads, title, description) in [
+        (Reads::Current, "reads-current", "reads-current-tip"),
+        (Reads::Marked, "reads-marked", "reads-marked-tip"),
+        (Reads::Visible, "reads-visible", "reads-visible-tip"),
+    ] {
+        if shape_option(ui, fill.reads == reads, tr(title), tr(description)).clicked() {
+            fill.reads = reads;
+        }
+    }
+    ui.add_space(6.0);
+    widgets::field_label(ui, tr("fill-comparison"));
+    ui.radio_value(&mut fill.by_colour, false, tr("compare-alpha"));
+    ui.radio_value(&mut fill.by_colour, true, tr("compare-colour"));
+    let mut tolerance = f32::from(fill.tolerance);
+    ui.add_enabled_ui(fill.by_colour, |ui| {
+        slider_row(
+            ui,
+            tr("fill-tolerance"),
+            tr("fill-tolerance"),
+            &mut tolerance,
+            0.0..=255.0,
+            "",
+            0,
+        );
+    });
+    fill.tolerance = tolerance.round().clamp(0.0, 255.0) as u8;
+    if bucket {
+        ui.add_space(4.0);
+        widgets::check_row(
+            ui,
+            tr("fill-antialias"),
+            tr("fill-antialias"),
+            &mut fill.antialias,
+        );
+    }
+    if fill != canvas.session().fill {
+        canvas.edit(|session| session.fill = fill);
     }
 }
 
@@ -526,46 +611,32 @@ fn shape_option(
 
 /// Marching ants around the selection and the shape being dragged, as
 /// 2.2.13 draws them: a light line under a dark dashed one that moves every
-/// 120 ms. They are drawn by egui over the canvas, so they take no document
-/// render or canvas upload, and stop while the window is minimized.
-pub fn selection_overlay(ui: &mut egui::Ui, canvas: &Canvas, panels: &mut Panels) {
+/// 120 ms. The shape is drawn by egui; the selection, which can be many small
+/// pieces, by the GPU (`ugu_render::ants`), so it is returned with the
+/// points its dashes have moved. Neither takes a document render or canvas
+/// upload, and both stop while the window is minimized.
+pub fn selection_overlay(ui: &mut egui::Ui, canvas: &Canvas) -> Option<(Arc<Selection>, f32)> {
     let session = canvas.session();
     let lasso = session.lasso();
     // A shape that will replace the selection hides it while dragged.
     let replacing = lasso.is_some_and(|lasso| lasso.combine == Combine::Replace);
     let selection = session.selection().filter(|_| !replacing);
-    let Some(selection) = selection else {
-        panels.ants = None;
-        if let Some(lasso) = lasso {
-            ants(ui, canvas, &[lasso_path(lasso)]);
-        }
-        return;
-    };
-    if !panels
-        .ants
-        .as_ref()
-        .is_some_and(|ants| Arc::ptr_eq(&ants.traced, selection))
-    {
-        panels.ants = Some(Ants {
-            traced: selection.clone(),
-            loops: selection.outline(),
-        });
+    if selection.is_none() && lasso.is_none() {
+        return None;
     }
-    let mut loops: Vec<Vec<[f64; 2]>> = panels.ants.as_ref().map_or(Vec::new(), |ants| {
-        ants.loops
-            .iter()
-            .map(|corners| {
-                let mut points: Vec<[f64; 2]> = corners
-                    .iter()
-                    .map(|&[x, y]| [f64::from(x), f64::from(y)])
-                    .collect();
-                points.extend(points.first().copied());
-                points
-            })
-            .collect()
-    });
-    loops.extend(lasso.map(lasso_path));
-    ants(ui, canvas, &loops);
+    let phase = ants_phase(ui);
+    if let Some(lasso) = lasso {
+        ants(ui, canvas, &lasso_path(lasso), phase);
+    }
+    selection.map(|selection| (selection.clone(), phase))
+}
+
+/// Points the dashes have moved: a step every 120 ms over a cycle of 8.
+fn ants_phase(ui: &egui::Ui) -> f32 {
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(120));
+    let step = (ui.ctx().input(|input| input.time) / 0.12).floor();
+    8.0 - (step % 8.0) as f32
 }
 
 /// The outline of a shape being dragged, in document pixels.
@@ -594,7 +665,7 @@ fn lasso_path(lasso: &Lasso) -> Vec<[f64; 2]> {
     }
 }
 
-fn ants(ui: &mut egui::Ui, canvas: &Canvas, paths: &[Vec<[f64; 2]>]) {
+fn ants(ui: &mut egui::Ui, canvas: &Canvas, path: &[[f64; 2]], offset: f32) {
     let ppp = ui.ctx().pixels_per_point();
     let placement = canvas.placement();
     let to_screen = |&[x, y]: &[f64; 2]| {
@@ -603,27 +674,21 @@ fn ants(ui: &mut egui::Ui, canvas: &Canvas, paths: &[Vec<[f64; 2]>]) {
             (placement.offset[1] + y as f32 * placement.scale) / ppp,
         )
     };
-    let step = (ui.ctx().input(|input| input.time) / 0.12).floor();
-    let offset = 8.0 - (step % 8.0) as f32;
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_millis(120));
     let light = egui::Stroke::new(
         1.8,
         egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235),
     );
     let dark = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(20, 20, 20, 245));
     let painter = ui.painter();
-    for path in paths {
-        let points: Vec<egui::Pos2> = path.iter().map(to_screen).collect();
-        painter.add(egui::Shape::line(points.clone(), light));
-        painter.extend(egui::Shape::dashed_line_with_offset(
-            &points,
-            dark,
-            &[4.0],
-            &[4.0],
-            offset,
-        ));
-    }
+    let points: Vec<egui::Pos2> = path.iter().map(to_screen).collect();
+    painter.add(egui::Shape::line(points.clone(), light));
+    painter.extend(egui::Shape::dashed_line_with_offset(
+        &points,
+        dark,
+        &[4.0],
+        &[4.0],
+        offset,
+    ));
 }
 
 pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {

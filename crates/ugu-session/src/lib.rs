@@ -9,6 +9,7 @@
 //! the pen lifts and is then committed as one edit; a cancelled stroke leaves
 //! nothing behind.
 
+mod filling;
 mod selecting;
 pub mod stabilizer;
 
@@ -24,6 +25,7 @@ use ugu_core::history::{History, LayerRevisions, StateId};
 use ugu_core::ops::{Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, Point, Stroke};
 
+pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
 use ugu_core::selection::Selection;
@@ -36,6 +38,8 @@ pub enum Tool {
     Pen,
     Eraser,
     Select,
+    Wand,
+    Fill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -143,6 +147,10 @@ pub struct Session {
     live: Option<LiveStroke>,
     /// The selection tool's shape.
     pub selection_shape: ShapeKind,
+    /// The selection tool fills its shape instead of selecting.
+    pub lasso_paints: bool,
+    /// How the wand and the bucket find an area, and how fills look.
+    pub fill: FillSettings,
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
@@ -163,6 +171,8 @@ impl Session {
             remembered: HashMap::new(),
             live: None,
             selection_shape: ShapeKind::default(),
+            lasso_paints: false,
+            fill: FillSettings::DEFAULT,
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
@@ -179,7 +189,7 @@ impl Session {
     pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
             Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select => &mut self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => &mut self.pen,
         };
         if settings.preset.id == preset.id {
             return;
@@ -256,12 +266,12 @@ impl Session {
     fn settings(&self) -> &ToolSettings {
         match self.tool {
             Tool::Eraser => &self.eraser,
-            Tool::Pen | Tool::Select => &self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill => &self.pen,
         }
     }
 
-    pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
-        self.live = None;
+    /// Whether the current layer can be drawn on.
+    fn can_paint(&self) -> Result<(), StrokeRefused> {
         if !matches!(
             self.document().layer(self.layer).map(|layer| &layer.kind),
             Some(LayerKind::Paint(_))
@@ -271,6 +281,12 @@ impl Session {
         if !shown(&self.document().layers, self.layer) {
             return Err(StrokeRefused::HiddenLayer);
         }
+        Ok(())
+    }
+
+    pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
+        self.live = None;
+        self.can_paint()?;
         let settings = *self.settings();
         let erase = self.tool == Tool::Eraser;
         self.strokes_started += 1;

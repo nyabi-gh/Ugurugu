@@ -26,6 +26,8 @@ pub enum Glyph {
     EyeClosed = 13,
     FitView = 14,
     Lasso = 16,
+    Wand = 17,
+    Bucket = 18,
     Wobble = 21,
     Panels = 22,
 }
@@ -155,6 +157,20 @@ fn shapes(glyph: Glyph) -> Shapes {
             );
             lines.push(quad([13.6, 15.0], [10.0, 17.4], [6.4, 19.6], 10));
             lines.push(vec![[6.4, 19.6], [9.2, 20.8]]);
+        }
+        Glyph::Wand => {
+            lines.push(vec![[15.8, 8.2], [6.6, 17.4]]);
+            lines.push(vec![[18.4, 2.8], [18.4, 5.4]]);
+            lines.push(vec![[18.4, 7.4], [18.4, 10.0]]);
+            lines.push(vec![[15.0, 6.4], [17.4, 6.4]]);
+            lines.push(vec![[19.4, 6.4], [21.8, 6.4]]);
+            shapes.fills.push(circle([20.6, 11.6], 1.0, 10));
+        }
+        Glyph::Bucket => {
+            lines.push(quad([7.2, 9.6], [12.0, 3.6], [16.8, 9.6], 12));
+            lines.push(vec![[5.8, 9.6], [18.2, 9.6]]);
+            lines.push(vec![[6.8, 9.6], [8.4, 19.2], [15.6, 19.2], [17.2, 9.6]]);
+            shapes.fills.push(circle([20.2, 14.4], 1.4, 12));
         }
         Glyph::Wobble => {
             // The shape the wobble preview animates, caught mid-wobble.

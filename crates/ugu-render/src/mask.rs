@@ -47,7 +47,8 @@ impl Runs {
         Self { top, rows }
     }
 
-    fn row(&self, y: i32) -> &[[i32; 2]] {
+    /// The runs of row `y`.
+    pub fn row(&self, y: i32) -> &[[i32; 2]] {
         usize::try_from(y - self.top)
             .ok()
             .and_then(|index| self.rows.get(index))
@@ -86,6 +87,22 @@ impl Runs {
             let around = union(&union(&widened, self.row(y - 1)), self.row(y + 1));
             subtract(&around, self.row(y))
         })
+    }
+
+    /// What a fill of `coverage` cut to `clip` draws: the pixels it covers,
+    /// and with `antialias` the fringe around them, laid behind what is
+    /// there (2.2.13's edge rule, ADR section 2); `None` for no fringe.
+    pub fn fill(coverage: &Mask, clip: Option<&Mask>, antialias: bool) -> (Self, Option<Self>) {
+        let covered = Self::from_mask(coverage);
+        let clip = clip.map(Self::from_mask);
+        let cut = |runs: Self| match &clip {
+            Some(clip) => runs.intersect(clip),
+            None => runs,
+        };
+        let fringe = antialias
+            .then(|| cut(covered.fringe()))
+            .filter(|fringe| !fringe.is_empty());
+        (cut(covered), fringe)
     }
 
     pub fn is_empty(&self) -> bool {

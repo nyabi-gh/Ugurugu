@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use ugu_render::ants::Ants;
 use ugu_render::gpu::{AdapterChoice, Gpu};
 use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::{DocumentView, Placement};
@@ -135,6 +136,7 @@ struct Display {
     presenter: Presenter,
     egui_renderer: egui_wgpu::Renderer,
     canvas_view: DocumentView,
+    ants: Ants,
 }
 
 impl Display {
@@ -152,11 +154,13 @@ impl Display {
             egui_wgpu::RendererOptions::default(),
         );
         let canvas_view = DocumentView::new(&gpu.device, presenter.format(), canvas::WORKSPACE);
+        let ants = Ants::new(&gpu.device, presenter.format());
         Ok(Self {
             gpu,
             presenter,
             egui_renderer,
             canvas_view,
+            ants,
         })
     }
 }
@@ -478,6 +482,7 @@ impl RenderThread {
     fn frame(&mut self) {
         let input = self.egui_state.take_egui_input(&self.window);
         let mut canvas_area = [0; 4];
+        let mut shown_ants = None;
         let Self {
             display,
             canvas,
@@ -603,7 +608,7 @@ impl RenderThread {
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
                     canvas_area = canvas.layout(ui);
-                    ui::selection_overlay(ui, canvas, panels);
+                    shown_ants = ui::selection_overlay(ui, canvas);
                     let ppp = f64::from(ui.ctx().pixels_per_point());
                     let area = ui.max_rect();
                     panels.pointer = ui
@@ -663,6 +668,7 @@ impl RenderThread {
                 presenter,
                 egui_renderer,
                 canvas_view,
+                ants,
             } = &mut self.display;
             for (id, deltas) in &textures.set {
                 for delta in deltas {
@@ -674,6 +680,11 @@ impl RenderThread {
                 tracing::debug!(?rect, "canvas uploaded");
             }
             canvas_view.update(&gpu.device, &gpu.queue, self.canvas.display(), upload);
+            ants.show(
+                &gpu.device,
+                &gpu.queue,
+                shown_ants.as_ref().map(|(selection, _)| selection),
+            );
             let canvas_area = canvas_area.map(|edge| edge.max(0) as u32);
             let placement = self.canvas.placement();
 
@@ -682,6 +693,8 @@ impl RenderThread {
                 &gpu.queue,
                 presenter,
                 canvas_view,
+                ants,
+                shown_ants.map_or(0.0, |(_, phase)| phase),
                 canvas_area,
                 placement,
                 egui_renderer,
@@ -736,6 +749,8 @@ fn draw(
     queue: &wgpu::Queue,
     presenter: &mut Presenter,
     canvas: &mut DocumentView,
+    ants: &mut Ants,
+    ants_phase: f32,
     canvas_area: [u32; 4],
     placement: Placement,
     egui_renderer: &mut egui_wgpu::Renderer,
@@ -777,6 +792,15 @@ fn draw(
             })
             .forget_lifetime();
         canvas.draw(queue, &mut pass, canvas_area, placement, size);
+        ants.draw(
+            queue,
+            &mut pass,
+            canvas_area,
+            placement,
+            pixels_per_point,
+            ants_phase,
+            size,
+        );
         pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
         egui_renderer.render(&mut pass, primitives, &screen);
     }
