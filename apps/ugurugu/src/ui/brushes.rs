@@ -63,11 +63,11 @@ impl Presets {
             self.scale = scale;
         }
         let current = match tool {
-            Tool::Pen => canvas.session().pen.preset,
+            Tool::Pen | Tool::Select => canvas.session().pen.preset,
             Tool::Eraser => canvas.session().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
-            Tool::Pen => {
+            Tool::Pen | Tool::Select => {
                 let shown = self.category.unwrap_or(current.category);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;

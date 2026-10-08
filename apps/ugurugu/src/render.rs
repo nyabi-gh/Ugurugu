@@ -433,6 +433,7 @@ impl RenderThread {
                     .egui_ctx
                     .input(|input| (input.modifiers, input.key_down(egui::Key::Space)));
                 let pan_held = space && !self.egui_ctx.text_edit_focused();
+                self.canvas.set_modifiers(modifiers.shift, modifiers.alt);
                 let canvas = &self.canvas;
                 let routed =
                     self.router
@@ -602,6 +603,7 @@ impl RenderThread {
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
                     canvas_area = canvas.layout(ui);
+                    ui::selection_overlay(ui, canvas, panels);
                     let ppp = f64::from(ui.ctx().pixels_per_point());
                     let area = ui.max_rect();
                     panels.pointer = ui

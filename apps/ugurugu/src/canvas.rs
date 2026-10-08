@@ -17,6 +17,7 @@ use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::edit::Outcome;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::Op;
+use ugu_core::selection::Combine;
 use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::LiveStroke;
@@ -72,6 +73,8 @@ enum Interaction {
     Panning {
         last: [f64; 2],
     },
+    /// Dragging a shape with the selection tool; the session holds it.
+    Selecting,
 }
 
 pub struct Canvas {
@@ -88,6 +91,8 @@ pub struct Canvas {
     upload: Option<PixelRect>,
     stamp: Stamp,
     interaction: Interaction,
+    /// Shift and Alt.
+    modifiers: (bool, bool),
     /// The last stroke's coverage, cleared, for the next stroke.
     spare_coverage: Option<Pixmap>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
@@ -142,6 +147,7 @@ impl Canvas {
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             stamp: Stamp::default(),
             interaction: Interaction::Idle,
+            modifiers: (false, false),
             spare_coverage: None,
             area: None,
             scale: 1.0,
@@ -535,6 +541,18 @@ impl Canvas {
                     last: sample.position,
                 };
             }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool == Tool::Select => {
+                self.sample_count += 1;
+                // As in 2.2.13: Shift adds, Alt takes away, both replace.
+                let combine = match self.modifiers {
+                    (true, false) => Combine::Add,
+                    (false, true) => Combine::Subtract,
+                    _ => Combine::Replace,
+                };
+                let point = self.to_document(sample.position);
+                self.session.begin_selection(point, combine);
+                self.interaction = Interaction::Selecting;
+            }
             CanvasInput::Begin(Gesture::Draw, kind, sample) => {
                 self.sample_count += 1;
                 self.begin_stroke(kind, &sample);
@@ -548,6 +566,10 @@ impl Canvas {
                         *last = sample.position;
                     }
                     Interaction::Drawing { .. } => self.extend_stroke(&sample),
+                    Interaction::Selecting => {
+                        let point = self.to_document(sample.position);
+                        self.session.extend_selection(point);
+                    }
                     Interaction::Idle => {}
                 }
             }
@@ -555,19 +577,47 @@ impl Canvas {
                 self.sample_count += 1;
                 match std::mem::replace(&mut self.interaction, Interaction::Idle) {
                     Interaction::Drawing { live, rect } => self.end_stroke(&sample, live, rect),
+                    Interaction::Selecting => {
+                        let point = self.to_document(sample.position);
+                        self.session.end_selection(point);
+                    }
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
             }
             CanvasInput::Cancel => {
-                if let Interaction::Drawing { rect, .. } =
-                    std::mem::replace(&mut self.interaction, Interaction::Idle)
-                {
-                    self.session.cancel_stroke();
-                    self.recomposite(rect);
-                }
+                self.cancel_gesture();
             }
             CanvasInput::Zoom { position, notches } => self.zoom(position, notches),
         }
+    }
+
+    /// Ends a drawing, panning or selecting gesture without its result;
+    /// returns whether there was one.
+    fn cancel_gesture(&mut self) -> bool {
+        match std::mem::replace(&mut self.interaction, Interaction::Idle) {
+            Interaction::Drawing { rect, .. } => {
+                self.session.cancel_stroke();
+                self.recomposite(rect);
+            }
+            Interaction::Selecting => {
+                self.session.cancel_selection();
+            }
+            Interaction::Panning { .. } => {}
+            Interaction::Idle => return false,
+        }
+        true
+    }
+
+    /// Esc: ends the gesture under way without its result, else deselects.
+    pub fn escape(&mut self) {
+        if !self.cancel_gesture() {
+            self.session.escape();
+        }
+    }
+
+    /// The modifier keys held, which decide how a dragged shape selects.
+    pub fn set_modifiers(&mut self, shift: bool, alt: bool) {
+        self.modifiers = (shift, alt);
     }
 
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
@@ -608,7 +658,8 @@ impl Canvas {
             live.template.color.0,
             live.erase,
             self.spare_coverage.take(),
-        );
+        )
+        .with_clip(live.clip.as_ref().map(|selection| selection.mask().clone()));
         let rect = stroke.update(&live.points);
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
@@ -655,10 +706,10 @@ impl Canvas {
         let document = self.session.document();
         let added = match self.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
-                last_stroke(document, after.layer).and_then(|(stroke, erase)| {
+                last_stroke(document, after.layer).and_then(|(stroke, erase, clip)| {
                     let wobble = wobble_of(document, after.layer);
                     let frames = document.frames;
-                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble, frames);
+                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble, frames, clip);
                     *key = after;
                     changed
                 })
@@ -810,18 +861,28 @@ fn wobble_of(document: &Document, layer: ugu_core::document::LayerId) -> ugu_cor
 fn last_stroke(
     document: &Document,
     layer: ugu_core::document::LayerId,
-) -> Option<(&ugu_core::store::Stroke, bool)> {
+) -> Option<(
+    &ugu_core::store::Stroke,
+    bool,
+    Option<&ugu_core::store::Mask>,
+)> {
     let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
         return None;
     };
-    let (id, erase) = match paint.ops.last()? {
-        // A stroke drawn in a selection is left to a new split, which cuts
-        // it to the selection.
-        Op::Paint { stroke, clip: None } => (stroke, false),
-        Op::Erase { stroke, clip: None } => (stroke, true),
+    let (id, erase, clip) = match paint.ops.last()? {
+        Op::Paint { stroke, clip } => (stroke, false, clip),
+        Op::Erase { stroke, clip } => (stroke, true, clip),
         _ => return None,
     };
-    document.store.strokes.get(id).map(|stroke| (stroke, erase))
+    let clip = match clip {
+        Some(mask) => Some(document.store.masks.get(mask)?),
+        None => None,
+    };
+    document
+        .store
+        .strokes
+        .get(id)
+        .map(|stroke| (stroke, erase, clip))
 }
 
 /// Calls `each` with every paint layer's id, inside groups too.

@@ -25,6 +25,7 @@ pub enum Glyph {
     EyeOpen = 12,
     EyeClosed = 13,
     FitView = 14,
+    Lasso = 16,
     Wobble = 21,
     Panels = 22,
 }
@@ -142,6 +143,18 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[14.8, 4.6], [19.4, 4.6], [19.4, 9.2]]);
             lines.push(vec![[19.4, 14.8], [19.4, 19.4], [14.8, 19.4]]);
             lines.push(vec![[9.2, 19.4], [4.6, 19.4], [4.6, 14.8]]);
+        }
+        Glyph::Lasso => {
+            lines.push(
+                (0..=26)
+                    .map(|step| {
+                        let angle = std::f64::consts::TAU * f64::from(step) / 26.0;
+                        [12.0 + 7.2 * angle.cos(), 9.8 + 5.4 * angle.sin()]
+                    })
+                    .collect(),
+            );
+            lines.push(quad([13.6, 15.0], [10.0, 17.4], [6.4, 19.6], 10));
+            lines.push(vec![[6.4, 19.6], [9.2, 20.8]]);
         }
         Glyph::Wobble => {
             // The shape the wobble preview animates, caught mid-wobble.
