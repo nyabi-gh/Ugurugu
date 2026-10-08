@@ -451,6 +451,15 @@ def make_dirty(app):
     return False
 
 
+def file_id_of(path):
+    """The file's id, or None while it is missing: `ReplaceFileW` (3.0)
+    moves the old file aside before the new one takes its name."""
+    try:
+        return os.stat(path).st_ino
+    except FileNotFoundError:
+        return None
+
+
 def measure_save(app, args):
     # QSaveFile renames a finished temporary file over the document, which
     # gives the file a new id: that moment is the save's end, with or without
@@ -464,7 +473,7 @@ def measure_save(app, args):
         sent = time.perf_counter()
         chord(ord("S"))
         before = app.thread.cycles()
-        wait_for(lambda: os.stat(app.document).st_ino != file_id, 120, "the saved file")
+        wait_for(lambda: file_id_of(app.document) not in (file_id, None), 120, "the saved file")
         replaced = time.perf_counter()
         if dirty:
             wait_for(lambda: "*" not in window_text(app.hwnd).split(" — ")[0], 120, "the saved title")
