@@ -12,7 +12,7 @@ use crate::compose::premultiplied;
 #[derive(Debug, PartialEq, Eq)]
 pub enum ImageError {
     Decode(String),
-    /// The PNG is not 8-bit RGBA, as `.ugu2` stores images.
+    /// The PNG is not 8-bit RGBA, as `.ugurugu` stores images.
     Format,
     /// The PNG's size is not the size the document records.
     Size([u32; 2]),

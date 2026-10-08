@@ -1,34 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Headless `.ugu2` tool.
+//! Headless `.ugurugu` tool.
 //!
-//! - `ugu-doc fixture <1-5> <out.ugu2>`: writes a comparison fixture with the
+//! - `ugu-doc fixture <1-5> <out.ugurugu>`: writes a comparison fixture with the
 //!   same make-up as the 2.2.13 ones (docs/rust/m0-evidence.md section 2):
 //!   the same canvases, layers, stroke and point counts and stroke shapes,
 //!   from a different random sequence.
-//! - `ugu-doc many <operations> <layers> <out.ugu2>`: fixture 4's short
+//! - `ugu-doc many <operations> <layers> <out.ugurugu>`: fixture 4's short
 //!   strokes, as many as asked, spread over that many layers, to measure the
 //!   operation limit (docs/rust/m3-plan.md M3-10).
-//! - `ugu-doc info <file.ugu2>`: reads, validates and summarises a file, and
+//! - `ugu-doc info <file.ugurugu>`: reads, validates and summarises a file, and
 //!   lists its layers top first.
-//! - `ugu-doc bench <file.ugu2> [rounds]`: times reading and saving it.
-//! - `ugu-doc render <file.ugu2> [threads [tile]]`: times drawing every frame, by
+//! - `ugu-doc bench <file.ugurugu> [rounds]`: times reading and saving it.
+//! - `ugu-doc render <file.ugurugu> [threads [tile]]`: times drawing every frame, by
 //!   stage, and editing splits, with the peak working set. Other brushes are
 //!   drawn as pens, which keeps the amount of work close and says so.
-//! - `ugu-doc pen-only <in.ugu2> <out.ugu2>`: makes brushes pens, keeping
+//! - `ugu-doc pen-only <in.ugurugu> <out.ugurugu>`: makes brushes pens, keeping
 //!   everything else, so the app can open a fixture to measure with.
-//! - `ugu-doc reframe <in.ugu2> <out.ugu2> <crop|resample|both>`: makes
+//! - `ugu-doc reframe <in.ugurugu> <out.ugurugu> <crop|resample|both>`: makes
 //!   brushes pens and puts in the middle of every layer a crop to 7/8 of the
 //!   canvas around its middle, a smooth resample to 3/4, or both one after
 //!   the other, to measure what canvas changes cost to draw.
-//! - `ugu-doc sparse <in.ugu2> <out.ugu2>`: gathers each layer's strokes into
+//! - `ugu-doc sparse <in.ugurugu> <out.ugurugu>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
-//! - `ugu-doc fills <in.ugu2> <out.ugu2>`: adds a large clipped fill and a
+//! - `ugu-doc fills <in.ugurugu> <out.ugurugu>`: adds a large clipped fill and a
 //!   clear to every layer, to measure what masks cost to draw.
-//! - `ugu-doc stop <file.ugu2>`: times how long a frame render on 8 threads
+//! - `ugu-doc stop <file.ugurugu>`: times how long a frame render on 8 threads
 //!   takes to end once it is told to stop, at points spread over the render.
-//! - `ugu-doc layers <file.ugu2> <threads>`: times each layer drawn alone on
+//! - `ugu-doc layers <file.ugurugu> <threads>`: times each layer drawn alone on
 //!   one thread and how long that many threads take to draw them all.
 
 use std::path::Path;
@@ -41,8 +41,8 @@ use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
-const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugu2> | many <operations> <layers> <out.ugu2> | info <file.ugu2> \
-     | bench <file.ugu2> [rounds] | render <file.ugu2> [threads [tile]] | pen-only <in.ugu2> <out.ugu2> | sparse <in.ugu2> <out.ugu2> | fills <in.ugu2> <out.ugu2> | reframe <in.ugu2> <out.ugu2> <crop|resample|both> | stop <file.ugu2> | layers <file.ugu2> <threads>";
+const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -192,7 +192,7 @@ fn count(layers: &[Layer], total: &mut usize, operations: &mut usize) {
 /// Times opening (read and validate), encoding into memory, and saving
 /// (write, flush, check and replace), in turn, then prints p50 and max.
 fn bench(path: &Path, rounds: usize) -> Result<(), String> {
-    let copy = path.with_extension("bench.ugu2");
+    let copy = path.with_extension("bench.ugurugu");
     std::fs::copy(path, &copy).map_err(|error| error.to_string())?;
     let mut opens = Vec::new();
     let mut encodes = Vec::new();

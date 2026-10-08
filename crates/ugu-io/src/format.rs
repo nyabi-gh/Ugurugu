@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The JSON parts of a `.ugu2` file (ADR section 4) and the binary entry
+//! The JSON parts of a `.ugurugu` file (ADR section 4) and the binary entry
 //! layouts. These types mirror the file, not the document model: the
 //! document's invariants are checked by `ugu_core` after reading.
 

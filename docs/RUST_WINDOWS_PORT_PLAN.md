@@ -327,10 +327,10 @@ Flood fill, 선택 이동, 이미지 resampling, 그룹 blend는 단순 dirty re
 
 ### 8.1 구형 reader 없이 새 컨테이너
 
-새 확장자는 **`.ugu2`를 가칭**으로 제안한다. 기존 `.ugu`를 계속 쓰는 것보다 구형 앱·새 앱의 파일 연결과 사용자 인식이 분명하다. 최종 이름은 형식 ADR에서 결정한다.
+새 확장자는 **`.ugurugu`**다(처음 가칭 `.ugu2`, 2026-10-08 ADR 4절에서 버전 없는 이름으로 확정). 기존 `.ugu`를 계속 쓰는 것보다 구형 앱·새 앱의 파일 연결과 사용자 인식이 분명하다. 최종 이름은 형식 ADR에서 결정한다.
 
 ```text
-project.ugu2                 ZIP 컨테이너
+project.ugurugu                 ZIP 컨테이너
   manifest.json              format_id, schema=1, render_revision, UUID, canvas
   document.json              레이어·연산·모션 메타데이터와 asset 참조
   strokes/<id>.bin            버전·길이·명시적 little-endian 점 데이터

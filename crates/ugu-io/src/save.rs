@@ -188,18 +188,18 @@ mod tests {
     #[test]
     fn a_saved_document_reads_back() {
         let folder = Folder::new("save");
-        let target = folder.0.join("doc.ugu2");
+        let target = folder.0.join("doc.ugurugu");
         save(&sample(), [1; 16], &target, &rename).unwrap();
         let (document, id) = read(File::open(&target).unwrap()).unwrap();
         assert_eq!(id, [1; 16]);
         assert_eq!(document.layers, sample().layers);
-        assert_eq!(folder.names(), ["doc.ugu2"]);
+        assert_eq!(folder.names(), ["doc.ugurugu"]);
     }
 
     #[test]
     fn a_failed_replace_keeps_the_old_file_and_no_temporary() {
         let folder = Folder::new("replace-fails");
-        let target = folder.0.join("doc.ugu2");
+        let target = folder.0.join("doc.ugurugu");
         std::fs::write(&target, b"old").unwrap();
         let refuse = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::PermissionDenied));
         assert!(matches!(
@@ -207,13 +207,13 @@ mod tests {
             Err(SaveError::Replace(_))
         ));
         assert_eq!(std::fs::read(&target).unwrap(), b"old");
-        assert_eq!(folder.names(), ["doc.ugu2"]);
+        assert_eq!(folder.names(), ["doc.ugurugu"]);
     }
 
     #[test]
     fn a_full_disk_keeps_the_old_file_and_no_temporary() {
         let folder = Folder::new("disk-full");
-        let target = folder.0.join("doc.ugu2");
+        let target = folder.0.join("doc.ugurugu");
         std::fs::write(&target, b"old").unwrap();
         let replaced = std::cell::Cell::new(false);
         let replace = |from: &Path, to: &Path| {
@@ -226,6 +226,6 @@ mod tests {
         assert!(matches!(result, Err(SaveError::Write(_))), "{result:?}");
         assert!(!replaced.get());
         assert_eq!(std::fs::read(&target).unwrap(), b"old");
-        assert_eq!(folder.names(), ["doc.ugu2"]);
+        assert_eq!(folder.names(), ["doc.ugurugu"]);
     }
 }

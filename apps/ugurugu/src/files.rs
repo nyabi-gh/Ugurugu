@@ -23,7 +23,7 @@ use crate::canvas::Canvas;
 
 const DOCUMENT_TYPE: FileType = FileType {
     name: "Ugurugu document",
-    extension: "ugu2",
+    extension: "ugurugu",
 };
 const PNG_TYPE: FileType = FileType {
     name: "PNG image",
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn a_save_writes_the_document_as_it_was_when_it_started() {
         let (mut files, mut canvas, events) = setup();
-        let path = folder("snapshot").join("drawing.ugu2");
+        let path = folder("snapshot").join("drawing.ugurugu");
         canvas.edit(Session::add_layer).unwrap();
         files.path = Some(path.clone());
         files.save(&mut canvas);
@@ -500,7 +500,7 @@ mod tests {
         files.path = Some(
             folder("missing")
                 .join("no such folder")
-                .join("drawing.ugu2"),
+                .join("drawing.ugurugu"),
         );
         files.after_save = Some(Action::New);
         files.save(&mut canvas);
@@ -517,7 +517,7 @@ mod tests {
         let folder = folder("open");
         let mut document = Files::new_canvas();
         document.frames = 12;
-        let good = folder.join("good.ugu2");
+        let good = folder.join("good.ugurugu");
         ugu_io::save::save(&document, [7; 16], &good, &ugu_win::file::replace_file).unwrap();
         let airbrush = ugu_core::store::Stroke {
             points: vec![ugu_core::store::Point {
@@ -542,7 +542,7 @@ mod tests {
         let layer = document.layers[0].id;
         let changes = ugu_core::command::draw(&document, layer, airbrush, false, None);
         ugu_core::edit::commit(&mut document, changes).unwrap();
-        let airbrush_file = folder.join("airbrush.ugu2");
+        let airbrush_file = folder.join("airbrush.ugurugu");
         ugu_io::save::save(
             &document,
             [8; 16],

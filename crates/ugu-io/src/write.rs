@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Writes a document as `.ugu2`.
+//! Writes a document as `.ugurugu`.
 //!
 //! The output depends only on the document: entries come in a fixed order
 //! with a fixed timestamp, and stored data is written in id order. Only data

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Reads a `.ugu2` file without trusting it.
+//! Reads a `.ugurugu` file without trusting it.
 //!
 //! The entry count is checked before any entry is opened, every entry is
 //! read through a limit on what it actually inflates to, and so is the total.
@@ -46,7 +46,7 @@ pub enum ReadError {
     /// Made by a newer version: an unknown schema, render revision or
     /// required feature.
     Newer(String),
-    /// Damaged or not a `.ugu2` file.
+    /// Damaged or not a `.ugurugu` file.
     Corrupt(String),
     /// Over a size limit.
     TooLarge(String),

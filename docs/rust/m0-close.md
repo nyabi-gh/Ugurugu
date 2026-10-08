@@ -11,7 +11,7 @@
 | 화면 표시 | wgpu 30.0.1, DX12만 | 1·4·8절: 창 전체 swapchain 하나, Independent Flip에서 입력→표시 p50 약 6ms(C++보다 약 4ms 빠름), 장치 손실 복구, WARP fallback | 자식 창 swapchain(4절), Vulkan backend(계획 4.3절) |
 | 문서 렌더 | Vello CPU 0.3.0, SSE4.2 고정 | 6절: 1스레드 래스터화가 tiny-skia의 3.4배, 8스레드 약 24배 | tiny-skia, Vello GPU(래스터화가 8스레드 CPU보다 5배 느림), skia-safe, Direct2D |
 | 접근성 | AccessKit(egui-winit 기능), 어댑터는 UI 스레드 | 7절: 이름 있는 컨트롤, 포커스·입력·Invoke | Narrator 청취 검증(범위 제외) |
-| 파일 | `.ugu2` ZIP 컨테이너, schema 1 | ADR 4절 | 구형 `.ugu` reader |
+| 파일 | `.ugurugu` ZIP 컨테이너, schema 1 | ADR 4절 | 구형 `.ugu` reader |
 | WebP | 내보내기 인코딩만 C `libwebp` 1.6.0, 가져오기는 `image-webp` | scope.md 3절 | 순수 Rust WebP 인코더 |
 
 M0 앱(`apps/ugurugu`)의 probe UI(IME 칸, 지연 표시, 진단 키)는 실증용이다. M2에서 제품 UI로 바꾸며, 진단 기능은 `UGURUGU_DIAGNOSTICS=1`일 때만 남긴다.
@@ -75,8 +75,8 @@ M1 종료 조건은 "roundtrip·거부 입력·macro 원자성·save failure 검
 | M1-2 | 데이터 저장소: 획 점(f32 x·y·pressure)·브러시·seed, 1비트 마스크, 자산 바이트를 `Arc`로 공유하고 바이트를 집계 | ugu-core | 복제해도 큰 배열을 복사하지 않는다. 바이트 합계가 맞는다 |
 | M1-3 | 명령과 커밋: 연산 추가, 레이어 추가·삭제·이동·속성, `merge_down`. 검증 후 한 번 커밋하고 `Committed`/`NoChange`/오류를 구분. 단조 증가 `Revision` | ugu-core | 변경 없음은 undo 항목을 만들지 않는다. 잘못된 명령은 문서를 바꾸지 않는다 |
 | M1-4 | undo/redo와 macro: delta history, macro 중간 실패 시 전체 되돌림, 저장 지점 identity로 dirty 판정 | ugu-core | 저장 지점으로 undo하면 dirty가 아니다. macro 실패 전후 문서가 같다. 긴 history의 커밋 비용을 잰다 |
-| M1-5 | `.ugu2` 쓰기: manifest, `document.json`, `strokes.bin`, `masks.bin`, `images/<sha256>.png` | ugu-io | 같은 문서는 같은 바이트로 저장된다. wire format의 바이트 배치 시험 |
-| M1-6 | `.ugu2` 읽기와 거부: 항목 수, 이름 중복, 경로, 압축·해제 크기, 실제 해제량 누계, 좌표 유한성, 연산 수, section 깊이, id 참조, 모르는 schema·required | ugu-io | roundtrip이 같다. 잘라낸 파일, 부풀린 크기, 순환 참조, NaN 좌표 등 거부 시험(proptest 포함) |
+| M1-5 | `.ugurugu` 쓰기: manifest, `document.json`, `strokes.bin`, `masks.bin`, `images/<sha256>.png` | ugu-io | 같은 문서는 같은 바이트로 저장된다. wire format의 바이트 배치 시험 |
+| M1-6 | `.ugurugu` 읽기와 거부: 항목 수, 이름 중복, 경로, 압축·해제 크기, 실제 해제량 누계, 좌표 유한성, 연산 수, section 깊이, id 참조, 모르는 schema·required | ugu-io | roundtrip이 같다. 잘라낸 파일, 부풀린 크기, 순환 참조, NaN 좌표 등 거부 시험(proptest 포함) |
 | M1-7 | 안전한 저장: 같은 폴더 임시 파일, 검증, flush, 교체(`ReplaceFileW`, 처음이면 이동). 실패하면 기존 파일과 dirty 상태를 유지 | ugu-io, ugu-win | 실패 주입(디스크 가득, 권한 없음, 공유 위반) 뒤 기존 파일이 그대로다 |
 | M1-8 | 구형 파일 판별: `.ugu`·`.wagle`·`.wobble`·`.wawa`·`.wwpreset`을 알아보고 "지원하지 않는 형식"으로 거절 | ugu-io | 구형 fixture 각각이 같은 오류를 낸다 |
 | M1-9 | headless 도구: fixture ①~⑤를 새 형식으로 만드는 생성기, 문서 검증·요약 출력 | tools | 생성 결과가 manifest(레이어·획·점 수)와 맞는다 |

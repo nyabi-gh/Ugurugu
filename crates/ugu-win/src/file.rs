@@ -81,13 +81,13 @@ mod tests {
     #[test]
     fn an_existing_file_is_replaced_and_a_new_one_created() {
         let folder = Folder::new("replace");
-        let target = folder.file("doc.ugu2", b"old");
+        let target = folder.file("doc.ugurugu", b"old");
         let replacement = folder.file("doc.tmp", b"new");
         replace_file(&replacement, &target).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         assert!(!replacement.exists());
 
-        let fresh = folder.0.join("fresh.ugu2");
+        let fresh = folder.0.join("fresh.ugurugu");
         let replacement = folder.file("fresh.tmp", b"first");
         replace_file(&replacement, &fresh).unwrap();
         assert_eq!(std::fs::read(&fresh).unwrap(), b"first");
@@ -100,7 +100,7 @@ mod tests {
     )]
     fn a_read_only_target_is_left_as_it_was() {
         let folder = Folder::new("readonly");
-        let target = folder.file("doc.ugu2", b"old");
+        let target = folder.file("doc.ugurugu", b"old");
         let mut permissions = std::fs::metadata(&target).unwrap().permissions();
         permissions.set_readonly(true);
         std::fs::set_permissions(&target, permissions.clone()).unwrap();
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn a_target_open_without_sharing_is_left_as_it_was() {
         let folder = Folder::new("locked");
-        let target = folder.file("doc.ugu2", b"old");
+        let target = folder.file("doc.ugurugu", b"old");
         let replacement = folder.file("doc.tmp", b"new");
         // Another program holding the file open, sharing nothing.
         let held = std::fs::OpenOptions::new()

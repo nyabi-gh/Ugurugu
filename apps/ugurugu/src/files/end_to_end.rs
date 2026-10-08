@@ -136,13 +136,13 @@ fn draw_move_save_reopen_and_export() {
     let folder = std::env::temp_dir().join(format!("ugurugu-end-to-end-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder).unwrap();
-    files.path = Some(folder.join("drawing.ugu2"));
+    files.path = Some(folder.join("drawing.ugurugu"));
     files.save(&mut canvas);
     files.handle(file_event(), &mut canvas);
     assert!(!canvas.session().is_dirty());
 
     let mut reopened = Canvas::new(Document::new([16, 16]), |_| {});
-    files.open_path(folder.join("drawing.ugu2"));
+    files.open_path(folder.join("drawing.ugurugu"));
     files.handle(file_event(), &mut reopened);
     assert!(reopened.session().document() == &document);
 
