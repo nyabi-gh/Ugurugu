@@ -31,6 +31,7 @@ pub enum Glyph {
     Wand = 17,
     Bucket = 18,
     Text = 19,
+    Eyedropper = 20,
     Wobble = 21,
     Panels = 22,
     Scale = 25,
@@ -202,6 +203,21 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[18.8, 5.6], [18.8, 8.2]]);
             lines.push(vec![[12.0, 5.6], [12.0, 19.2]]);
             lines.push(vec![[9.2, 19.2], [14.8, 19.2]]);
+        }
+        Glyph::Eyedropper => {
+            // A pipette along the brush's axis: bulb, collar, and a barrel
+            // tapering to the tip that samples.
+            let mut outline = vec![
+                [4.6, 19.4],
+                [5.7, 15.7],
+                [10.0, 11.4],
+                [9.0, 10.4],
+                [15.4, 4.0],
+            ];
+            outline.extend(quad([15.4, 4.0], [20.3, 3.7], [20.0, 8.6], 10));
+            outline.extend([[13.6, 15.0], [12.7, 14.0], [8.3, 18.3], [4.6, 19.4]]);
+            lines.push(outline);
+            lines.push(vec![[8.4, 11.9], [12.1, 15.6]]);
         }
         Glyph::Wobble => {
             // The shape the wobble preview animates, caught mid-wobble.

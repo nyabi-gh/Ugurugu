@@ -12,6 +12,7 @@
 mod clipboard;
 mod filling;
 mod placing;
+mod restyling;
 mod selecting;
 pub mod stabilizer;
 mod transforming;
@@ -46,6 +47,7 @@ pub enum Tool {
     Wand,
     Fill,
     Text,
+    Eyedropper,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -228,7 +230,9 @@ impl Session {
     pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
             Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => &mut self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
+                &mut self.pen
+            }
         };
         if settings.preset.id == preset.id {
             return;
@@ -310,7 +314,9 @@ impl Session {
     fn settings(&self) -> &ToolSettings {
         match self.tool {
             Tool::Eraser => &self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => &self.pen,
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
+                &self.pen
+            }
         }
     }
 

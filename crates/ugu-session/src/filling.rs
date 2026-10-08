@@ -70,6 +70,8 @@ pub enum FillError {
     /// The bucket was clicked outside the selection.
     OutsideSelection,
     NoSelection,
+    /// A transform or placed text has to be applied or cancelled first.
+    Pending,
     Edit(EditError),
 }
 

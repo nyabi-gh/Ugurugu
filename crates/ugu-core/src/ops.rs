@@ -104,6 +104,28 @@ impl Affine {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgba8(pub [u8; 4]);
 
+impl Rgba8 {
+    /// A premultiplied pixel as straight alpha, rounded as Qt's
+    /// `qUnpremultiply`.
+    pub fn from_premultiplied(pixel: [u8; 4]) -> Self {
+        let alpha = u32::from(pixel[3]);
+        Self(match alpha {
+            255 => pixel,
+            0 => [0; 4],
+            _ => {
+                let inverse = 0x00ff_00ff / alpha;
+                let channel = |value: u8| ((u32::from(value) * inverse + 0x8000) >> 16) as u8;
+                [
+                    channel(pixel[0]),
+                    channel(pixel[1]),
+                    channel(pixel[2]),
+                    pixel[3],
+                ]
+            }
+        })
+    }
+}
+
 /// How strokes move from frame to frame; `crate::motion` evaluates it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionStyle {

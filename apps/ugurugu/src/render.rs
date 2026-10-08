@@ -548,7 +548,7 @@ impl RenderThread {
             // Before the widgets run, so focus is what the key was pressed in.
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, paste);
             files.confirm(ui.ctx(), canvas);
-            ui::resize_dialog(ui.ctx(), canvas, panels);
+            ui::dialogs(ui.ctx(), canvas, panels);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             let bar = |fill, x, y| {
@@ -659,7 +659,8 @@ impl RenderThread {
                     canvas_area = canvas.layout(ui);
                     shown_ants = ui::selection_overlay(ui, canvas);
                     ui::text_overlay(ui, canvas);
-                    ui::selection_actions(ui, canvas);
+                    ui::pick_cursor(ui, canvas);
+                    ui::selection_actions(ui, canvas, panels);
                     let ppp = f64::from(ui.ctx().pixels_per_point());
                     let area = ui.max_rect();
                     panels.pointer = ui

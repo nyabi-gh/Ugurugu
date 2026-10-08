@@ -296,3 +296,18 @@ text-hint = Click the canvas to place the text, then drag it into position. The 
 text-type-hint = Type in the Text panel to see it here.
 text-drag-hint = Drag to move · Enter applies · Esc cancels
 text-empty = Type some text to place it.
+
+# Eyedropper and stroke properties
+tool-eyedropper = Eyedropper
+tool-eyedropper-rail = Eyedropper
+tool-eyedropper-tip = Pick a color from the canvas. Alt+click does the same from any paint tool.
+eyedropper-hint = Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket.
+restyle-selected = Edit selected stroke properties…
+restyle-selected-tip = Change the color or width of selected strokes
+restyle-title = Edit Stroke Properties
+restyle-color = Color
+restyle-width = Width
+restyle-choose-color = Select Stroke Color
+restyle-description = Changes the strokes and fills the selection touches on the current layer. Only checked properties change.
+restyle-nothing = No strokes or fills in the selection to edit.
+restyle-pending = Apply or cancel the transform or text first.

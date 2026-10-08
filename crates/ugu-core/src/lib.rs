@@ -13,6 +13,7 @@ pub mod edit;
 pub mod history;
 pub mod motion;
 pub mod ops;
+pub mod restyle;
 pub mod selection;
 pub mod store;
 pub mod text;

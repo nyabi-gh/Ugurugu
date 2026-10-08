@@ -36,6 +36,7 @@ use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
 mod clipboard;
+mod picking;
 mod text;
 mod transform;
 
@@ -95,6 +96,8 @@ enum Interaction {
         start: [f64; 2],
         base: [f64; 2],
     },
+    /// Picking up colours with the eyedropper.
+    Picking,
 }
 
 pub struct Canvas {
@@ -587,6 +590,10 @@ impl Canvas {
                     last: sample.position,
                 };
             }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.picks() => {
+                self.sample_count += 1;
+                self.begin_pick(sample.position);
+            }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.pending().is_some() => {
                 self.sample_count += 1;
                 self.begin_transform_drag(sample.position);
@@ -628,6 +635,7 @@ impl Canvas {
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
+                    Interaction::Picking => self.pick(sample.position),
                     Interaction::Idle => {}
                 }
             }
@@ -649,6 +657,7 @@ impl Canvas {
                         self.drag_text(sample.position);
                         self.interaction = Interaction::Idle;
                     }
+                    Interaction::Picking => self.pick(sample.position),
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
             }
@@ -684,7 +693,7 @@ impl Canvas {
                 }
                 self.refresh_text_preview();
             }
-            Interaction::Panning { .. } => {}
+            Interaction::Panning { .. } | Interaction::Picking => {}
             Interaction::Idle => return false,
         }
         true
@@ -823,6 +832,7 @@ impl Canvas {
             FillError::NothingThere => tr("fill-nothing").to_owned(),
             FillError::OutsideSelection => tr("fill-outside").to_owned(),
             FillError::NoSelection => tr("fill-no-selection").to_owned(),
+            FillError::Pending => tr("restyle-pending").to_owned(),
             FillError::Edit(error) => format!("The fill was not added: {error}"),
         });
     }
@@ -1643,5 +1653,88 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(shown(&wider, 300), shown(&frames[0], 200));
+    }
+
+    fn press(x: f64, y: f64) -> PointerSample {
+        PointerSample {
+            position: [x, y],
+            pressure: None,
+            tilt: None,
+            twist: None,
+            buttons: ugu_win::pointer::Buttons::empty(),
+            in_contact: true,
+            inverted: false,
+            time: Ticks(0),
+            frame_id: 0,
+        }
+    }
+
+    #[test]
+    fn the_eyedropper_picks_what_is_shown_and_alt_picks_only_with_painting_tools() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        let red = ugu_core::ops::Rgba8([200, 30, 30, 255]);
+        canvas.edit(|session| {
+            let point = |position, time| InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session.pen.color = red;
+            session.pen.width = 20.0;
+            session.begin_stroke(point([20.0, 100.0], 0.0)).unwrap();
+            session.end_stroke(point([300.0, 100.0], 100.0)).unwrap();
+            session.pen.color = ugu_core::ops::Rgba8([0, 0, 0, 255]);
+        });
+        settle(&mut canvas, &renders);
+        let white = ugu_core::ops::Rgba8([255, 255, 255, 255]);
+        let pen = |canvas: &super::Canvas| canvas.session().pen.color;
+        let ops = |canvas: &super::Canvas| {
+            let layer = canvas.session().current_layer();
+            match &canvas.session().document().layer(layer).unwrap().kind {
+                LayerKind::Paint(paint) => paint.ops.len(),
+                LayerKind::Group(_) => unreachable!(),
+            }
+        };
+
+        // Alt with the brush picks, and keeps picking while dragged.
+        canvas.set_modifiers(false, true);
+        let draw = |at| CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, at);
+        canvas.apply(draw(press(150.0, 100.0)));
+        assert_eq!(pen(&canvas), red);
+        canvas.apply(CanvasInput::Extend(press(150.0, 20.0)));
+        assert_eq!(pen(&canvas), white, "the background");
+        canvas.apply(CanvasInput::End(press(150.0, 100.0)));
+        assert_eq!(pen(&canvas), red);
+        assert_eq!(ops(&canvas), 1, "nothing drawn");
+        // Off the canvas, nothing changes.
+        canvas.edit(|session| session.pen.color = white);
+        canvas.apply(draw(press(400.0, 100.0)));
+        canvas.apply(CanvasInput::End(press(400.0, 100.0)));
+        assert_eq!(pen(&canvas), white);
+
+        // Alt with the selection tool takes away instead.
+        canvas.edit(|session| session.set_tool(Tool::Select));
+        canvas.apply(draw(press(150.0, 100.0)));
+        assert!(matches!(canvas.interaction, Interaction::Selecting));
+        canvas.apply(CanvasInput::Cancel);
+        assert_eq!(pen(&canvas), white);
+
+        // The eyedropper needs no Alt, and reads the frame shown during
+        // playback, drawn smaller.
+        canvas.set_modifiers(false, false);
+        canvas.edit(|session| session.set_tool(Tool::Eyedropper));
+        canvas.apply(draw(press(150.0, 100.0)));
+        canvas.apply(CanvasInput::End(press(150.0, 100.0)));
+        assert_eq!(pen(&canvas), red);
+        canvas.edit(|session| session.pen.color = white);
+        let mut small = Pixmap::new(160, 100);
+        small.data_as_u8_slice_mut()[(50 * 160 + 75) * 4..][..4].copy_from_slice(&[0, 0, 255, 255]);
+        canvas.held = Some((Arc::new(small), 2));
+        canvas.apply(draw(press(151.0, 101.0)));
+        canvas.apply(CanvasInput::End(press(151.0, 101.0)));
+        assert_eq!(pen(&canvas), ugu_core::ops::Rgba8([0, 0, 255, 255]));
     }
 }

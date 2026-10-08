@@ -48,24 +48,8 @@ pub enum Compare {
     Color(u8),
 }
 
-/// A premultiplied pixel as straight alpha, rounded as Qt's
-/// `qUnpremultiply`.
 fn straight(pixel: [u8; 4]) -> [u8; 4] {
-    let alpha = u32::from(pixel[3]);
-    match alpha {
-        255 => pixel,
-        0 => [0; 4],
-        _ => {
-            let inverse = 0x00ff_00ff / alpha;
-            let channel = |value: u8| ((u32::from(value) * inverse + 0x8000) >> 16) as u8;
-            [
-                channel(pixel[0]),
-                channel(pixel[1]),
-                channel(pixel[2]),
-                pixel[3],
-            ]
-        }
-    }
+    crate::ops::Rgba8::from_premultiplied(pixel).0
 }
 
 /// Pixels as one byte each over a whole canvas, for combining.
@@ -555,6 +539,17 @@ impl Selection {
         )
     }
 
+    /// This selection on a canvas `canvas` that `to_here` moved onto this
+    /// one: every pixel there that lands on a selected one. `None` when none
+    /// does.
+    pub(crate) fn before(&self, canvas: [u32; 2], to_here: Affine) -> Option<Self> {
+        let back = Self {
+            canvas,
+            mask: self.mask.clone(),
+        };
+        back.transformed(to_here.inverse()?)
+    }
+
     pub fn canvas(&self) -> [u32; 2] {
         self.canvas
     }
@@ -578,7 +573,7 @@ impl Selection {
 
 /// Copies `width` bits from bit `from` of `source` to the start of `out`,
 /// leaving the bits after them clear.
-fn copy_bits(source: &[u8], from: usize, width: usize, out: &mut [u8]) {
+pub(crate) fn copy_bits(source: &[u8], from: usize, width: usize, out: &mut [u8]) {
     let shift = from % 8;
     for (index, byte) in out.iter_mut().enumerate().take(width.div_ceil(8)) {
         let at = from / 8 + index;

@@ -296,3 +296,18 @@ text-hint = 캔버스를 클릭해 텍스트를 놓고 드래그로 위치를 �
 text-type-hint = 텍스트 패널에 입력하면 여기에 표시됩니다.
 text-drag-hint = 드래그로 이동 · Enter 적용 · Esc 취소
 text-empty = 배치할 텍스트를 먼저 입력하세요.
+
+# Eyedropper and stroke properties
+tool-eyedropper = 스포이드
+tool-eyedropper-rail = 스포이드
+tool-eyedropper-tip = 캔버스에서 색상을 추출합니다. 페인트 도구에서 Alt+클릭해도 같습니다.
+eyedropper-hint = 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다.
+restyle-selected = 선택한 선 속성 편집…
+restyle-selected-tip = 선택한 선의 색상 또는 굵기를 변경합니다
+restyle-title = 선 속성 편집
+restyle-color = 색상
+restyle-width = 굵기
+restyle-choose-color = 선 색상 선택
+restyle-description = 현재 레이어에서 선택 영역에 닿는 선과 채우기를 바꿉니다. 체크한 속성만 바뀝니다.
+restyle-nothing = 선택 영역에 편집할 선이나 채우기가 없습니다.
+restyle-pending = 변형이나 텍스트를 먼저 적용하거나 취소하세요.

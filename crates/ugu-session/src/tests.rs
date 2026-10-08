@@ -3,6 +3,7 @@
 
 use super::*;
 use ugu_core::ops::{Affine, MaskId, Op, Rgba8, Sampling};
+use ugu_core::restyle::Style;
 use ugu_core::selection::Combine;
 use ugu_core::store::BrushEngine;
 
@@ -1433,4 +1434,144 @@ fn placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits() {
         session.place_text([0.0, 0.0], boxed_text()),
         Err(FillError::HiddenLayer)
     );
+}
+
+#[test]
+fn the_eyedropper_sets_the_pen_colour_without_an_edit() {
+    let mut session = Session::new(Document::new([200, 100]), true);
+    session.set_tool(Tool::Eyedropper);
+    let (revision, label) = (session.revision(), session.undo_label().map(str::to_owned));
+    // Half-transparent red, premultiplied.
+    assert!(session.pick_color([128, 0, 0, 128]));
+    assert_eq!(session.pen.color, Rgba8([255, 0, 0, 128]));
+    assert!(!session.pick_color([128, 0, 0, 128]), "the same colour");
+    assert!(!session.pick_color([0, 0, 0, 0]), "a clear pixel");
+    assert_eq!(session.pen.color, Rgba8([255, 0, 0, 128]));
+    assert_eq!(session.eraser.color, ToolSettings::ERASER.color);
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.undo_label().map(str::to_owned), label);
+    assert!(!session.is_dirty());
+}
+
+#[test]
+fn picking_leaves_a_pending_transform_and_placed_text_pending() {
+    let mut session = session();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 40.0],
+        [70.0, 60.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(20.0, 0.0));
+    session.pick_color([0, 0, 255, 255]);
+    assert!(session.pending().is_some());
+    session.cancel_transform();
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 40.0], boxed_text()).unwrap();
+    session.pick_color([0, 255, 0, 255]);
+    assert!(session.placed_text().is_some());
+}
+
+#[test]
+fn restyling_changes_what_the_selection_touches_in_one_step() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    session.pen.width = 3.0;
+    session.pen.color = Rgba8([0, 0, 255, 255]);
+    draw(&mut session, 120.0, 180.0);
+    let before = session.document().clone();
+    assert_eq!(session.touched(), Err(FillError::NoSelection));
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [0.0, 0.0],
+        [100.0, 100.0],
+        Combine::Replace,
+    );
+    let touched = session.touched().unwrap();
+    assert_eq!((touched.colored, touched.sized), (1, 1));
+    assert_eq!(touched.color, Some(Rgba8([0, 0, 0, 255])));
+    assert_eq!(touched.width, Some(6.0));
+
+    let red = Rgba8([255, 0, 0, 255]);
+    let style = Style {
+        color: Some(red),
+        width: None,
+    };
+    let selection = session.selection().cloned();
+    assert!(matches!(
+        session.restyle_selected(style).unwrap(),
+        Outcome::Committed(_)
+    ));
+    assert_eq!(session.undo_label(), Some("Edit stroke properties"));
+    assert_eq!(
+        session.selection().cloned(),
+        selection,
+        "the selection stays"
+    );
+    let colors: Vec<_> = ops(&session, layer)
+        .iter()
+        .map(|op| match op {
+            Op::Paint { stroke, .. } => session.document().store.strokes[stroke].color,
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(colors, [red, Rgba8([0, 0, 255, 255])]);
+    assert_eq!(
+        session.restyle_selected(style).unwrap(),
+        Outcome::NoChange,
+        "already red"
+    );
+    assert!(session.undo().unwrap());
+    assert_eq!(session.document(), &before);
+    assert_eq!(session.selection().cloned(), selection);
+}
+
+#[test]
+fn restyling_waits_for_a_pending_transform_or_placed_text() {
+    let mut session = session();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 40.0],
+        [70.0, 60.0],
+        Combine::Replace,
+    );
+    let style = Style {
+        color: None,
+        width: Some(12.0),
+    };
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(20.0, 0.0));
+    let revision = session.revision();
+    assert_eq!(session.touched(), Err(FillError::Pending));
+    assert_eq!(session.restyle_selected(style), Err(FillError::Pending));
+    assert!(session.pending().is_some(), "not applied");
+    assert_eq!(session.revision(), revision);
+    session.apply_transform().unwrap();
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 10.0], boxed_text()).unwrap();
+    assert_eq!(session.restyle_selected(style), Err(FillError::Pending));
+    assert!(session.cancel_text());
+    assert!(matches!(
+        session.restyle_selected(style).unwrap(),
+        Outcome::Committed(_)
+    ));
+}
+
+#[test]
+fn restyling_refuses_a_hidden_layer() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    session.select_all();
+    session
+        .update_layer(layer, "Hide", |layer| layer.visible = false)
+        .unwrap();
+    assert_eq!(session.touched(), Err(FillError::HiddenLayer));
 }

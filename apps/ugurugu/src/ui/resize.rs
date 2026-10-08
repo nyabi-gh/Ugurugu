@@ -273,7 +273,7 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     }
 }
 
-fn heading(ui: &mut egui::Ui, title: &str, description: &str) {
+pub(super) fn heading(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.heading(title);
     ui.label(egui::RichText::new(description).color(theme::MUTED));
     ui.add_space(6.0);

@@ -294,3 +294,18 @@ text-hint | ugurugu::TextPopoverPanel | Click the canvas to place the text, then
 text-type-hint | ugurugu::CanvasWidget | Type in the Text panel to see it here.
 text-drag-hint | ugurugu::CanvasWidget | Drag to move · Enter applies · Esc cancels
 text-empty | ugurugu::CanvasWidget | Type some text to place it.
+
+# Eyedropper and stroke properties
+tool-eyedropper | ugurugu::MainWindow | E&yedropper
+tool-eyedropper-rail | ugurugu::MainWindow | Eyedropper
+tool-eyedropper-tip | ugurugu::MainWindow | Pick a color from the canvas. Alt+click does the same from any paint tool.
+eyedropper-hint | - | Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket. | 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다. | キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
+restyle-selected | ugurugu::MainWindow | Edit selected stroke properties…
+restyle-selected-tip | ugurugu::MainWindow | Change the color or width of selected strokes
+restyle-title | ugurugu::StrokePropertiesDialog | Edit Stroke Properties
+restyle-color | ugurugu::StrokePropertiesDialog | Color
+restyle-width | ugurugu::StrokePropertiesDialog | Width
+restyle-choose-color | ugurugu::StrokePropertiesDialog | Select Stroke Color
+restyle-description | - | Changes the strokes and fills the selection touches on the current layer. Only checked properties change. | 현재 레이어에서 선택 영역에 닿는 선과 채우기를 바꿉니다. 체크한 속성만 바뀝니다. | 現在のレイヤーで選択範囲に触れるストロークと塗りつぶしを変更します。チェックしたプロパティだけが変わります。
+restyle-nothing | - | No strokes or fills in the selection to edit. | 선택 영역에 편집할 선이나 채우기가 없습니다. | 選択範囲に編集できるストロークや塗りつぶしがありません。
+restyle-pending | - | Apply or cancel the transform or text first. | 변형이나 텍스트를 먼저 적용하거나 취소하세요. | 先に変形またはテキストを適用するか、キャンセルしてください。

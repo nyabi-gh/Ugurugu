@@ -296,3 +296,18 @@ text-hint = キャンバスをクリックしてテキストを置き、ドラ�
 text-type-hint = テキストパネルに入力すると、ここに表示されます。
 text-drag-hint = ドラッグで移動 · Enter で適用 · Esc でキャンセル
 text-empty = 配置するテキストを先に入力してください。
+
+# Eyedropper and stroke properties
+tool-eyedropper = スポイト
+tool-eyedropper-rail = スポイト
+tool-eyedropper-tip = キャンバスから色を取得します。どの描画ツールでもAlt+クリックで同じ操作ができます。
+eyedropper-hint = キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
+restyle-selected = 選択したストロークのプロパティを編集…
+restyle-selected-tip = 選択したストロークの色または太さを変更します
+restyle-title = ストロークのプロパティを編集
+restyle-color = 色
+restyle-width = 太さ
+restyle-choose-color = ストロークの色を選択
+restyle-description = 現在のレイヤーで選択範囲に触れるストロークと塗りつぶしを変更します。チェックしたプロパティだけが変わります。
+restyle-nothing = 選択範囲に編集できるストロークや塗りつぶしがありません。
+restyle-pending = 先に変形またはテキストを適用するか、キャンセルしてください。

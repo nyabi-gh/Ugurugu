@@ -10,6 +10,7 @@ mod brushes;
 mod color;
 mod layers;
 mod resize;
+mod restyle;
 mod text;
 
 use fluent_bundle::FluentArgs;
@@ -51,6 +52,8 @@ pub struct Panels {
     refusal: Option<String>,
     /// The canvas or image size dialog, while open.
     resize: Option<resize::Dialog>,
+    /// The stroke properties dialog, while open.
+    restyle: Option<restyle::Dialog>,
 }
 
 /// Panels the Window menu opens and closes.
@@ -147,6 +150,9 @@ pub fn shortcuts(
     }
     if pressed(none, egui::Key::T) {
         canvas.edit(|session| session.set_tool(Tool::Text));
+    }
+    if pressed(none, egui::Key::I) {
+        canvas.edit(|session| session.set_tool(Tool::Eyedropper));
     }
     if pressed(egui::Modifiers::ALT, egui::Key::Delete) {
         canvas.fill_selection();
@@ -372,6 +378,16 @@ pub fn menu_bar(
             {
                 canvas.fill_selection();
             }
+            if ui
+                .add_enabled(
+                    restyle::available(canvas),
+                    egui::Button::new(tr("restyle-selected")),
+                )
+                .on_hover_text(tr("restyle-selected-tip"))
+                .clicked()
+            {
+                restyle::open(canvas, panels);
+            }
             let delete = egui::Button::new(tr("delete-selected")).shortcut_text("Delete");
             if ui.add_enabled(selected, delete).clicked() {
                 canvas.delete_selected();
@@ -432,6 +448,7 @@ pub fn menu_bar(
                 (Tool::Wand, "tool-wand", "W"),
                 (Tool::Fill, "tool-fill", "G"),
                 (Tool::Text, "tool-text", "T"),
+                (Tool::Eyedropper, "tool-eyedropper", "I"),
             ] {
                 if ui
                     .add(egui::Button::selectable(tool == each, tr(key)).shortcut_text(shortcut))
@@ -445,9 +462,11 @@ pub fn menu_bar(
     });
 }
 
-/// The canvas or image size dialog, while one is open.
-pub fn resize_dialog(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
+/// The canvas or image size dialog or the stroke properties dialog, while
+/// one is open.
+pub fn dialogs(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     resize::show(ctx, canvas, panels);
+    restyle::show(ctx, canvas, panels);
 }
 
 /// The quick access bar: panels on the left, undo and redo on the right.
@@ -482,6 +501,12 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (Tool::Wand, Glyph::Wand, "tool-wand", "W"),
         (Tool::Fill, Glyph::Bucket, "tool-fill", "G"),
         (Tool::Text, Glyph::Text, "tool-text-rail", "T"),
+        (
+            Tool::Eyedropper,
+            Glyph::Eyedropper,
+            "tool-eyedropper-rail",
+            "I",
+        ),
     ] {
         if widgets::tool_button(ui, glyph, tr(key), shortcut, tool == each).clicked() {
             canvas.edit(|session| session.set_tool(each));
@@ -539,19 +564,31 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         Tool::Select => return selection_settings(ui, canvas),
         Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
         Tool::Text => return text::settings(ui, canvas),
+        Tool::Eyedropper => {
+            ui.label(
+                egui::RichText::new(tr("eyedropper-hint"))
+                    .size(theme::SMALL)
+                    .color(theme::MUTED),
+            );
+            return;
+        }
         Tool::Pen | Tool::Eraser => {}
     }
     panels.presets.show(ui, canvas, tool);
     // Read after the presets: choosing one sets its width and stabilizer.
     let mut settings = match tool {
         Tool::Eraser => canvas.session().eraser,
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => canvas.session().pen,
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
+            canvas.session().pen
+        }
     };
     let before = settings;
     ui.add_space(4.0);
     let size_name = match tool {
         Tool::Eraser => tr("eraser-size"),
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => tr("brush-size"),
+        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
+            tr("brush-size")
+        }
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -586,7 +623,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if settings != before {
         canvas.edit(|session| match tool {
             Tool::Eraser => session.eraser = settings,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text => {
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
                 session.pen = settings
             }
         });
@@ -772,6 +809,21 @@ pub fn selection_overlay(
     selection.map(|selection| (selection.clone(), moved, phase))
 }
 
+/// A crosshair over the canvas while a press would pick a colour.
+pub fn pick_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
+    let (alt, pointer) = ui.input(|input| (input.modifiers.alt, input.pointer.hover_pos()));
+    let over = pointer.is_some_and(|pointer| {
+        ui.max_rect().contains(pointer)
+            && ui
+                .ctx()
+                .layer_id_at(pointer)
+                .is_none_or(|layer| layer.order == egui::Order::Background)
+    });
+    if over && canvas.picks_with(alt) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+}
+
 /// A dashed frame around placed text and what to do with it, as 2.2.13
 /// draws them.
 pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
@@ -875,7 +927,7 @@ fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
 /// The bar of selection actions under the selection, as 2.2.13's: transform,
 /// flip, apply and cancel, duplicate, delete and deselect. Hidden while a
 /// shape or the box is dragged.
-pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas) {
+pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     const MARGIN: f32 = 8.0;
     const GAP: f32 = 6.0;
     let session = canvas.session();
@@ -916,13 +968,18 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas) {
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| action_buttons(ui, canvas, pending));
+                    ui.horizontal(|ui| action_buttons(ui, canvas, panels, pending));
                 });
         });
 }
 
 /// `pending`: whether a transform is pending, and whether it duplicates.
-fn action_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, pending: Option<bool>) {
+fn action_buttons(
+    ui: &mut egui::Ui,
+    canvas: &mut Canvas,
+    panels: &mut Panels,
+    pending: Option<bool>,
+) {
     ui.spacing_mut().item_spacing.x = 2.0;
     let button = |ui: &mut egui::Ui, glyph, name, tip| {
         widgets::icon_button_tip(ui, glyph, 18.0, tr(name), tr(tip), true).clicked()
@@ -974,6 +1031,11 @@ fn action_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, pending: Option<bool>)
     );
     if toggled.clicked() {
         canvas.set_duplicate(!duplicate);
+    }
+    if restyle::available(canvas)
+        && button(ui, Glyph::Brush, "restyle-selected", "restyle-selected-tip")
+    {
+        restyle::open(canvas, panels);
     }
     if button(ui, Glyph::Delete, "delete-selected", "delete-selected") {
         canvas.delete_selected();
