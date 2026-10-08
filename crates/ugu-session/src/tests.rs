@@ -1575,3 +1575,35 @@ fn restyling_refuses_a_hidden_layer() {
         .unwrap();
     assert_eq!(session.touched(), Err(FillError::HiddenLayer));
 }
+
+#[test]
+fn a_stroke_begun_while_a_transform_is_pending_is_cut_to_the_moved_selection() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 40.0],
+        [70.0, 60.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(100.0, 0.0));
+    session.begin_stroke(at(120.0, 50.0, 0.0)).unwrap();
+    assert!(session.pending().is_none(), "applied at the press");
+    let moved = session.selection().cloned();
+    assert_eq!(session.live().unwrap().clip, moved);
+    session.end_stroke(at(160.0, 50.0, 8.0)).unwrap();
+    let ops = ops(&session, layer);
+    let Some(Op::Paint {
+        clip: Some(clip), ..
+    }) = ops.last()
+    else {
+        panic!("a clipped stroke");
+    };
+    assert_eq!(
+        session.document().store.masks[clip].bounds,
+        moved.unwrap().mask().bounds
+    );
+}

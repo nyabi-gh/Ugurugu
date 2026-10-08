@@ -334,9 +334,12 @@ impl Session {
         Ok(())
     }
 
+    /// Applies a pending transform or placed text first, so the stroke is
+    /// cut to the selection as they leave it.
     pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
         self.live = None;
         self.can_paint()?;
+        self.settle();
         let settings = *self.settings();
         let erase = self.tool == Tool::Eraser;
         self.strokes_started += 1;
