@@ -294,6 +294,7 @@ mod tests {
                     antialias: true,
                     size_dynamics: 0.8,
                     wobble_scale,
+                    ..Brush::default()
                 },
                 seed: 1,
             },

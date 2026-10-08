@@ -370,6 +370,7 @@ mod tests {
                 antialias: false,
                 size_dynamics: 0.8,
                 wobble_scale: 1.0,
+                ..Brush::default()
             },
             seed: 1,
         }

@@ -179,11 +179,27 @@ pub struct StrokeDto {
 #[serde(deny_unknown_fields)]
 pub struct BrushDto {
     pub engine: EngineDto,
+    pub tip: TipDto,
     pub opacity: f32,
+    pub flow: f32,
     pub hardness: f32,
-    pub antialias: bool,
+    pub spacing: f32,
+    pub scatter: f32,
+    pub particle_size: f32,
+    pub density: f32,
     pub size_dynamics: f32,
+    pub opacity_dynamics: f32,
+    pub size_jitter: f32,
+    pub animated_jitter: bool,
     pub wobble_scale: f32,
+    pub antialias: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipDto {
+    Round,
+    Square,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

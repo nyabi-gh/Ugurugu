@@ -911,6 +911,7 @@ fn make_stroke(seed: u64, canvas: [u32; 2], shape: Shape) -> Stroke {
             antialias: false,
             size_dynamics: 0.8,
             wobble_scale: 1.0,
+            ..Brush::default()
         },
         seed: stroke_seed,
     }

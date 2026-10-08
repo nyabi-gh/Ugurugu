@@ -12,7 +12,7 @@ use std::io::{Seek, Write};
 
 use ugu_core::document::{Document, Layer, LayerKind};
 use ugu_core::ops::{AssetId, Blend, MaskId, MotionStyle, Op, Sampling, StrokeId, Wobble};
-use ugu_core::store::{BrushEngine, Mask, Point};
+use ugu_core::store::{BrushEngine, Mask, Point, TipShape};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
@@ -88,11 +88,23 @@ pub fn write<W: Write + Seek>(
                             BrushEngine::Airbrush => EngineDto::Airbrush,
                             BrushEngine::Spray => EngineDto::Spray,
                         },
+                        tip: match stroke.brush.tip {
+                            TipShape::Round => TipDto::Round,
+                            TipShape::Square => TipDto::Square,
+                        },
                         opacity: stroke.brush.opacity,
+                        flow: stroke.brush.flow,
                         hardness: stroke.brush.hardness,
-                        antialias: stroke.brush.antialias,
+                        spacing: stroke.brush.spacing,
+                        scatter: stroke.brush.scatter,
+                        particle_size: stroke.brush.particle_size,
+                        density: stroke.brush.density,
                         size_dynamics: stroke.brush.size_dynamics,
+                        opacity_dynamics: stroke.brush.opacity_dynamics,
+                        size_jitter: stroke.brush.size_jitter,
+                        animated_jitter: stroke.brush.animated_jitter,
                         wobble_scale: stroke.brush.wobble_scale,
+                        antialias: stroke.brush.antialias,
                     },
                     seed: format!("{:016x}", stroke.seed),
                 }

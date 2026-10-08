@@ -17,6 +17,14 @@ pub mod limits {
     pub const COORDINATE: f32 = 32_767.0;
     pub const STROKE_WIDTH: std::ops::RangeInclusive<f32> = 0.25..=512.0;
     pub const WOBBLE_SCALE: std::ops::RangeInclusive<f32> = 0.0..=2.0;
+    /// Dab spacing, in brush widths.
+    pub const SPACING: std::ops::RangeInclusive<f32> = 0.02..=2.0;
+    /// How far spray particles land from the stroke, in brush widths.
+    pub const SCATTER: std::ops::RangeInclusive<f32> = 0.0..=2.0;
+    /// Spray particle size, in brush widths.
+    pub const PARTICLE_SIZE: std::ops::RangeInclusive<f32> = 0.01..=1.0;
+    /// Spray particles per sample, in sixes.
+    pub const DENSITY: std::ops::RangeInclusive<f32> = 0.05..=4.0;
     pub const ASSET_PIXELS: u64 = 4096 * 4096;
     /// Everything the store holds, as stored.
     pub const BYTES: u64 = 128 * 1024 * 1024;
@@ -37,19 +45,70 @@ pub enum BrushEngine {
     Spray,
 }
 
-/// The brush a stroke was drawn with. M4 adds the airbrush and spray
-/// fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TipShape {
+    Round,
+    /// Square ends and mitred corners for lines, square dabs and particles.
+    Square,
+}
+
+/// The brush a stroke was drawn with: 2.2.13's `BrushSettings`, with its
+/// defaults.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Brush {
     pub engine: BrushEngine,
+    pub tip: TipShape,
     pub opacity: f32,
+    /// Each airbrush dab's and spray particle's share of `opacity`.
+    pub flow: f32,
+    /// How much of an airbrush dab's radius is solid before it fades.
     pub hardness: f32,
-    pub antialias: bool,
+    /// See `limits::SPACING`.
+    pub spacing: f32,
+    /// See `limits::SCATTER`.
+    pub scatter: f32,
+    /// See `limits::PARTICLE_SIZE`.
+    pub particle_size: f32,
+    /// See `limits::DENSITY`.
+    pub density: f32,
     /// How much pressure narrows the stroke: the width is scaled by
     /// `1 - size_dynamics + pressure * size_dynamics`.
     pub size_dynamics: f32,
+    /// How much pressure fades the stroke, in the same way.
+    pub opacity_dynamics: f32,
+    /// How much spray particle sizes vary.
+    pub size_jitter: f32,
+    /// Spray particles land elsewhere on every frame.
+    pub animated_jitter: bool,
     /// Multiplies the layer's wobble amount for this stroke.
     pub wobble_scale: f32,
+    pub antialias: bool,
+}
+
+impl Brush {
+    pub const DEFAULT: Self = Self {
+        engine: BrushEngine::Line,
+        tip: TipShape::Round,
+        opacity: 1.0,
+        flow: 1.0,
+        hardness: 1.0,
+        spacing: 0.15,
+        scatter: 0.0,
+        particle_size: 0.08,
+        density: 1.0,
+        size_dynamics: 0.8,
+        opacity_dynamics: 0.0,
+        size_jitter: 0.0,
+        animated_jitter: false,
+        wobble_scale: 1.0,
+        antialias: false,
+    };
+}
+
+impl Default for Brush {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -106,6 +165,7 @@ pub enum StoreError {
     StrokePoints(StrokeId),
     StrokePoint(StrokeId),
     StrokeWidth(StrokeId),
+    StrokeBrush(StrokeId),
     TooManyPoints(usize),
     MaskSize(MaskId),
     AssetSize(AssetId),
@@ -117,7 +177,8 @@ impl std::fmt::Display for StoreError {
         match self {
             Self::StrokePoints(id) => write!(f, "stroke {} has no points or too many", id.0),
             Self::StrokePoint(id) => write!(f, "stroke {} has a point out of range", id.0),
-            Self::StrokeWidth(id) => write!(f, "stroke {} has an invalid width or brush", id.0),
+            Self::StrokeWidth(id) => write!(f, "stroke {} has an invalid width", id.0),
+            Self::StrokeBrush(id) => write!(f, "stroke {} has a brush setting out of range", id.0),
             Self::TooManyPoints(count) => write!(f, "{count} points is over the limit"),
             Self::MaskSize(id) => write!(f, "mask {} does not match its bounds", id.0),
             Self::AssetSize(_) => write!(f, "an image is empty or over the size limit"),
@@ -184,16 +245,30 @@ pub fn check_stroke(id: StrokeId, stroke: &Stroke) -> Result<(), StoreError> {
     }) {
         return Err(StoreError::StrokePoint(id));
     }
-    let unit = 0.0..=1.0;
-    if !limits::STROKE_WIDTH.contains(&stroke.width)
-        || !unit.contains(&stroke.brush.opacity)
-        || !unit.contains(&stroke.brush.hardness)
-        || !unit.contains(&stroke.brush.size_dynamics)
-        || !limits::WOBBLE_SCALE.contains(&stroke.brush.wobble_scale)
-    {
+    if !limits::STROKE_WIDTH.contains(&stroke.width) {
         return Err(StoreError::StrokeWidth(id));
     }
+    if !brush_in_range(&stroke.brush) {
+        return Err(StoreError::StrokeBrush(id));
+    }
     Ok(())
+}
+
+/// 2.2.13's `isValidBrushSettings`.
+pub fn brush_in_range(brush: &Brush) -> bool {
+    let unit = 0.0..=1.0;
+    unit.contains(&brush.opacity)
+        && brush.flow > 0.0
+        && brush.flow <= 1.0
+        && unit.contains(&brush.hardness)
+        && limits::SPACING.contains(&brush.spacing)
+        && limits::SCATTER.contains(&brush.scatter)
+        && limits::PARTICLE_SIZE.contains(&brush.particle_size)
+        && limits::DENSITY.contains(&brush.density)
+        && unit.contains(&brush.size_dynamics)
+        && unit.contains(&brush.opacity_dynamics)
+        && unit.contains(&brush.size_jitter)
+        && limits::WOBBLE_SCALE.contains(&brush.wobble_scale)
 }
 
 pub fn check_mask(id: MaskId, mask: &Mask) -> Result<(), StoreError> {
@@ -222,14 +297,7 @@ mod tests {
             points: points.into(),
             color: Rgba8([0, 0, 0, 255]),
             width: 6.0,
-            brush: Brush {
-                engine: BrushEngine::Line,
-                opacity: 1.0,
-                hardness: 1.0,
-                antialias: false,
-                size_dynamics: 0.8,
-                wobble_scale: 1.0,
-            },
+            brush: Brush::default(),
             seed: 7,
         }
     }

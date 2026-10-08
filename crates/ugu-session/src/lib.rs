@@ -249,6 +249,7 @@ impl Session {
                 antialias: settings.antialias,
                 size_dynamics: settings.size_dynamics,
                 wobble_scale: 1.0,
+                ..Brush::default()
             },
             seed: self.seeds.hash_one(self.strokes_started),
         };

@@ -281,20 +281,12 @@ impl Files {
                 }
             }
             FileEvent::Opened(path, result) => match result {
-                Ok((document, id)) => match ugu_render::document::check(&document) {
-                    Ok(()) => {
-                        canvas.replace(document, true);
-                        self.path = Some(path);
-                        self.id = id;
-                        self.message = None;
-                    }
-                    Err(missing) => {
-                        self.message = Some(format!(
-                            "{} uses {missing}, which this build cannot show yet",
-                            path.display()
-                        ));
-                    }
-                },
+                Ok((document, id)) => {
+                    canvas.replace(document, true);
+                    self.path = Some(path);
+                    self.id = id;
+                    self.message = None;
+                }
                 Err(error) => self.message = Some(format!("{}: {error}", path.display())),
             },
             FileEvent::Exported(path, result) => {
@@ -543,25 +535,26 @@ mod tests {
                 antialias: true,
                 size_dynamics: 0.8,
                 wobble_scale: 1.0,
+                ..ugu_core::store::Brush::default()
             },
             seed: 1,
         };
         let layer = document.layers[0].id;
         let changes = ugu_core::command::draw(&document, layer, airbrush, false, None);
         ugu_core::edit::commit(&mut document, changes).unwrap();
-        let unsupported = folder.join("airbrush.ugu2");
+        let airbrush_file = folder.join("airbrush.ugu2");
         ugu_io::save::save(
             &document,
             [8; 16],
-            &unsupported,
+            &airbrush_file,
             &ugu_win::file::replace_file,
         )
         .unwrap();
 
-        files.open_path(unsupported);
+        files.open_path(airbrush_file);
         files.handle(next(&events), &mut canvas);
-        assert!(files.message().unwrap().contains("cannot show yet"));
-        assert_eq!(canvas.session().document().frames, 30);
+        assert!(files.message().is_none());
+        assert_eq!(canvas.session().document().store.strokes.len(), 1);
 
         files.open_path(good.clone());
         files.handle(next(&events), &mut canvas);
@@ -600,6 +593,7 @@ mod tests {
                     antialias: true,
                     size_dynamics: 0.8,
                     wobble_scale: 1.0,
+                    ..Brush::default()
                 },
                 seed: 9,
             },

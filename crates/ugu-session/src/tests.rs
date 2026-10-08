@@ -299,6 +299,7 @@ fn pen_up_cost_on_a_large_document() {
                     antialias: true,
                     size_dynamics: 0.8,
                     wobble_scale: 1.0,
+                    ..Brush::default()
                 },
                 seed: u64::from(index),
             },

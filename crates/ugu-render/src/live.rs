@@ -249,6 +249,7 @@ mod tests {
                 antialias,
                 size_dynamics: 0.8,
                 wobble_scale: 1.0,
+                ..Brush::default()
             },
             seed: 77,
             wobble: 3.0,

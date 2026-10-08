@@ -18,7 +18,7 @@ use ugu_core::ops::{
     Affine, AssetId, Blend, MaskId, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
     StrokeId, Wobble,
 };
-use ugu_core::store::{self, Asset, Brush, BrushEngine, Mask, Point, Store, Stroke};
+use ugu_core::store::{self, Asset, Brush, BrushEngine, Mask, Point, Store, Stroke, TipShape};
 use zip::ZipArchive;
 
 use crate::format::*;
@@ -253,11 +253,23 @@ impl<R: Read + Seek> Entries<R> {
                         EngineDto::Airbrush => BrushEngine::Airbrush,
                         EngineDto::Spray => BrushEngine::Spray,
                     },
+                    tip: match stroke.brush.tip {
+                        TipDto::Round => TipShape::Round,
+                        TipDto::Square => TipShape::Square,
+                    },
                     opacity: stroke.brush.opacity,
+                    flow: stroke.brush.flow,
                     hardness: stroke.brush.hardness,
-                    antialias: stroke.brush.antialias,
+                    spacing: stroke.brush.spacing,
+                    scatter: stroke.brush.scatter,
+                    particle_size: stroke.brush.particle_size,
+                    density: stroke.brush.density,
                     size_dynamics: stroke.brush.size_dynamics,
+                    opacity_dynamics: stroke.brush.opacity_dynamics,
+                    size_jitter: stroke.brush.size_jitter,
+                    animated_jitter: stroke.brush.animated_jitter,
                     wobble_scale: stroke.brush.wobble_scale,
+                    antialias: stroke.brush.antialias,
                 },
                 seed: u64::from_be_bytes(seed),
             };

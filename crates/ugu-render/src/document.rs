@@ -7,7 +7,6 @@
 //! draw on a transparent surface in order, so an eraser removes only what is
 //! below it in the same surface, and the surface is then drawn over what is
 //! beneath with its opacity. This is the meaning `ugu_core::semantics` pins.
-//! Only what M2 can draw is accepted; `check` names the rest.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,65 +26,12 @@ use vello_cpu::{
 
 use crate::compose::premultiplied;
 use crate::composite::{self, Source};
+use crate::dab::{self, Dab};
 use crate::mask::Runs;
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
 use crate::tile::TiledSurface;
-
-/// Content this build cannot draw yet, and the milestone that adds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unsupported {
-    /// Airbrush and spray (M4).
-    Brush,
-}
-
-impl std::fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Brush => "airbrush or spray strokes",
-        })
-    }
-}
-
-/// Whether this build can draw `document`.
-pub fn check(document: &Document) -> Result<(), Unsupported> {
-    check_layers(&document.layers, &document.store)
-}
-
-fn check_layers(layers: &[ugu_core::document::Layer], store: &Store) -> Result<(), Unsupported> {
-    for layer in layers {
-        match &layer.kind {
-            LayerKind::Paint(paint) => check_ops(&paint.ops, store)?,
-            LayerKind::Group(group) => check_layers(&group.children, store)?,
-        }
-    }
-    Ok(())
-}
-
-fn check_ops(ops: &[Op], store: &Store) -> Result<(), Unsupported> {
-    for op in ops {
-        match op {
-            Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
-                if store
-                    .strokes
-                    .get(stroke)
-                    .is_some_and(|stroke| stroke.brush.engine != BrushEngine::Line)
-                {
-                    return Err(Unsupported::Brush);
-                }
-            }
-            Op::Fill { .. }
-            | Op::ClearSelection { .. }
-            | Op::PlaceImage { .. }
-            | Op::TransformSelection { .. }
-            | Op::Crop { .. }
-            | Op::Resample { .. } => {}
-            Op::Isolated(section) => check_ops(&section.ops, store)?,
-        }
-    }
-    Ok(())
-}
 
 /// Which layers a frame shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +132,10 @@ struct Raster {
     /// The outlines of the last layer drawn, one per stroke, refilled for
     /// the next so that their memory is not given back and taken again.
     paths: Vec<BezPath>,
+    /// Likewise the dabs of airbrush and spray strokes, one list per stroke.
+    dabs: Vec<Vec<Dab>>,
+    /// For each dab's outline.
+    scratch: BezPath,
 }
 
 /// Bytes the layers' own surfaces may take until `set_surface_budget`; the
@@ -745,6 +695,8 @@ impl Raster {
             resources: Resources::new(),
             threads: usize::from(threads.max(1)),
             paths: Vec::new(),
+            dabs: Vec::new(),
+            scratch: BezPath::new(),
         }
     }
 
@@ -836,9 +788,10 @@ impl Raster {
 
         let started = std::time::Instant::now();
         let mut paths = std::mem::take(&mut self.paths);
-        self.outlines(steps, frame, detail, &mut paths);
+        let mut dabs = std::mem::take(&mut self.dabs);
+        self.outlines(steps, frame, detail, &mut paths, &mut dabs);
         timings.outlines += started.elapsed();
-        let mut outlines = paths.iter();
+        let mut outlines = paths.iter().zip(&dabs);
 
         // A run after a moved selection or a resample draws over what the
         // run before drew, so buffers take turns instead of copying: one
@@ -909,9 +862,12 @@ impl Raster {
                         clip,
                         ..
                     } => {
-                        let path = outlines.next().expect("one outline per stroke");
+                        let (path, dabs) = outlines.next().expect("one outline per stroke");
+                        let clip = clip.as_ref().map(|clip| &clip.area);
                         if !path.is_empty() {
-                            self.draw(stroke, *erase, path, clip.as_ref().map(|clip| &clip.area));
+                            self.draw(stroke, *erase, path, clip);
+                        } else if !dabs.is_empty() {
+                            self.draw_dabs(stroke, *erase, dabs, clip);
                         }
                     }
                     Step::Fill {
@@ -1029,6 +985,7 @@ impl Raster {
             cache.keep_spare(left);
         }
         self.paths = paths;
+        self.dabs = dabs;
         timings
     }
 
@@ -1050,9 +1007,17 @@ impl Raster {
         self.context.fill_rect(&size);
     }
 
-    /// The outline of each `Step::Draw` into `paths`, in order (empty
-    /// without samples), made on the worker threads in contiguous runs.
-    fn outlines(&self, steps: &[Step<'_>], frame: u32, detail: u32, paths: &mut Vec<BezPath>) {
+    /// The outline of each `Step::Draw` into `paths`, or for an airbrush or
+    /// spray its dabs into `dabs`, in order (the other one and both without
+    /// samples left empty), made on the worker threads in contiguous runs.
+    fn outlines(
+        &self,
+        steps: &[Step<'_>],
+        frame: u32,
+        detail: u32,
+        paths: &mut Vec<BezPath>,
+        dabs: &mut Vec<Vec<Dab>>,
+    ) {
         let draws: Vec<(&Stroke, &Pen)> = steps
             .iter()
             .filter_map(|step| match step {
@@ -1061,24 +1026,38 @@ impl Raster {
             })
             .collect();
         paths.resize_with(draws.len(), BezPath::new);
-        let make = |(stroke, pen): &(&Stroke, &Pen), path: &mut BezPath| {
-            let spacing =
-                stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
-            let samples = Resampler::whole(&stroke.points, spacing);
-            stroke::outline_into(&samples, pen, frame, path);
+        dabs.resize_with(draws.len(), Vec::new);
+        let make = |(stroke, pen): &(&Stroke, &Pen), path: &mut BezPath, dabs: &mut Vec<Dab>| {
+            if stroke.brush.engine == BrushEngine::Line {
+                dabs.clear();
+                let spacing =
+                    stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
+                let samples = Resampler::whole(&stroke.points, spacing);
+                stroke::outline_into(&samples, pen, frame, path);
+            } else {
+                // Spacing is part of how dabs add up, so it keeps full detail.
+                path.truncate(0);
+                let samples =
+                    Resampler::at_most(&stroke.points, pen.dab_spacing(frame), dab::MAX_DABS);
+                dab::dabs_into(&samples, pen, frame, stroke.color.0[3], dabs);
+            }
         };
         let run = draws.len().div_ceil(self.threads).max(1);
         if self.threads == 1 || draws.len() < 2 {
-            for (draw, path) in draws.iter().zip(paths.iter_mut()) {
-                make(draw, path);
+            for ((draw, path), dabs) in draws.iter().zip(paths.iter_mut()).zip(dabs.iter_mut()) {
+                make(draw, path, dabs);
             }
             return;
         }
         std::thread::scope(|scope| {
-            for (chunk, paths) in draws.chunks(run).zip(paths.chunks_mut(run)) {
+            let chunks = draws
+                .chunks(run)
+                .zip(paths.chunks_mut(run))
+                .zip(dabs.chunks_mut(run));
+            for ((chunk, paths), dabs) in chunks {
                 scope.spawn(move || {
-                    for (draw, path) in chunk.iter().zip(paths) {
-                        make(draw, path);
+                    for ((draw, path), dabs) in chunk.iter().zip(paths).zip(dabs) {
+                        make(draw, path, dabs);
                     }
                 });
             }
@@ -1089,8 +1068,8 @@ impl Raster {
     /// the aliasing setting its clip is pushed with, so the clip is pushed
     /// first and stays exact for aliased pens too.
     fn draw(&mut self, stroke: &Stroke, erase: bool, path: &BezPath, clip: Option<&BezPath>) {
-        let [r, g, b, a] = stroke.color.0;
-        let alpha = (f32::from(a) * stroke.brush.opacity.clamp(0.0, 1.0)).round() as u8;
+        let [r, g, b, _] = stroke.color.0;
+        let alpha = stroke::line_alpha(stroke);
         let layer = erase || clip.is_some();
         if layer {
             let mode = erase.then(|| BlendMode::new(Mix::Normal, Compose::DestOut));
@@ -1111,6 +1090,19 @@ impl Raster {
         if layer {
             self.context.pop_layer();
         }
+    }
+
+    /// Draws an airbrush or spray stroke's dabs over each other on a surface
+    /// of their own, which then goes over what is there, or is erased from
+    /// it, within `clip`; so drawn, a stroke added at pen-up is within a
+    /// level of the same stroke drawn here.
+    fn draw_dabs(&mut self, stroke: &Stroke, erase: bool, dabs: &[Dab], clip: Option<&BezPath>) {
+        let mode = erase.then(|| BlendMode::new(Mix::Normal, Compose::DestOut));
+        self.context.push_layer(clip, mode, None, None, None);
+        let [r, g, b, _] = if erase { [0; 4] } else { stroke.color.0 };
+        let look = dab::look(&stroke.brush);
+        dab::draw(&mut self.context, dabs, look, [r, g, b], &mut self.scratch);
+        self.context.pop_layer();
     }
 
     /// Removes what is under `area`.
@@ -1777,6 +1769,7 @@ mod tests {
                     antialias,
                     size_dynamics: 0.8,
                     wobble_scale: 1.0,
+                    ..Brush::default()
                 },
                 seed: 0x1234 + u64::from(id.0),
             },
@@ -1982,75 +1975,6 @@ mod tests {
         DocumentRenderer::new(0).render(&document, 0, Purpose::Export, &mut exported);
         assert!(exported.data_as_u8_slice() == without_upper.data_as_u8_slice());
         assert!(max_difference(&exported, &render(&document, 0, 0)) > 0);
-    }
-
-    #[test]
-    fn what_this_build_cannot_draw_is_named() {
-        let mut document = document();
-        assert_eq!(check(&document), Ok(()));
-        paint_layer(&mut document).ops = vec![Op::Crop {
-            offset: [0, 0],
-            size: [96, 48],
-        }];
-        assert_eq!(check(&document), Ok(()));
-        let mask = ugu_core::ops::MaskId(0);
-        let fill = Op::Fill {
-            coverage: mask,
-            color: Rgba8([0, 0, 0, 255]),
-            antialias: false,
-            clip: Some(mask),
-        };
-        let image = Op::PlaceImage {
-            asset: ugu_core::ops::AssetId([0; 32]),
-            transform: ugu_core::ops::Affine::IDENTITY,
-            sampling: ugu_core::ops::Sampling::Smooth,
-        };
-        let moved = Op::TransformSelection {
-            mask,
-            transform: ugu_core::ops::Affine::IDENTITY,
-            sampling: ugu_core::ops::Sampling::Nearest,
-            keep_source: false,
-        };
-        paint_layer(&mut document).ops = vec![
-            fill.clone(),
-            Op::ClearSelection { mask },
-            image,
-            moved.clone(),
-        ];
-        assert_eq!(check(&document), Ok(()));
-        let resized = Op::Isolated(Box::new(Section {
-            ops: vec![
-                moved,
-                Op::Resample {
-                    size: [48, 24],
-                    sampling: ugu_core::ops::Sampling::Smooth,
-                },
-            ],
-            opacity: 1.0,
-            wobble: None,
-        }));
-        document.layers = vec![tree_group(
-            10,
-            Blend::Overlay,
-            vec![tree_layer(1, vec![fill, resized], |paint| {
-                paint.clip_to_below = true
-            })],
-        )];
-        assert_eq!(check(&document), Ok(()));
-        let spray = line(&mut document, 0.0, 10.0, 5.0, RED, true);
-        document.store.strokes.get_mut(&spray).unwrap().brush.engine = BrushEngine::Spray;
-        document.layers = vec![tree_group(
-            10,
-            Blend::Overlay,
-            vec![tree_layer(1, painting(spray), |_| {})],
-        )];
-        assert_eq!(check(&document), Err(Unsupported::Brush));
-        document.layers = vec![tree_group(
-            10,
-            Blend::Overlay,
-            vec![tree_layer(1, vec![], |_| {})],
-        )];
-        assert_eq!(check(&document), Ok(()));
     }
 
     fn tree_layer(id: u32, ops: Vec<Op>, update: impl FnOnce(&mut PaintLayer)) -> Layer {
@@ -2956,6 +2880,162 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A stroke of `brush` from `points` (x, y, pressure).
+    fn brushed(
+        document: &mut Document,
+        brush: Brush,
+        width: f32,
+        color: [u8; 4],
+        points: &[(f32, f32, f32)],
+    ) -> StrokeId {
+        let id = StrokeId(document.store.strokes.len() as u32);
+        let points: Vec<Point> = points
+            .iter()
+            .map(|&(x, y, pressure)| Point { x, y, pressure })
+            .collect();
+        document.store.strokes.insert(
+            id,
+            Stroke {
+                points: Arc::from(points),
+                color: Rgba8(color),
+                width,
+                brush,
+                seed: 0x1234_5678_9abc_def0,
+            },
+        );
+        id
+    }
+
+    fn painted(pixmap: &Pixmap) -> bool {
+        pixmap.data_as_u8_slice().iter().any(|value| *value > 0)
+    }
+
+    #[test]
+    fn every_built_in_brush_and_eraser_draws_alike_everywhere() {
+        use ugu_core::brush::{BRUSHES, ERASERS};
+        for (preset, erase) in BRUSHES
+            .iter()
+            .map(|preset| (preset, false))
+            .chain(ERASERS.iter().map(|preset| (preset, true)))
+        {
+            let mut document = Document::new([128, 96]);
+            document.background = Rgba8([0, 0, 0, 0]);
+            document.wobble = Wobble::classic(1.6);
+            let under = line(&mut document, 8.0, 120.0, 48.0, RED, true);
+            let width = preset.size.min(64.0);
+            let stroke = brushed(
+                &mut document,
+                preset.brush,
+                width,
+                [20, 40, 80, 255],
+                &[(24.0, 48.0, 0.45), (64.0, 40.0, 0.8), (104.0, 48.0, 1.0)],
+            );
+            let op = if erase {
+                Op::Erase { stroke, clip: None }
+            } else {
+                Op::Paint { stroke, clip: None }
+            };
+            let document = with_ops(&document, vec![paint(under), op]);
+            let below = render(&with_ops(&document, vec![paint(under)]), 3, 0);
+            for frame in [0, 3] {
+                let single = render(&document, frame, 0);
+                assert!(
+                    render(&document, frame, 0).data_as_u8_slice() == single.data_as_u8_slice()
+                );
+                assert!(
+                    render(&document, frame, 8).data_as_u8_slice() == single.data_as_u8_slice(),
+                    "{}",
+                    preset.id
+                );
+                for edge in [16, 4096] {
+                    let most = max_difference(&render_tiled(&document, frame, edge, 8), &single);
+                    assert!(most <= 1, "{} tiles of {edge} differ by {most}", preset.id);
+                }
+            }
+            let drawn = render(&document, 3, 0);
+            assert!(painted(&drawn), "{}", preset.id);
+            assert!(
+                max_difference(&drawn, &below) > 0,
+                "{} changes nothing",
+                preset.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_soft_airbrush_fades_from_the_middle() {
+        let mut document = Document::new([80, 80]);
+        document.background = Rgba8([0, 0, 0, 0]);
+        document.wobble = Wobble::classic(0.0);
+        let brush = ugu_core::brush::find("soft-airbrush").unwrap().brush;
+        let dab = brushed(
+            &mut document,
+            brush,
+            48.0,
+            [0, 0, 0, 255],
+            &[(40.0, 40.0, 1.0)],
+        );
+        let result = render(&with_ops(&document, vec![paint(dab)]), 0, 0);
+        let [center, middle, edge] = [40, 52, 64].map(|x| at(&result, x, 40)[3]);
+        assert!(center > middle && middle > edge, "{center} {middle} {edge}");
+        assert!(center > 0 && center < 255);
+    }
+
+    #[test]
+    fn without_wobble_only_an_animated_spray_moves() {
+        let frames = |id: &str, wobble_scale: f32| {
+            let mut document = Document::new([96, 72]);
+            document.wobble = Wobble::classic(0.0);
+            let mut brush = ugu_core::brush::find(id).unwrap().brush;
+            brush.wobble_scale = wobble_scale;
+            let spray = brushed(
+                &mut document,
+                brush,
+                44.0,
+                [0, 0, 0, 255],
+                &[(18.0, 36.0, 1.0), (78.0, 36.0, 1.0)],
+            );
+            let document = with_ops(&document, vec![paint(spray)]);
+            [render(&document, 0, 0), render(&document, 1, 0)]
+        };
+        let [a, b] = frames("pixel-spray", 1.0);
+        assert!(a.data_as_u8_slice() == b.data_as_u8_slice());
+        let [a, b] = frames("wobble-spray", 1.0);
+        assert!(a.data_as_u8_slice() != b.data_as_u8_slice());
+        let [a, b] = frames("wobble-spray", 0.0);
+        assert!(a.data_as_u8_slice() == b.data_as_u8_slice());
+    }
+
+    #[test]
+    fn a_marker_has_square_ends() {
+        let mut document = Document::new([96, 48]);
+        document.background = Rgba8([0, 0, 0, 0]);
+        document.wobble = Wobble::classic(0.0);
+        let end = |document: &mut Document, tip| {
+            let brush = Brush {
+                tip,
+                size_dynamics: 0.0,
+                ..Brush::default()
+            };
+            let stroke = brushed(
+                document,
+                brush,
+                20.0,
+                [0, 0, 0, 255],
+                &[(20.0, 24.0, 1.0), (60.0, 24.0, 1.0)],
+            );
+            render(&with_ops(document, vec![paint(stroke)]), 0, 0)
+        };
+        let square = end(&mut document, ugu_core::store::TipShape::Square);
+        let round = end(&mut document, ugu_core::store::TipShape::Round);
+        // Past the end, near the edge: inside a square end, outside a round one.
+        assert_eq!(at(&square, 68, 32)[3], 255);
+        assert_eq!(at(&round, 68, 32)[3], 0);
+        // Half a width past the end, nothing.
+        assert_eq!(at(&square, 71, 24)[3], 0);
+        assert_eq!(at(&square, 69, 24)[3], 255);
     }
 
     fn render_tiled(document: &Document, frame: i64, edge: u32, threads: u16) -> Pixmap {

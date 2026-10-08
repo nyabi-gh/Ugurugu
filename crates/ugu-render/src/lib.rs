@@ -5,6 +5,7 @@
 
 pub mod compose;
 pub mod composite;
+pub mod dab;
 pub mod document;
 pub mod gpu;
 pub mod image;

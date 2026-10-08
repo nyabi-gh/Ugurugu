@@ -10,10 +10,12 @@
 //! Most of each circle is inside the bands on either side, so only the part
 //! outside both is drawn, and the whole is traced as one outline.
 //! Every stroke takes this one shape, whether its pressure varies or not, so
-//! a small change in pressure never changes how a stroke is drawn.
+//! a small change in pressure never changes how a stroke is drawn. A square
+//! tip takes the same kind of union with square ends and mitred corners.
+//! Airbrush and spray strokes are dabs instead (`crate::dab`).
 
 use ugu_core::motion::classic;
-use ugu_core::store::{Brush, Point};
+use ugu_core::store::{Brush, BrushEngine, Point, TipShape};
 use vello_cpu::kurbo::{self, BezPath, Circle, Shape};
 
 /// Resampling never makes more samples than this; longer strokes are sampled
@@ -62,11 +64,16 @@ impl Resampler {
     /// Samples for all of `points`, with a spacing widened if needed so that
     /// there are at most `MAX_SAMPLES`.
     pub fn whole(points: &[Point], base_spacing: f64) -> Vec<Sample> {
+        Self::at_most(points, base_spacing, MAX_SAMPLES)
+    }
+
+    /// `whole` with at most `most` samples.
+    pub fn at_most(points: &[Point], base_spacing: f64, most: usize) -> Vec<Sample> {
         let length: f64 = points
             .windows(2)
             .map(|pair| distance(position(&pair[0]), position(&pair[1])))
             .sum();
-        let mut resampler = Self::new(base_spacing.max(length / (MAX_SAMPLES - 2) as f64));
+        let mut resampler = Self::new(base_spacing.max(length / (most - 2) as f64));
         for point in points {
             resampler.push(*point);
         }
@@ -139,6 +146,19 @@ fn lerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
 
+/// The alpha a pen or marker stroke is drawn with: its colour's, scaled by
+/// the brush opacity and, as 2.2.13 does for a stroke of one pressure, by
+/// the first point's pressure.
+pub fn line_alpha(stroke: &ugu_core::store::Stroke) -> u8 {
+    let [_, _, _, a] = stroke.color.0;
+    let pressure = stroke
+        .points
+        .first()
+        .map_or(1.0, |point| f64::from(point.pressure));
+    let fade = pressure_scale(stroke.brush.opacity_dynamics, pressure) as f32;
+    (f32::from(a) * (stroke.brush.opacity * fade).clamp(0.0, 1.0)).round() as u8
+}
+
 /// What decides a stroke's shape on a frame besides its samples.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pen {
@@ -149,19 +169,55 @@ pub struct Pen {
     pub wobble: f64,
 }
 
+/// 2.2.13's `pressureScale`.
+pub fn pressure_scale(dynamics: f32, pressure: f64) -> f64 {
+    let dynamics = f64::from(dynamics).clamp(0.0, 1.0);
+    1.0 - dynamics + pressure.clamp(0.0, 1.0) * dynamics
+}
+
 impl Pen {
-    fn pressure_scale(&self, pressure: f64) -> f64 {
-        let dynamics = f64::from(self.brush.size_dynamics);
-        1.0 - dynamics + pressure.clamp(0.0, 1.0) * dynamics
+    pub(crate) fn pressure_scale(&self, pressure: f64) -> f64 {
+        pressure_scale(self.brush.size_dynamics, pressure)
     }
 
     /// No part of the stroke reaches further than this from its raw points.
     pub fn reach(&self) -> f64 {
         let width = f64::from(self.width);
         // `classic::width` varies the width by at most 2.5%.
-        (width * 1.025).max(0.5) * 0.5 + classic::max_displacement(width, self.wobble)
+        let widest = (width * 1.025).max(0.5);
+        let brush = &self.brush;
+        let square = brush.tip == TipShape::Square;
+        let shape = match brush.engine {
+            BrushEngine::Spray => {
+                let particle = (widest
+                    * f64::from(brush.particle_size * (1.0 + brush.size_jitter * 0.75)))
+                .max(0.5);
+                let corner = if square {
+                    std::f64::consts::SQRT_2
+                } else {
+                    1.0
+                };
+                widest * f64::from(brush.scatter) * 0.5 + particle * 0.5 * corner
+            }
+            // A mitre reaches at most `MITRE_LIMIT` widths.
+            BrushEngine::Line if square => widest * MITRE_LIMIT,
+            _ if square => widest * std::f64::consts::FRAC_1_SQRT_2,
+            _ => widest * 0.5,
+        };
+        shape + classic::max_displacement(width, self.wobble)
+    }
+
+    /// Spacing of samples on `frame` for an airbrush or spray: a share of the
+    /// width drawn on that frame, as in 2.2.13.
+    pub fn dab_spacing(&self, frame: u32) -> f64 {
+        let base = classic::width(f64::from(self.width), self.seed, frame, self.wobble);
+        (base * f64::from(self.brush.spacing)).max(0.5)
     }
 }
+
+/// How far a mitred corner may reach from its sample, in widths, as Qt's
+/// default; a sharper turn is bevelled.
+const MITRE_LIMIT: f64 = 2.0;
 
 /// The pixels a stroke can touch on any frame: left, top, right, bottom.
 pub fn bounds(points: &[Point], pen: &Pen) -> [f64; 4] {
@@ -236,6 +292,11 @@ pub fn outline(samples: &[Sample], pen: &Pen, frame: u32) -> Option<BezPath> {
 pub fn outline_into(samples: &[Sample], pen: &Pen, frame: u32, path: &mut BezPath) {
     path.truncate(0);
     if samples.is_empty() {
+        return;
+    }
+    if pen.brush.tip == TipShape::Square {
+        let all = 0..samples.len();
+        square_pieces(samples, pen, frame, all, 0..samples.len() - 1, path);
         return;
     }
     let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
@@ -409,6 +470,11 @@ pub fn pieces(
     circles: std::ops::Range<usize>,
     bands: std::ops::Range<usize>,
 ) -> Pieces {
+    if pen.brush.tip == TipShape::Square {
+        let mut path = BezPath::new();
+        let bounds = square_pieces(samples, pen, frame, circles, bands, &mut path);
+        return Pieces { path, bounds };
+    }
     let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
     let radius = |sample: &Sample| radius(base, pen, sample);
     let first = circles.start.saturating_sub(1).min(bands.start);
@@ -466,6 +532,140 @@ pub fn pieces(
         }
     }
     Pieces { path, bounds }
+}
+
+/// A square tip's pieces into `path`, all wound alike so that a non-zero fill
+/// unites them: for each sample in `corners`, a square for a lone sample, a
+/// square end at either end, or the corner a turn leaves outside the two
+/// bands, mitred up to `MITRE_LIMIT` and bevelled beyond; for each sample in
+/// `bands`, the quadrilateral across the stroke to the next sample. Like
+/// `pieces`, a corner depends on the samples on either side. Returns the
+/// bounds.
+fn square_pieces(
+    samples: &[Sample],
+    pen: &Pen,
+    frame: u32,
+    corners: std::ops::Range<usize>,
+    bands: std::ops::Range<usize>,
+    path: &mut BezPath,
+) -> [f64; 4] {
+    let base = classic::width(f64::from(pen.width), pen.seed, frame, pen.wobble);
+    let first = corners.start.saturating_sub(1).min(bands.start);
+    let last = (corners.end + 1).max(bands.end + 1).min(samples.len());
+    let centers: Vec<[f64; 2]> = (first..last)
+        .map(|index| displaced_at(samples, index, pen, frame))
+        .collect();
+    let center = |index: usize| centers[index - first];
+    let half = |index: usize| radius(base, pen, &samples[index]);
+    let direction = |from: usize, to: usize| {
+        let ([ax, ay], [bx, by]) = (center(from), center(to));
+        let length = (bx - ax).hypot(by - ay);
+        (length > 1e-9).then(|| [(bx - ax) / length, (by - ay) / length])
+    };
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    let mut polygon = |corners: &[[f64; 2]]| {
+        let area: f64 = (0..corners.len())
+            .map(|index| {
+                let ([ax, ay], [bx, by]) = (corners[index], corners[(index + 1) % corners.len()]);
+                ax * by - bx * ay
+            })
+            .sum();
+        if area.abs() < 1e-12 {
+            return;
+        }
+        let mut ordered = corners.to_vec();
+        if area < 0.0 {
+            ordered.reverse();
+        }
+        for (index, &[x, y]) in ordered.iter().enumerate() {
+            bounds = [
+                bounds[0].min(x),
+                bounds[1].min(y),
+                bounds[2].max(x),
+                bounds[3].max(y),
+            ];
+            let point = kurbo::Point::new(x, y);
+            if index == 0 {
+                path.move_to(point);
+            } else {
+                path.line_to(point);
+            }
+        }
+        path.close_path();
+    };
+    let offset = |[x, y]: [f64; 2], [dx, dy]: [f64; 2], along: f64, across: f64| {
+        [x + dx * along - dy * across, y + dy * along + dx * across]
+    };
+    for index in corners {
+        let (c, r) = (center(index), half(index));
+        let before = index
+            .checked_sub(1)
+            .and_then(|previous| direction(previous, index));
+        let after = (index + 1 < samples.len())
+            .then(|| direction(index, index + 1))
+            .flatten();
+        match (before, after) {
+            (None, None) => polygon(&[
+                [c[0] - r, c[1] - r],
+                [c[0] + r, c[1] - r],
+                [c[0] + r, c[1] + r],
+                [c[0] - r, c[1] + r],
+            ]),
+            (None, Some(d)) => polygon(&[
+                offset(c, d, 0.0, r),
+                offset(c, d, -r, r),
+                offset(c, d, -r, -r),
+                offset(c, d, 0.0, -r),
+            ]),
+            (Some(d), None) => polygon(&[
+                offset(c, d, 0.0, r),
+                offset(c, d, r, r),
+                offset(c, d, r, -r),
+                offset(c, d, 0.0, -r),
+            ]),
+            (Some(d1), Some(d2)) => {
+                let cross = d1[0] * d2[1] - d1[1] * d2[0];
+                if cross.abs() < 1e-9 {
+                    continue;
+                }
+                // The outer side of the turn.
+                let side = -cross.signum();
+                let normals = [[-d1[1] * side, d1[0] * side], [-d2[1] * side, d2[0] * side]];
+                let [p1, p2] = normals.map(|[nx, ny]| [c[0] + nx * r, c[1] + ny * r]);
+                let dot = normals[0][0] * normals[1][0] + normals[0][1] * normals[1][1];
+                let reach = r * 2.0 / (1.0 + dot);
+                let length = reach * ((1.0 + dot) / 2.0).sqrt();
+                if 1.0 + dot > 1e-9 && length <= MITRE_LIMIT * r * 2.0 {
+                    let tip = [
+                        c[0] + (normals[0][0] + normals[1][0]) * r / (1.0 + dot),
+                        c[1] + (normals[0][1] + normals[1][1]) * r / (1.0 + dot),
+                    ];
+                    polygon(&[c, p1, tip, p2]);
+                } else {
+                    polygon(&[c, p1, p2]);
+                }
+            }
+        }
+    }
+    for index in bands {
+        let Some(d) = direction(index, index + 1) else {
+            continue;
+        };
+        let (a, b) = (center(index), center(index + 1));
+        let (ra, rb) = (half(index), half(index + 1));
+        polygon(&[
+            offset(a, d, 0.0, ra),
+            offset(b, d, 0.0, rb),
+            offset(b, d, 0.0, -rb),
+            offset(a, d, 0.0, -ra),
+        ]);
+    }
+    bounds
 }
 
 /// A half plane `normal · (p − center) ≥ offset` around a circle's center.
@@ -646,6 +846,7 @@ mod tests {
                 antialias: true,
                 size_dynamics,
                 wobble_scale: 1.0,
+                ..Brush::default()
             },
             seed: 0x5eed,
             wobble,
