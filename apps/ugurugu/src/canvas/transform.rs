@@ -168,9 +168,9 @@ impl Canvas {
                 scaled(bounds, handle, inverse.apply(point), shift).then(base)
             }
         };
-        if self.session.set_transform(transform) {
-            self.refresh_preview();
-        }
+        // Shown once per frame by `sync`, with the newest transform: input
+        // comes faster than a large selection can be drawn.
+        self.session.set_transform(transform);
     }
 
     /// Starts a transform of the selection (Ctrl+T).
@@ -294,9 +294,11 @@ impl Canvas {
         let started = std::time::Instant::now();
         let rect = split.show_move(&mut preview.moving, wanted.0, wanted.1, wanted.2);
         preview.shown = Some(wanted);
+        let layer = started.elapsed();
         self.recomposite(rect);
         tracing::debug!(
             ms = started.elapsed().as_secs_f64() * 1000.0,
+            layer_ms = layer.as_secs_f64() * 1000.0,
             "transform shown"
         );
     }

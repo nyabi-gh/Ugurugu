@@ -372,10 +372,11 @@ impl Canvas {
         self.thumbnails_asked = true;
     }
 
-    /// Asks for a new split when the shown one no longer matches, and for
-    /// thumbnails that are out of date. Playback shows whole frames instead
-    /// of a split.
+    /// Shows a pending transform as it is now, asks for a new split when the
+    /// shown one no longer matches, and for thumbnails that are out of date.
+    /// Playback shows whole frames instead of a split.
     pub fn sync(&mut self) {
+        self.refresh_preview();
         self.sync_thumbnails();
         if self.playback.is_some() {
             return;
@@ -1316,9 +1317,11 @@ mod tests {
         assert_eq!(canvas.grip_at([300.0, 10.0]), Some(Grip::Rotate));
         canvas.begin_transform_drag([120.0, 90.0]);
         canvas.drag_transform([150.5, 97.25]);
+        canvas.sync();
         canvas.interaction = Interaction::Idle;
         canvas.begin_transform_drag([300.0, 10.0]);
         canvas.drag_transform([310.0, 40.0]);
+        canvas.sync();
         canvas.interaction = Interaction::Idle;
         assert_ne!(
             canvas.display().data_as_u8_slice(),
@@ -1347,6 +1350,7 @@ mod tests {
         canvas.begin_transform();
         canvas.begin_transform_drag([150.0, 100.0]);
         canvas.drag_transform([100.0, 60.0]);
+        canvas.sync();
         canvas.interaction = Interaction::Idle;
         assert_ne!(
             canvas.display().data_as_u8_slice(),

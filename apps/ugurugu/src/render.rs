@@ -439,10 +439,20 @@ impl RenderThread {
                 let pan_held = space && !self.egui_ctx.text_edit_focused();
                 self.canvas.set_modifiers(modifiers.shift, modifiers.alt);
                 let canvas = &self.canvas;
+                let egui_ctx = &self.egui_ctx;
+                // Menus, popups and the selection bar float over the canvas
+                // and take presses there; the canvas itself is under egui's
+                // background layer.
+                let under_egui = |[x, y]: [f64; 2]| {
+                    let point = egui::pos2(x as f32, y as f32) / pixels_per_point;
+                    egui_ctx
+                        .layer_id_at(point)
+                        .is_some_and(|layer| layer.order != egui::Order::Background)
+                };
                 let routed =
                     self.router
                         .route(events, pixels_per_point, modifiers, pan_held, |position| {
-                            canvas.contains(position)
+                            canvas.contains(position) && !under_egui(position)
                         });
                 self.egui_state.egui_input_mut().events.extend(routed.egui);
                 for input in routed.canvas {
