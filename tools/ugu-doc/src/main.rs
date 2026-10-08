@@ -14,10 +14,9 @@
 //!   lists its layers top first.
 //! - `ugu-doc bench <file.ugurugu> [rounds]`: times reading and saving it.
 //! - `ugu-doc render <file.ugurugu> [threads [tile]]`: times drawing every frame, by
-//!   stage, and editing splits, with the peak working set. Other brushes are
-//!   drawn as pens, which keeps the amount of work close and says so.
+//!   stage, and editing splits, with the peak working set.
 //! - `ugu-doc pen-only <in.ugurugu> <out.ugurugu>`: makes brushes pens, keeping
-//!   everything else, so the app can open a fixture to measure with.
+//!   everything else, to tell what brushes cost from the rest.
 //! - `ugu-doc reframe <in.ugurugu> <out.ugurugu> <crop|resample|both>`: makes
 //!   brushes pens and puts in the middle of every layer a crop to 7/8 of the
 //!   canvas around its middle, a smooth resample to 3/4, or both one after
@@ -453,8 +452,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     };
     use ugu_render::plan::RenderPlan;
 
-    let mut document = open(path)?;
-    to_pens(&mut document);
+    let document = open(path)?;
     let shrink = std::env::var("UGU_SHRINK")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
@@ -593,8 +591,7 @@ fn layers(path: &Path, threads: usize) -> Result<(), String> {
         }
     }
 
-    let mut document = open(path)?;
-    to_pens(&mut document);
+    let document = open(path)?;
     let plan = RenderPlan::new(&document, Purpose::Display);
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
@@ -679,8 +676,7 @@ fn stop(path: &Path) -> Result<(), String> {
     use ugu_render::document::{DocumentRenderer, Purpose};
     use ugu_render::plan::RenderPlan;
 
-    let mut document = open(path)?;
-    to_pens(&mut document);
+    let document = open(path)?;
     let plan = RenderPlan::new(&document, Purpose::Display);
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
