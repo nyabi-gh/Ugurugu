@@ -11,15 +11,17 @@
 
 pub mod stabilizer;
 
+use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
 
+use ugu_core::brush::{self, Preset};
 use ugu_core::command;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::history::{History, LayerRevisions, StateId};
 use ugu_core::ops::{Rgba8, Sampling, Wobble};
-use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
+use ugu_core::store::{self, Brush, Point, Stroke};
 
 use crate::stabilizer::Stabilizer;
 
@@ -37,11 +39,13 @@ pub struct ToolSettings {
     /// Ignored by the eraser.
     pub color: Rgba8,
     pub width: f32,
-    pub opacity: f32,
-    pub size_dynamics: f32,
+    /// The brush tool's own setting, which its presets follow; an eraser
+    /// takes its preset's.
     pub antialias: bool,
     /// 0 (off) to 1.
     pub stabilizer: f32,
+    /// What the stroke is drawn with.
+    pub preset: &'static Preset,
 }
 
 impl ToolSettings {
@@ -49,19 +53,17 @@ impl ToolSettings {
     pub const PEN: Self = Self {
         color: Rgba8([0, 0, 0, 255]),
         width: 6.0,
-        opacity: 1.0,
-        size_dynamics: 0.8,
         antialias: false,
         stabilizer: 0.0,
+        preset: &brush::BRUSHES[0],
     };
     /// 2.2.13's hard eraser.
     pub const ERASER: Self = Self {
         color: Rgba8([0, 0, 0, 255]),
         width: 6.0,
-        opacity: 1.0,
-        size_dynamics: 0.8,
         antialias: true,
         stabilizer: 0.0,
+        preset: &brush::ERASERS[0],
     };
 }
 
@@ -130,6 +132,8 @@ pub struct Session {
     pub tool: Tool,
     pub pen: ToolSettings,
     pub eraser: ToolSettings,
+    /// The width and stabilizer each preset had when another was chosen.
+    remembered: HashMap<&'static str, (f32, f32)>,
     live: Option<LiveStroke>,
     seeds: RandomState,
     strokes_started: u64,
@@ -147,6 +151,7 @@ impl Session {
             tool: Tool::Pen,
             pen: ToolSettings::PEN,
             eraser: ToolSettings::ERASER,
+            remembered: HashMap::new(),
             live: None,
             seeds: RandomState::new(),
             strokes_started: 0,
@@ -155,6 +160,32 @@ impl Session {
 
     pub fn document(&self) -> &Document {
         self.history.document()
+    }
+
+    /// Makes `preset` the brush, or with `Tool::Eraser` the eraser. Each
+    /// preset keeps its own width and stabilizer, starting from its size and
+    /// none, as in 2.2.13.
+    pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
+        let settings = match tool {
+            Tool::Pen => &mut self.pen,
+            Tool::Eraser => &mut self.eraser,
+        };
+        if settings.preset.id == preset.id {
+            return;
+        }
+        self.remembered
+            .insert(settings.preset.id, (settings.width, settings.stabilizer));
+        let (width, stabilizer) = self
+            .remembered
+            .get(preset.id)
+            .copied()
+            .unwrap_or((preset.size, 0.0));
+        settings.preset = preset;
+        settings.width = width;
+        settings.stabilizer = stabilizer;
+        if tool == Tool::Eraser {
+            settings.antialias = preset.brush.antialias;
+        }
     }
 
     /// Goes up on every change, undo and redo included.
@@ -243,13 +274,8 @@ impl Session {
                 *store::limits::STROKE_WIDTH.end(),
             ),
             brush: Brush {
-                engine: BrushEngine::Line,
-                opacity: settings.opacity,
-                hardness: 1.0,
                 antialias: settings.antialias,
-                size_dynamics: settings.size_dynamics,
-                wobble_scale: 1.0,
-                ..Brush::default()
+                ..settings.preset.brush
             },
             seed: self.seeds.hash_one(self.strokes_started),
         };

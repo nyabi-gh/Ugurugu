@@ -3,6 +3,7 @@
 
 use super::*;
 use ugu_core::ops::Op;
+use ugu_core::store::BrushEngine;
 
 fn at(x: f64, y: f64, time: f64) -> InputPoint {
     InputPoint {
@@ -173,6 +174,45 @@ fn the_eraser_commits_an_erase_operation() {
     let layer = session.current_layer();
     assert!(matches!(ops(&session, layer)[1], Op::Erase { .. }));
     assert_eq!(session.undo_label(), Some("Erase"));
+}
+
+#[test]
+fn each_preset_keeps_its_width_and_stabilizer_and_draws_with_its_brush() {
+    let find = |id| ugu_core::brush::find(id).unwrap();
+    let mut session = session();
+    session.pen.width = 11.0;
+    session.pen.antialias = true;
+    session.choose_preset(Tool::Pen, find("soft-airbrush"));
+    assert_eq!(session.pen.width, find("soft-airbrush").size);
+    session.pen.stabilizer = 0.4;
+    draw(&mut session, 10.0, 60.0);
+    let brush = |session: &Session| {
+        let layer = session.current_layer();
+        let Some(&Op::Paint { stroke, .. } | &Op::Erase { stroke, .. }) =
+            ops(session, layer).last()
+        else {
+            unreachable!("a stroke was drawn");
+        };
+        session.document().store.strokes[&stroke].brush
+    };
+    // The brush tool's antialiasing goes with every brush preset.
+    let airbrush = Brush {
+        antialias: true,
+        ..find("soft-airbrush").brush
+    };
+    assert_eq!(brush(&session), airbrush);
+    session.choose_preset(Tool::Pen, find("ink-pen"));
+    assert_eq!((session.pen.width, session.pen.stabilizer), (11.0, 0.0));
+    session.choose_preset(Tool::Pen, find("soft-airbrush"));
+    assert_eq!(
+        (session.pen.width, session.pen.stabilizer),
+        (find("soft-airbrush").size, 0.4)
+    );
+    // An eraser takes its preset's.
+    session.tool = Tool::Eraser;
+    session.choose_preset(Tool::Eraser, find("kneaded-eraser"));
+    draw(&mut session, 20.0, 30.0);
+    assert_eq!(brush(&session), find("kneaded-eraser").brush);
 }
 
 #[test]

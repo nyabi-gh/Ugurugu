@@ -6,6 +6,7 @@
 //! layers on the right, the animation bar under the canvas and the status
 //! bar at the bottom. Only what 3.0 can already do is shown.
 
+mod brushes;
 mod color;
 mod layers;
 
@@ -29,6 +30,7 @@ use crate::widgets;
 pub struct Panels {
     pub layers: layers::LayerDock,
     color: color::ColorDock,
+    presets: brushes::Presets,
     pub shown: Shown,
     /// Frames and frames per second being edited.
     animation: Option<(f32, f32)>,
@@ -364,6 +366,9 @@ fn slider_row(
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     dock_header(ui, tr("tool-settings"), &mut panels.shown.tool_settings);
     let tool = canvas.session().tool;
+    ui.add_space(4.0);
+    panels.presets.show(ui, canvas, tool);
+    // Read after the presets: choosing one sets its width and stabilizer.
     let mut settings = match tool {
         Tool::Pen => canvas.session().pen,
         Tool::Eraser => canvas.session().eraser,
