@@ -1091,4 +1091,88 @@ mod tests {
             assert!(most <= 2, "{layer:?} after a stroke: differs by {most}");
         }
     }
+
+    #[test]
+    fn a_pending_transform_shown_on_any_layer_is_within_a_level_of_a_full_render() {
+        use ugu_core::ops::{Affine as Transform, Sampling};
+        let centre = [65.0, 45.0];
+        let transforms = [
+            (Transform::translation(7.5, -3.25), Sampling::Smooth),
+            (Transform::translation(-12.0, 5.0), Sampling::Smooth),
+            (Transform::rotation_about(0.52, centre), Sampling::Smooth),
+            (
+                Transform::scaling_about([0.3, 0.4], centre),
+                Sampling::Smooth,
+            ),
+            (
+                Transform::scaling_about([-1.7, 1.3], centre),
+                Sampling::Nearest,
+            ),
+            (Transform::rotation_about(-0.3, centre), Sampling::Nearest),
+        ];
+        let mask = ugu_core::ops::MaskId(0);
+        for history in histories() {
+            if history.document().canvas != [120, 80] {
+                continue;
+            }
+            for layer in paint_layers(&history) {
+                for keep_source in [false, true] {
+                    let (mut split, _) = split(&history, layer, 4);
+                    let document = history.document();
+                    let selection = document.store.masks.get(&mask).unwrap();
+                    let mut moving = split.begin_move(selection, 2).unwrap();
+                    // One after another, as a drag shows them.
+                    for (transform, sampling) in transforms {
+                        split.show_move(&mut moving, transform, sampling, keep_source);
+                        let mut moved = History::new(document.clone(), false);
+                        moved
+                            .edit("Transform", |document| {
+                                command::transform_selection(
+                                    document,
+                                    layer,
+                                    mask,
+                                    transform,
+                                    sampling,
+                                    keep_source,
+                                )
+                            })
+                            .unwrap();
+                        let mut renderer = DocumentRenderer::new(0);
+                        let mut full = canvas(moved.document());
+                        let plan = RenderPlan::new(moved.document(), Purpose::Display);
+                        renderer.render_plan(moved.document(), &plan, 4, None, &mut full);
+                        let Held::Tiles(shown_layer) = &split.sources[split.edited.unwrap()] else {
+                            unreachable!("a paint layer's pixels are tiles");
+                        };
+                        let drawn = renderer.surface(layer).unwrap().to_pixmap();
+                        let most = max_difference(&shown_layer.to_pixmap(), &drawn);
+                        assert!(
+                            most <= 1,
+                            "{layer:?} {transform:?} keep {keep_source}: differs by {most}"
+                        );
+                        let mut shown = canvas(document);
+                        composite(&split, None, whole(document), &mut shown);
+                        let most = max_difference(&shown, &full);
+                        assert!(
+                            most <= 2,
+                            "{layer:?} {transform:?}: shown differs by {most}"
+                        );
+                    }
+                    split.show_move(
+                        &mut moving,
+                        Transform::IDENTITY,
+                        Sampling::Smooth,
+                        keep_source,
+                    );
+                    let mut shown = canvas(document);
+                    composite(&split, None, whole(document), &mut shown);
+                    assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
+                    split.show_move(&mut moving, transforms[2].0, Sampling::Smooth, keep_source);
+                    split.end_move(moving, false);
+                    composite(&split, None, whole(document), &mut shown);
+                    assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
+                }
+            }
+        }
+    }
 }

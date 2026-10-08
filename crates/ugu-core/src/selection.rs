@@ -460,93 +460,9 @@ impl Selection {
             && Self::all(self.canvas).is_some_and(|all| all.mask == self.mask)
     }
 
-    /// The edges between selected and other pixels as closed loops of pixel
-    /// corners, the selection on the right of each step; straight runs are
-    /// one step. Pixels touching only at a corner are kept apart.
+    /// The edges between selected and other pixels; see `Mask::outline`.
     pub fn outline(&self) -> Vec<Vec<[i32; 2]>> {
-        let [left, top, width, height] = self.mask.bounds;
-        let [width, height] = [width as usize, height as usize];
-        let row_bytes = Mask::row_bytes(width as i32);
-        let bits = &self.mask.bits;
-        let set = |x: usize, y: usize| {
-            // Corners sit between pixels, so neighbours go one past either
-            // side; those wrap to large values and read as unset.
-            x < width && y < height && bits[y * row_bytes + x / 8] & (0x80 >> (x % 8)) != 0
-        };
-        // Whether each edge along a row (the top edges of rows 0..=height)
-        // was traced; loops are started only from those.
-        let mut traced = vec![false; (height + 1) * width];
-        let empty = vec![0u8; row_bytes];
-        let row = |y: usize| {
-            if y < height {
-                &bits[y * row_bytes..(y + 1) * row_bytes]
-            } else {
-                &empty[..]
-            }
-        };
-        let mut loops = Vec::new();
-        // Every loop has an edge along a row, found a byte at a time.
-        for y in 0..=height {
-            let (above, below) = (row(y.wrapping_sub(1)), row(y));
-            for (byte, (&a, &b)) in above.iter().zip(below).enumerate() {
-                let mut changed = a ^ b;
-                while changed != 0 {
-                    let bit = changed.leading_zeros() as usize;
-                    changed &= !(0x80 >> bit);
-                    let x = byte * 8 + bit;
-                    if x >= width || traced[y * width + x] {
-                        continue;
-                    }
-                    let (start, direction) = if b & (0x80 >> bit) != 0 {
-                        ([x, y], RIGHT)
-                    } else {
-                        ([x + 1, y], LEFT)
-                    };
-                    let mut corners = Vec::new();
-                    let (mut at, mut going) = (start, direction);
-                    loop {
-                        match going {
-                            RIGHT => traced[at[1] * width + at[0]] = true,
-                            LEFT => traced[at[1] * width + at[0] - 1] = true,
-                            _ => {}
-                        }
-                        at = [
-                            (at[0] as isize + STEP[going][0]) as usize,
-                            (at[1] as isize + STEP[going][1]) as usize,
-                        ];
-                        let [x, y] = at;
-                        let [top_left, top_right, bottom_left, bottom_right] = [
-                            set(x.wrapping_sub(1), y.wrapping_sub(1)),
-                            set(x, y.wrapping_sub(1)),
-                            set(x.wrapping_sub(1), y),
-                            set(x, y),
-                        ];
-                        let leaves = [
-                            bottom_right && !top_right,
-                            bottom_left && !bottom_right,
-                            top_left && !bottom_left,
-                            top_right && !top_left,
-                        ];
-                        // A right turn first keeps pixels that meet at a
-                        // corner in loops of their own.
-                        let turned = [1, 0, 3]
-                            .map(|turn| (going + turn) % 4)
-                            .into_iter()
-                            .find(|&next| leaves[next])
-                            .expect("an edge leaves every corner reached");
-                        if turned != going {
-                            corners.push([left + x as i32, top + y as i32]);
-                        }
-                        going = turned;
-                        if at == start && going == direction {
-                            break;
-                        }
-                    }
-                    loops.push(corners);
-                }
-            }
-        }
-        loops
+        self.mask.outline()
     }
 }
 
@@ -574,12 +490,6 @@ fn across(quad: &[[f64; 2]; 4], y: f64) -> Option<[f64; 2]> {
     let high = quad.iter().map(|corner| corner[1]).fold(f64::MIN, f64::max);
     reach.filter(|[from, to]| to > from && low < bottom && high > top)
 }
-
-/// Directions along pixel edges, clockwise on screen (y down), and the step
-/// each takes.
-const RIGHT: usize = 0;
-const LEFT: usize = 2;
-const STEP: [[isize; 2]; 4] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 
 #[cfg(test)]
 mod tests {

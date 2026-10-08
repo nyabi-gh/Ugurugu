@@ -1324,7 +1324,7 @@ fn layer_steps<'a>(document: &'a Document, paint: &PaintLayer, masks: &DrawCache
 }
 
 /// `transform` of the document as Vello's.
-fn affine(transform: ops::Affine) -> Affine {
+pub(crate) fn affine(transform: ops::Affine) -> Affine {
     let [a, b, c, d, e, f] = transform.0;
     Affine::new([a, d, b, e, c, f])
 }
@@ -1332,7 +1332,7 @@ fn affine(transform: ops::Affine) -> Affine {
 /// How a moved selection or placed image is sampled. Like 2.2.13, smooth
 /// sampling is dropped where every pixel lands on a whole pixel: turns by a
 /// quarter, flips and whole-pixel moves.
-fn quality(sampling: Sampling, transform: ops::Affine) -> ImageQuality {
+pub(crate) fn quality(sampling: Sampling, transform: ops::Affine) -> ImageQuality {
     let [a, b, c, d, e, f] = transform.0;
     let unit = |value: f64| value.abs() == 1.0;
     let square = (unit(a) && b == 0.0 && d == 0.0 && unit(e))
@@ -1345,7 +1345,7 @@ fn quality(sampling: Sampling, transform: ops::Affine) -> ImageQuality {
 }
 
 /// The bounds of `bounds` (left, top, right, bottom) moved by `transform`.
-fn moved_bounds(bounds: [f64; 4], transform: Affine) -> [f64; 4] {
+pub(crate) fn moved_bounds(bounds: [f64; 4], transform: Affine) -> [f64; 4] {
     let [left, top, right, bottom] = bounds;
     let corners = [(left, top), (right, top), (left, bottom), (right, bottom)]
         .map(|(x, y)| transform * Point::new(x, y));

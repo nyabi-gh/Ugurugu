@@ -12,6 +12,7 @@ pub mod gpu;
 pub mod image;
 pub mod live;
 pub mod mask;
+pub mod moving;
 pub mod plan;
 pub mod present;
 pub mod raster;

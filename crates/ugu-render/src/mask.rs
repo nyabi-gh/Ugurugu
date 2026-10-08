@@ -27,8 +27,16 @@ impl Runs {
                 let bits = &mask.bits[row * row_bytes..(row + 1) * row_bytes];
                 let mut runs = Vec::new();
                 let mut start = None;
-                for column in 0..width {
-                    let set = bits[column as usize / 8] & (0x80 >> (column % 8)) != 0;
+                let mut column = 0;
+                while column < width {
+                    let byte = bits[column as usize / 8];
+                    // Whole bytes like the run so far are passed over at once.
+                    let same = if start.is_some() { 0xFF } else { 0x00 };
+                    if column % 8 == 0 && byte == same && column + 8 <= width {
+                        column += 8;
+                        continue;
+                    }
+                    let set = byte & (0x80 >> (column % 8)) != 0;
                     match (set, start) {
                         (true, None) => start = Some(column),
                         (false, Some(from)) => {
@@ -37,6 +45,7 @@ impl Runs {
                         }
                         _ => {}
                     }
+                    column += 1;
                 }
                 if let Some(from) = start {
                     runs.push([left + from, left + width]);
@@ -126,23 +135,54 @@ impl Runs {
         bounds
     }
 
-    /// The squares of the pixels, one rectangle per run, all wound the same
-    /// way and apart, for the non-zero rule.
+    /// The outline of the pixels' squares, every loop with the pixels on its
+    /// right, for the non-zero rule. Edges are only where pixels meet
+    /// others, so a transformed path crosses as few tiles as its shape needs.
     pub fn path(&self) -> BezPath {
         let mut path = BezPath::new();
-        for (index, runs) in self.rows.iter().enumerate() {
-            let y = f64::from(self.top + index as i32);
-            for &[left, right] in runs {
-                let (left, right) = (f64::from(left), f64::from(right));
-                path.move_to((left, y));
-                path.line_to((right, y));
-                path.line_to((right, y + 1.0));
-                path.line_to((left, y + 1.0));
-                path.close_path();
+        let Some([left, top, right, bottom]) = self.bounds() else {
+            return path;
+        };
+        let width = right - left;
+        let row_bytes = Mask::row_bytes(width);
+        let mut bits = vec![0u8; row_bytes * (bottom - top) as usize];
+        for y in top..bottom {
+            let row = &mut bits[(y - top) as usize * row_bytes..][..row_bytes];
+            for &[from, to] in self.row(y) {
+                set_bits(row, (from - left) as usize, (to - left) as usize);
             }
+        }
+        let mask = Mask {
+            bounds: [left, top, width, bottom - top],
+            bits: bits.into(),
+        };
+        for corners in mask.outline() {
+            let mut corners = corners.iter().map(|&[x, y]| (f64::from(x), f64::from(y)));
+            let Some(first) = corners.next() else {
+                continue;
+            };
+            path.move_to(first);
+            for corner in corners {
+                path.line_to(corner);
+            }
+            path.close_path();
         }
         path
     }
+}
+
+/// Sets bits `from..to` of `row`, the highest bit of a byte first.
+fn set_bits(row: &mut [u8], from: usize, to: usize) {
+    let (first, last) = (from / 8, (to - 1) / 8);
+    let head = 0xFFu8 >> (from % 8);
+    let tail = 0xFFu8 << (7 - (to - 1) % 8);
+    if first == last {
+        row[first] |= head & tail;
+        return;
+    }
+    row[first] |= head;
+    row[first + 1..last].fill(0xFF);
+    row[last] |= tail;
 }
 
 fn intersect(a: &[[i32; 2]], b: &[[i32; 2]]) -> Vec<[i32; 2]> {
