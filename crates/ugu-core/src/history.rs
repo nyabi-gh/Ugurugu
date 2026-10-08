@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Undo, redo and grouped edits over one document.
+//! Undo, redo and grouped edits over one document, and the selection.
 //!
 //! An undo entry holds the changes that undo it; large data in them is shared,
 //! so a long history copies nothing big. Each document state has an id, so
 //! returning to the saved state by undo or redo is clean, not dirty.
+//!
+//! The selection is not part of the document, but each change to it is an
+//! undo step of its own, as in 2.2.13; such a step leaves the document state
+//! as it is, so it never makes the document dirty.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::document::{Document, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError, Outcome, commit};
+use crate::selection::Selection;
 
 /// Identifies a document state; equal ids mean equal content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -131,12 +137,16 @@ struct Entry {
     label: String,
     /// Applied to go back to `before` (undo) or forward to `after` (redo).
     changes: Vec<Change>,
+    /// The selection to restore with them; `None` when the step leaves the
+    /// selection alone.
+    selection: Option<Option<Arc<Selection>>>,
     before: StateId,
     after: StateId,
 }
 
 pub struct History {
     document: Document,
+    selection: Option<Arc<Selection>>,
     undo: Vec<Entry>,
     redo: Vec<Entry>,
     state: StateId,
@@ -153,6 +163,7 @@ impl History {
         let state = StateId(0);
         Self {
             document,
+            selection: None,
             undo: Vec::new(),
             redo: Vec::new(),
             state,
@@ -169,6 +180,28 @@ impl History {
 
     pub fn document(&self) -> &Document {
         &self.document
+    }
+
+    pub fn selection(&self) -> Option<&Arc<Selection>> {
+        self.selection.as_ref()
+    }
+
+    /// Makes `selection` the selection as one undo step; returns `false`,
+    /// recording nothing, when it is the selection already.
+    pub fn select(&mut self, label: &str, selection: Option<Selection>) -> bool {
+        if self.selection.as_deref() == selection.as_ref() {
+            return false;
+        }
+        let previous = std::mem::replace(&mut self.selection, selection.map(Arc::new));
+        self.redo.clear();
+        self.undo.push(Entry {
+            label: label.to_owned(),
+            changes: Vec::new(),
+            selection: Some(previous),
+            before: self.state,
+            after: self.state,
+        });
+        true
     }
 
     pub fn state(&self) -> StateId {
@@ -218,27 +251,31 @@ impl History {
     ) -> Result<Outcome, EditError> {
         let mut group = Group {
             document: &mut self.document,
+            selection: &mut self.selection,
+            previous: None,
             undo: Vec::new(),
         };
         if let Err(error) = steps(&mut group) {
             group.roll_back();
             return Err(error);
         }
-        let mut undo = group.undo;
-        if undo.is_empty() {
+        let Group { undo, previous, .. } = group;
+        if undo.is_empty() && previous.is_none() {
             return Ok(Outcome::NoChange);
         }
-        undo.reverse();
-        let changes: Vec<Change> = undo.into_iter().flatten().collect();
-        self.layers.note(&self.document, &changes);
+        let changes: Vec<Change> = undo.into_iter().rev().flatten().collect();
         let before = self.state;
-        self.state = StateId(self.next_state);
-        self.next_state += 1;
-        self.revision += 1;
+        if !changes.is_empty() {
+            self.layers.note(&self.document, &changes);
+            self.state = StateId(self.next_state);
+            self.next_state += 1;
+            self.revision += 1;
+        }
         self.redo.clear();
         self.undo.push(Entry {
             label: label.to_owned(),
             changes: changes.clone(),
+            selection: previous,
             before,
             after: self.state,
         });
@@ -247,78 +284,56 @@ impl History {
 
     /// Returns `false` when there is nothing to undo.
     pub fn undo(&mut self) -> Result<bool, EditError> {
-        let Some(entry) = self.undo.pop() else {
+        let Some(mut entry) = self.undo.pop() else {
             return Ok(false);
         };
-        match self.reapply(entry, true) {
-            Ok(redo) => {
-                self.redo.push(redo);
-                Ok(true)
-            }
-            Err((entry, error)) => {
-                self.undo.push(entry);
-                Err(error)
-            }
+        let applied = self.reapply(&mut entry, true);
+        match applied {
+            Ok(()) => self.redo.push(entry),
+            Err(_) => self.undo.push(entry),
         }
+        applied.map(|()| true)
     }
 
     /// Returns `false` when there is nothing to redo.
     pub fn redo(&mut self) -> Result<bool, EditError> {
-        let Some(entry) = self.redo.pop() else {
+        let Some(mut entry) = self.redo.pop() else {
             return Ok(false);
         };
-        match self.reapply(entry, false) {
-            Ok(undo) => {
-                self.undo.push(undo);
-                Ok(true)
-            }
-            Err((entry, error)) => {
-                self.redo.push(entry);
-                Err(error)
-            }
+        let applied = self.reapply(&mut entry, false);
+        match applied {
+            Ok(()) => self.undo.push(entry),
+            Err(_) => self.redo.push(entry),
         }
+        applied.map(|()| true)
     }
 
-    /// Applies an entry's changes and returns the entry that reverses it.
-    fn reapply(&mut self, entry: Entry, backwards: bool) -> Result<Entry, (Entry, EditError)> {
-        let Entry {
-            label,
-            changes,
-            before,
-            after,
-        } = entry;
-        match commit(&mut self.document, changes.clone()) {
-            Ok(outcome) => {
-                let reverse = match outcome {
-                    Outcome::Committed(reverse) => reverse,
-                    Outcome::NoChange => Vec::new(),
-                };
-                self.layers.note(&self.document, &reverse);
-                self.state = if backwards { before } else { after };
-                self.revision += 1;
-                Ok(Entry {
-                    label,
-                    changes: reverse,
-                    before,
-                    after,
-                })
-            }
-            Err(error) => Err((
-                Entry {
-                    label,
-                    changes,
-                    before,
-                    after,
-                },
-                error,
-            )),
+    /// Applies an entry's changes and turns it into the entry that reverses
+    /// them; on failure the entry is left as it was.
+    fn reapply(&mut self, entry: &mut Entry, backwards: bool) -> Result<(), EditError> {
+        let reverse = match commit(&mut self.document, entry.changes.clone())? {
+            Outcome::Committed(reverse) => reverse,
+            Outcome::NoChange => Vec::new(),
+        };
+        if !reverse.is_empty() {
+            self.layers.note(&self.document, &reverse);
+            self.revision += 1;
         }
+        self.state = if backwards { entry.before } else { entry.after };
+        entry.changes = reverse;
+        if let Some(selection) = entry.selection.as_mut() {
+            std::mem::swap(selection, &mut self.selection);
+        }
+        Ok(())
     }
 }
 
 /// Edits being grouped into one undo step.
 pub struct Group<'a> {
     document: &'a mut Document,
+    selection: &'a mut Option<Arc<Selection>>,
+    /// The selection before the group changed it.
+    previous: Option<Option<Arc<Selection>>>,
     /// Undo changes of each applied step, in order applied.
     undo: Vec<Vec<Change>>,
 }
@@ -326,6 +341,19 @@ pub struct Group<'a> {
 impl Group<'_> {
     pub fn document(&self) -> &Document {
         self.document
+    }
+
+    pub fn selection(&self) -> Option<&Arc<Selection>> {
+        self.selection.as_ref()
+    }
+
+    /// Changes the selection with the edits, in the same undo step.
+    pub fn select(&mut self, selection: Option<Selection>) {
+        if self.selection.as_deref() == selection.as_ref() {
+            return;
+        }
+        let previous = std::mem::replace(self.selection, selection.map(Arc::new));
+        self.previous.get_or_insert(previous);
     }
 
     pub fn apply(&mut self, build: impl FnOnce(&Document) -> Vec<Change>) -> Result<(), EditError> {
@@ -337,6 +365,9 @@ impl Group<'_> {
     }
 
     fn roll_back(self) {
+        if let Some(previous) = self.previous {
+            *self.selection = previous;
+        }
         for undo in self.undo.into_iter().rev() {
             if let Err(error) = commit(self.document, undo) {
                 unreachable!("undoing an applied step failed: {error}");
@@ -591,5 +622,71 @@ mod tests {
         // Another document's layer 1 never shares a revision.
         let other = History::new(Document::new([64, 64]), false);
         assert_ne!(other.layer_revisions().of(first), wobbled.0);
+    }
+
+    fn square(at: f64) -> Option<Selection> {
+        let shape = crate::selection::Shape::Rectangle([at, at], [at + 4.0, at + 4.0]);
+        Selection::of_shape(&shape, [64, 64])
+    }
+
+    #[test]
+    fn each_selection_change_is_an_undo_step_that_leaves_the_document_clean() {
+        let mut history = History::new(Document::new([64, 64]), true);
+        assert!(history.select("Select area", square(2.0)));
+        assert!(history.select("Add to selection", square(20.0)));
+        // The same selection again records nothing.
+        assert!(!history.select("Select area", square(20.0)));
+        assert!(!history.is_dirty());
+        assert_eq!(history.undo_label(), Some("Add to selection"));
+        let revision = history.revision();
+        history.undo().unwrap();
+        assert_eq!(history.selection().map(|s| (**s).clone()), square(2.0));
+        history.undo().unwrap();
+        assert_eq!(history.selection(), None);
+        assert!(!history.undo().unwrap());
+        history.redo().unwrap();
+        history.redo().unwrap();
+        assert_eq!(history.selection().map(|s| (**s).clone()), square(20.0));
+        // Nothing to render changed.
+        assert_eq!(history.revision(), revision);
+        assert!(!history.is_dirty());
+    }
+
+    #[test]
+    fn a_stroke_step_leaves_the_selection_alone_and_a_new_selection_drops_redo() {
+        let mut history = History::new(Document::new([64, 64]), true);
+        history.select("Select area", square(2.0));
+        draw_at(&mut history, 1.0);
+        history.undo().unwrap();
+        assert_eq!(history.selection().map(|s| (**s).clone()), square(2.0));
+        assert!(!history.is_dirty());
+        history.select("Deselect", None);
+        assert_eq!(history.redo_label(), None);
+    }
+
+    #[test]
+    fn a_group_changes_the_selection_with_the_document_in_one_step() {
+        let mut history = History::new(Document::new([64, 64]), true);
+        history.select("Select area", square(2.0));
+        history
+            .group("Crop", |group| {
+                group.apply(|document| crate::command::crop_canvas(document, [1, 1], [32, 32]))?;
+                let moved = group.selection().and_then(|s| s.cropped([1, 1], [32, 32]));
+                group.select(moved);
+                Ok(())
+            })
+            .unwrap();
+        let moved = history.selection().unwrap().mask().bounds;
+        assert_eq!(moved, [3, 3, 4, 4]);
+        history.undo().unwrap();
+        assert_eq!(history.document().canvas, [64, 64]);
+        assert_eq!(history.selection().map(|s| (**s).clone()), square(2.0));
+        // A failing group puts the selection back too.
+        let failed = history.group("Fail", |group| {
+            group.select(None);
+            Err(EditError::NoSuchLayer(LayerId(99)))
+        });
+        assert!(failed.is_err());
+        assert_eq!(history.selection().map(|s| (**s).clone()), square(2.0));
     }
 }

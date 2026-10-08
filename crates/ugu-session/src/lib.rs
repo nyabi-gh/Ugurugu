@@ -9,6 +9,7 @@
 //! the pen lifts and is then committed as one edit; a cancelled stroke leaves
 //! nothing behind.
 
+mod selecting;
 pub mod stabilizer;
 
 use std::collections::HashMap;
@@ -23,7 +24,9 @@ use ugu_core::history::{History, LayerRevisions, StateId};
 use ugu_core::ops::{Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, Point, Stroke};
 
+pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
+use ugu_core::selection::Selection;
 
 /// Points closer than this to the last kept one are dropped, as in 2.2.13.
 const MIN_POINT_DISTANCE: f64 = 0.75;
@@ -32,6 +35,7 @@ const MIN_POINT_DISTANCE: f64 = 0.75;
 pub enum Tool {
     Pen,
     Eraser,
+    Select,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -95,6 +99,8 @@ pub struct LiveStroke {
     /// Set when the last point was replaced rather than added, so a display
     /// that drew it must draw from the point before.
     pub replaced_last: bool,
+    /// The selection the stroke is cut to.
+    pub clip: Option<Arc<Selection>>,
     stabilizer: Stabilizer,
 }
 
@@ -135,6 +141,9 @@ pub struct Session {
     /// The width and stabilizer each preset had when another was chosen.
     remembered: HashMap<&'static str, (f32, f32)>,
     live: Option<LiveStroke>,
+    /// The selection tool's shape.
+    pub selection_shape: ShapeKind,
+    lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
 }
@@ -153,6 +162,8 @@ impl Session {
             eraser: ToolSettings::ERASER,
             remembered: HashMap::new(),
             live: None,
+            selection_shape: ShapeKind::default(),
+            lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
         }
@@ -167,8 +178,8 @@ impl Session {
     /// none, as in 2.2.13.
     pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
-            Tool::Pen => &mut self.pen,
             Tool::Eraser => &mut self.eraser,
+            Tool::Pen | Tool::Select => &mut self.pen,
         };
         if settings.preset.id == preset.id {
             return;
@@ -241,10 +252,11 @@ impl Session {
         self.live.as_ref()
     }
 
+    /// The settings strokes are drawn with: the eraser's, else the pen's.
     fn settings(&self) -> &ToolSettings {
         match self.tool {
-            Tool::Pen => &self.pen,
             Tool::Eraser => &self.eraser,
+            Tool::Pen | Tool::Select => &self.pen,
         }
     }
 
@@ -286,6 +298,7 @@ impl Session {
             template,
             points: vec![point(position, pressure(input.pressure))],
             replaced_last: false,
+            clip: self.clip(),
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
         });
         Ok(())
@@ -328,8 +341,12 @@ impl Session {
             ..live.template
         };
         let label = if live.erase { "Erase" } else { "Draw" };
-        self.history.edit(label, |document| {
-            command::draw(document, live.layer, stroke, live.erase, None)
+        self.history.group(label, |group| {
+            let clip = match &live.clip {
+                Some(selection) => Some(selecting::stored_mask(group, selection)?),
+                None => None,
+            };
+            group.apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
         })
     }
 
@@ -339,6 +356,7 @@ impl Session {
 
     pub fn undo(&mut self) -> Result<bool, EditError> {
         self.live = None;
+        self.lasso = None;
         let undone = self.history.undo()?;
         self.keep_layer_valid();
         Ok(undone)
@@ -346,6 +364,7 @@ impl Session {
 
     pub fn redo(&mut self) -> Result<bool, EditError> {
         self.live = None;
+        self.lasso = None;
         let redone = self.history.redo()?;
         self.keep_layer_valid();
         Ok(redone)
@@ -499,8 +518,14 @@ impl Session {
         if offset == [0, 0] && size == self.document().canvas {
             return Ok(Outcome::NoChange);
         }
-        self.history.edit("Canvas size", |document| {
-            command::crop_canvas(document, offset, size)
+        self.lasso = None;
+        self.history.group("Canvas size", |group| {
+            group.apply(|document| command::crop_canvas(document, offset, size))?;
+            let moved = group
+                .selection()
+                .and_then(|selection| selection.cropped(offset, size));
+            group.select(moved);
+            Ok(())
         })
     }
 
@@ -513,8 +538,14 @@ impl Session {
         if size == self.document().canvas {
             return Ok(Outcome::NoChange);
         }
-        self.history.edit("Image size", |document| {
-            command::resample_image(document, size, sampling)
+        self.lasso = None;
+        self.history.group("Image size", |group| {
+            group.apply(|document| command::resample_image(document, size, sampling))?;
+            let scaled = group
+                .selection()
+                .and_then(|selection| selection.resampled(size));
+            group.select(scaled);
+            Ok(())
         })
     }
 

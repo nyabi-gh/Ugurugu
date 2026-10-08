@@ -15,7 +15,7 @@ use std::sync::Arc;
 use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
 use ugu_core::ops::Wobble;
-use ugu_core::store::{BrushEngine, Stroke};
+use ugu_core::store::{BrushEngine, Mask, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
@@ -73,6 +73,11 @@ pub fn erase(target: &mut [u8], color: [u8; 4], cover: u8) {
     dest_out(target, mul(cover, color[3]));
 }
 
+/// Whether a stroke cut to `clip` reaches the pixel at `x`, `y`.
+pub fn inside(clip: Option<&Mask>, x: usize, y: usize) -> bool {
+    clip.is_none_or(|clip| clip.contains(x as i32, y as i32))
+}
+
 /// Vello's premultiplied bytes for a straight colour.
 pub fn premultiplied([r, g, b, a]: [u8; 4]) -> [u8; 4] {
     let color = AlphaColor::<vello_cpu::color::Srgb>::from_rgba8(r, g, b, a)
@@ -106,12 +111,14 @@ impl Split {
         erase: bool,
         wobble: Wobble,
         frames: u32,
+        clip: Option<&Mask>,
     ) -> Option<PixelRect> {
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
         };
         let pen = Pen::new(stroke, wobble, frames);
-        stamp.apply_stroke(Arc::make_mut(surface), stroke, erase, &pen, self.frame)
+        let surface = Arc::make_mut(surface);
+        stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip)
     }
 
     fn sources(&self) -> Vec<Source<'_>> {
@@ -257,8 +264,8 @@ impl Default for Stamp {
 
 impl Stamp {
     /// Adds a committed stroke to `surface` as drawing the layer again would:
-    /// painted over, or erased from, what is there. Returns the pixels it
-    /// changed.
+    /// painted over, or erased from, what is there, only inside `clip` when
+    /// there is one. Returns the pixels it may have changed.
     pub fn apply_stroke(
         &mut self,
         surface: &mut TiledSurface,
@@ -266,9 +273,10 @@ impl Stamp {
         erase: bool,
         pen: &Pen,
         frame: u32,
+        clip: Option<&Mask>,
     ) -> Option<PixelRect> {
         if stroke.brush.engine != BrushEngine::Line {
-            return self.apply_dabs(surface, stroke, erase, pen, frame);
+            return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
         }
         let rect = clamp(stroke::bounds(&stroke.points, pen), surface.size())?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
@@ -286,7 +294,7 @@ impl Stamp {
             let from = (y - rect[1]) as usize * coverage_width;
             for (x, target) in line.iter_mut().enumerate() {
                 let cover = source[(from + x) * 4 + 3];
-                if cover == 0 {
+                if cover == 0 || !inside(clip, rect[0] as usize + x, y as usize) {
                     continue;
                 }
                 if erase {
@@ -309,6 +317,7 @@ impl Stamp {
         erase: bool,
         pen: &Pen,
         frame: u32,
+        clip: Option<&Mask>,
     ) -> Option<PixelRect> {
         dab::stroke_dabs(
             &stroke.points,
@@ -337,7 +346,7 @@ impl Stamp {
             let from = (y - top) as usize * width;
             for (x, target) in line.iter_mut().enumerate() {
                 let source = &self.buffer[(from + x) * 4..(from + x) * 4 + 4];
-                if source[3] == 0 {
+                if source[3] == 0 || !inside(clip, left as usize + x, y as usize) {
                     continue;
                 }
                 if erase {
@@ -757,7 +766,14 @@ mod tests {
             .flat_map(|brush| histories().map(|history| (history, brush)))
         {
             for layer in paint_layers(&history) {
-                for (erase, seed) in [(false, 500), (true, 501)] {
+                // Drawn plainly and cut to the selection `history` keeps.
+                let selection = ugu_core::ops::MaskId(0);
+                for (erase, seed, clip) in [
+                    (false, 500, None),
+                    (true, 501, None),
+                    (false, 502, Some(selection)),
+                    (true, 503, Some(selection)),
+                ] {
                     let (mut split, _) = split(&history, layer, 4);
                     let mut new = stroke([0.0, 40.0], [120.0, 35.0], [90, 20, 150, 180], seed);
                     new.brush = brush;
@@ -769,13 +785,14 @@ mod tests {
                             erase,
                             layer_wobble(document, layer),
                             document.frames,
+                            clip.and_then(|id| document.store.masks.get(&id)),
                         )
                         .unwrap();
                     let mut shown = canvas(history.document());
                     composite(&split, None, whole(history.document()), &mut shown);
                     history
                         .edit("Draw", |document| {
-                            command::draw(document, layer, new, erase, None)
+                            command::draw(document, layer, new, erase, clip)
                         })
                         .unwrap();
                     let mut renderer = DocumentRenderer::new(0);
@@ -837,6 +854,7 @@ mod tests {
                     false,
                     layer_wobble(document, layer),
                     document.frames,
+                    None,
                 )
                 .unwrap();
             let mut shown = canvas(history.document());

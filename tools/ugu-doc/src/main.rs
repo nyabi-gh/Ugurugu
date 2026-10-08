@@ -766,7 +766,7 @@ fn splits(document: &Document, threads: u16) {
         later.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
         let frames = history.document().frames;
-        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble, frames) {
+        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble, frames, None) {
             composite(&split, None, rect, &mut display);
         }
         pen_ups.push(started.elapsed().as_secs_f64() * 1000.0);

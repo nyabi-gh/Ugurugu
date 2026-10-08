@@ -3,6 +3,7 @@
 
 use super::*;
 use ugu_core::ops::Op;
+use ugu_core::selection::Combine;
 use ugu_core::store::BrushEngine;
 
 fn at(x: f64, y: f64, time: f64) -> InputPoint {
@@ -479,4 +480,232 @@ fn the_last_paint_layer_is_not_removed_even_with_its_group() {
             .map(|layer| &layer.kind),
         Some(LayerKind::Paint(_))
     ));
+}
+
+fn drag(
+    session: &mut Session,
+    kind: ShapeKind,
+    from: [f64; 2],
+    to: [f64; 2],
+    how: Combine,
+) -> bool {
+    session.selection_shape = kind;
+    session.begin_selection(from, how);
+    session.extend_selection([(from[0] + to[0]) / 2.0, from[1]]);
+    session.end_selection(to)
+}
+
+fn selected(session: &Session) -> Option<[i32; 4]> {
+    session.selection().map(|selection| selection.mask().bounds)
+}
+
+#[test]
+fn shapes_replace_add_and_subtract_one_undo_step_each() {
+    let mut session = session();
+    assert!(drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace
+    ));
+    assert_eq!(selected(&session), Some([10, 10, 20, 10]));
+    assert_eq!(session.undo_label(), Some("Select area"));
+    assert!(drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [30.0, 10.0],
+        [50.0, 20.0],
+        Combine::Add
+    ));
+    assert_eq!(selected(&session), Some([10, 10, 40, 10]));
+    assert_eq!(session.undo_label(), Some("Add to selection"));
+    assert!(drag(
+        &mut session,
+        ShapeKind::Ellipse,
+        [0.0, 0.0],
+        [20.0, 30.0],
+        Combine::Subtract
+    ));
+    assert_eq!(session.undo_label(), Some("Subtract from selection"));
+    assert!(!session.selection().unwrap().mask().contains(12, 15));
+    let revision = session.revision();
+    session.undo().unwrap();
+    assert_eq!(selected(&session), Some([10, 10, 40, 10]));
+    session.undo().unwrap();
+    session.undo().unwrap();
+    assert_eq!(selected(&session), None);
+    assert_eq!(session.revision(), revision);
+}
+
+#[test]
+fn a_click_deselects_when_replacing_and_does_nothing_otherwise() {
+    let mut session = session();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    assert!(!drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 5.0],
+        [5.0, 5.0],
+        Combine::Add
+    ));
+    assert!(!drag(
+        &mut session,
+        ShapeKind::Freehand,
+        [5.0, 5.0],
+        [5.2, 5.0],
+        Combine::Subtract
+    ));
+    assert!(selected(&session).is_some());
+    assert!(drag(
+        &mut session,
+        ShapeKind::Ellipse,
+        [5.0, 5.0],
+        [5.0, 5.0],
+        Combine::Replace
+    ));
+    assert_eq!(selected(&session), None);
+    assert_eq!(session.undo_label(), Some("Deselect"));
+    // With nothing selected, a click records nothing.
+    assert!(!drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 5.0],
+        [5.0, 5.0],
+        Combine::Replace
+    ));
+}
+
+#[test]
+fn a_freehand_loop_takes_points_a_pixel_apart_and_stays_on_the_canvas() {
+    let mut session = session();
+    session.selection_shape = ShapeKind::Freehand;
+    session.begin_selection([-20.0, 10.0], Combine::Replace);
+    assert!(!session.extend_selection([-19.0, 10.4]));
+    for point in [[60.0, 10.0], [60.0, 300.0], [10.0, 60.0]] {
+        assert!(session.extend_selection(point));
+    }
+    let lasso = session.lasso().unwrap();
+    assert_eq!(lasso.points[0], [0.0, 10.0]);
+    assert_eq!(lasso.points[2], [60.0, 100.0]);
+    assert!(session.end_selection([10.0, 60.0]));
+    assert!(session.lasso().is_none());
+    assert!(session.selection().unwrap().mask().contains(30, 30));
+}
+
+#[test]
+fn escape_drops_the_shape_being_dragged_before_the_selection() {
+    let mut session = session();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    session.begin_selection([0.0, 0.0], Combine::Replace);
+    session.extend_selection([50.0, 50.0]);
+    assert!(session.escape());
+    assert!(session.lasso().is_none());
+    assert_eq!(selected(&session), Some([10, 10, 20, 10]));
+    assert_eq!(session.undo_label(), Some("Select area"));
+    assert!(session.escape());
+    assert_eq!(selected(&session), None);
+    assert_eq!(session.undo_label(), Some("Deselect"));
+    assert!(!session.escape());
+}
+
+#[test]
+fn select_all_and_invert_cover_the_canvas() {
+    let mut session = session();
+    assert!(!session.invert_selection());
+    assert!(session.select_all());
+    assert_eq!(selected(&session), Some([0, 0, 200, 100]));
+    assert!(session.invert_selection());
+    assert_eq!(selected(&session), None);
+    assert_eq!(session.undo_label(), Some("Invert selection"));
+    session.undo().unwrap();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [0.0, 0.0],
+        [100.0, 100.0],
+        Combine::Replace,
+    );
+    session.invert_selection();
+    assert_eq!(selected(&session), Some([100, 0, 100, 100]));
+}
+
+#[test]
+fn strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [20.0, 0.0],
+        [40.0, 100.0],
+        Combine::Replace,
+    );
+    draw(&mut session, 10.0, 60.0);
+    session.tool = Tool::Eraser;
+    draw(&mut session, 10.0, 60.0);
+    let clips: Vec<_> = ops(&session, layer)
+        .iter()
+        .map(|op| match op {
+            Op::Paint { clip, .. } | Op::Erase { clip, .. } => *clip,
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(clips[0], None);
+    assert!(clips[1].is_some());
+    assert_eq!(clips[1], clips[2]);
+    assert_eq!(session.document().store.masks.len(), 1);
+    // Undoing the strokes takes the mask with them.
+    session.undo().unwrap();
+    session.undo().unwrap();
+    assert!(session.document().store.masks.is_empty());
+    // A selection of everything cuts nothing.
+    session.select_all();
+    session.tool = Tool::Pen;
+    draw(&mut session, 10.0, 60.0);
+    assert!(matches!(
+        ops(&session, layer).last(),
+        Some(Op::Paint { clip: None, .. })
+    ));
+}
+
+#[test]
+fn the_selection_stays_across_layers_and_follows_canvas_changes() {
+    let mut session = session();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [20.0, 10.0],
+        [40.0, 30.0],
+        Combine::Replace,
+    );
+    session.add_layer().unwrap();
+    assert_eq!(selected(&session), Some([20, 10, 20, 20]));
+    session.crop_canvas([-10, 5], [150, 80]).unwrap();
+    assert_eq!(selected(&session), Some([10, 15, 20, 20]));
+    session
+        .resample_image([300, 160], Sampling::Smooth)
+        .unwrap();
+    assert_eq!(selected(&session), Some([20, 30, 40, 40]));
+    session.undo().unwrap();
+    session.undo().unwrap();
+    assert_eq!(selected(&session), Some([20, 10, 20, 20]));
+    // A crop that leaves it off the canvas drops it, and undo brings it back.
+    session.crop_canvas([-100, 0], [50, 50]).unwrap();
+    assert_eq!(selected(&session), None);
+    session.undo().unwrap();
+    assert_eq!(selected(&session), Some([20, 10, 20, 20]));
 }

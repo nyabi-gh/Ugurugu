@@ -16,11 +16,11 @@
 //! they too are walked once up to the samples that no longer move.
 
 use ugu_core::motion::{Breaks, Walk};
-use ugu_core::store::{BrushEngine, Point};
+use ugu_core::store::{BrushEngine, Mask, Point};
 use vello_cpu::Pixmap;
 use vello_cpu::color::{AlphaColor, Srgb};
 
-use crate::compose::{Stamp, clamp, dest_out, erase, paint, premultiplied, src_over};
+use crate::compose::{Stamp, clamp, dest_out, erase, inside, paint, premultiplied, src_over};
 use crate::dab::{self, Dab, Look};
 use crate::raster::PixelRect;
 use crate::stroke::{self, Pen, Resampler};
@@ -55,6 +55,8 @@ pub struct LiveStroke {
     stamp: Stamp,
     painter: dab::Painter,
     placed: Vec<Dab>,
+    /// The selection the stroke is cut to.
+    clip: Option<Mask>,
     /// Where a broken line breaks; `None` when it shows whole.
     breaks: Option<Breaks>,
     /// The walk along the moved samples that no longer move.
@@ -105,12 +107,20 @@ impl LiveStroke {
             stamp: Stamp::default(),
             painter: dab::Painter::default(),
             placed: Vec::new(),
+            clip: None,
             breaks: pen.motion.breaks(pen.seed, frame),
             walk: Walk::default(),
             walked: 0,
             shown: Vec::new(),
             fixed_shown: 0,
         }
+    }
+
+    /// Cuts the stroke to `clip`, as the renderer cuts a stroke drawn in a
+    /// selection.
+    pub fn with_clip(mut self, clip: Option<Mask>) -> Self {
+        self.clip = clip;
+        self
     }
 
     /// Brings `shown` up to `samples`. The moved sample `i` depends on
@@ -333,6 +343,9 @@ impl LiveStroke {
     }
 
     pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
+        if !inside(self.clip.as_ref(), x, y) {
+            return;
+        }
         if self.dabs.is_some() {
             let pixel = self.pixel(x, y);
             if pixel[3] == 0 {
@@ -533,6 +546,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_stroke_in_a_selection_changes_only_pixels_inside_it() {
+        let selection = ugu_core::selection::Selection::of_shape(
+            &ugu_core::selection::Shape::Rectangle([60.0, 0.0], [120.0, 120.0]),
+            [200, 120],
+        )
+        .unwrap();
+        let mask = selection.mask().clone();
+        let pen = pen(true);
+        let points = points();
+        let mut cut = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None)
+            .with_clip(Some(mask.clone()));
+        let mut whole = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
+        for count in 1..=points.len() {
+            cut.update(&points[..count]);
+            whole.update(&points[..count]);
+        }
+        let mut inside = 0;
+        for y in 0..120 {
+            for x in 0..200 {
+                let (mut a, mut b) = ([255; 4], [255; 4]);
+                cut.apply(x, y, &mut a);
+                whole.apply(x, y, &mut b);
+                if mask.contains(x as i32, y as i32) {
+                    assert_eq!(a, b);
+                    inside += usize::from(a != [255; 4]);
+                } else {
+                    assert_eq!(a, [255; 4], "at {x}, {y}");
+                }
+            }
+        }
+        assert!(inside > 0);
     }
 
     #[test]

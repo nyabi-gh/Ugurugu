@@ -12,6 +12,7 @@ pub mod edit;
 pub mod history;
 pub mod motion;
 pub mod ops;
+pub mod selection;
 pub mod store;
 
 #[cfg(test)]
