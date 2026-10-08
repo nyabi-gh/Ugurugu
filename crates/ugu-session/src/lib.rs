@@ -12,6 +12,7 @@
 mod filling;
 mod selecting;
 pub mod stabilizer;
+mod transforming;
 
 use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
@@ -28,6 +29,7 @@ use ugu_core::store::{self, Brush, Point, Stroke};
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
+pub use crate::transforming::Pending;
 use ugu_core::selection::Selection;
 
 /// Points closer than this to the last kept one are dropped, as in 2.2.13.
@@ -151,6 +153,9 @@ pub struct Session {
     pub lasso_paints: bool,
     /// How the wand and the bucket find an area, and how fills look.
     pub fill: FillSettings,
+    /// How a transformed selection is resampled.
+    pub transform_sampling: Sampling,
+    pending: Option<Pending>,
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
@@ -173,6 +178,8 @@ impl Session {
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
             fill: FillSettings::DEFAULT,
+            transform_sampling: Sampling::Smooth,
+            pending: None,
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
@@ -181,6 +188,12 @@ impl Session {
 
     pub fn document(&self) -> &Document {
         self.history.document()
+    }
+
+    /// The history, with a pending transform applied first.
+    fn history_mut(&mut self) -> &mut History {
+        self.settle();
+        &mut self.history
     }
 
     /// Makes `preset` the brush, or with `Tool::Eraser` the eraser. Each
@@ -223,8 +236,9 @@ impl Session {
         self.history.state()
     }
 
+    /// A pending transform counts as an unsaved change.
     pub fn is_dirty(&self) -> bool {
-        self.history.is_dirty()
+        self.history.is_dirty() || self.pending.is_some()
     }
 
     pub fn mark_saved(&mut self, state: StateId) {
@@ -244,7 +258,8 @@ impl Session {
     }
 
     pub fn select_layer(&mut self, id: LayerId) {
-        if self.document().layer(id).is_some() {
+        if self.document().layer(id).is_some() && id != self.layer {
+            self.settle();
             self.layer = id;
         }
     }
@@ -255,6 +270,9 @@ impl Session {
 
     /// Any frame number; the document's frames repeat.
     pub fn set_frame(&mut self, frame: i64) {
+        if frame != self.frame {
+            self.settle();
+        }
         self.frame = frame;
     }
 
@@ -357,7 +375,7 @@ impl Session {
             ..live.template
         };
         let label = if live.erase { "Erase" } else { "Draw" };
-        self.history.group(label, |group| {
+        self.history_mut().group(label, |group| {
             let clip = match &live.clip {
                 Some(selection) => Some(selecting::stored_mask(group, selection)?),
                 None => None,
@@ -370,17 +388,25 @@ impl Session {
         self.live = None;
     }
 
+    /// Cancels a pending transform, else undoes the last change.
     pub fn undo(&mut self) -> Result<bool, EditError> {
         self.live = None;
         self.lasso = None;
+        if self.cancel_transform() {
+            return Ok(true);
+        }
         let undone = self.history.undo()?;
         self.keep_layer_valid();
         Ok(undone)
     }
 
+    /// Cancels a pending transform, else redoes the last change undone.
     pub fn redo(&mut self) -> Result<bool, EditError> {
         self.live = None;
         self.lasso = None;
+        if self.cancel_transform() {
+            return Ok(true);
+        }
         let redone = self.history.redo()?;
         self.keep_layer_valid();
         Ok(redone)
@@ -396,7 +422,7 @@ impl Session {
             });
         let name = format!("Layer {}", command::next_layer_id(self.document()).0);
         let mut added = None;
-        let outcome = self.history.edit("Add layer", |document| {
+        let outcome = self.history_mut().edit("Add layer", |document| {
             let (id, changes) = command::add_paint_layer(document, parent, index, name);
             added = Some(id);
             changes
@@ -439,7 +465,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         let changes = command::move_layer(self.document(), id, parent, to)?;
-        self.history.edit("Move layer", |_| changes)
+        self.history_mut().edit("Move layer", |_| changes)
     }
 
     /// Moves `id` to `index` in `parent` (`None` for the top level),
@@ -451,7 +477,7 @@ impl Session {
         index: usize,
     ) -> Result<Outcome, EditError> {
         let changes = command::move_layer(self.document(), id, parent, index)?;
-        self.history.edit("Move layer", |_| changes)
+        self.history_mut().edit("Move layer", |_| changes)
     }
 
     /// Puts the current layer in a new group in its place.
@@ -461,7 +487,7 @@ impl Session {
             .find(|name| !named(&self.document().layers, name))
             .expect("fewer layers than numbers");
         let (_, changes) = command::wrap_in_group(self.document(), self.layer, name)?;
-        self.history.edit("Add layer group", |_| changes)
+        self.history_mut().edit("Add layer group", |_| changes)
     }
 
     /// Puts the children of the current group in its place; the top one
@@ -474,7 +500,7 @@ impl Session {
         };
         let top = content.children.last().map(|child| child.id);
         let changes = command::ungroup(self.document(), group)?;
-        let outcome = self.history.edit("Ungroup", |_| changes)?;
+        let outcome = self.history_mut().edit("Ungroup", |_| changes)?;
         if let (Outcome::Committed(_), Some(top)) = (&outcome, top) {
             self.layer = top;
         }
@@ -490,7 +516,7 @@ impl Session {
             Some(_) => "Move layer into group",
             None => "Move layer out of groups",
         };
-        self.history.edit(label, |_| changes)
+        self.history_mut().edit(label, |_| changes)
     }
 
     /// Changes one of a layer's own properties.
@@ -510,7 +536,7 @@ impl Session {
         if unchanged {
             return Ok(Outcome::NoChange);
         }
-        self.history.edit(label, |_| changes)
+        self.history_mut().edit(label, |_| changes)
     }
 
     /// Merges the current layer into the one below, which becomes current.
@@ -521,7 +547,7 @@ impl Session {
             Some(siblings.get(index.checked_sub(1)?)?.id)
         });
         let changes = command::merge_down(self.document(), above)?;
-        let outcome = self.history.edit("Merge down", |_| changes)?;
+        let outcome = self.history_mut().edit("Merge down", |_| changes)?;
         if let Some(below) = below {
             self.layer = below;
         }
@@ -535,7 +561,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         self.lasso = None;
-        self.history.group("Canvas size", |group| {
+        self.history_mut().group("Canvas size", |group| {
             group.apply(|document| command::crop_canvas(document, offset, size))?;
             let moved = group
                 .selection()
@@ -555,7 +581,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         self.lasso = None;
-        self.history.group("Image size", |group| {
+        self.history_mut().group("Image size", |group| {
             group.apply(|document| command::resample_image(document, size, sampling))?;
             let scaled = group
                 .selection()
@@ -579,7 +605,7 @@ impl Session {
         if settings == self.document().settings() {
             return Ok(Outcome::NoChange);
         }
-        self.history.edit("Animation settings", |_| {
+        self.history_mut().edit("Animation settings", |_| {
             vec![ugu_core::edit::Change::SetSettings(settings)]
         })
     }

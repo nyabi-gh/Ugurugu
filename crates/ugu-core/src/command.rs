@@ -48,11 +48,7 @@ pub fn draw(
     clip: Option<MaskId>,
 ) -> Vec<Change> {
     let id = next_stroke_id(document);
-    let index = match document.layer(layer).map(|layer| &layer.kind) {
-        Some(LayerKind::Paint(paint)) => paint.ops.len(),
-        // The commit reports the missing or wrong layer.
-        _ => 0,
-    };
+    let index = top_of(document, layer);
     let op = if erase {
         Op::Erase { stroke: id, clip }
     } else {
@@ -74,11 +70,7 @@ pub fn fill(
     antialias: bool,
     clip: Option<MaskId>,
 ) -> Vec<Change> {
-    let index = match document.layer(layer).map(|layer| &layer.kind) {
-        Some(LayerKind::Paint(paint)) => paint.ops.len(),
-        // The commit reports the missing or wrong layer.
-        _ => 0,
-    };
+    let index = top_of(document, layer);
     let op = Op::Fill {
         coverage,
         color,
@@ -86,6 +78,47 @@ pub fn fill(
         clip,
     };
     vec![Change::InsertOp { layer, index, op }]
+}
+
+/// Moves `mask`'s part of `layer` by `transform`, leaving the source in
+/// place when `keep_source`, on top of its operations.
+pub fn transform_selection(
+    document: &Document,
+    layer: LayerId,
+    mask: MaskId,
+    transform: ops::Affine,
+    sampling: Sampling,
+    keep_source: bool,
+) -> Vec<Change> {
+    let op = Op::TransformSelection {
+        mask,
+        transform,
+        sampling,
+        keep_source,
+    };
+    vec![Change::InsertOp {
+        layer,
+        index: top_of(document, layer),
+        op,
+    }]
+}
+
+/// Clears `mask`'s part of `layer`, on top of its operations.
+pub fn clear_selection(document: &Document, layer: LayerId, mask: MaskId) -> Vec<Change> {
+    vec![Change::InsertOp {
+        layer,
+        index: top_of(document, layer),
+        op: Op::ClearSelection { mask },
+    }]
+}
+
+/// Where an operation goes on top of `layer`'s; the commit reports a missing
+/// or wrong layer.
+fn top_of(document: &Document, layer: LayerId) -> usize {
+    match document.layer(layer).map(|layer| &layer.kind) {
+        Some(LayerKind::Paint(paint)) => paint.ops.len(),
+        _ => 0,
+    }
 }
 
 /// An empty paint layer at `index` in `parent` (`None` for the top level).

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 use super::*;
-use ugu_core::ops::{MaskId, Op, Rgba8};
+use ugu_core::ops::{Affine, MaskId, Op, Rgba8, Sampling};
 use ugu_core::selection::Combine;
 use ugu_core::store::BrushEngine;
 
@@ -908,4 +908,155 @@ fn filling_the_selection_or_a_painted_shape_is_one_fill_cut_to_the_selection() {
         Combine::Replace
     ));
     assert_eq!(fills(&session, layer).len(), 3);
+}
+
+fn transforms(session: &Session, layer: LayerId) -> Vec<Op> {
+    ops(session, layer)
+        .into_iter()
+        .filter(|op| {
+            matches!(
+                op,
+                Op::TransformSelection { .. } | Op::ClearSelection { .. }
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_pending_transform_is_applied_as_one_step_moving_the_selection_along() {
+    let mut session = session();
+    let layer = session.current_layer();
+    assert_eq!(session.begin_transform(), Err(FillError::NoSelection));
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    let selection = session.selection().cloned().unwrap();
+    assert_eq!(session.begin_transform(), Ok(true));
+    assert_eq!(session.begin_transform(), Ok(false));
+    assert!(session.is_dirty());
+    // A flattening transform is refused; the pending one stays.
+    assert!(!session.set_transform(Affine::scaling_about([0.0, 1.0], [0.0, 0.0])));
+    assert!(!session.set_transform(Affine::translation(40_000.0, 0.0)));
+    let moved = Affine::translation(15.0, 5.0).then(Affine::rotation_about(0.3, [35.0, 20.0]));
+    assert!(session.set_transform(moved));
+    assert!(
+        ops(&session, layer).is_empty(),
+        "nothing in the document before applying"
+    );
+    assert!(matches!(
+        session.apply_transform(),
+        Ok(Outcome::Committed(_))
+    ));
+    assert_eq!(session.pending(), None);
+    let [
+        Op::TransformSelection {
+            mask,
+            transform,
+            sampling,
+            keep_source,
+        },
+    ] = &transforms(&session, layer)[..]
+    else {
+        panic!("one transform");
+    };
+    assert_eq!(
+        (*transform, *sampling, *keep_source),
+        (moved, Sampling::Smooth, false)
+    );
+    assert_eq!(&session.document().store.masks[mask], selection.mask());
+    assert_eq!(
+        session.selection().map(|selection| selection.as_ref()),
+        selection.transformed(moved).as_ref()
+    );
+    assert_eq!(session.undo_label(), Some("Transform selection"));
+    assert!(session.undo().unwrap());
+    assert!(ops(&session, layer).is_empty());
+    assert_eq!(session.selection(), Some(&selection));
+    // An unmoved selection applies nothing.
+    session.begin_transform().unwrap();
+    assert_eq!(session.apply_transform(), Ok(Outcome::NoChange));
+}
+
+#[test]
+fn undo_and_escape_cancel_a_pending_transform_and_other_edits_apply_it_first() {
+    let mut session = session();
+    let layer = session.current_layer();
+    draw(&mut session, 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 40.0],
+        [70.0, 60.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(50.0, 0.0));
+    let label = session.undo_label().map(str::to_owned);
+    assert!(session.undo().unwrap());
+    assert_eq!(session.pending(), None);
+    assert_eq!(
+        session.undo_label().map(str::to_owned),
+        label,
+        "undo only cancelled it"
+    );
+    assert_eq!(ops(&session, layer).len(), 1);
+
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(50.0, 0.0));
+    session.set_keep_source(true);
+    draw(&mut session, 10.0, 30.0);
+    let kinds: Vec<_> = ops(&session, layer)
+        .iter()
+        .map(|op| match op {
+            Op::Paint { .. } => "paint",
+            Op::TransformSelection {
+                keep_source: true, ..
+            } => "copy",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["paint", "copy", "paint"]);
+
+    // Changing layer or frame applies it too.
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(0.0, 10.0));
+    session.set_frame(3);
+    assert_eq!(session.pending(), None);
+    assert_eq!(transforms(&session, layer).len(), 2);
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(0.0, 10.0));
+    session.add_layer().unwrap();
+    assert_eq!(transforms(&session, layer).len(), 3);
+    assert!(!session.cancel_transform());
+}
+
+#[test]
+fn deleting_clears_the_selected_part_after_a_pending_transform() {
+    let mut session = session();
+    let layer = session.current_layer();
+    assert_eq!(session.delete_selected(), Err(FillError::NoSelection));
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(40.0, 0.0));
+    session.delete_selected().unwrap();
+    let [Op::TransformSelection { .. }, Op::ClearSelection { mask }] =
+        &transforms(&session, layer)[..]
+    else {
+        panic!("the move, then the clear");
+    };
+    assert_eq!(
+        session.document().store.masks[mask].bounds,
+        [50, 10, 20, 10]
+    );
+    assert_eq!(session.undo_label(), Some("Delete"));
 }

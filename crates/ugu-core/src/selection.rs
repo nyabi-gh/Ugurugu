@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use crate::ops::Affine;
 use crate::store::Mask;
 
 /// A non-empty set of pixels on a canvas, its mask cut to the pixels set.
@@ -298,6 +299,77 @@ impl Selection {
         reached.selection()
     }
 
+    /// Where the selected pixels land when `transform` moves them: every
+    /// canvas pixel a moved pixel square overlaps. The renderer draws moved
+    /// content cut to that shape with soft edges, so later strokes cut to
+    /// this selection reach those edge pixels too. `None` when nothing lands
+    /// on the canvas or it flattens.
+    pub fn transformed(&self, transform: Affine) -> Option<Self> {
+        transform.inverse()?;
+        let [left, top, width, height] = self.mask.bounds;
+        let row_bytes = Mask::row_bytes(width);
+        let runs = |row: i32| {
+            let bits = &self.mask.bits[row as usize * row_bytes..(row as usize + 1) * row_bytes];
+            let set = |x: i32| bits[x as usize / 8] & (0x80 >> (x % 8)) != 0;
+            let mut runs = Vec::new();
+            let mut x = 0;
+            while x < width {
+                if bits[x as usize / 8] == 0 && x % 8 == 0 {
+                    x += 8;
+                    continue;
+                }
+                if !set(x) {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < width && set(x) {
+                    x += 1;
+                }
+                runs.push([start, x]);
+            }
+            runs
+        };
+        let mut pixels = Canvas::empty(self.canvas);
+        let [canvas_width, canvas_height] = self.canvas.map(f64::from);
+        let mut row = 0;
+        while row < height {
+            // Rows with the same runs make rectangles, moved as one.
+            let same = runs(row);
+            let mut end = row + 1;
+            while end < height && runs(end) == same {
+                end += 1;
+            }
+            let [y0, y1] = [top + row, top + end].map(f64::from);
+            for [from, to] in same {
+                let [x0, x1] = [left + from, left + to].map(f64::from);
+                // Quarter turns land on whole pixels give or take rounding.
+                let snap = |value: f64| {
+                    let whole = value.round();
+                    if (value - whole).abs() < 1e-9 {
+                        whole
+                    } else {
+                        value
+                    }
+                };
+                let quad = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+                    .map(|corner| transform.apply(corner).map(snap));
+                let low = quad.iter().map(|corner| corner[1]).fold(f64::MAX, f64::min);
+                let high = quad.iter().map(|corner| corner[1]).fold(f64::MIN, f64::max);
+                let first = low.floor().clamp(0.0, canvas_height) as usize;
+                let last = high.ceil().clamp(0.0, canvas_height) as usize;
+                for y in first..last {
+                    if let Some([from, to]) = across(&quad, y as f64) {
+                        let clamp = |value: f64| value.clamp(0.0, canvas_width) as usize;
+                        pixels.fill(y, clamp(from.floor()), clamp(to.ceil()));
+                    }
+                }
+            }
+            row = end;
+        }
+        pixels.selection()
+    }
+
     /// `shape`'s pixels combined with `current` by `how`; `None` when no
     /// pixel is left.
     pub fn combine(current: Option<&Self>, shape: Option<Self>, how: Combine) -> Option<Self> {
@@ -476,6 +548,31 @@ impl Selection {
         }
         loops
     }
+}
+
+/// How far the convex `quad` reaches across the row of pixels from `y` to
+/// `y + 1`: the least and greatest x of the part inside it; `None` when that
+/// part has no height.
+fn across(quad: &[[f64; 2]; 4], y: f64) -> Option<[f64; 2]> {
+    let (top, bottom) = (y, y + 1.0);
+    let mut reach: Option<[f64; 2]> = None;
+    let mut take = |x: f64| {
+        reach = Some(reach.map_or([x, x], |[low, high]| [low.min(x), high.max(x)]));
+    };
+    for (index, &[ax, ay]) in quad.iter().enumerate() {
+        if (top..=bottom).contains(&ay) {
+            take(ax);
+        }
+        let [bx, by] = quad[(index + 1) % 4];
+        for line in [top, bottom] {
+            if (ay - line) * (by - line) < 0.0 {
+                take(ax + (line - ay) * (bx - ax) / (by - ay));
+            }
+        }
+    }
+    let low = quad.iter().map(|corner| corner[1]).fold(f64::MAX, f64::min);
+    let high = quad.iter().map(|corner| corner[1]).fold(f64::MIN, f64::max);
+    reach.filter(|[from, to]| to > from && low < bottom && high > top)
 }
 
 /// Directions along pixel edges, clockwise on screen (y down), and the step
@@ -781,5 +878,76 @@ mod tests {
         // Qt: (c · ⌊0xff00ff / a⌋ + 0x8000) >> 16.
         assert_eq!(straight([1, 63, 127, 128]), [2, 126, 253, 128]);
         assert_eq!(straight([1, 2, 3, 3]), [85, 170, 255, 3]);
+    }
+
+    #[test]
+    fn affine_helpers_compose_invert_and_turn_about_a_centre() {
+        let turn = Affine::rotation_about(std::f64::consts::FRAC_PI_2, [10.0, 10.0]);
+        let [x, y] = turn.apply([20.0, 10.0]);
+        assert!(
+            (x - 10.0).abs() < 1e-9 && (y - 20.0).abs() < 1e-9,
+            "clockwise on screen"
+        );
+        let both = Affine::scaling_about([2.0, 3.0], [1.0, 1.0]).then(turn);
+        let back = both.inverse().unwrap();
+        let [x, y] = back.apply(both.apply([7.0, -4.0]));
+        assert!((x - 7.0).abs() < 1e-9 && (y + 4.0).abs() < 1e-9);
+        assert_eq!(
+            Affine::scaling_about([0.0, 1.0], [0.0, 0.0]).inverse(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_transformed_selection_holds_every_pixel_the_moved_squares_reach() {
+        let square = rectangle([4.0, 4.0], [10.0, 8.0]).unwrap();
+        // Whole-pixel moves shift the bits; off the canvas is dropped.
+        let moved = square.transformed(Affine::translation(3.0, -2.0)).unwrap();
+        assert_eq!(moved.mask.bounds, [7, 2, 6, 4]);
+        assert_eq!(pixels(Some(&moved)).len(), 24);
+        let off = square.transformed(Affine::translation(33.0, 0.0)).unwrap();
+        assert_eq!(off.mask.bounds, [37, 4, 3, 4]);
+        assert_eq!(square.transformed(Affine::translation(100.0, 0.0)), None);
+        // A quarter turn about a pixel corner turns the rectangle exactly.
+        let turned = square
+            .transformed(Affine::rotation_about(
+                std::f64::consts::FRAC_PI_2,
+                [10.0, 8.0],
+            ))
+            .unwrap();
+        assert_eq!(turned.mask.bounds, [10, 2, 4, 6]);
+        assert_eq!(pixels(Some(&turned)).len(), 24);
+        // Half a pixel off: each moved square reaches two columns.
+        let half = square.transformed(Affine::translation(0.5, 0.0)).unwrap();
+        assert_eq!(half.mask.bounds, [4, 4, 7, 4]);
+        // Turned 30°: every pixel a point of the moved squares lands in is
+        // held, and nothing far from them.
+        let transform = Affine::rotation_about(std::f64::consts::FRAC_PI_6, [7.0, 6.0]);
+        let tilted = square.transformed(transform).unwrap();
+        let inverse = transform.inverse().unwrap();
+        for y in 0..CANVAS[1] as i32 {
+            for x in 0..CANVAS[0] as i32 {
+                let hits = (0..8)
+                    .flat_map(|i| (0..8).map(move |j| (i, j)))
+                    .any(|(i, j)| {
+                        let point = [
+                            f64::from(x) + (f64::from(i) + 0.5) / 8.0,
+                            f64::from(y) + (f64::from(j) + 0.5) / 8.0,
+                        ];
+                        let [sx, sy] = inverse.apply(point);
+                        square.mask.contains(sx.floor() as i32, sy.floor() as i32)
+                    });
+                if hits {
+                    assert!(tilted.mask.contains(x, y), "{x},{y} reached but not held");
+                }
+                if tilted.mask.contains(x, y) {
+                    let [sx, sy] = inverse.apply([f64::from(x) + 0.5, f64::from(y) + 0.5]);
+                    assert!(
+                        (3.0..11.5).contains(&sx) && (3.0..9.5).contains(&sy),
+                        "{x},{y} too far"
+                    );
+                }
+            }
+        }
     }
 }

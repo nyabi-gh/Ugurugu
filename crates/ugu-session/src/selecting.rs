@@ -122,7 +122,7 @@ impl Session {
             (Combine::Subtract, Some(_)) => "Subtract from selection",
         };
         let next = Selection::combine(self.selection().map(Arc::as_ref), shape, lasso.combine);
-        Ok(self.history.select(label, next))
+        Ok(self.history_mut().select(label, next))
     }
 
     /// Drops the shape being dragged, leaving the selection as it was.
@@ -133,7 +133,7 @@ impl Session {
     pub fn select_all(&mut self) -> bool {
         self.lasso = None;
         let all = Selection::all(self.document().canvas);
-        self.history.select("Select all", all)
+        self.history_mut().select("Select all", all)
     }
 
     /// Selects what is not selected; nothing without a selection.
@@ -142,12 +142,12 @@ impl Session {
         let Some(inverted) = self.selection().map(|selection| selection.invert()) else {
             return false;
         };
-        self.history.select("Invert selection", inverted)
+        self.history_mut().select("Invert selection", inverted)
     }
 
     pub fn deselect(&mut self) -> bool {
         self.lasso = None;
-        self.history.select("Deselect", None)
+        self.history_mut().select("Deselect", None)
     }
 
     /// Esc: drops a shape being dragged, else the selection.

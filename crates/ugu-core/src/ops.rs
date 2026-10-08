@@ -34,6 +34,70 @@ impl Affine {
     pub fn translation(x: f64, y: f64) -> Self {
         Self([1.0, 0.0, x, 0.0, 1.0, y])
     }
+
+    /// Scales by `scale` (horizontal, vertical) about `centre`.
+    pub fn scaling_about(scale: [f64; 2], centre: [f64; 2]) -> Self {
+        let [sx, sy] = scale;
+        Self([
+            sx,
+            0.0,
+            centre[0] * (1.0 - sx),
+            0.0,
+            sy,
+            centre[1] * (1.0 - sy),
+        ])
+    }
+
+    /// Turns by `radians` about `centre`, clockwise on screen (y down).
+    pub fn rotation_about(radians: f64, centre: [f64; 2]) -> Self {
+        let (sin, cos) = radians.sin_cos();
+        let [x, y] = centre;
+        Self([
+            cos,
+            -sin,
+            x - cos * x + sin * y,
+            sin,
+            cos,
+            y - sin * x - cos * y,
+        ])
+    }
+
+    pub fn apply(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [a, b, c, d, e, f] = self.0;
+        [a * x + b * y + c, d * x + e * y + f]
+    }
+
+    /// This transform, then `next`.
+    pub fn then(&self, next: Self) -> Self {
+        let [a, b, c, d, e, f] = self.0;
+        let [p, q, r, s, t, u] = next.0;
+        Self([
+            p * a + q * d,
+            p * b + q * e,
+            p * c + q * f + r,
+            s * a + t * d,
+            s * b + t * e,
+            s * c + t * f + u,
+        ])
+    }
+
+    /// `None` when it flattens the plane or is not finite.
+    pub fn inverse(&self) -> Option<Self> {
+        let [a, b, c, d, e, f] = self.0;
+        let determinant = a * e - b * d;
+        if !determinant.is_normal() || !self.0.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let [ia, ib, id, ie] = [e, -b, -d, a].map(|value| value / determinant);
+        Some(Self([
+            ia,
+            ib,
+            -(ia * c + ib * f),
+            id,
+            ie,
+            -(id * c + ie * f),
+        ]))
+    }
 }
 
 /// Straight-alpha sRGB colour.
