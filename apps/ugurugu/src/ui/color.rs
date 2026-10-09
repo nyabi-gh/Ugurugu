@@ -10,8 +10,10 @@ use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use ugu_core::ops::Rgba8;
 
 use crate::canvas::Canvas;
-use crate::i18n::tr;
+use crate::i18n::{tr, tr_with};
 use crate::theme;
+
+use super::history::hex;
 
 const MARGIN: f32 = 4.0;
 const RING_GAP: f32 = 6.0;
@@ -28,6 +30,8 @@ pub struct ColorDock {
     dragged_from: Option<Rgba8>,
     /// Which part a drag started in.
     dragging_ring: bool,
+    /// The pen colour when the dock was last shown.
+    seen: Option<Rgba8>,
 }
 
 fn hsv_to_rgb([h, s, v]: [f32; 3]) -> [f32; 3] {
@@ -79,8 +83,22 @@ fn on_ring(center: Pos2, hue: f32, radius: f32) -> Pos2 {
 }
 
 impl ColorDock {
+    /// Makes the colour shown last the previous one when the pen colour was
+    /// changed elsewhere: by the eyedropper, the history or a restore, as
+    /// 2.2.13's pair follows every change of colour.
+    fn follow(&mut self, color: Rgba8) {
+        if let Some(seen) = self.seen
+            && seen != color
+            && self.dragged_from.is_none()
+        {
+            self.previous = Some(seen);
+        }
+        self.seen = Some(color);
+    }
+
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas) {
         let color = canvas.session().pen.color;
+        self.follow(color);
         let [r, g, b, alpha] = color.0.map(|channel| f32::from(channel) / 255.0);
         let stored = self
             .hsv
@@ -189,6 +207,7 @@ impl ColorDock {
         if picked != color {
             canvas.edit(|session| session.pen.color = picked);
         }
+        self.seen = Some(picked);
         if (response.drag_stopped() || response.clicked())
             && let Some(from) = self.dragged_from.take()
             && from != picked
@@ -203,8 +222,18 @@ impl ColorDock {
             let back =
                 Rect::from_min_size(pair.min + egui::vec2(24.0, 22.0), egui::vec2(40.0, 34.0));
             let front = Rect::from_min_size(pair.min, egui::vec2(48.0, 42.0));
-            let back_response = ui.interact(back, ui.id().with("previous colour"), Sense::click());
             let previous = self.previous.unwrap_or(Rgba8([255, 255, 255, 255]));
+            let back_response = ui
+                .interact(back, ui.id().with("previous colour"), Sense::click())
+                .on_hover_text(tr("color-pair-tip"));
+            back_response.widget_info(|| {
+                let names = [("current", hex(picked)), ("previous", hex(previous))];
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    tr_with("color-pair", &super::args(names)),
+                )
+            });
             let painter = ui.painter();
             painter.rect(
                 back,
@@ -222,6 +251,7 @@ impl ColorDock {
             );
             if back_response.clicked() {
                 self.previous = Some(picked);
+                self.seen = Some(previous);
                 canvas.edit(|session| session.pen.color = previous);
             }
             ui.vertical(|ui| {
@@ -255,5 +285,26 @@ mod tests {
                 assert!((back[axis] - rgb[axis]).abs() < 1e-5, "{rgb:?} -> {back:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_colour_changed_elsewhere_makes_the_last_one_previous() {
+        let (red, blue, green) = (
+            Rgba8([255, 0, 0, 255]),
+            Rgba8([0, 0, 255, 255]),
+            Rgba8([0, 255, 0, 255]),
+        );
+        let mut dock = ColorDock::default();
+        dock.follow(red);
+        assert_eq!(dock.previous, None);
+        dock.follow(red);
+        assert_eq!(dock.previous, None);
+        // The eyedropper picked blue.
+        dock.follow(blue);
+        assert_eq!(dock.previous, Some(red));
+        // A drag on the wheel sets the previous colour when it ends.
+        dock.dragged_from = Some(blue);
+        dock.follow(green);
+        assert_eq!(dock.previous, Some(red));
     }
 }

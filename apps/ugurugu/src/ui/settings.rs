@@ -55,6 +55,12 @@ fn language_name(language: Language) -> &'static str {
     }
 }
 
+/// Puts the tools and colour history kept in `settings` back, at start.
+pub fn restore_tools(settings: &Settings, canvas: &mut Canvas) {
+    let tools = settings.tools.clone();
+    canvas.edit(|session| session.set_tools(tools));
+}
+
 /// Puts `settings` into effect everywhere but the interface language, which
 /// waits for the next start.
 pub fn apply(ctx: &egui::Context, settings: &Settings, canvas: &mut Canvas, files: &mut Files) {
@@ -115,7 +121,7 @@ pub fn show(
         ui.separator();
         ui.horizontal(|ui| {
             if ui.button(tr("settings-restore-defaults")).clicked() {
-                settings = settings.defaults_keeping_unknown();
+                settings = settings.restored();
                 dialog.picking_accent = false;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

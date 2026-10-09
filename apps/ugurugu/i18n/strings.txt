@@ -175,6 +175,11 @@ motion-break-range | ugurugu::WobblePopoverPanel | Break range
 # Colour
 color-dock | ugurugu::ColorDock | Color
 color-current | ugurugu::ColorDock | Current color
+color-pair | ugurugu::ColorPairSwatch | Current color %1, previous color %2 | args=current,previous
+color-pair-tip | ugurugu::ColorPairSwatch | Current and previous color. Click the rear swatch to swap.
+color-history | ugurugu::ColorHistoryDock | Color history
+color-history-clear | ugurugu::ColorHistoryDock | Clear history
+color-history-swatch | ugurugu::ColorHistoryGrid | History color %1 | args=color
 
 # Layers
 layers | ugurugu::LayerDock | Layers

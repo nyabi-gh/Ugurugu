@@ -8,6 +8,7 @@
 
 mod brushes;
 mod color;
+mod history;
 mod layers;
 mod resize;
 mod restyle;
@@ -66,6 +67,7 @@ pub struct Shown {
     pub tool_settings: bool,
     pub wobble: bool,
     pub color: bool,
+    pub color_history: bool,
     pub layers: bool,
     pub animation_bar: bool,
 }
@@ -76,6 +78,7 @@ impl Default for Shown {
             tool_settings: true,
             wobble: true,
             color: true,
+            color_history: true,
             layers: true,
             animation_bar: true,
         }
@@ -267,6 +270,7 @@ fn window_items(ui: &mut egui::Ui, shown: &mut Shown) {
     toggle_item(ui, &mut shown.tool_settings, tr("tool-settings"), "");
     toggle_item(ui, &mut shown.wobble, tr("wobble-dock"), "");
     toggle_item(ui, &mut shown.color, tr("color-dock"), "");
+    toggle_item(ui, &mut shown.color_history, tr("color-history"), "");
     toggle_item(ui, &mut shown.layers, tr("layers"), "");
     ui.separator();
     if ui.button(tr("window-reset-layout")).clicked() {
@@ -494,6 +498,7 @@ pub fn dialogs(
 
 /// Puts the settings read at start into effect.
 pub fn apply_settings(ctx: &egui::Context, store: &Store, canvas: &mut Canvas, files: &mut Files) {
+    settings::restore_tools(store.get(), canvas);
     settings::apply(ctx, store.get(), canvas, files);
 }
 
@@ -1379,6 +1384,11 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
 pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     dock_header(ui, tr("color-dock"), &mut panels.shown.color);
     panels.color.show(ui, canvas);
+}
+
+pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+    dock_header(ui, tr("color-history"), &mut panels.shown.color_history);
+    history::show(ui, canvas);
 }
 
 pub fn layers(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {

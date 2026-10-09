@@ -15,6 +15,7 @@ mod placing;
 mod restyling;
 mod selecting;
 pub mod stabilizer;
+mod tools;
 mod transforming;
 
 use std::collections::HashMap;
@@ -33,6 +34,7 @@ pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
+pub use crate::tools::{ColorHistory, Tools};
 pub use crate::transforming::{Ended, Pending};
 use ugu_core::selection::Selection;
 
@@ -150,7 +152,8 @@ pub struct Session {
     tool: Tool,
     pub pen: ToolSettings,
     pub eraser: ToolSettings,
-    /// The width and stabilizer each preset had when another was chosen.
+    /// The width and stabilizer each preset not in use had when another was
+    /// chosen.
     remembered: HashMap<&'static str, (f32, f32)>,
     live: Option<LiveStroke>,
     /// The selection tool's shape.
@@ -165,6 +168,8 @@ pub struct Session {
     /// The text tool's settings and the text it places.
     pub text: TextSettings,
     pub text_content: String,
+    /// The colours drawn, filled and written with.
+    pub colors: ColorHistory,
     placed: Option<Placed>,
     ended: Option<Ended>,
     lasso: Option<Lasso>,
@@ -193,6 +198,7 @@ impl Session {
             pending: None,
             text: TextSettings::DEFAULT,
             text_content: String::new(),
+            colors: ColorHistory::default(),
             placed: None,
             ended: None,
             lasso: None,
@@ -241,8 +247,7 @@ impl Session {
             .insert(settings.preset.id, (settings.width, settings.stabilizer));
         let (width, stabilizer) = self
             .remembered
-            .get(preset.id)
-            .copied()
+            .remove(preset.id)
             .unwrap_or((preset.size, 0.0));
         settings.preset = preset;
         settings.width = width;
@@ -410,13 +415,18 @@ impl Session {
             ..live.template
         };
         let label = if live.erase { "Erase" } else { "Draw" };
-        self.history_mut().group(label, |group| {
+        let color = stroke.color;
+        let outcome = self.history_mut().group(label, |group| {
             let clip = match &live.clip {
                 Some(selection) => Some(selecting::stored_mask(group, selection)?),
                 None => None,
             };
             group.apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
-        })
+        })?;
+        if !live.erase && matches!(outcome, Outcome::Committed(_)) {
+            self.colors.record(color);
+        }
+        Ok(outcome)
     }
 
     pub fn cancel_stroke(&mut self) {

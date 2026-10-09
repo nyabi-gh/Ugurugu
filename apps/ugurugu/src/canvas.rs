@@ -211,7 +211,10 @@ impl Canvas {
     /// `saved` when it is on disk as it is.
     pub fn replace(&mut self, document: Document, saved: bool) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
+        // The tools stay as they were, as in 2.2.13.
+        let tools = self.session.tools();
         self.session = Session::new(document, saved);
+        self.session.set_tools(tools);
         self.generation += 1;
         self.split = None;
         self.preview = None;

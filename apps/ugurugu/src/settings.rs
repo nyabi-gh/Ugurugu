@@ -17,6 +17,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
+use ugu_session::Tools;
+
+mod tools;
 
 /// How long settings must stay unchanged before they are written.
 const QUIET: Duration = Duration::from_millis(500);
@@ -65,6 +68,8 @@ pub struct Settings {
     /// Where new documents are first saved and exported, `None` for
     /// Documents.
     pub default_save_folder: Option<PathBuf>,
+    /// The tools and colour history as last left.
+    pub tools: Tools,
     /// Keys this version does not know, kept to be written back.
     unknown: Map<String, Value>,
 }
@@ -76,16 +81,19 @@ impl Default for Settings {
             accent: None,
             wobble_animation: true,
             default_save_folder: None,
+            tools: Tools::default(),
             unknown: Map::new(),
         }
     }
 }
 
 impl Settings {
-    /// The settings as they would be on a fresh install, keeping only what
-    /// this version cannot show.
-    pub fn defaults_keeping_unknown(&self) -> Self {
+    /// What the settings dialog restores: its own settings as on a fresh
+    /// install. The tools, the colour history and what this version cannot
+    /// show stay, as in 2.2.13.
+    pub fn restored(&self) -> Self {
         Self {
+            tools: self.tools.clone(),
             unknown: self.unknown.clone(),
             ..Self::default()
         }
@@ -144,6 +152,12 @@ impl Settings {
                 tracing::warn!(?folder, "the default save folder is not a full path");
             }
         }
+        if let Some(value) = object.remove("tools") {
+            settings.tools = tools::parse(&value);
+        }
+        if let Some(value) = object.remove("colorHistory") {
+            settings.tools.colors = tools::parse_history(&value);
+        }
         if !object.is_empty() {
             let keys: Vec<&String> = object.keys().collect();
             tracing::info!(?keys, "settings this version does not use are kept");
@@ -170,6 +184,13 @@ impl Settings {
             object.insert(
                 "defaultSaveFolder".to_owned(),
                 folder.to_string_lossy().into_owned().into(),
+            );
+        }
+        object.insert("tools".to_owned(), tools::to_json(&self.tools));
+        if !self.tools.colors.colors().is_empty() {
+            object.insert(
+                "colorHistory".to_owned(),
+                tools::history_to_json(&self.tools.colors),
             );
         }
         let mut text =
@@ -421,6 +442,14 @@ mod tests {
             accent: Some([0x12, 0xab, 0xef]),
             wobble_animation: false,
             default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),
+            tools: {
+                let mut tools = Tools {
+                    tool: ugu_session::Tool::Fill,
+                    ..Tools::default()
+                };
+                tools.colors.record(ugu_core::ops::Rgba8([1, 2, 3, 4]));
+                tools
+            },
             unknown: Map::new(),
         }
     }
@@ -446,7 +475,7 @@ mod tests {
         let object: Map<String, Value> = serde_json::from_str(&text).unwrap();
         let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["format", "version", "wobbleAnimation"]);
+        assert_eq!(keys, ["format", "tools", "version", "wobbleAnimation"]);
     }
 
     #[test]
@@ -510,7 +539,7 @@ mod tests {
         assert_eq!(again["version"], 1);
         assert_eq!(Settings::parse(&settings.to_json()), settings);
         assert_eq!(
-            settings.defaults_keeping_unknown().to_json(),
+            settings.restored().to_json(),
             Settings {
                 unknown: settings.unknown.clone(),
                 ..Settings::default()

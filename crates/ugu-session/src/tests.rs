@@ -1607,3 +1607,82 @@ fn a_stroke_begun_while_a_transform_is_pending_is_cut_to_the_moved_selection() {
         moved.unwrap().mask().bounds
     );
 }
+
+#[test]
+fn the_colour_history_keeps_each_colour_once_newest_first_up_to_256() {
+    let colour = |index: usize| Rgba8([index as u8, (index >> 8) as u8, 0, 255]);
+    let mut history = ColorHistory::default();
+    for index in 0..300 {
+        history.record(colour(index));
+    }
+    assert_eq!(history.colors().len(), ColorHistory::CAPACITY);
+    assert_eq!(history.colors()[0], colour(299));
+    assert_eq!(history.colors()[255], colour(44));
+    history.record(colour(100));
+    assert_eq!(history.colors()[0], colour(100));
+    assert_eq!(history.colors()[1], colour(299));
+    assert_eq!(history.colors().len(), ColorHistory::CAPACITY);
+    let kept = ColorHistory::from_colors([colour(1), colour(2), colour(1)]);
+    assert_eq!(kept.colors(), [colour(1), colour(2)]);
+    assert_eq!(
+        ColorHistory::from_colors((0..300).map(colour))
+            .colors()
+            .len(),
+        ColorHistory::CAPACITY
+    );
+    history.clear();
+    assert!(history.colors().is_empty());
+}
+
+#[test]
+fn strokes_fills_and_text_record_their_colour_and_erasing_does_not() {
+    let mut session = session();
+    let red = Rgba8([255, 0, 0, 255]);
+    let blue = Rgba8([0, 0, 255, 128]);
+    let green = Rgba8([0, 255, 0, 255]);
+    session.pen.color = red;
+    draw(&mut session, 10.0, 60.0);
+    assert_eq!(session.colors.colors(), [red]);
+    session.set_tool(Tool::Eraser);
+    draw(&mut session, 10.0, 30.0);
+    assert_eq!(session.colors.colors(), [red]);
+    session.set_tool(Tool::Fill);
+    session.pen.color = blue;
+    assert!(matches!(
+        session.bucket([60.0, 50.0], Some(boxed().as_slice())),
+        Ok(Outcome::Committed(_))
+    ));
+    assert_eq!(session.colors.colors(), [blue, red]);
+    session.set_tool(Tool::Text);
+    session.pen.color = green;
+    session.place_text([30.0, 40.0], boxed_text()).unwrap();
+    session.apply_text().unwrap();
+    assert_eq!(session.colors.colors(), [green, blue, red]);
+    // Drawing red again moves it to the front; undo keeps the history.
+    session.set_tool(Tool::Pen);
+    session.pen.color = red;
+    draw(&mut session, 10.0, 60.0);
+    session.undo().unwrap();
+    assert_eq!(session.colors.colors(), [red, green, blue]);
+}
+
+#[test]
+fn tools_carry_over_to_another_document() {
+    let mut session = session();
+    session.set_tool(Tool::Wand);
+    session.pen.color = Rgba8([1, 2, 3, 255]);
+    session.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[3]);
+    session.pen.width = 17.0;
+    session.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[0]);
+    session.fill.tolerance = 90;
+    session.text.size = 100.0;
+    session.colors.record(Rgba8([9, 9, 9, 255]));
+    let tools = session.tools();
+    let mut next = Session::new(Document::new([50, 50]), true);
+    assert_eq!(next.tools(), Tools::default());
+    next.set_tools(tools.clone());
+    assert_eq!(next.tools(), tools);
+    next.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[3]);
+    assert_eq!(next.pen.width, 17.0);
+    assert_eq!(next.tool(), Tool::Wand);
+}

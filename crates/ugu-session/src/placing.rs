@@ -171,6 +171,7 @@ impl Session {
             self.ended = Some(Ended::Applied {
                 revision: self.history.revision(),
             });
+            self.colors.record(color);
         }
         Ok(outcome)
     }

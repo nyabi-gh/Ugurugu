@@ -189,13 +189,17 @@ impl Session {
         clip: Option<Arc<Selection>>,
     ) -> Result<Outcome, FillError> {
         let (layer, color, antialias) = (self.layer, self.pen.color, self.fill.antialias);
-        Ok(self.history_mut().group("Fill", |group| {
+        let outcome = self.history_mut().group("Fill", |group| {
             let coverage = selecting::stored_mask(group, coverage)?;
             let clip = match &clip {
                 Some(selection) => Some(selecting::stored_mask(group, selection)?),
                 None => None,
             };
             group.apply(|document| command::fill(document, layer, coverage, color, antialias, clip))
-        })?)
+        })?;
+        if let Outcome::Committed(_) = outcome {
+            self.colors.record(color);
+        }
+        Ok(outcome)
     }
 }

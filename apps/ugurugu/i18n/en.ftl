@@ -177,6 +177,11 @@ motion-break-range = Break range
 # Colour
 color-dock = Color
 color-current = Current color
+color-pair = Current color { $current }, previous color { $previous }
+color-pair-tip = Current and previous color. Click the rear swatch to swap.
+color-history = Color history
+color-history-clear = Clear history
+color-history-swatch = History color { $color }
 
 # Layers
 layers = Layers

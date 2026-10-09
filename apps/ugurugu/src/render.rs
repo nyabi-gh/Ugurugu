@@ -700,7 +700,8 @@ impl RenderThread {
                 .exact_size(48.0)
                 .frame(bar(theme::CHROME, 4, 8))
                 .show(ui, |ui| ui::rail(ui, canvas));
-            if panels.shown.tool_settings || panels.shown.color {
+            let left = panels.shown;
+            if left.tool_settings || left.color || left.color_history {
                 egui::Panel::left("tool settings")
                     .resizable(true)
                     .default_size(260.0)
@@ -713,6 +714,12 @@ impl RenderThread {
                         }
                         if panels.shown.color {
                             ui::color(ui, canvas, panels);
+                        }
+                        if panels.shown.color_history {
+                            if left.color {
+                                ui.separator();
+                            }
+                            ui::color_history(ui, canvas, panels);
                         }
                     });
             }
@@ -773,6 +780,11 @@ impl RenderThread {
                         });
                 });
         });
+        // Tools change through the panels, shortcuts and the canvas.
+        let tools = self.canvas.session().tools();
+        if tools != self.settings.get().tools {
+            self.settings.change(|settings| settings.tools = tools);
+        }
         let laid_out = Instant::now();
         let mut platform_output = output.platform_output;
         if let Some(update) = platform_output.accesskit_update.take() {
