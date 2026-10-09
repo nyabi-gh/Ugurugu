@@ -28,6 +28,7 @@ use crate::files::{Action, FileEvent, Files};
 use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
+use crate::settings::Store;
 use crate::theme;
 use crate::ui::{self, Panels};
 
@@ -142,6 +143,7 @@ pub struct RenderThread {
     ime: ImeProbe,
     panels: Panels,
     files: Files,
+    settings: Store,
     clipboard: Clipboard,
     control_held: bool,
     /// Ctrl+V since the last frame.
@@ -284,6 +286,7 @@ impl RenderThread {
         EguiState(egui_state): EguiState,
         open_at_start: Option<std::path::PathBuf>,
         early: Option<EarlyGpu>,
+        settings: Store,
     ) -> Result<Self, String> {
         let Links {
             surface_source,
@@ -301,7 +304,7 @@ impl RenderThread {
             }
             None => Display::open(&instance, surface, adapter_choice, size),
         }?;
-        Ok(Self {
+        let mut render = Self {
             window,
             egui_ctx,
             egui_state,
@@ -334,6 +337,7 @@ impl RenderThread {
                 }
                 files
             },
+            settings,
             title: String::new(),
             ime: ImeProbe::default(),
             panels: Panels::default(),
@@ -343,7 +347,14 @@ impl RenderThread {
             repaint_at: None,
             minimized: false,
             recovery: None,
-        })
+        };
+        ui::apply_settings(
+            &render.egui_ctx,
+            &render.settings,
+            &mut render.canvas,
+            &mut render.files,
+        );
+        Ok(render)
     }
 
     /// Replaces everything made with a lost device. The next frame shows what
@@ -622,6 +633,7 @@ impl RenderThread {
             files,
             clipboard,
             diagnostics,
+            settings,
             ..
         } = self;
         let adapter_summary = &display.gpu.summary;
@@ -631,7 +643,7 @@ impl RenderThread {
             // Before the widgets run, so focus is what the key was pressed in.
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, paste);
             files.confirm(ui.ctx(), canvas);
-            ui::dialogs(ui.ctx(), canvas, panels);
+            ui::dialogs(ui.ctx(), canvas, files, settings, panels);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             let bar = |fill, x, y| {

@@ -136,6 +136,8 @@ pub struct Canvas {
     sample_count: usize,
     notice: Option<String>,
     playback: Option<Playback>,
+    /// Off in the settings keeps playback from starting.
+    animation_allowed: bool,
     /// Counts documents opened, so renders of an earlier one are told apart.
     generation: u64,
     /// The document as last handed to the worker, shared by its jobs.
@@ -192,6 +194,7 @@ impl Canvas {
             sample_count: 0,
             notice: None,
             playback: None,
+            animation_allowed: true,
             snapshot: None,
             generation: 0,
             thumbnails: HashMap::new(),
@@ -471,11 +474,27 @@ impl Canvas {
         self.playback.is_some()
     }
 
+    /// Whether the wobble animation may play, from the settings.
+    pub fn animation_allowed(&self) -> bool {
+        self.animation_allowed
+    }
+
+    /// Allows the wobble animation to play or not; not stops it.
+    pub fn allow_animation(&mut self, allowed: bool) {
+        self.animation_allowed = allowed;
+        if !allowed && self.is_playing() {
+            self.toggle_playback();
+        }
+    }
+
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
         if let Some(playback) = self.playback.take() {
             self.held = Some(playback.shown);
             self.upload_all();
+            return;
+        }
+        if !self.animation_allowed {
             return;
         }
         // Playing moves through frames, which applies a pending transform or
@@ -1220,6 +1239,20 @@ mod tests {
         }
         assert_eq!(canvas.display().width(), 320);
         assert_eq!(canvas.placement().scale, 0.5);
+    }
+
+    #[test]
+    fn the_wobble_animation_setting_stops_and_blocks_playback() {
+        let mut canvas = super::Canvas::new(Document::new([64, 64]), |_| {});
+        canvas.toggle_playback();
+        assert!(canvas.is_playing());
+        canvas.allow_animation(false);
+        assert!(!canvas.is_playing());
+        canvas.toggle_playback();
+        assert!(!canvas.is_playing());
+        canvas.allow_animation(true);
+        canvas.toggle_playback();
+        assert!(canvas.is_playing());
     }
 
     #[test]

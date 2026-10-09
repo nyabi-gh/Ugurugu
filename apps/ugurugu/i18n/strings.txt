@@ -12,6 +12,7 @@ file-open | ugurugu::MainWindow | &Open…
 file-save | ugurugu::MainWindow | &Save
 file-save-as | ugurugu::MainWindow | Save &As…
 file-export-frame | ugurugu::MainWindow | Export current frame as &image…
+file-export-image | ugurugu::MainWindow | Export &image…
 file-insert-image | ugurugu::MainWindow | Insert &image…
 insert-image-failed | ugurugu::MainWindow | Could not insert image
 image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
@@ -309,3 +310,26 @@ restyle-choose-color | ugurugu::StrokePropertiesDialog | Select Stroke Color
 restyle-description | - | Changes the strokes and fills the selection touches on the current layer. Only checked properties change. | 현재 레이어에서 선택 영역에 닿는 선과 채우기를 바꿉니다. 체크한 속성만 바뀝니다. | 現在のレイヤーで選択範囲に触れるストロークと塗りつぶしを変更します。チェックしたプロパティだけが変わります。
 restyle-nothing | - | No strokes or fills in the selection to edit. | 선택 영역에 편집할 선이나 채우기가 없습니다. | 選択範囲に編集できるストロークや塗りつぶしがありません。
 restyle-pending | - | Apply or cancel the transform or text first. | 변형이나 텍스트를 먼저 적용하거나 취소하세요. | 先に変形またはテキストを適用するか、キャンセルしてください。
+
+# Settings
+edit-settings | ugurugu::MainWindow | &Settings…
+settings-title | ugurugu::SettingsDialog | Settings
+settings-general | ugurugu::SettingsDialog | General
+settings-language | ugurugu::SettingsDialog | Language
+settings-language-system | ugurugu::SettingsDialog | System default
+settings-theme-color | ugurugu::SettingsDialog | Theme color
+settings-restart | ugurugu::SettingsDialog | Restart Ugurugu to apply language changes.
+settings-drawing | ugurugu::SettingsDialog | Drawing
+settings-wobble-animation | ugurugu::SettingsDialog | Wobble animation
+settings-files | ugurugu::SettingsDialog | Files
+settings-default-folder | ugurugu::SettingsDialog | Default save folder
+settings-default-folder-hint | ugurugu::SettingsDialog | New projects and exports start in this folder.
+settings-choose | ugurugu::SettingsDialog | Choose…
+settings-system-folder | ugurugu::SettingsDialog | Use system default
+settings-choose-folder | ugurugu::SettingsDialog | Choose default save folder
+settings-about | ugurugu::SettingsDialog | About
+settings-version | ugurugu::SettingsDialog | Version %1 | args=version
+settings-credit-development | ugurugu::SettingsDialog | Development support by seuppi
+settings-credit-icon | ugurugu::SettingsDialog | App icon artwork by seuppi
+settings-restore-defaults | - | Restore defaults | 기본값 복원 | デフォルトに戻す
+settings-close | - | Close | 닫기 | 閉じる

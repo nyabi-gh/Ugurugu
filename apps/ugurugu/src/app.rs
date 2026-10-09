@@ -22,6 +22,7 @@ use winit::window::{Window, WindowId};
 use crate::render::{
     EarlyGpu, EarlyInstance, EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink,
 };
+use crate::settings::Store;
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
@@ -48,6 +49,8 @@ pub struct App {
     /// render thread take them.
     early_instance: Option<EarlyInstance>,
     early_gpu: Option<EarlyGpu>,
+    /// Handed to the render thread, which shows and changes them.
+    settings: Option<Store>,
 }
 
 struct Session {
@@ -64,13 +67,18 @@ struct Session {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UiEvent>, early: (EarlyInstance, EarlyGpu)) -> Self {
+    pub fn new(
+        proxy: EventLoopProxy<UiEvent>,
+        early: (EarlyInstance, EarlyGpu),
+        settings: Store,
+    ) -> Self {
         Self {
             proxy,
             session: None,
             fatal_error: None,
             early_instance: Some(early.0),
             early_gpu: Some(early.1),
+            settings: Some(settings),
         }
     }
 
@@ -94,6 +102,7 @@ impl Session {
         event_loop: &ActiveEventLoop,
         proxy: EventLoopProxy<UiEvent>,
         early_gpu: Option<EarlyGpu>,
+        settings: Store,
     ) -> Result<Self, String> {
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
@@ -116,6 +125,7 @@ impl Session {
 
         let egui_ctx = egui::Context::default();
         crate::theme::apply(&egui_ctx);
+        crate::theme::set_accent(&egui_ctx, settings.get().accent);
         let egui_state = EguiState::new(egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -158,6 +168,7 @@ impl Session {
                     egui_state,
                     open_at_start,
                     early_gpu,
+                    settings,
                 )
                 .and_then(|render| render.run(&messages))
                 .err();
@@ -187,7 +198,15 @@ impl ApplicationHandler<UiEvent> for App {
         if self.session.is_some() {
             return;
         }
-        match Session::create(event_loop, self.proxy.clone(), self.early_gpu.take()) {
+        let Some(settings) = self.settings.take() else {
+            return;
+        };
+        match Session::create(
+            event_loop,
+            self.proxy.clone(),
+            self.early_gpu.take(),
+            settings,
+        ) {
             Ok(session) => self.session = Some(session),
             Err(error) => {
                 self.fatal_error = Some(error);

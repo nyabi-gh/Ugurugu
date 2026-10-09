@@ -5,6 +5,7 @@
 //! neutral interface with one amber accent, set in Pretendard JP.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
@@ -24,11 +25,41 @@ pub const BORDER: Color32 = rgb(0x3F_43_4B);
 pub const TEXT: Color32 = rgb(0xE8_E8_EA);
 pub const MUTED: Color32 = rgb(0x9A_A0_A8);
 pub const DISABLED: Color32 = rgb(0x6A_6F_78);
-pub const ACCENT: Color32 = rgb(0xFF_C9_4A);
-/// `ACCENT` 12% darker, as Qt's `darker(112)`.
-pub const ACCENT_PRESSED: Color32 = rgb(0xE4_B3_42);
-/// Text on the accent, dark because the amber is light.
-pub const ACCENT_TEXT: Color32 = rgb(0x18_18_1A);
+/// The accent unless the user chose another.
+pub const DEFAULT_ACCENT: [u8; 3] = [0xFF, 0xC9, 0x4A];
+
+/// The accent as 0xRRGGBB; read on every frame, set from the settings.
+static ACCENT: AtomicU32 = AtomicU32::new(0xFF_C9_4A);
+
+pub fn accent() -> Color32 {
+    rgb(ACCENT.load(Ordering::Relaxed))
+}
+
+/// `accent()` 12% darker, as Qt's `darker(112)`.
+pub fn accent_pressed() -> Color32 {
+    let [r, g, b, _] = accent().to_array();
+    let darker = |channel: u8| (f32::from(channel) * 100.0 / 112.0).round() as u8;
+    Color32::from_rgb(darker(r), darker(g), darker(b))
+}
+
+/// Text on the accent: dark on a light accent, light on a dark one, by
+/// 2.2.13's luminance threshold.
+pub fn accent_text() -> Color32 {
+    let [r, g, b, _] = accent().to_array();
+    let luminance = (0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b)) / 255.0;
+    if luminance >= 0.52 {
+        rgb(0x18_18_1A)
+    } else {
+        rgb(0xFA_FA_FB)
+    }
+}
+
+/// Uses `color` as the accent, or the default for `None`, and restyles `ctx`.
+pub fn set_accent(ctx: &egui::Context, color: Option<[u8; 3]>) {
+    let [r, g, b] = color.unwrap_or(DEFAULT_ACCENT);
+    ACCENT.store(u32::from_be_bytes([0, r, g, b]), Ordering::Relaxed);
+    ctx.all_styles_mut(style_accent);
+}
 
 /// Body text, the size of the Windows interface font Qt uses (9 pt).
 pub const BODY: f32 = 12.0;
@@ -92,10 +123,6 @@ pub fn apply(ctx: &egui::Context) {
         visuals.extreme_bg_color = BASE;
         visuals.faint_bg_color = HOVER;
         visuals.code_bg_color = BASE;
-        visuals.hyperlink_color = ACCENT;
-        visuals.selection.bg_fill = ACCENT;
-        visuals.selection.stroke = Stroke::new(1.0, ACCENT_TEXT);
-        visuals.text_cursor.stroke = Stroke::new(2.0, ACCENT);
         visuals.slider_trailing_fill = true;
         visuals.handle_shape = egui::style::HandleShape::Circle;
         visuals.popup_shadow = egui::Shadow {
@@ -126,10 +153,41 @@ pub fn apply(ctx: &egui::Context) {
         widgets.hovered.expansion = 0.0;
         widgets.active.bg_fill = CONTROL;
         widgets.active.weak_bg_fill = CONTROL;
-        widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
         widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
         widgets.active.corner_radius = radius;
         widgets.active.expansion = 0.0;
-        widgets.open = widgets.active;
+        style_accent(style);
     });
+}
+
+/// The parts of the style drawn in the accent.
+fn style_accent(style: &mut egui::Style) {
+    let visuals = &mut style.visuals;
+    visuals.hyperlink_color = accent();
+    visuals.selection.bg_fill = accent();
+    visuals.selection.stroke = Stroke::new(1.0, accent_text());
+    visuals.text_cursor.stroke = Stroke::new(2.0, accent());
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, accent());
+    visuals.widgets.open = visuals.widgets.active;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_accent_gives_2_2_13s_colours() {
+        let ctx = egui::Context::default();
+        set_accent(&ctx, None);
+        assert_eq!(accent(), rgb(0xFF_C9_4A));
+        assert_eq!(accent_pressed(), rgb(0xE4_B3_42));
+        assert_eq!(accent_text(), rgb(0x18_18_1A));
+        set_accent(&ctx, Some([0x20, 0x40, 0xA0]));
+        assert_eq!(accent_text(), rgb(0xFA_FA_FB));
+        assert_eq!(
+            ctx.global_style().visuals.selection.bg_fill,
+            rgb(0x20_40_A0)
+        );
+        set_accent(&ctx, None);
+    }
 }

@@ -217,7 +217,7 @@ impl ColorDock {
                 front,
                 CornerRadius::same(6),
                 rgba(picked),
-                Stroke::new(3.0, theme::ACCENT),
+                Stroke::new(3.0, theme::accent()),
                 egui::StrokeKind::Inside,
             );
             if back_response.clicked() {

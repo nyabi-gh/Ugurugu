@@ -15,6 +15,7 @@ mod ime_probe;
 mod input;
 mod latency;
 mod render;
+mod settings;
 mod theme;
 mod ui;
 mod widgets;
@@ -49,12 +50,14 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let early_gpu = render::open_gpu_early();
+    let settings = settings::Store::load();
+    i18n::choose(settings.get().language);
     ugu_win::pointer::enable_mouse_in_pointer()
         .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
     let event_loop = EventLoop::<app::UiEvent>::with_user_event()
         .build()
         .map_err(|error| format!("cannot create the event loop: {error}"))?;
-    let mut app = app::App::new(event_loop.create_proxy(), early_gpu);
+    let mut app = app::App::new(event_loop.create_proxy(), early_gpu, settings);
     event_loop
         .run_app(&mut app)
         .map_err(|error| format!("event loop failed: {error}"))?;

@@ -148,7 +148,7 @@ impl Presets {
             theme::BASE
         };
         let edge = if selected || response.has_focus() {
-            Stroke::new(1.5, theme::ACCENT)
+            Stroke::new(1.5, theme::accent())
         } else {
             Stroke::new(1.0, theme::BORDER)
         };

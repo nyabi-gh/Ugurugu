@@ -366,8 +366,8 @@ fn preview(ui: &mut egui::Ui, name: &str, rectangles: &[([f64; 4], bool)]) {
             painter.rect(
                 shape,
                 egui::CornerRadius::ZERO,
-                theme::ACCENT.gamma_multiply(0.25),
-                egui::Stroke::new(1.5, theme::ACCENT),
+                theme::accent().gamma_multiply(0.25),
+                egui::Stroke::new(1.5, theme::accent()),
                 egui::StrokeKind::Inside,
             );
         } else {
@@ -477,7 +477,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
                 let chosen = dialog.anchor == Some(index);
                 let button = egui::Button::new("")
                     .min_size(egui::vec2(28.0, 28.0))
-                    .fill(if chosen { theme::ACCENT } else { theme::BASE });
+                    .fill(if chosen { theme::accent() } else { theme::BASE });
                 let response = ui.add(button).on_hover_text(tr(key));
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, tr(key))

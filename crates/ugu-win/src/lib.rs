@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod clock;
 pub mod dialog;
 pub mod file;
+pub mod folder;
 pub mod locale;
 pub mod memory;
 pub mod pointer;

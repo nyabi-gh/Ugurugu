@@ -12,6 +12,8 @@ use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource};
 use unic_langid::LanguageIdentifier;
 
+use crate::settings::Language;
+
 const LANGUAGES: [(&str, &str); 3] = [
     ("en", include_str!("../i18n/en.ftl")),
     ("ko", include_str!("../i18n/ko.ftl")),
@@ -27,12 +29,29 @@ struct Text {
     plain: HashMap<String, &'static str>,
 }
 
+/// The language chosen in the settings, set before any text is shown.
+static CHOSEN: OnceLock<Language> = OnceLock::new();
+
+/// Uses `language` from the settings unless `UGURUGU_LANGUAGE` names one.
+/// Text already shown keeps its language, so this comes first.
+pub fn choose(language: Language) {
+    if CHOSEN.set(language).is_err() {
+        tracing::warn!("the interface language was already chosen");
+    }
+}
+
 fn text() -> &'static Text {
     static TEXT: OnceLock<Text> = OnceLock::new();
     TEXT.get_or_init(|| {
+        let chosen = CHOSEN
+            .get()
+            .filter(|language| **language != Language::System)
+            .map(|language| language.code().to_owned());
         let preferred = std::env::var("UGURUGU_LANGUAGE")
+            .ok()
+            .or(chosen)
             .map(|language| vec![language])
-            .unwrap_or_else(|_| ugu_win::locale::preferred_ui_languages());
+            .unwrap_or_else(ugu_win::locale::preferred_ui_languages);
         let chosen = language_for(&preferred);
         tracing::info!(language = chosen, "interface language");
         load(chosen)

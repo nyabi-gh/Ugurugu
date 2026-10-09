@@ -70,6 +70,8 @@ pub enum Purpose {
     SaveAs,
     ExportPng,
     InsertImage,
+    /// The default save folder, for the settings.
+    SaveFolder,
 }
 
 /// What waits for unsaved changes to be dealt with.
@@ -114,6 +116,10 @@ pub struct Files {
     after_save: Option<Action>,
     saving: bool,
     busy_dialog: bool,
+    /// The default save folder from the settings, `None` for Documents.
+    default_save_folder: Option<PathBuf>,
+    /// A default save folder chosen, for the settings to take.
+    chosen_save_folder: Option<PathBuf>,
     /// What the status bar says.
     message: Option<String>,
     /// What it says instead from then on, unless something else is said first.
@@ -160,6 +166,8 @@ impl Files {
             after_save: None,
             saving: false,
             busy_dialog: false,
+            default_save_folder: None,
+            chosen_save_folder: None,
             message: None,
             upcoming: None,
             close: false,
@@ -240,7 +248,7 @@ impl Files {
                 self.id = new_id();
                 self.clear_message();
             }
-            Action::Open => self.pick(Purpose::Open, Dialog::Open),
+            Action::Open => self.pick(Purpose::Open, Dialog::Open(DOCUMENT_TYPE)),
             Action::Close => self.close = true,
         }
     }
@@ -258,51 +266,86 @@ impl Files {
     }
 
     pub fn save_as(&mut self) {
-        let name = format!("{}.{}", self.display_name(), DOCUMENT_TYPE.extensions[0]);
-        self.pick(Purpose::SaveAs, Dialog::Save { name: &name });
+        self.pick_save(Purpose::SaveAs, DOCUMENT_TYPE);
+    }
+
+    /// Where new documents are first saved and exported, from the settings.
+    pub fn set_default_save_folder(&mut self, folder: Option<PathBuf>) {
+        self.default_save_folder = folder;
+    }
+
+    /// Asks for a new default save folder, starting in the current one.
+    pub fn choose_save_folder(&mut self) {
+        self.pick(
+            Purpose::SaveFolder,
+            Dialog::Folder {
+                title: tr("settings-choose-folder").to_owned(),
+                start: None,
+            },
+        );
+    }
+
+    /// The default save folder the user chose since last asked.
+    pub fn take_chosen_save_folder(&mut self) -> Option<PathBuf> {
+        self.chosen_save_folder.take()
+    }
+
+    /// Saves as `file_type` under the document's name, in its folder, or in
+    /// the default save folder for a document never saved, as 2.2.13 does.
+    fn pick_save(&mut self, purpose: Purpose, file_type: FileType) {
+        let name = format!("{}.{}", self.display_name(), file_type.extensions[0]);
+        let folder = self
+            .path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(std::path::Path::to_path_buf);
+        self.pick(
+            purpose,
+            Dialog::Save {
+                file_type,
+                name,
+                folder,
+            },
+        );
     }
 
     /// Shows a dialog on a thread of its own.
-    pub fn pick(&mut self, purpose: Purpose, dialog: Dialog<'_>) {
+    pub fn pick(&mut self, purpose: Purpose, mut dialog: Dialog) {
         if self.busy_dialog {
             return;
         }
         self.busy_dialog = true;
         let owner = self.owner;
         let events = self.events.clone();
-        let file_type = match purpose {
-            Purpose::ExportPng => PNG_TYPE,
-            Purpose::InsertImage => IMAGE_TYPE,
-            Purpose::Open | Purpose::SaveAs => DOCUMENT_TYPE,
-        };
-        let save_name = match dialog {
-            Dialog::Save { name } => Some(name.to_owned()),
-            Dialog::Open => None,
-        };
+        let default_save_folder = self.default_save_folder.clone();
         std::thread::Builder::new()
             .name("file dialog".to_owned())
             .spawn(move || {
-                let dialog = match &save_name {
-                    Some(name) => Dialog::Save { name },
-                    None => Dialog::Open,
-                };
-                let path =
-                    ugu_win::dialog::pick(owner, dialog, file_type).unwrap_or_else(|error| {
-                        tracing::error!(%error, "the file dialog failed");
-                        None
-                    });
+                // Looking at the disk is left to this thread.
+                match &mut dialog {
+                    Dialog::Save { folder, .. } if folder.is_none() => {
+                        *folder = crate::settings::save_folder(default_save_folder.as_deref());
+                    }
+                    Dialog::Folder { start, .. } => {
+                        *start = crate::settings::save_folder(default_save_folder.as_deref());
+                    }
+                    _ => {}
+                }
+                let path = ugu_win::dialog::pick(owner, &dialog).unwrap_or_else(|error| {
+                    tracing::error!(%error, "the file dialog failed");
+                    None
+                });
                 events(FileEvent::Picked(purpose, path));
             })
             .expect("cannot start the dialog thread");
     }
 
     pub fn insert_image(&mut self) {
-        self.pick(Purpose::InsertImage, Dialog::Open);
+        self.pick(Purpose::InsertImage, Dialog::Open(IMAGE_TYPE));
     }
 
     pub fn export_png(&mut self) {
-        let name = format!("{}.{}", self.display_name(), PNG_TYPE.extensions[0]);
-        self.pick(Purpose::ExportPng, Dialog::Save { name: &name });
+        self.pick_save(Purpose::ExportPng, PNG_TYPE);
     }
 
     /// Exports the frame with a pending transform or placed text applied.
@@ -348,6 +391,7 @@ impl Files {
                         let fit = canvas.session().document().canvas;
                         let _ = self.to_worker.send(Job::Insert { path, fit });
                     }
+                    Purpose::SaveFolder => self.chosen_save_folder = Some(path),
                 }
             }
             FileEvent::Opened(path, result) => match result {

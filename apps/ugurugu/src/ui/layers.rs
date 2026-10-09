@@ -370,7 +370,7 @@ impl LayerDock {
         ui.add_space(4.0);
         self.buttons(ui, canvas, refusal);
         if let Some(text) = refusal.as_deref() {
-            ui.colored_label(theme::ACCENT, text);
+            ui.colored_label(theme::accent(), text);
         }
         ui.add_space(4.0);
         self.properties(ui, canvas, current, refusal);
@@ -401,7 +401,7 @@ impl LayerDock {
                 egui::pos2(card.left() + 4.0 + 1.5, card.center().y),
                 egui::vec2(3.0, 20.0),
             );
-            painter.rect_filled(bar, CornerRadius::same(2), theme::ACCENT);
+            painter.rect_filled(bar, CornerRadius::same(2), theme::accent());
         } else if response.hovered() {
             painter.rect_filled(card, CornerRadius::same(7), theme::HOVER);
         }
@@ -509,7 +509,7 @@ impl LayerDock {
                 wobble,
                 Glyph::Wobble,
                 if wobbles {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
                     theme::DISABLED
                 },
@@ -610,10 +610,10 @@ impl LayerDock {
                 let galley = painter.layout_no_wrap(
                     badge.to_owned(),
                     FontId::proportional(theme::BODY),
-                    theme::ACCENT,
+                    theme::accent(),
                 );
                 let width = galley.size().x;
-                painter.galley(egui::pos2(x, name_pos.y), galley, theme::ACCENT);
+                painter.galley(egui::pos2(x, name_pos.y), galley, theme::accent());
                 x += width + 5.0;
             }
             let name_color = if row.visible {
@@ -691,15 +691,15 @@ impl LayerDock {
         };
         match target {
             Drop::Above(_) => {
-                painter.rect_filled(line(rect.top()), CornerRadius::same(1), theme::ACCENT)
+                painter.rect_filled(line(rect.top()), CornerRadius::same(1), theme::accent())
             }
             Drop::Below(_) => {
-                painter.rect_filled(line(rect.bottom()), CornerRadius::same(1), theme::ACCENT)
+                painter.rect_filled(line(rect.bottom()), CornerRadius::same(1), theme::accent())
             }
             Drop::Into(_) => painter.rect_stroke(
                 card,
                 CornerRadius::same(7),
-                Stroke::new(2.0, theme::ACCENT),
+                Stroke::new(2.0, theme::accent()),
                 egui::StrokeKind::Inside,
             ),
         };

@@ -11,6 +11,7 @@ mod color;
 mod layers;
 mod resize;
 mod restyle;
+mod settings;
 mod text;
 
 use fluent_bundle::FluentArgs;
@@ -28,6 +29,7 @@ use crate::clipboard::Clipboard;
 use crate::files::{Action, Files};
 use crate::i18n::{tr, tr_with};
 use crate::icons::{self, Glyph};
+use crate::settings::Store;
 use crate::theme;
 use crate::widgets;
 
@@ -54,6 +56,8 @@ pub struct Panels {
     resize: Option<resize::Dialog>,
     /// The stroke properties dialog, while open.
     restyle: Option<restyle::Dialog>,
+    /// The settings dialog, while open.
+    settings: Option<settings::Dialog>,
 }
 
 /// Panels the Window menu opens and closes.
@@ -296,7 +300,13 @@ pub fn menu_bar(
             if item(ui, tr("file-insert-image"), "") {
                 files.insert_image();
             }
-            if item(ui, tr("file-export-frame"), "Ctrl+Shift+E") {
+            // As 2.2.13: without the animation, there is only the image.
+            let export = if canvas.animation_allowed() {
+                tr("file-export-frame")
+            } else {
+                tr("file-export-image")
+            };
+            if item(ui, export, "Ctrl+Shift+E") {
                 files.export_png();
             }
             ui.separator();
@@ -418,6 +428,10 @@ pub fn menu_bar(
             if ui.add_enabled(pending, cancel).clicked() {
                 canvas.cancel_transform();
             }
+            ui.separator();
+            if item(ui, tr("edit-settings"), "") {
+                panels.settings = Some(settings::Dialog::default());
+            }
         });
         ui.menu_button(tr("menu-view"), |ui| {
             if item(ui, tr("view-zoom-in"), "Ctrl++") {
@@ -434,7 +448,9 @@ pub fn menu_bar(
             }
             ui.separator();
             let mut playing = canvas.is_playing();
-            toggle_item(ui, &mut playing, tr("view-animate"), "P");
+            ui.add_enabled_ui(canvas.animation_allowed(), |ui| {
+                toggle_item(ui, &mut playing, tr("view-animate"), "P");
+            });
             if playing != canvas.is_playing() {
                 canvas.toggle_playback();
             }
@@ -462,11 +478,23 @@ pub fn menu_bar(
     });
 }
 
-/// The canvas or image size dialog or the stroke properties dialog, while
-/// one is open.
-pub fn dialogs(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
+/// The canvas or image size, stroke properties or settings dialog, while one
+/// is open.
+pub fn dialogs(
+    ctx: &egui::Context,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    store: &mut Store,
+    panels: &mut Panels,
+) {
     resize::show(ctx, canvas, panels);
     restyle::show(ctx, canvas, panels);
+    settings::show(ctx, canvas, files, store, panels);
+}
+
+/// Puts the settings read at start into effect.
+pub fn apply_settings(ctx: &egui::Context, store: &Store, canvas: &mut Canvas, files: &mut Files) {
+    settings::apply(ctx, store.get(), canvas, files);
 }
 
 /// The quick access bar: panels on the left, undo and redo on the right.
@@ -747,7 +775,7 @@ fn shape_option(
     });
     let painter = ui.painter();
     let (fill, edge) = match (selected, response.hovered()) {
-        (true, _) => (theme::CONTROL, theme::ACCENT),
+        (true, _) => (theme::CONTROL, theme::accent()),
         (false, true) => (theme::HOVER, theme::BORDER),
         (false, false) => (egui::Color32::TRANSPARENT, theme::BORDER),
     };
@@ -846,7 +874,7 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
     for side in corners.windows(2) {
         painter.extend(egui::Shape::dashed_line(
             side,
-            egui::Stroke::new(1.0, theme::ACCENT),
+            egui::Stroke::new(1.0, theme::accent()),
             4.0,
             3.0,
         ));
@@ -882,14 +910,14 @@ fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
     let painter = ui.painter();
     painter.add(egui::Shape::closed_line(
         points[..4].to_vec(),
-        egui::Stroke::new(1.0, theme::ACCENT),
+        egui::Stroke::new(1.0, theme::accent()),
     ));
     for point in points {
         painter.rect(
             egui::Rect::from_center_size(point, egui::vec2(8.0, 8.0)),
             egui::CornerRadius::same(1),
             egui::Color32::WHITE,
-            egui::Stroke::new(1.0, theme::ACCENT_TEXT),
+            egui::Stroke::new(1.0, theme::accent_text()),
             egui::StrokeKind::Middle,
         );
     }
@@ -1343,7 +1371,7 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
         .collect();
     ui.painter().add(egui::Shape::line(
         points,
-        egui::Stroke::new(2.0, theme::ACCENT),
+        egui::Stroke::new(2.0, theme::accent()),
     ));
     response
 }
@@ -1364,20 +1392,27 @@ pub fn layers(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
 /// The animation bar: play, the frame and frame count, the scrubber and the
 /// playback speed.
 pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+    // With the wobble animation off in the settings, as 2.2.13's timeline.
+    ui.add_enabled_ui(canvas.animation_allowed(), |ui| {
+        animation_controls(ui, canvas, panels)
+    });
+}
+
+fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         let playing = canvas.is_playing();
         let (rect, play) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::click());
         let fill = match (playing, play.hovered()) {
-            (true, true) => theme::ACCENT_PRESSED,
-            (true, false) => theme::ACCENT,
+            (true, true) => theme::accent_pressed(),
+            (true, false) => theme::accent(),
             (false, true) => theme::HOVER,
             (false, false) => theme::CONTROL,
         };
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(7), fill);
         let (glyph, ink) = if playing {
-            (Glyph::Pause, theme::ACCENT_TEXT)
+            (Glyph::Pause, theme::accent_text())
         } else {
             (Glyph::Play, theme::TEXT)
         };
@@ -1487,7 +1522,7 @@ fn scrubber(
         egui::Stroke::new(
             1.0,
             if focused {
-                theme::ACCENT
+                theme::accent()
             } else {
                 theme::BORDER
             },
@@ -1517,14 +1552,14 @@ fn scrubber(
         painter.rect_filled(
             bar,
             egui::CornerRadius::same(1),
-            theme::ACCENT.gamma_multiply(0.55),
+            theme::accent().gamma_multiply(0.55),
         );
     } else {
         let head = egui::Rect::from_center_size(
             head.center(),
             egui::vec2(head.width().max(6.0), head.height()),
         );
-        painter.rect_filled(head, egui::CornerRadius::same(4), theme::ACCENT);
+        painter.rect_filled(head, egui::CornerRadius::same(4), theme::accent());
     }
     let name = tr_with(
         "scrubber-frame",
@@ -1559,7 +1594,7 @@ pub fn status_bar(
 ) {
     ui.horizontal(|ui| {
         match message {
-            Some((text, true)) => ui.colored_label(theme::ACCENT, text),
+            Some((text, true)) => ui.colored_label(theme::accent(), text),
             Some((text, false)) => ui.colored_label(theme::MUTED, text),
             None => ui.colored_label(theme::MUTED, tr("status-ready")),
         };
