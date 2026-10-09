@@ -965,11 +965,24 @@ impl Canvas {
             edge(rect.right()),
             edge(rect.bottom()),
         ];
-        self.area = Some(area);
+        self.set_area(area);
+        area
+    }
+
+    /// A placed view keeps the document point at the area's centre there
+    /// when the area grows or shrinks, as a resized or maximized window does.
+    fn set_area(&mut self, area: [i32; 4]) {
+        if let Some(old) = self.area.replace(area)
+            && self.placed
+        {
+            for axis in 0..2 {
+                let grown = (area[axis + 2] - area[axis]) - (old[axis + 2] - old[axis]);
+                self.offset[axis] += f64::from(grown / 2);
+            }
+        }
         if !self.placed {
             self.place(area);
         }
-        area
     }
 
     /// 100% if the document fits, otherwise small enough to fit, centred.
@@ -1162,6 +1175,17 @@ mod tests {
     fn playback_samples_are_as_far_apart_on_screen_as_at_100_percent() {
         let details = [2.0, 1.0, 0.73, 0.5, 0.3, 0.001].map(|scale| super::preview(scale).detail);
         assert_eq!(details, [16, 16, 21, 32, 53, 1024]);
+    }
+
+    #[test]
+    fn a_resized_area_keeps_the_document_point_at_its_centre() {
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), |_| {});
+        canvas.set_area([0, 0, 400, 300]);
+        assert_eq!(canvas.document_point([200.0, 150.0]), [160.0, 100.0]);
+        canvas.set_area([40, 30, 1240, 830]);
+        assert_eq!(canvas.document_point([640.0, 430.0]), [160.0, 100.0]);
+        canvas.set_area([0, 0, 300, 200]);
+        assert_eq!(canvas.document_point([150.0, 100.0]), [160.0, 100.0]);
     }
 
     #[test]

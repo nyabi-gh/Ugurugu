@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
+use std::time::{Duration, Instant};
 
 use ugu_core::document::Document;
 use ugu_core::history::StateId;
@@ -45,6 +46,8 @@ const IMAGE_TYPE: FileType = FileType {
 };
 /// 2.2.13's new document.
 const NEW_CANVAS: [u32; 2] = [1024, 768];
+/// How long a save or export runs before the status bar says it is running.
+const PROGRESS_DELAY: Duration = Duration::from_millis(300);
 
 /// What finished off the render thread.
 pub enum FileEvent {
@@ -111,7 +114,10 @@ pub struct Files {
     after_save: Option<Action>,
     saving: bool,
     busy_dialog: bool,
+    /// What the status bar says.
     message: Option<String>,
+    /// What it says instead from then on, unless something else is said first.
+    upcoming: Option<(String, Instant)>,
     close: bool,
 }
 
@@ -155,6 +161,7 @@ impl Files {
             saving: false,
             busy_dialog: false,
             message: None,
+            upcoming: None,
             close: false,
         }
     }
@@ -169,7 +176,34 @@ impl Files {
     }
 
     pub fn message(&self) -> Option<&str> {
-        self.message.as_deref()
+        match &self.upcoming {
+            Some((text, from)) if *from <= Instant::now() => Some(text),
+            _ => self.message.as_deref(),
+        }
+    }
+
+    /// When the upcoming message is due.
+    pub fn message_due(&self) -> Option<Instant> {
+        self.upcoming
+            .as_ref()
+            .map(|(_, from)| *from)
+            .filter(|from| *from > Instant::now())
+    }
+
+    fn say(&mut self, text: String) {
+        self.message = Some(text);
+        self.upcoming = None;
+    }
+
+    fn clear_message(&mut self) {
+        self.message = None;
+        self.upcoming = None;
+    }
+
+    /// Says what is under way only if it is still under way after a moment,
+    /// so a quick save does not flash its progress.
+    fn say_if_slow(&mut self, text: String) {
+        self.upcoming = Some((text, Instant::now() + PROGRESS_DELAY));
     }
 
     /// The window title: file name, a mark for unsaved changes.
@@ -204,7 +238,7 @@ impl Files {
                 canvas.replace(Self::new_canvas(), false);
                 self.path = None;
                 self.id = new_id();
-                self.message = None;
+                self.clear_message();
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open),
             Action::Close => self.close = true,
@@ -274,7 +308,7 @@ impl Files {
     /// Exports the frame with a pending transform or placed text applied.
     fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
         canvas.apply_pending();
-        self.message = Some(format!("Exporting {}...", path.display()));
+        self.say_if_slow(format!("Exporting {}...", path.display()));
         let _ = self.to_worker.send(Job::Export {
             document: canvas.snapshot_now(),
             frame: canvas.session().frame(),
@@ -288,7 +322,7 @@ impl Files {
     fn start_save(&mut self, path: PathBuf, canvas: &mut Canvas) {
         canvas.apply_pending();
         self.saving = true;
-        self.message = Some(format!("Saving {}...", path.display()));
+        self.say_if_slow(format!("Saving {}...", path.display()));
         let _ = self.to_worker.send(Job::Save {
             document: canvas.snapshot_now(),
             id: self.id,
@@ -321,9 +355,9 @@ impl Files {
                     canvas.replace(*document, true);
                     self.path = Some(path);
                     self.id = id;
-                    self.message = None;
+                    self.clear_message();
                 }
-                Err(error) => self.message = Some(format!("{}: {error}", path.display())),
+                Err(error) => self.say(format!("{}: {error}", path.display())),
             },
             FileEvent::Inserted(path, result) => match result {
                 Ok((id, asset)) => {
@@ -331,14 +365,14 @@ impl Files {
                     let name = path
                         .file_name()
                         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                    self.message = Some(tr_with("image-inserted", &args_name(name)));
+                    self.say(tr_with("image-inserted", &args_name(name)));
                 }
                 Err(error) => {
-                    self.message = Some(format!("{}: {error}", tr("insert-image-failed")));
+                    self.say(format!("{}: {error}", tr("insert-image-failed")));
                 }
             },
             FileEvent::Exported(path, result) => {
-                self.message = Some(match result {
+                self.say(match result {
                     Ok(()) => format!("Exported {}", path.display()),
                     Err(error) => format!("Not exported: {error}"),
                 });
@@ -352,7 +386,7 @@ impl Files {
                 match result {
                     Ok(()) => {
                         canvas.mark_saved(state);
-                        self.message = Some(format!("Saved {}", path.display()));
+                        self.say(format!("Saved {}", path.display()));
                         self.path = Some(path);
                         if let Some(action) = self.after_save.take() {
                             self.proceed(action, canvas);
@@ -360,7 +394,7 @@ impl Files {
                     }
                     Err(error) => {
                         self.after_save = None;
-                        self.message = Some(format!("Not saved: {error}"));
+                        self.say(format!("Not saved: {error}"));
                     }
                 }
             }
@@ -545,9 +579,13 @@ mod tests {
         canvas.edit(Session::add_layer).unwrap();
         files.path = Some(path.clone());
         files.save(&mut canvas);
+        // A save says it is running only once it has taken a while.
+        assert_eq!(files.message(), None);
+        assert!(files.message_due().is_some());
         // An edit while the file thread writes.
         canvas.edit(Session::add_layer).unwrap();
         files.handle(next(&events), &mut canvas);
+        assert!(files.message().unwrap().starts_with("Saved"));
         assert_eq!(layers_in(&path), 2);
         assert_eq!(canvas.session().document().layers.len(), 3);
         assert!(canvas.session().is_dirty());

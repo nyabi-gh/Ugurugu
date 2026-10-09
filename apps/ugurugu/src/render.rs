@@ -145,6 +145,21 @@ struct Display {
     egui_renderer: egui_wgpu::Renderer,
     canvas_view: DocumentView,
     ants: Ants,
+    /// What the last presented frame shows, to skip frames that would
+    /// present the same picture again.
+    shown: Option<Shown>,
+    /// A frame waited for but not presented, which the next frame uses
+    /// instead of waiting for another.
+    slot_held: bool,
+}
+
+#[derive(PartialEq)]
+struct Shown {
+    shapes: Vec<egui::epaint::ClippedShape>,
+    pixels_per_point: f32,
+    canvas_area: [u32; 4],
+    placement: Placement,
+    canvas_size: [u32; 2],
 }
 
 impl Display {
@@ -169,7 +184,14 @@ impl Display {
             egui_renderer,
             canvas_view,
             ants,
+            shown: None,
+            slot_held: false,
         })
+    }
+
+    fn wait_for_frame(&mut self) -> bool {
+        self.slot_held = self.slot_held || self.presenter.wait_for_frame(FRAME_WAIT_LIMIT);
+        self.slot_held
     }
 }
 
@@ -351,7 +373,7 @@ impl RenderThread {
             if self.repaint_at.is_some_and(|at| at <= Instant::now()) {
                 self.needs_frame = true;
             }
-            if self.needs_frame && self.display.presenter.wait_for_frame(FRAME_WAIT_LIMIT) {
+            if self.needs_frame && self.display.wait_for_frame() {
                 if self
                     .recovery
                     .as_ref()
@@ -511,6 +533,7 @@ impl RenderThread {
                     self.display
                         .presenter
                         .resize(&self.display.gpu.device, [size.width, size.height]);
+                    self.display.shown = None;
                     self.needs_frame = true;
                 }
                 if self
@@ -526,6 +549,7 @@ impl RenderThread {
     }
 
     fn frame(&mut self) {
+        let started = Instant::now();
         let input = self.egui_state.take_egui_input(&self.window);
         let mut canvas_area = [0; 4];
         let mut shown_ants = None;
@@ -577,6 +601,10 @@ impl RenderThread {
                         .map(|text| (text, true))
                         .or(files.message().map(|text| (text, false)));
                     let message = message.map(|(text, warn)| (text.to_owned(), warn));
+                    if let Some(due) = files.message_due() {
+                        ui.ctx()
+                            .request_repaint_after(due.saturating_duration_since(Instant::now()));
+                    }
                     let pointer = panels.pointer;
                     ui::status_bar(
                         ui,
@@ -674,6 +702,7 @@ impl RenderThread {
                         });
                 });
         });
+        let laid_out = Instant::now();
         let mut platform_output = output.platform_output;
         if let Some(update) = platform_output.accesskit_update.take() {
             (self.tree_sink)(update);
@@ -707,9 +736,37 @@ impl RenderThread {
             self.repaint_at = Some(self.repaint_at.map_or(next, |at| at.min(next)));
         }
         self.canvas.sync();
-        let pixels_per_point = output.pixels_per_point;
-        let primitives = self.egui_ctx.tessellate(output.shapes, pixels_per_point);
+        let upload = self.canvas.take_upload();
         let textures = output.textures_delta;
+        let shown = Shown {
+            shapes: output.shapes,
+            pixels_per_point: output.pixels_per_point,
+            canvas_area: canvas_area.map(|edge| edge.max(0) as u32),
+            placement: self.canvas.placement(),
+            canvas_size: {
+                let display = self.canvas.display();
+                [u32::from(display.width()), u32::from(display.height())]
+            },
+        };
+        let same_picture = upload.is_none()
+            && shown_ants.is_none()
+            && textures.is_empty()
+            && self.display.shown.as_ref() == Some(&shown);
+        if same_picture {
+            // Nothing it shows waits on a present any more.
+            self.router.take_oldest_unpresented();
+            tracing::debug!(
+                ui_ms = (laid_out - started).as_secs_f64() * 1000.0,
+                "frame skipped: same picture"
+            );
+            return;
+        }
+        let pixels_per_point = shown.pixels_per_point;
+        let canvas_area = shown.canvas_area;
+        let placement = shown.placement;
+        let primitives = self
+            .egui_ctx
+            .tessellate(shown.shapes.clone(), pixels_per_point);
         // egui-wgpu panics instead of returning an error when a buffer cannot
         // be made on a lost device, and a device can be lost at any point in
         // the frame. Such a panic is caught only when the device is lost; the
@@ -721,13 +778,13 @@ impl RenderThread {
                 egui_renderer,
                 canvas_view,
                 ants,
+                ..
             } = &mut self.display;
             for (id, deltas) in &textures.set {
                 for delta in deltas {
                     egui_renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
                 }
             }
-            let upload = self.canvas.take_upload();
             if let Some(rect) = upload {
                 tracing::debug!(?rect, "canvas uploaded");
             }
@@ -740,10 +797,7 @@ impl RenderThread {
                     .as_ref()
                     .map_or(ugu_core::ops::Affine::IDENTITY, |(_, moved, _)| *moved),
             );
-            let canvas_area = canvas_area.map(|edge| edge.max(0) as u32);
-            let placement = self.canvas.placement();
-
-            match draw(
+            let presented = match draw(
                 &gpu.device,
                 &gpu.queue,
                 presenter,
@@ -763,22 +817,39 @@ impl RenderThread {
                         self.present_latency
                             .record(Ticks::now().seconds_since(oldest_input));
                     }
+                    true
                 }
                 // The input stays marked unpresented and is drawn next time.
-                None => self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT),
-            }
+                None => {
+                    self.repaint_at = Some(Instant::now() + FRAME_WAIT_LIMIT);
+                    false
+                }
+            };
 
             for id in &textures.free {
                 egui_renderer.free_texture(id);
             }
+            presented
         }));
-        if let Err(panic) = drawn {
-            if !self.display.gpu.check_removed() {
-                std::panic::resume_unwind(panic);
+        match drawn {
+            Ok(true) => {
+                self.display.shown = Some(shown);
+                self.display.slot_held = false;
             }
-            tracing::warn!("frame abandoned on the lost GPU device");
-            self.needs_frame = true;
+            Ok(false) => {}
+            Err(panic) => {
+                if !self.display.gpu.check_removed() {
+                    std::panic::resume_unwind(panic);
+                }
+                tracing::warn!("frame abandoned on the lost GPU device");
+                self.needs_frame = true;
+            }
         }
+        tracing::debug!(
+            ui_ms = (laid_out - started).as_secs_f64() * 1000.0,
+            rest_ms = laid_out.elapsed().as_secs_f64() * 1000.0,
+            "frame"
+        );
     }
 
     fn collect_display_times(&mut self) {

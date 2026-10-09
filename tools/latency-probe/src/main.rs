@@ -40,7 +40,7 @@ const SESSION: &str = "UguruguLatencyProbe";
 
 const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
                      [--steps N] [--warmup N] [--radius FRACTION] [--window WxH | --window max] [--key LETTER] [--csv PATH] \
-                     [--document PATH]";
+                     [--document PATH] [--app-log PATH]";
 
 struct Options {
     exe: PathBuf,
@@ -58,6 +58,8 @@ struct Options {
     csv: PathBuf,
     /// Opened by the app at launch; an empty canvas without it.
     document: Option<PathBuf>,
+    /// Where the app's standard output goes; discarded without it.
+    app_log: Option<PathBuf>,
 }
 
 fn parse() -> Option<Options> {
@@ -70,6 +72,7 @@ fn parse() -> Option<Options> {
     let mut key = None;
     let mut csv = std::env::temp_dir().join("latency-probe-presentmon.csv");
     let mut document = None;
+    let mut app_log = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next()?;
@@ -90,6 +93,7 @@ fn parse() -> Option<Options> {
             }
             "--csv" => csv = PathBuf::from(value),
             "--document" => document = Some(PathBuf::from(value)),
+            "--app-log" => app_log = Some(PathBuf::from(value)),
             _ => return None,
         }
     }
@@ -103,6 +107,7 @@ fn parse() -> Option<Options> {
         key,
         csv,
         document,
+        app_log,
     })
 }
 
@@ -363,9 +368,16 @@ fn run(options: &Options) -> Result<(), String> {
         return Err("PresentMon did not start recording; it needs administrator rights".into());
     }
 
+    let output = match &options.app_log {
+        Some(path) => Stdio::from(
+            std::fs::File::create(path)
+                .map_err(|error| format!("cannot create {}: {error}", path.display()))?,
+        ),
+        None => Stdio::null(),
+    };
     let mut app = Command::new(&options.exe)
         .args(&options.document)
-        .stdout(Stdio::null())
+        .stdout(output)
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("cannot start {}: {error}", options.exe.display()))?;
