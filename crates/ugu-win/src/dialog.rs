@@ -32,9 +32,11 @@ pub struct FileType {
 pub enum Dialog {
     Open(FileType),
     /// Suggests `name` for the file, in `folder` if given; otherwise the
-    /// folder Windows remembers.
+    /// folder Windows remembers. The first file type is chosen to begin
+    /// with; the chosen one's first extension is added to a name without
+    /// one of its own.
     Save {
-        file_type: FileType,
+        file_types: &'static [FileType],
         name: String,
         folder: Option<PathBuf>,
     },
@@ -58,23 +60,55 @@ pub fn pick(owner: isize, dialog: &Dialog) -> windows::core::Result<Option<PathB
     }
 }
 
-unsafe fn set_file_type(picker: &IFileDialog, file_type: FileType) -> windows::core::Result<()> {
-    let name = HSTRING::from(file_type.name);
-    let pattern = file_type
-        .extensions
+unsafe fn set_file_types(
+    picker: &IFileDialog,
+    file_types: &[FileType],
+) -> windows::core::Result<()> {
+    let strings: Vec<(HSTRING, HSTRING)> = file_types
         .iter()
-        .map(|extension| format!("*.{extension}"))
-        .collect::<Vec<_>>()
-        .join(";");
-    let pattern = HSTRING::from(pattern);
-    // SAFETY: COM is set up on this thread; the strings outlive the calls.
-    unsafe {
-        picker.SetFileTypes(&[COMDLG_FILTERSPEC {
+        .map(|file_type| {
+            let pattern = file_type
+                .extensions
+                .iter()
+                .map(|extension| format!("*.{extension}"))
+                .collect::<Vec<_>>()
+                .join(";");
+            (HSTRING::from(file_type.name), HSTRING::from(pattern))
+        })
+        .collect();
+    let specs: Vec<COMDLG_FILTERSPEC> = strings
+        .iter()
+        .map(|(name, pattern)| COMDLG_FILTERSPEC {
             pszName: PCWSTR(name.as_ptr()),
             pszSpec: PCWSTR(pattern.as_ptr()),
-        }])?;
-        picker.SetDefaultExtension(&HSTRING::from(file_type.extensions[0]))
+        })
+        .collect();
+    // SAFETY: COM is set up on this thread; the strings outlive the calls.
+    unsafe {
+        picker.SetFileTypes(&specs)?;
+        picker.SetDefaultExtension(&HSTRING::from(file_types[0].extensions[0]))
     }
+}
+
+/// `path` with `file_type`'s first extension added unless it already ends
+/// in one of the type's.
+pub fn with_extension_of(path: PathBuf, file_type: FileType) -> PathBuf {
+    let has = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            file_type
+                .extensions
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(extension))
+        });
+    if has {
+        return path;
+    }
+    let mut name = path.into_os_string();
+    name.push(".");
+    name.push(file_type.extensions[0]);
+    PathBuf::from(name)
 }
 
 /// Opens the dialog in `folder`. A folder that cannot be found is left to
@@ -104,13 +138,13 @@ unsafe fn show(owner: isize, dialog: &Dialog) -> windows::core::Result<Option<Pa
         let picker: IFileDialog = CoCreateInstance(class, None, CLSCTX_INPROC_SERVER)?;
         let mut options = picker.GetOptions()? | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
         match dialog {
-            Dialog::Open(file_type) => set_file_type(&picker, *file_type)?,
+            Dialog::Open(file_type) => set_file_types(&picker, &[*file_type])?,
             Dialog::Save {
-                file_type,
+                file_types,
                 name,
                 folder,
             } => {
-                set_file_type(&picker, *file_type)?;
+                set_file_types(&picker, file_types)?;
                 options |= FOS_OVERWRITEPROMPT;
                 picker.SetFileName(&HSTRING::from(name.as_str()))?;
                 if let Some(folder) = folder {
@@ -137,8 +171,33 @@ unsafe fn show(owner: isize, dialog: &Dialog) -> windows::core::Result<Option<Pa
         let text = item.GetDisplayName(SIGDN_FILESYSPATH)?;
         let path = text.to_string();
         CoTaskMemFree(Some(text.0 as *const _));
-        Ok(Some(PathBuf::from(
-            path.map_err(|_| windows::core::Error::from(E_FAIL))?,
-        )))
+        let path = PathBuf::from(path.map_err(|_| windows::core::Error::from(E_FAIL))?);
+        if let Dialog::Save { file_types, .. } = dialog {
+            // One-based.
+            let chosen = picker.GetFileTypeIndex()? as usize;
+            if let Some(file_type) = file_types.get(chosen.wrapping_sub(1)) {
+                return Ok(Some(with_extension_of(path, *file_type)));
+            }
+        }
+        Ok(Some(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IMAGE: FileType = FileType {
+        name: "JPEG",
+        extensions: &["jpg", "jpeg"],
+    };
+
+    #[test]
+    fn a_name_gets_the_chosen_type_s_extension_unless_it_has_one() {
+        let named = |path: &str| with_extension_of(PathBuf::from(path), IMAGE);
+        assert_eq!(named(r"C:\a\cat"), PathBuf::from(r"C:\a\cat.jpg"));
+        assert_eq!(named(r"C:\a\cat.JPEG"), PathBuf::from(r"C:\a\cat.JPEG"));
+        assert_eq!(named(r"C:\a\cat.png"), PathBuf::from(r"C:\a\cat.png.jpg"));
+        assert_eq!(named(r"C:\a\cat.v2"), PathBuf::from(r"C:\a\cat.v2.jpg"));
     }
 }

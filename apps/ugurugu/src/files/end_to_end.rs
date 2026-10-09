@@ -153,7 +153,11 @@ fn draw_move_save_reopen_and_export() {
     // The PNG of frame 7 is that frame as the renderer draws it for export.
     let png = folder.join("frame.png");
     let shared = Arc::new(reopened.session().document().clone());
-    export(shared, 7, &png, &reopened.renders()).unwrap();
+    let not_cancelled = std::sync::atomic::AtomicBool::new(false);
+    assert_eq!(
+        crate::export::still(shared, 7, &png, &reopened.renders(), &not_cancelled),
+        crate::export::Outcome::Done
+    );
     let mut decoder =
         png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&png).unwrap()))
             .read_info()

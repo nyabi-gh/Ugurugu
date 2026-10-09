@@ -28,6 +28,7 @@ wgpu.workspace = true
 winit.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 png.workspace = true
 
 [lints]

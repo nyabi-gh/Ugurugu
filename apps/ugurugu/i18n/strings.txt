@@ -17,6 +17,11 @@ file-insert-image | ugurugu::MainWindow | Insert &image…
 insert-image-failed | ugurugu::MainWindow | Could not insert image
 image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
 file-quit | ugurugu::MainWindow | &Quit
+export-running | ugurugu::MainWindow | Rendering image…
+export-cancel | ugurugu::MainWindow | Cancel
+export-canceled | ugurugu::MainWindow | Export canceled
+export-done | ugurugu::MainWindow | Exported %1 | args=path
+export-failed | ugurugu::MainWindow | Export failed
 recovery-title | ugurugu::MainWindow | Recover unsaved work
 recovery-found | ugurugu::MainWindow | Ugurugu found work from a previous session. Choose whether to recover or discard it.
 recovery-recover | ugurugu::MainWindow | Recover

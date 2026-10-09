@@ -1314,13 +1314,23 @@ fn scrubber(
 
 /// The status bar: the last message on the left; the pointer, zoom and fit
 /// on the right.
+/// Returns whether the export under way, `export` naming it, is to be
+/// cancelled.
 pub fn status_bar(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
     message: Option<(&str, bool)>,
+    export: Option<&str>,
     pointer: Option<[f64; 2]>,
-) {
+) -> bool {
+    let mut cancel = false;
     ui.horizontal(|ui| {
+        if let Some(export) = export {
+            ui.spinner();
+            ui.label(export);
+            cancel = ui.button(tr("export-cancel")).clicked();
+            ui.separator();
+        }
         match message {
             Some((text, true)) => ui.colored_label(theme::accent(), text),
             Some((text, false)) => ui.colored_label(theme::MUTED, text),
@@ -1369,4 +1379,5 @@ pub fn status_bar(
             );
         });
     });
+    cancel
 }

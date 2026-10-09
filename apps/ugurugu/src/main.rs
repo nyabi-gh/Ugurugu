@@ -8,6 +8,7 @@ mod budget;
 mod cache;
 mod canvas;
 mod clipboard;
+mod export;
 mod files;
 mod i18n;
 mod icons;

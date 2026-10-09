@@ -692,12 +692,16 @@ impl RenderThread {
                             .request_repaint_after(due.saturating_duration_since(Instant::now()));
                     }
                     let pointer = panels.pointer;
-                    ui::status_bar(
+                    let cancel = ui::status_bar(
                         ui,
                         canvas,
                         message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
+                        files.export_status(),
                         pointer,
                     );
+                    if cancel {
+                        files.cancel_export();
+                    }
                     if *diagnostics {
                         ui.horizontal(|ui| {
                             ui.label(adapter_summary.as_str());

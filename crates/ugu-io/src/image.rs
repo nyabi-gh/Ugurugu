@@ -5,6 +5,8 @@
 //!
 //! Frames are rendered premultiplied; PNG stores straight alpha. A fully
 //! transparent pixel has no colour, so it is written as transparent black.
+//! JPEG keeps no alpha: what is left transparent is put over white, the
+//! paper drawn on, as 2.2.13 does, at 2.2.13's quality.
 
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -43,18 +45,74 @@ pub fn encode_png(
     writer.finish()
 }
 
-/// Exports to `target` without risking the file already there.
-pub fn export_png(
+pub const JPEG_QUALITY: u8 = 92;
+
+/// The file formats a still image is exported as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    Png,
+    Jpeg,
+}
+
+impl Format {
+    /// By the file name's extension; `None` for one that is neither.
+    pub fn of(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        match extension.as_str() {
+            "png" => Some(Self::Png),
+            "jpg" | "jpeg" => Some(Self::Jpeg),
+            _ => None,
+        }
+    }
+}
+
+/// Premultiplied RGBA8 over opaque white, as RGB8.
+pub fn over_white(pixels: &[u8]) -> Vec<u8> {
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|&[r, g, b, a]| {
+            let paper = 255 - a;
+            [r, g, b].map(|channel| channel.saturating_add(paper))
+        })
+        .collect()
+}
+
+/// Writes premultiplied RGBA8 rows of `size` as a JPEG over white.
+pub fn encode_jpeg(
     pixels: &[u8],
     size: [u32; 2],
+    out: impl Write,
+) -> Result<(), ::image::ImageError> {
+    let rgb = over_white(pixels);
+    ::image::codecs::jpeg::JpegEncoder::new_with_quality(out, JPEG_QUALITY).encode(
+        &rgb,
+        size[0],
+        size[1],
+        ::image::ExtendedColorType::Rgb8,
+    )
+}
+
+/// Exports to `target` without risking the file already there.
+pub fn export(
+    pixels: &[u8],
+    size: [u32; 2],
+    format: Format,
     target: &Path,
     replace: Replace<'_>,
 ) -> Result<(), SaveError> {
+    let failed = |error: String| SaveError::Write(WriteError::Io(std::io::Error::other(error)));
     replace_with(target, replace, |file, _| {
         let mut out = BufWriter::new(file);
-        encode_png(pixels, size, &mut out).map_err(|error| {
-            SaveError::Write(WriteError::Io(std::io::Error::other(error.to_string())))
-        })?;
+        match format {
+            Format::Png => {
+                encode_png(pixels, size, &mut out).map_err(|error| failed(error.to_string()))?;
+            }
+            Format::Jpeg => {
+                encode_jpeg(pixels, size, &mut out).map_err(|error| failed(error.to_string()))?;
+            }
+        }
         out.flush()?;
         Ok(())
     })
@@ -109,5 +167,54 @@ mod tests {
             let premultiplied: [u8; 4] = premultiplied.try_into().unwrap();
             assert_eq!(straight, unpremultiply(premultiplied));
         }
+    }
+
+    #[test]
+    fn transparency_goes_over_white() {
+        let pixels = [[0, 0, 0, 0], [64, 32, 0, 128], [10, 20, 30, 255]].concat();
+        assert_eq!(
+            over_white(&pixels),
+            [255, 255, 255, 191, 159, 127, 10, 20, 30]
+        );
+    }
+
+    #[test]
+    fn the_jpeg_decodes_close_to_the_image_over_white() {
+        // Flat areas, which JPEG keeps within a few levels.
+        let size = [32, 16];
+        let pixels: Vec<u8> = (0..size[0] * size[1])
+            .flat_map(|index| {
+                if index % size[0] < 16 {
+                    [200, 40, 40, 255]
+                } else {
+                    [0, 0, 0, 0]
+                }
+            })
+            .collect();
+        let mut bytes = Vec::new();
+        encode_jpeg(&pixels, size, &mut bytes).unwrap();
+        let decoded = ::image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert_eq!(decoded.dimensions(), (32, 16));
+        let expected = over_white(&pixels);
+        // Away from the edge between the halves.
+        for y in 0..16 {
+            for x in (0..6).chain(26..32) {
+                let at = (y * 32 + x) as usize * 3;
+                for channel in 0..3 {
+                    let difference =
+                        decoded.as_raw()[at + channel].abs_diff(expected[at + channel]);
+                    assert!(difference <= 6, "{difference} at {x}, {y}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_format_follows_the_extension() {
+        assert_eq!(Format::of(Path::new("a.PNG")), Some(Format::Png));
+        assert_eq!(Format::of(Path::new("a.jpeg")), Some(Format::Jpeg));
+        assert_eq!(Format::of(Path::new("a.JPG")), Some(Format::Jpeg));
+        assert_eq!(Format::of(Path::new("a.bmp")), None);
+        assert_eq!(Format::of(Path::new("a")), None);
     }
 }

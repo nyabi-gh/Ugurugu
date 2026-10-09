@@ -239,7 +239,7 @@ pub fn run(
         A::Save => files.save(canvas),
         A::SaveAs => files.save_as(),
         A::InsertImage => files.insert_image(),
-        A::Export => files.export_png(),
+        A::Export => files.export_image(),
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool(canvas.edit(Session::undo)),
         A::Redo => report_bool(canvas.edit(Session::redo)),

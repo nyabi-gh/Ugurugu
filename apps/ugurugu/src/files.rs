@@ -7,8 +7,8 @@
 //! Dialogs run on threads of their own; reading and writing run in order on
 //! one file thread, so a later save never finishes before an earlier one to
 //! the same file. A save writes the snapshot taken when it started, and the
-//! document counts as saved only in that state. A PNG export renders the
-//! frame shown when it started, on the file thread.
+//! document counts as saved only in that state. An export renders the frame
+//! shown when it started, on a thread of its own (`export`).
 //!
 //! Unsaved work is also written for automatic recovery on the file thread,
 //! in order with saves, so a write queued before a save or a clean close
@@ -29,14 +29,20 @@ use ugu_core::store::Asset;
 use ugu_session::{Session, ToolSettings};
 use ugu_win::dialog::{Dialog, FileType};
 
-use crate::cache::Renders;
 use crate::canvas::Canvas;
+use crate::export::{Exporting, Outcome};
 use crate::i18n::{tr, tr_with};
 use crate::recovery::{self, Found, Meta};
 
 fn args_name(name: String) -> fluent_bundle::FluentArgs<'static> {
     let mut args = fluent_bundle::FluentArgs::new();
     args.set("name", name);
+    args
+}
+
+fn args_path(path: &Path) -> fluent_bundle::FluentArgs<'static> {
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("path", path.display().to_string());
     args
 }
 
@@ -48,6 +54,12 @@ const PNG_TYPE: FileType = FileType {
     name: "PNG image",
     extensions: &["png"],
 };
+const JPEG_TYPE: FileType = FileType {
+    name: "JPEG image",
+    extensions: &["jpg", "jpeg"],
+};
+/// What a frame is exported as, as 2.2.13 offers; the extension picks it.
+const STILL_TYPES: &[FileType] = &[PNG_TYPE, JPEG_TYPE];
 /// What an image can be inserted from, as 2.2.13 offers.
 const IMAGE_TYPE: FileType = FileType {
     name: "Image",
@@ -68,7 +80,12 @@ pub enum FileEvent {
         state: StateId,
         result: Result<(), String>,
     },
-    Exported(PathBuf, Result<(), String>),
+    /// How export `number` ended.
+    Exported {
+        number: u64,
+        path: PathBuf,
+        outcome: Outcome,
+    },
     /// An image read to insert, as an asset.
     Inserted(PathBuf, Result<(AssetId, Asset), String>),
     /// This window's recovery folder is locked, and the folders of windows
@@ -91,7 +108,7 @@ pub struct Recovered {
 pub enum Purpose {
     Open,
     SaveAs,
-    ExportPng,
+    ExportImage,
     InsertImage,
     /// The default save folder, for the settings.
     SaveFolder,
@@ -123,12 +140,6 @@ enum Job {
         state: StateId,
     },
     Open(PathBuf),
-    Export {
-        document: Arc<Document>,
-        frame: i64,
-        path: PathBuf,
-        renders: Renders,
-    },
     /// Reads an image no larger than `fit`.
     Insert {
         path: PathBuf,
@@ -243,6 +254,10 @@ pub struct Files {
     /// work had been saved, if anywhere.
     recovered_name: Option<String>,
     recovered_from: Option<PathBuf>,
+    exporting: Option<Exporting>,
+    /// Cancelled exports whose threads may still be finishing.
+    cancelled: Vec<Exporting>,
+    exports: u64,
 }
 
 /// A fresh document id, from the same entropy as hash seeds.
@@ -300,6 +315,9 @@ impl Files {
             reading_found: false,
             recovered_name: None,
             recovered_from: None,
+            exporting: None,
+            cancelled: Vec::new(),
+            exports: 0,
         }
     }
 
@@ -409,6 +427,16 @@ impl Files {
         }
         // Left for the next start.
         self.found.clear();
+        // Their unfinished files are removed before the process ends.
+        for export in self
+            .exporting
+            .take()
+            .into_iter()
+            .chain(self.cancelled.drain(..))
+        {
+            export.cancel();
+            export.join();
+        }
         let _ = self.to_worker.send(Job::Stop);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -519,7 +547,7 @@ impl Files {
     }
 
     pub fn save_as(&mut self) {
-        self.pick_save(Purpose::SaveAs, DOCUMENT_TYPE);
+        self.pick_save(Purpose::SaveAs, &[DOCUMENT_TYPE]);
     }
 
     /// Where new documents are first saved and exported, from the settings.
@@ -545,8 +573,8 @@ impl Files {
 
     /// Saves as `file_type` under the document's name, in its folder, or in
     /// the default save folder for a document never saved, as 2.2.13 does.
-    fn pick_save(&mut self, purpose: Purpose, file_type: FileType) {
-        let name = format!("{}.{}", self.display_name(), file_type.extensions[0]);
+    fn pick_save(&mut self, purpose: Purpose, file_types: &'static [FileType]) {
+        let name = format!("{}.{}", self.display_name(), file_types[0].extensions[0]);
         let folder = self
             .path
             .as_deref()
@@ -556,7 +584,7 @@ impl Files {
         self.pick(
             purpose,
             Dialog::Save {
-                file_type,
+                file_types,
                 name,
                 folder,
             },
@@ -598,20 +626,52 @@ impl Files {
         self.pick(Purpose::InsertImage, Dialog::Open(IMAGE_TYPE));
     }
 
-    pub fn export_png(&mut self) {
-        self.pick_save(Purpose::ExportPng, PNG_TYPE);
+    /// Asks where to export the frame shown, one export at a time.
+    pub fn export_image(&mut self) {
+        if self.exporting.is_none() {
+            self.pick_save(Purpose::ExportImage, STILL_TYPES);
+        }
     }
 
     /// Exports the frame with a pending transform or placed text applied.
     fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        if self.exporting.is_some() {
+            return;
+        }
         canvas.apply_pending();
-        self.say_if_slow(format!("Exporting {}...", path.display()));
-        let _ = self.to_worker.send(Job::Export {
-            document: canvas.snapshot_now(),
-            frame: canvas.session().frame(),
+        self.cancelled.retain(|export| !export.is_finished());
+        self.exports += 1;
+        let number = self.exports;
+        let events = self.events.clone();
+        let done_path = path.clone();
+        self.exporting = Some(Exporting::start(
+            number,
+            canvas.snapshot_now(),
+            canvas.session().frame(),
             path,
-            renders: canvas.renders(),
-        });
+            canvas.renders(),
+            move |outcome| {
+                events(FileEvent::Exported {
+                    number,
+                    path: done_path,
+                    outcome,
+                });
+            },
+        ));
+    }
+
+    /// What the status bar shows while an export runs.
+    pub fn export_status(&self) -> Option<&'static str> {
+        self.exporting.as_ref().map(|_| tr("export-running"))
+    }
+
+    /// Stops the export under way; says so at once.
+    pub fn cancel_export(&mut self) {
+        if let Some(export) = self.exporting.take() {
+            export.cancel();
+            self.cancelled.push(export);
+            self.say(tr("export-canceled").to_owned());
+        }
     }
 
     /// Saves with a pending transform or placed text applied, so what is
@@ -640,7 +700,7 @@ impl Files {
                 match purpose {
                     Purpose::Open => self.open_path(path),
                     Purpose::SaveAs => self.start_save(path, canvas),
-                    Purpose::ExportPng => self.start_export(path, canvas),
+                    Purpose::ExportImage => self.start_export(path, canvas),
                     Purpose::InsertImage => {
                         let fit = canvas.session().document().canvas;
                         let _ = self.to_worker.send(Job::Insert { path, fit });
@@ -671,10 +731,24 @@ impl Files {
                     self.say(format!("{}: {error}", tr("insert-image-failed")));
                 }
             },
-            FileEvent::Exported(path, result) => {
-                self.say(match result {
-                    Ok(()) => format!("Exported {}", path.display()),
-                    Err(error) => format!("Not exported: {error}"),
+            FileEvent::Exported {
+                number,
+                path,
+                outcome,
+            } => {
+                // A cancelled one was answered when it was cancelled.
+                if self
+                    .exporting
+                    .as_ref()
+                    .is_none_or(|export| export.number != number)
+                {
+                    return;
+                }
+                self.exporting = None;
+                self.say(match outcome {
+                    Outcome::Done => tr_with("export-done", &args_path(&path)),
+                    Outcome::Cancelled => tr("export-canceled").to_owned(),
+                    Outcome::Failed(error) => format!("{}: {error}", tr("export-failed")),
                 });
             }
             FileEvent::Saved {
@@ -872,21 +946,6 @@ fn run(job: Job) -> Option<FileEvent> {
                 result,
             }
         }
-        Job::Export {
-            document,
-            frame,
-            path,
-            renders,
-        } => {
-            let started = std::time::Instant::now();
-            let result = export(document, frame, &path, &renders);
-            tracing::info!(
-                ms = started.elapsed().as_secs_f64() * 1000.0,
-                ok = result.is_ok(),
-                "frame exported"
-            );
-            FileEvent::Exported(path, result)
-        }
         Job::Insert { path, fit } => {
             let started = std::time::Instant::now();
             let result = std::fs::read(&path)
@@ -971,27 +1030,6 @@ fn run(job: Job) -> Option<FileEvent> {
         }
         Job::Stop => return None,
     })
-}
-
-/// Renders `frame` without reference layers at the document's size, on the
-/// render worker after the canvas's own work.
-fn export(
-    document: Arc<Document>,
-    frame: i64,
-    path: &Path,
-    renders: &Renders,
-) -> Result<(), String> {
-    let [width, height] = document.canvas;
-    let pixmap = renders
-        .export(document, frame)
-        .ok_or("the render worker has stopped")?;
-    ugu_io::image::export_png(
-        pixmap.data_as_u8_slice(),
-        [width, height],
-        path,
-        &ugu_win::file::replace_file,
-    )
-    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -1140,7 +1178,14 @@ mod tests {
         for index in 0..(30 * 20) {
             pixels.extend([(index % 256) as u8, 40, 200, 255]);
         }
-        ugu_io::image::export_png(&pixels, [30, 20], &path, &ugu_win::file::replace_file).unwrap();
+        ugu_io::image::export(
+            &pixels,
+            [30, 20],
+            ugu_io::image::Format::Png,
+            &path,
+            &ugu_win::file::replace_file,
+        )
+        .unwrap();
         files.handle(
             FileEvent::Picked(Purpose::InsertImage, Some(path)),
             &mut canvas,
@@ -1298,7 +1343,15 @@ mod tests {
 
         let path = folder("export").join("frame.png");
         let worker = crate::cache::CacheWorker::start(|_| {});
-        export(Arc::new(document.clone()), 5, &path, &worker.renders()).unwrap();
+        let not_cancelled = std::sync::atomic::AtomicBool::new(false);
+        let outcome = crate::export::still(
+            Arc::new(document.clone()),
+            5,
+            &path,
+            &worker.renders(),
+            &not_cancelled,
+        );
+        assert_eq!(outcome, Outcome::Done);
         let file = std::fs::File::open(&path).unwrap();
         let mut decoder = png::Decoder::new(std::io::BufReader::new(file))
             .read_info()
@@ -1329,6 +1382,53 @@ mod tests {
                 .any(|pixel| pixel[3] == 160)
         );
         assert!(decoded.as_chunks::<4>().0.contains(&[0; 4]));
+    }
+
+    #[test]
+    fn exports_run_one_at_a_time_and_a_cancelled_one_is_answered_at_once() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("export-flow");
+        let first = folder.join("frame.jpg");
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(first.clone())),
+            &mut canvas,
+        );
+        assert_eq!(files.export_status(), Some(tr("export-running")));
+        // Another waits for it: neither a dialog nor a second export.
+        files.export_image();
+        assert!(!files.busy_dialog);
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(folder.join("other.png"))),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(files.export_status(), None);
+        assert_eq!(
+            files.message(),
+            Some(tr_with("export-done", &args_path(&first)).as_str())
+        );
+        assert!(first.exists());
+        assert!(!folder.join("other.png").exists());
+
+        // Cancelled: said at once; the thread's late answer changes nothing.
+        let second = folder.join("second.png");
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(second)),
+            &mut canvas,
+        );
+        files.cancel_export();
+        assert_eq!(files.export_status(), None);
+        assert_eq!(files.message(), Some(tr("export-canceled")));
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(files.message(), Some(tr("export-canceled")));
+        files.end();
+        // Whether it got as far as writing or not, nothing is left half done.
+        let left: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]
