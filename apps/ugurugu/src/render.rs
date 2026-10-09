@@ -88,6 +88,35 @@ unsafe impl Send for EguiState {}
 /// UI Automation provider.
 pub type TreeSink = Box<dyn Fn(egui::accesskit::TreeUpdate) + Send>;
 
+/// The graphics instance, for the UI thread to make the first surface with.
+pub struct EarlyInstance(Receiver<wgpu::Instance>);
+
+/// The GPU opened while the window was being made.
+pub struct EarlyGpu(std::thread::JoinHandle<Result<Gpu, String>>);
+
+/// Starts opening the GPU on a thread of its own. Loading the drivers of
+/// every adapter wgpu looks at takes most of start-up (m0-evidence section
+/// 14) and needs no window.
+pub fn open_gpu_early() -> (EarlyInstance, EarlyGpu) {
+    let (instance_out, instance_in) = std::sync::mpsc::sync_channel(1);
+    let gpu = std::thread::Builder::new()
+        .name("gpu".to_owned())
+        .spawn(move || {
+            let instance = RenderThread::create_instance();
+            tracing::debug!("graphics instance created");
+            let _ = instance_out.send(instance.clone());
+            Gpu::open_without_surface(&instance, AdapterChoice::from_env())
+        })
+        .expect("cannot start the GPU thread");
+    (EarlyInstance(instance_in), EarlyGpu(gpu))
+}
+
+impl EarlyInstance {
+    pub fn take(self) -> Option<wgpu::Instance> {
+        self.0.recv().ok()
+    }
+}
+
 /// How the render thread reaches the UI thread and the window.
 pub struct Links {
     pub surface_source: SurfaceSource,
@@ -169,7 +198,33 @@ impl Display {
         choice: AdapterChoice,
         size: [u32; 2],
     ) -> Result<Self, String> {
-        let gpu = Gpu::open(instance, &surface, choice)?;
+        Self::with_gpu(Gpu::open(instance, &surface, choice)?, surface, size)
+    }
+
+    /// Uses the GPU opened early if it can show the window, and otherwise
+    /// opens one that can.
+    fn open_with_early(
+        early: EarlyGpu,
+        instance: &wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        choice: AdapterChoice,
+        size: [u32; 2],
+    ) -> Result<Self, String> {
+        match early.0.join() {
+            Ok(Ok(gpu)) if gpu.can_show(&surface) => Self::with_gpu(gpu, surface, size),
+            Ok(Ok(gpu)) => {
+                tracing::warn!(adapter = %gpu.summary, "the adapter opened early cannot show the window");
+                Self::open(instance, surface, choice, size)
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(error, "opening the GPU early failed");
+                Self::open(instance, surface, choice, size)
+            }
+            Err(_) => Err("the GPU thread panicked".to_owned()),
+        }
+    }
+
+    fn with_gpu(gpu: Gpu, surface: wgpu::Surface<'static>, size: [u32; 2]) -> Result<Self, String> {
         let presenter = Presenter::new(surface, &gpu.adapter, &gpu.device, size)?;
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu.device,
@@ -207,16 +262,18 @@ impl RenderThread {
     }
 
     /// Called on the UI thread, the only thread winit lets read the window
-    /// handle. The instance is new each time: after a driver reset, swap
-    /// chains made through an older instance's DXGI factory never reach the
-    /// screen.
+    /// handle. The first surface uses the instance the GPU was opened early
+    /// with; later ones get a new instance: after a driver reset, swap chains
+    /// made through an older instance's DXGI factory never reach the screen.
     pub fn create_surface(
         window: &Arc<Window>,
+        early: Option<wgpu::Instance>,
     ) -> Result<(wgpu::Instance, wgpu::Surface<'static>), String> {
-        let instance = Self::create_instance();
+        let instance = early.unwrap_or_else(Self::create_instance);
         let surface = instance
             .create_surface(window.clone())
             .map_err(|error| format!("cannot create the window surface: {error}"))?;
+        tracing::debug!("window surface created");
         Ok((instance, surface))
     }
 
@@ -226,6 +283,7 @@ impl RenderThread {
         egui_ctx: egui::Context,
         EguiState(egui_state): EguiState,
         open_at_start: Option<std::path::PathBuf>,
+        early: Option<EarlyGpu>,
     ) -> Result<Self, String> {
         let Links {
             surface_source,
@@ -236,12 +294,13 @@ impl RenderThread {
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
         let (instance, surface) = surface_source()?;
-        let display = Display::open(
-            &instance,
-            surface,
-            adapter_choice,
-            [size.width, size.height],
-        )?;
+        let size = [size.width, size.height];
+        let display = match early {
+            Some(early) => {
+                Display::open_with_early(early, &instance, surface, adapter_choice, size)
+            }
+            None => Display::open(&instance, surface, adapter_choice, size),
+        }?;
         Ok(Self {
             window,
             egui_ctx,

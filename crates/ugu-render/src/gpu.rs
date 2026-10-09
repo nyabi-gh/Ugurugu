@@ -39,32 +39,37 @@ pub struct Gpu {
 }
 
 impl Gpu {
+    /// Opens the adapter `choice` asks for that can show `surface`.
     pub fn open(
         instance: &wgpu::Instance,
         surface: &wgpu::Surface<'_>,
         choice: AdapterChoice,
     ) -> Result<Self, String> {
-        let request = |force_fallback_adapter| {
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter,
-                compatible_surface: Some(surface),
-                apply_limit_buckets: false,
-            }))
-        };
-        let adapter = match choice {
-            AdapterChoice::Warp => request(true),
-            AdapterChoice::Hardware => request(false).or_else(|error| {
-                tracing::warn!(%error, "no hardware DX12 adapter can show the window; trying WARP");
-                request(true)
-            }),
-        }
-        .map_err(|error| format!("no DX12 adapter can show the window: {error}"))?;
+        Self::with_adapter(request_adapter(instance, Some(surface), choice)?)
+    }
+
+    /// Opens the adapter `choice` asks for before there is a window to show,
+    /// so that loading the drivers, which takes most of start-up, runs while
+    /// the window is made. Whether it can show the window is checked later
+    /// with [`Gpu::can_show`].
+    pub fn open_without_surface(
+        instance: &wgpu::Instance,
+        choice: AdapterChoice,
+    ) -> Result<Self, String> {
+        Self::with_adapter(request_adapter(instance, None, choice)?)
+    }
+
+    pub fn can_show(&self, surface: &wgpu::Surface<'_>) -> bool {
+        self.adapter.is_surface_supported(surface)
+    }
+
+    fn with_adapter(adapter: wgpu::Adapter) -> Result<Self, String> {
         let summary = adapter_summary(&adapter.get_info());
         tracing::info!(adapter = %summary, "selected GPU adapter");
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|error| format!("cannot open the DX12 device: {error}"))?;
+        tracing::debug!("GPU device opened");
 
         let lost = Arc::new(AtomicBool::new(false));
         let flag = lost.clone();
@@ -136,6 +141,31 @@ impl Gpu {
         unsafe { device5.RemoveDevice() };
         Ok(())
     }
+}
+
+/// The high-performance adapter `choice` asks for, falling back to WARP
+/// when no hardware adapter can show `surface`.
+fn request_adapter(
+    instance: &wgpu::Instance,
+    surface: Option<&wgpu::Surface<'_>>,
+    choice: AdapterChoice,
+) -> Result<wgpu::Adapter, String> {
+    let request = |force_fallback_adapter| {
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter,
+            compatible_surface: surface,
+            apply_limit_buckets: false,
+        }))
+    };
+    match choice {
+        AdapterChoice::Warp => request(true),
+        AdapterChoice::Hardware => request(false).or_else(|error| {
+            tracing::warn!(%error, "no hardware DX12 adapter can show the window; trying WARP");
+            request(true)
+        }),
+    }
+    .map_err(|error| format!("no DX12 adapter can show the window: {error}"))
 }
 
 fn adapter_summary(info: &wgpu::AdapterInfo) -> String {

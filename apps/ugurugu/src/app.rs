@@ -19,7 +19,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
-use crate::render::{EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink};
+use crate::render::{
+    EarlyGpu, EarlyInstance, EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink,
+};
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
@@ -42,6 +44,10 @@ pub struct App {
     proxy: EventLoopProxy<UiEvent>,
     session: Option<Session>,
     fatal_error: Option<String>,
+    /// The GPU being opened since start-up, until the first surface and
+    /// render thread take them.
+    early_instance: Option<EarlyInstance>,
+    early_gpu: Option<EarlyGpu>,
 }
 
 struct Session {
@@ -58,11 +64,13 @@ struct Session {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UiEvent>) -> Self {
+    pub fn new(proxy: EventLoopProxy<UiEvent>, early: (EarlyInstance, EarlyGpu)) -> Self {
         Self {
             proxy,
             session: None,
             fatal_error: None,
+            early_instance: Some(early.0),
+            early_gpu: Some(early.1),
         }
     }
 
@@ -85,6 +93,7 @@ impl Session {
     fn create(
         event_loop: &ActiveEventLoop,
         proxy: EventLoopProxy<UiEvent>,
+        early_gpu: Option<EarlyGpu>,
     ) -> Result<Self, String> {
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
@@ -103,6 +112,7 @@ impl Session {
         let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
         window.set_visible(true);
+        tracing::debug!("window shown");
 
         let egui_ctx = egui::Context::default();
         crate::theme::apply(&egui_ctx);
@@ -147,6 +157,7 @@ impl Session {
                     egui_ctx,
                     egui_state,
                     open_at_start,
+                    early_gpu,
                 )
                 .and_then(|render| render.run(&messages))
                 .err();
@@ -176,7 +187,7 @@ impl ApplicationHandler<UiEvent> for App {
         if self.session.is_some() {
             return;
         }
-        match Session::create(event_loop, self.proxy.clone()) {
+        match Session::create(event_loop, self.proxy.clone(), self.early_gpu.take()) {
             Ok(session) => self.session = Some(session),
             Err(error) => {
                 self.fatal_error = Some(error);
@@ -202,7 +213,8 @@ impl ApplicationHandler<UiEvent> for App {
         let error = match event {
             UiEvent::NeedSurface(reply) => {
                 if let Some(session) = self.session.as_ref() {
-                    let _ = reply.send(RenderThread::create_surface(&session.window));
+                    let early = self.early_instance.take().and_then(EarlyInstance::take);
+                    let _ = reply.send(RenderThread::create_surface(&session.window, early));
                 }
                 return;
             }

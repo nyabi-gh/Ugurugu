@@ -36,6 +36,7 @@ fn main() -> ExitCode {
         .with_ansi(std::io::stdout().is_terminal())
         .with_writer(log_writer)
         .init();
+    tracing::debug!("starting");
 
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -47,12 +48,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
+    let early_gpu = render::open_gpu_early();
     ugu_win::pointer::enable_mouse_in_pointer()
         .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
     let event_loop = EventLoop::<app::UiEvent>::with_user_event()
         .build()
         .map_err(|error| format!("cannot create the event loop: {error}"))?;
-    let mut app = app::App::new(event_loop.create_proxy());
+    let mut app = app::App::new(event_loop.create_proxy(), early_gpu);
     event_loop
         .run_app(&mut app)
         .map_err(|error| format!("event loop failed: {error}"))?;
