@@ -153,6 +153,30 @@ target_link_libraries(
 ugurugu_target_defaults(ugurugu_fill_representation_probe)
 
 add_executable(
+    ugurugu_gif_golden_probe
+    EXCLUDE_FROM_ALL
+    tools/GifGoldenProbe.cpp
+)
+target_link_libraries(
+    ugurugu_gif_golden_probe
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_gif_golden_probe)
+
+add_executable(
+    ugurugu_gif_export_probe
+    EXCLUDE_FROM_ALL
+    tools/GifExportProbe.cpp
+)
+target_link_libraries(
+    ugurugu_gif_export_probe
+    PRIVATE
+    ugurugu_core
+)
+ugurugu_target_defaults(ugurugu_gif_export_probe)
+
+add_executable(
     ugurugu_wawa_v10_probe
     EXCLUDE_FROM_ALL
     tools/WawaV10Probe.cpp

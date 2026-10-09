@@ -47,6 +47,72 @@ pub fn encode_png(
 
 pub const JPEG_QUALITY: u8 = 92;
 
+/// For each pixel along an edge of `to`, the first pixel of `from` it
+/// covers and how much of each, in parts of 2^16 of the whole.
+fn spans(from: u32, to: u32) -> Vec<(usize, Vec<u32>)> {
+    let scale = f64::from(from) / f64::from(to);
+    (0..to)
+        .map(|index| {
+            let start = f64::from(index) * scale;
+            let end = start + scale;
+            let first = start.floor() as usize;
+            let last = (end.ceil() as usize).min(from as usize);
+            let mut weights: Vec<u32> = (first..last)
+                .map(|pixel| {
+                    let covered = (end.min(pixel as f64 + 1.0) - start.max(pixel as f64)).max(0.0);
+                    (covered / scale * 65536.0).round() as u32
+                })
+                .collect();
+            // Rounding leaves the sum a little off; the largest part takes it.
+            let sum: u32 = weights.iter().sum();
+            if let Some(largest) = weights.iter_mut().max() {
+                *largest = (*largest + 65536).saturating_sub(sum);
+            }
+            (first, weights)
+        })
+        .collect()
+}
+
+/// Premultiplied RGBA8 rows of `from` made `to`, no larger, each pixel the
+/// average of the area it covers.
+pub fn shrink(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+    if from == to {
+        return pixels.to_vec();
+    }
+    let columns = spans(from[0], to[0]);
+    let rows = spans(from[1], to[1]);
+    let source = pixels.as_chunks::<4>().0;
+    // Across first, kept in 2^16 parts, then down.
+    let mut across = vec![[0u32; 4]; (to[0] * from[1]) as usize];
+    for y in 0..from[1] as usize {
+        let row = &source[y * from[0] as usize..][..from[0] as usize];
+        for (x, (first, weights)) in columns.iter().enumerate() {
+            let mut sum = [0u32; 4];
+            for (pixel, &weight) in row[*first..].iter().zip(weights) {
+                for channel in 0..4 {
+                    sum[channel] += u32::from(pixel[channel]) * weight;
+                }
+            }
+            across[y * to[0] as usize + x] = sum.map(|channel| (channel + 128) >> 8);
+        }
+    }
+    let mut out = Vec::with_capacity((to[0] * to[1] * 4) as usize);
+    for (first, weights) in &rows {
+        for x in 0..to[0] as usize {
+            let mut sum = [0u64; 4];
+            for (offset, &weight) in weights.iter().enumerate() {
+                let pixel = across[(first + offset) * to[0] as usize + x];
+                for channel in 0..4 {
+                    sum[channel] += u64::from(pixel[channel]) * u64::from(weight);
+                }
+            }
+            // 2^8 parts across times 2^16 down.
+            out.extend(sum.map(|channel| ((channel + (1 << 23)) >> 24).min(255) as u8));
+        }
+    }
+    out
+}
+
 /// The file formats a still image is exported as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -207,6 +273,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn shrinking_averages_the_area_each_pixel_covers() {
+        let flat: Vec<u8> = [[40, 80, 120, 200]; 12].concat();
+        assert_eq!(
+            shrink(&flat, [4, 3], [2, 1]),
+            [[40, 80, 120, 200]; 2].concat()
+        );
+        // Two by two into one.
+        let square = [
+            [0, 0, 0, 0],
+            [100, 0, 0, 100],
+            [0, 200, 0, 200],
+            [255, 255, 255, 255],
+        ]
+        .concat();
+        assert_eq!(shrink(&square, [2, 2], [1, 1]), [89, 114, 64, 139]);
+        // Three into two: the middle one is shared half and half.
+        let row = [[0, 0, 0, 255], [90, 90, 90, 255], [180, 180, 180, 255]].concat();
+        assert_eq!(
+            shrink(&row, [3, 1], [2, 1]),
+            [[30, 30, 30, 255], [150, 150, 150, 255]].concat()
+        );
+        assert_eq!(shrink(&flat, [4, 3], [4, 3]), flat);
     }
 
     #[test]

@@ -16,7 +16,7 @@ mod restyle;
 mod settings;
 mod text;
 
-use fluent_bundle::FluentArgs;
+use crate::i18n::args;
 use std::sync::Arc;
 use ugu_core::document::{LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
@@ -87,14 +87,6 @@ impl Default for Shown {
             animation_bar: true,
         }
     }
-}
-
-fn args<const N: usize>(pairs: [(&'static str, String); N]) -> FluentArgs<'static> {
-    let mut args = FluentArgs::new();
-    for (name, value) in pairs {
-        args.set(name, value);
-    }
-    args
 }
 
 impl Panels {

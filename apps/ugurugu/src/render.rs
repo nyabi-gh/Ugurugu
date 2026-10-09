@@ -656,6 +656,7 @@ impl RenderThread {
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, &typed);
             files.confirm(ui.ctx(), canvas);
             files.ask_recovery(ui.ctx(), canvas);
+            files.ask_gif(ui.ctx(), canvas);
             ui::dialogs(ui.ctx(), canvas, files, settings, panels, &typed);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
@@ -692,11 +693,16 @@ impl RenderThread {
                             .request_repaint_after(due.saturating_duration_since(Instant::now()));
                     }
                     let pointer = panels.pointer;
+                    let export = files.export_status();
+                    if export.is_some() {
+                        // The progress moves on without input.
+                        ui.ctx().request_repaint_after(Duration::from_millis(200));
+                    }
                     let cancel = ui::status_bar(
                         ui,
                         canvas,
                         message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
-                        files.export_status(),
+                        export.as_deref(),
                         pointer,
                     );
                     if cancel {

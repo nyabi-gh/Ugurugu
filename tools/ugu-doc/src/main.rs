@@ -29,6 +29,10 @@
 //!   takes to end once it is told to stop, at points spread over the render.
 //! - `ugu-doc layers <file.ugurugu> <threads>`: times each layer drawn alone on
 //!   one thread and how long that many threads take to draw them all.
+//! - `ugu-doc gif <file.ugurugu> <out.gif> <percent> [threads]`: exports every
+//!   frame as the app does, drawing on that many threads (8 if not given)
+//!   while the frames before are shrunk and their colours taken, and prints
+//!   the time of each pass and the peak working set.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -41,7 +45,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -65,6 +69,14 @@ fn main() -> ExitCode {
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
         ["render", file] => render(Path::new(file), 8, None),
+        ["gif", file, out, percent] => percent
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|percent| gif(Path::new(file), Path::new(out), percent, 8)),
+        ["gif", file, out, percent, threads] => match (percent.parse(), threads.parse()) {
+            (Ok(percent), Ok(threads)) => gif(Path::new(file), Path::new(out), percent, threads),
+            _ => Err(USAGE.to_owned()),
+        },
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["fills", from, to] => fills(Path::new(from), Path::new(to)),
@@ -407,6 +419,97 @@ fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
     document.validate().map_err(|error| error.to_string())?;
     save(&document, to)?;
     info(to)
+}
+
+/// The app's GIF export (apps/ugurugu/src/export.rs) without the app: the
+/// same frames, shrinking, colours and coding, keeping transparency.
+fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose};
+
+    let document = open(path)?;
+    let canvas = document.canvas;
+    let size = if percent >= 100 {
+        canvas
+    } else {
+        canvas.map(|edge| (edge * percent / 100).max(1))
+    };
+    let frames = document.frames;
+    println!(
+        "{}: {} frames of {}x{} at {percent}% = {}x{}",
+        path.display(),
+        frames,
+        canvas[0],
+        canvas[1],
+        size[0],
+        size[1]
+    );
+    let started = Instant::now();
+    let (to_export, drawn) = std::sync::mpsc::sync_channel::<vello_cpu::Pixmap>(2);
+    let (drawing, quantized, taking) = std::thread::scope(|scope| {
+        let drawer = scope.spawn(|| {
+            let mut renderer = DocumentRenderer::new(threads);
+            let mut busy = 0.0;
+            for frame in 0..i64::from(frames) {
+                let mut pixmap = vello_cpu::Pixmap::new(canvas[0] as u16, canvas[1] as u16);
+                let started = Instant::now();
+                renderer.render(&document, frame, Purpose::Export, &mut pixmap);
+                busy += started.elapsed().as_secs_f64();
+                if to_export.send(pixmap).is_err() {
+                    break;
+                }
+            }
+            // Ends the taking below.
+            drop(to_export);
+            busy
+        });
+        let mut quantizer = ugu_io::gif::Quantizer::new(size);
+        let mut taking = 0.0;
+        for pixmap in drawn {
+            let started = Instant::now();
+            let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
+            let straight: Vec<u8> = shrunk
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|&pixel| Rgba8::from_premultiplied(pixel).0)
+                .collect();
+            quantizer.add(&straight);
+            taking += started.elapsed().as_secs_f64();
+        }
+        (drawer.join().expect("drawing"), quantizer.finish(), taking)
+    });
+    let first_pass = started.elapsed().as_secs_f64();
+    let coding_started = Instant::now();
+    let delays: Vec<u16> = ugu_io::gif::delays(frames, f64::from(document.frames_per_second), 100)
+        .into_iter()
+        .map(|delay| delay.min(u32::from(u16::MAX)) as u16)
+        .collect();
+    let coders = std::thread::available_parallelism().map_or(1, usize::from);
+    let file = std::fs::File::create(out).map_err(|error| error.to_string())?;
+    quantized
+        .write(
+            std::io::BufWriter::new(file),
+            &delays,
+            coders,
+            &|| false,
+            &mut |_| {},
+        )
+        .map_err(|error| error.to_string())?;
+    let coding = coding_started.elapsed().as_secs_f64();
+    let bytes = std::fs::metadata(out)
+        .map_err(|error| error.to_string())?
+        .len();
+    println!(
+        "  drawing {drawing:.2}s, shrinking and colours {taking:.2}s, first pass {first_pass:.2}s"
+    );
+    println!("  coding on {coders} threads {coding:.2}s");
+    println!(
+        "  total {:.2}s, {:.1}MB, peak working set {:.0} MiB",
+        first_pass + coding,
+        bytes as f64 / 1e6,
+        peak_working_set_mib()
+    );
+    Ok(())
 }
 
 fn peak_working_set_mib() -> f64 {

@@ -30,6 +30,7 @@ pub const FILE: &[Entry] = &[
     Gap,
     Do(A::InsertImage),
     Do(A::Export),
+    Do(A::ExportGif),
     Gap,
     Do(A::Quit),
 ];
@@ -149,7 +150,8 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         // Enter also places text, as it did before shortcuts could change.
         A::ApplyTransform => pending || session.placed_text().is_some(),
         A::CancelTransform => pending,
-        A::Animate => canvas.animation_allowed(),
+        // As 2.2.13: without the animation there is nothing to animate.
+        A::Animate | A::ExportGif => canvas.animation_allowed(),
         _ => true,
     }
 }
@@ -240,6 +242,7 @@ pub fn run(
         A::SaveAs => files.save_as(),
         A::InsertImage => files.insert_image(),
         A::Export => files.export_image(),
+        A::ExportGif => files.export_gif(canvas),
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool(canvas.edit(Session::undo)),
         A::Redo => report_bool(canvas.edit(Session::redo)),

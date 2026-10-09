@@ -167,6 +167,15 @@ pub fn tr(id: &'static str) -> &'static str {
 }
 
 /// The text of message `id` with `args` put in.
+/// Arguments for `tr_with`.
+pub fn args<const N: usize>(pairs: [(&'static str, String); N]) -> FluentArgs<'static> {
+    let mut args = FluentArgs::new();
+    for (name, value) in pairs {
+        args.set(name, value);
+    }
+    args
+}
+
 pub fn tr_with(id: &'static str, args: &FluentArgs) -> String {
     format(&text().bundles, id, Some(args)).unwrap_or_else(|| {
         tracing::warn!(id, "no interface text");

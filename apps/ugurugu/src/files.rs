@@ -30,7 +30,7 @@ use ugu_session::{Session, ToolSettings};
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
-use crate::export::{Exporting, Outcome};
+use crate::export::{self, Exporting, Job as ExportJob, Outcome};
 use crate::i18n::{tr, tr_with};
 use crate::recovery::{self, Found, Meta};
 
@@ -60,6 +60,10 @@ const JPEG_TYPE: FileType = FileType {
 };
 /// What a frame is exported as, as 2.2.13 offers; the extension picks it.
 const STILL_TYPES: &[FileType] = &[PNG_TYPE, JPEG_TYPE];
+const GIF_TYPE: FileType = FileType {
+    name: "GIF image",
+    extensions: &["gif"],
+};
 /// What an image can be inserted from, as 2.2.13 offers.
 const IMAGE_TYPE: FileType = FileType {
     name: "Image",
@@ -109,9 +113,18 @@ pub enum Purpose {
     Open,
     SaveAs,
     ExportImage,
+    ExportGif,
     InsertImage,
     /// The default save folder, for the settings.
     SaveFolder,
+}
+
+/// The animation export options being chosen.
+struct GifDialog {
+    /// Into `export::SCALES`.
+    scale: usize,
+    keep_transparency: bool,
+    budget: u64,
 }
 
 /// What becomes of work left by a window no longer running.
@@ -255,6 +268,10 @@ pub struct Files {
     recovered_name: Option<String>,
     recovered_from: Option<PathBuf>,
     exporting: Option<Exporting>,
+    /// The animation export options asked for, while they are.
+    gif_dialog: Option<GifDialog>,
+    /// The animation export chosen, waiting for where it goes.
+    gif_job: Option<ExportJob>,
     /// Cancelled exports whose threads may still be finishing.
     cancelled: Vec<Exporting>,
     exports: u64,
@@ -316,6 +333,8 @@ impl Files {
             recovered_name: None,
             recovered_from: None,
             exporting: None,
+            gif_dialog: None,
+            gif_job: None,
             cancelled: Vec::new(),
             exports: 0,
         }
@@ -633,8 +652,127 @@ impl Files {
         }
     }
 
-    /// Exports the frame with a pending transform or placed text applied.
-    fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas) {
+    /// Asks how to export the animation as a GIF, then where; one export
+    /// at a time.
+    pub fn export_gif(&mut self, canvas: &Canvas) {
+        if self.exporting.is_some() || self.busy_dialog {
+            return;
+        }
+        let document = canvas.session().document();
+        let budget = crate::budget::Budget::now(0).render as u64;
+        // The largest size that fits, as 2.2.13 opens on.
+        let scale = export::SCALES
+            .iter()
+            .position(|&percent| {
+                let size = export::scaled(document.canvas, percent);
+                export::gif_bytes(document.canvas, size, document.frames, export::threads())
+                    <= budget
+            })
+            .unwrap_or(export::SCALES.len() - 1);
+        self.gif_dialog = Some(GifDialog {
+            scale,
+            keep_transparency: true,
+            budget,
+        });
+    }
+
+    /// The animation export options, while they are asked for.
+    pub fn ask_gif(&mut self, ctx: &egui::Context, canvas: &Canvas) {
+        let Some(dialog) = self.gif_dialog.as_mut() else {
+            return;
+        };
+        let document = canvas.session().document();
+        let transparent = document.background.0[3] < 255;
+        let sizes = export::SCALES.map(|percent| export::scaled(document.canvas, percent));
+        let bytes = export::gif_bytes(
+            document.canvas,
+            sizes[dialog.scale],
+            document.frames,
+            export::threads(),
+        );
+        let fits = bytes <= dialog.budget;
+        let mebibytes = format!("{:.0}", bytes as f64 / (1024.0 * 1024.0));
+        let label = |index: usize| {
+            let [width, height] = sizes[index];
+            tr_with(
+                "export-scale",
+                &crate::i18n::args([
+                    ("percent", export::SCALES[index].to_string()),
+                    ("width", width.to_string()),
+                    ("height", height.to_string()),
+                ]),
+            )
+        };
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("gif export")).show(ctx, |ui| {
+            ui.heading(tr("export-gif-title"));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(tr("export-size"));
+                egui::ComboBox::from_id_salt("gif size")
+                    .selected_text(label(dialog.scale))
+                    .show_ui(ui, |ui| {
+                        for index in 0..sizes.len() {
+                            ui.selectable_value(&mut dialog.scale, index, label(index));
+                        }
+                    });
+            });
+            let mut keep = transparent && dialog.keep_transparency;
+            let checkbox = ui.add_enabled(
+                transparent,
+                egui::Checkbox::new(&mut keep, tr("export-keep-transparency")),
+            );
+            if transparent {
+                dialog.keep_transparency = keep;
+            } else {
+                checkbox.on_disabled_hover_text(tr("export-opaque-background"));
+            }
+            ui.label(if fits {
+                tr_with(
+                    "export-estimate",
+                    &crate::i18n::args([
+                        ("frames", document.frames.to_string()),
+                        ("mebibytes", mebibytes.clone()),
+                    ]),
+                )
+            } else {
+                tr_with(
+                    "export-over-budget",
+                    &crate::i18n::args([("mebibytes", mebibytes.clone())]),
+                )
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(fits, egui::Button::new(tr("export-confirm")))
+                    .clicked()
+                {
+                    choice = Some(true);
+                }
+                if ui.button(tr("export-cancel")).clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false);
+        }
+        match choice {
+            Some(true) => {
+                self.gif_job = Some(ExportJob::Gif {
+                    size: sizes[dialog.scale],
+                    keep_transparency: transparent && dialog.keep_transparency,
+                });
+                self.gif_dialog = None;
+                self.pick_save(Purpose::ExportGif, &[GIF_TYPE]);
+            }
+            Some(false) => self.gif_dialog = None,
+            None => {}
+        }
+    }
+
+    /// Exports with a pending transform or placed text applied.
+    fn start_export(&mut self, path: PathBuf, canvas: &mut Canvas, job: ExportJob) {
         if self.exporting.is_some() {
             return;
         }
@@ -647,7 +785,7 @@ impl Files {
         self.exporting = Some(Exporting::start(
             number,
             canvas.snapshot_now(),
-            canvas.session().frame(),
+            job,
             path,
             canvas.renders(),
             move |outcome| {
@@ -661,8 +799,18 @@ impl Files {
     }
 
     /// What the status bar shows while an export runs.
-    pub fn export_status(&self) -> Option<&'static str> {
-        self.exporting.as_ref().map(|_| tr("export-running"))
+    pub fn export_status(&self) -> Option<String> {
+        let export = self.exporting.as_ref()?;
+        Some(if export.steps > 1 {
+            format!(
+                "{} {} / {}",
+                tr("export-animation-running"),
+                export.done(),
+                export.steps
+            )
+        } else {
+            tr("export-running").to_owned()
+        })
     }
 
     /// Stops the export under way; says so at once.
@@ -695,12 +843,21 @@ impl Files {
                 self.busy_dialog = false;
                 let Some(path) = path else {
                     self.after_save = None;
+                    self.gif_job = None;
                     return;
                 };
                 match purpose {
                     Purpose::Open => self.open_path(path),
                     Purpose::SaveAs => self.start_save(path, canvas),
-                    Purpose::ExportImage => self.start_export(path, canvas),
+                    Purpose::ExportImage => {
+                        let frame = canvas.session().frame();
+                        self.start_export(path, canvas, ExportJob::Still { frame });
+                    }
+                    Purpose::ExportGif => {
+                        if let Some(job) = self.gif_job.take() {
+                            self.start_export(path, canvas, job);
+                        }
+                    }
                     Purpose::InsertImage => {
                         let fit = canvas.session().document().canvas;
                         let _ = self.to_worker.send(Job::Insert { path, fit });
@@ -1393,7 +1550,7 @@ mod tests {
             FileEvent::Picked(Purpose::ExportImage, Some(first.clone())),
             &mut canvas,
         );
-        assert_eq!(files.export_status(), Some(tr("export-running")));
+        assert_eq!(files.export_status().as_deref(), Some(tr("export-running")));
         // Another waits for it: neither a dialog nor a second export.
         files.export_image();
         assert!(!files.busy_dialog);

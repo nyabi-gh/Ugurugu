@@ -5,6 +5,7 @@
 //! and image export.
 
 pub mod format;
+pub mod gif;
 pub mod image;
 pub mod import;
 pub mod read;
