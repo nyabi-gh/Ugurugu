@@ -84,8 +84,21 @@ impl Chord {
     }
 
     /// Space pans the canvas and Tab moves the focus, with any modifiers.
+    /// A modifier alone, which egui also sends as a key, is no shortcut.
     pub fn assignable(self) -> bool {
-        !matches!(self.key, Key::Space | Key::Tab)
+        !matches!(
+            self.key,
+            Key::Space
+                | Key::Tab
+                | Key::ShiftLeft
+                | Key::ShiftRight
+                | Key::ControlLeft
+                | Key::ControlRight
+                | Key::AltLeft
+                | Key::AltRight
+                | Key::SuperLeft
+                | Key::SuperRight
+        )
     }
 
     /// As 2.2.13 writes it: "Ctrl+Alt+Shift+Key".
@@ -639,6 +652,8 @@ mod tests {
         assert!(!plain(Key::Space).assignable());
         assert!(!ctrl(Key::Space).assignable());
         assert!(!shift(Key::Tab).assignable());
+        assert!(!ctrl(Key::ControlLeft).assignable());
+        assert!(!shift(Key::ShiftRight).assignable());
         assert!(plain(Key::F2).assignable());
     }
 }

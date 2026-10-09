@@ -51,10 +51,15 @@ pub fn tool_button(
         ink,
         0.0,
     );
-    if shortcut.is_empty() {
-        response.on_hover_text(name)
+    response.on_hover_text(with_key(name, shortcut))
+}
+
+/// A tooltip naming the key that does the same, if there is one.
+pub fn with_key(tip: &str, key: &str) -> String {
+    if key.is_empty() {
+        tip.to_owned()
     } else {
-        response.on_hover_text(format!("{name} ({shortcut})"))
+        format!("{tip} ({key})")
     }
 }
 

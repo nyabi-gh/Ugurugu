@@ -54,6 +54,9 @@ pub struct Dialog {
     picking_accent: bool,
     /// The action whose new key is awaited.
     capturing: Option<Action>,
+    /// The key button to focus again: Escape, which stops the wait, also
+    /// drops egui's focus.
+    refocus: Option<Action>,
     /// Why the last key was refused.
     refusal: Option<String>,
 }
@@ -269,7 +272,9 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
 #[derive(Debug, PartialEq)]
 enum Pressed {
     Key(Chord),
+    /// Tab, which goes on to move the focus.
     Cancel,
+    Escape,
 }
 
 /// Takes the first key pressed in this frame, before the dialog's buttons
@@ -298,7 +303,7 @@ fn pressed(ctx: &egui::Context, typed: &[Chord]) -> Option<Pressed> {
                     true
                 }
                 egui::Key::Escape if modifiers.is_none() => {
-                    found = Some(Pressed::Cancel);
+                    found = Some(Pressed::Escape);
                     false
                 }
                 _ if !chord.assignable() => false,
@@ -325,6 +330,9 @@ fn shortcuts(
         && let Some(pressed) = pressed(ui.ctx(), typed)
     {
         dialog.capturing = None;
+        if pressed == Pressed::Escape {
+            dialog.refocus = Some(action);
+        }
         if let Pressed::Key(key) = pressed {
             dialog.refusal = settings
                 .shortcuts
@@ -382,6 +390,10 @@ fn shortcut_row(
     button.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{name}: {text}"))
     });
+    if dialog.refocus == Some(action) {
+        dialog.refocus = None;
+        button.request_focus();
+    }
     if button.clicked() {
         dialog.capturing = (!capturing).then_some(action);
         dialog.refusal = None;
@@ -396,6 +408,12 @@ fn shortcut_row(
             format!("{name}: {}", tr("settings-shortcut-clear")),
         )
     });
+    // egui does not scroll to a widget Tab moves the focus to.
+    for response in [&button, &clear] {
+        if response.gained_focus() {
+            response.scroll_to_me(None);
+        }
+    }
     if clear.clicked() {
         // Nothing conflicts with no key.
         let _ = settings.shortcuts.assign(action, None);
@@ -470,7 +488,7 @@ mod tests {
         // Escape stops waiting, and the dialog does not close on it.
         assert_eq!(
             waiting(&[(none, egui::Key::Escape)], &[]),
-            (Some(Pressed::Cancel), vec![])
+            (Some(Pressed::Escape), vec![])
         );
         // Tab stops waiting and still moves the focus.
         assert_eq!(
@@ -479,6 +497,15 @@ mod tests {
         );
         // Space is the canvas's.
         assert_eq!(waiting(&[(none, egui::Key::Space)], &[]), (None, vec![]));
+        // Ctrl arrives as a key of its own before the key it is held with.
+        let undo = Chord::new(command, egui::Key::Z);
+        assert_eq!(
+            waiting(
+                &[(command, egui::Key::ControlLeft), (command, egui::Key::Z)],
+                &[]
+            ),
+            (Some(Pressed::Key(undo)), vec![])
+        );
         let copy = Chord::new(command, egui::Key::C);
         assert_eq!(waiting(&[], &[copy]), (Some(Pressed::Key(copy)), vec![]));
         assert_eq!(waiting(&[], &[]), (None, vec![]));

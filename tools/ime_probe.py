@@ -274,7 +274,12 @@ def japanese(results, line_rect, text_rect):
 
 # The probe fields are part of the diagnostics panel; canvas shortcuts are
 # logged by the UI module.
-env = dict(os.environ, UGURUGU_DIAGNOSTICS="1",
+# Fresh settings each run: the app keeps the last tool, and a run that
+# starts with the text tool puts the "canvas" click in the tool's field.
+SETTINGS = os.path.join(OUT, "settings.json")
+if os.path.exists(SETTINGS):
+    os.remove(SETTINGS)
+env = dict(os.environ, UGURUGU_DIAGNOSTICS="1", UGURUGU_SETTINGS_PATH=SETTINGS,
            UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug,ugurugu::ui::text=trace")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)

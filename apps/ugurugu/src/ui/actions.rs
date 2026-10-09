@@ -314,12 +314,16 @@ pub fn shortcuts(
     }
 }
 
-/// Takes the keys of actions out of this frame's input, unless a text field
-/// or a dialog has the keyboard.
+/// Takes the keys of actions out of this frame's input, unless a text field,
+/// a dialog or an open menu has the keyboard.
 fn take_pressed(ctx: &egui::Context, keys: &Keymap, typed: &[Chord]) -> Vec<(Chord, Action)> {
     // Not `egui_wants_keyboard_input`, which also holds for a focused row or
-    // button and would leave the shortcuts dead after clicking a layer.
-    if ctx.text_edit_focused() || ctx.memory(|memory| memory.top_modal_layer().is_some()) {
+    // button and would leave the shortcuts dead after clicking a layer. An
+    // open menu closes on Escape, which would otherwise be the canvas's.
+    if ctx.text_edit_focused()
+        || ctx.memory(|memory| memory.top_modal_layer().is_some())
+        || egui::Popup::is_any_open(ctx)
+    {
         return Vec::new();
     }
     // A whole chord can arrive within one frame, so each key is matched with
@@ -434,5 +438,8 @@ mod tests {
             frame(&ctx, &keys, &copy, false),
             [A::Undo, A::ApplyTransform, A::Brush, A::Copy]
         );
+        // Nor do they reach the canvas while a menu is open.
+        egui::Popup::open_id(&ctx, egui::Id::new("menu"));
+        assert_eq!(frame(&ctx, &keys, &copy, false), []);
     }
 }

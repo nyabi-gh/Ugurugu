@@ -52,13 +52,13 @@ sampling-smooth-tip | ugurugu::MainWindow | Interpolate neighboring pixels durin
 sampling-pixels | ugurugu::LassoPopoverPanel | Pixel-based
 sampling-pixels-tip | ugurugu::MainWindow | Skip interpolation without removing existing transparency; edges may look stepped
 transform-selection | ugurugu::DocumentController | Transform selection
-transform-selection-tip | - | Move, scale and turn the selection with handles (Ctrl+T) | 핸들로 선택 영역을 이동·크기 조절·회전합니다(Ctrl+T) | ハンドルで選択範囲を移動・拡大縮小・回転します(Ctrl+T)
+transform-selection-tip | - | Move, scale and turn the selection with handles | 핸들로 선택 영역을 이동·크기 조절·회전합니다 | ハンドルで選択範囲を移動・拡大縮小・回転します
 flip-horizontal | ugurugu::MainWindow | Flip selection horizontally
 flip-vertical | ugurugu::MainWindow | Flip selection vertically
 transform-apply | ugurugu::MainWindow | Apply transform
-transform-apply-tip | ugurugu::MainWindow | Apply selection transform (Enter)
+transform-apply-tip | - | Apply selection transform | 선택 영역 변형 적용 | 選択範囲の変形を適用
 transform-cancel | ugurugu::MainWindow | Cancel transform
-transform-cancel-tip | ugurugu::MainWindow | Cancel selection transform (Esc)
+transform-cancel-tip | - | Cancel selection transform | 선택 영역 변형 취소 | 選択範囲の変形をキャンセル
 transform-duplicate | - | Duplicate | 복제 | 複製
 transform-duplicate-tip | - | Keep the selected part where it was too | 선택한 부분을 원래 자리에도 남깁니다 | 選択した部分を元の場所にも残します
 delete-selected | ugurugu::MainWindow | Delete selected content
@@ -228,7 +228,7 @@ fps | ugurugu::TimelineBar | FPS
 fps-tip | ugurugu::TimelineBar | Playback speed (frames per second)
 fps-name | ugurugu::TimelineBar | Playback speed
 bar-hide | ugurugu::TimelineBar | Hide
-bar-hide-tip | ugurugu::TimelineBar | Hide animation bar (Ctrl+T)
+bar-hide-tip | ugurugu::TimelineBar | Hide animation bar
 scrubber | ugurugu::FrameScrubber | Frame scrubber
 scrubber-frame | ugurugu::FrameScrubber | Frame %1 of %2 | args=frame,count
 

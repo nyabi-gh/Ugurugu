@@ -692,8 +692,10 @@ fn action_buttons(
     pending: Option<bool>,
 ) {
     ui.spacing_mut().item_spacing.x = 2.0;
-    let button = |ui: &mut egui::Ui, glyph, name, tip| {
-        widgets::icon_button_tip(ui, glyph, 18.0, tr(name), tr(tip), true).clicked()
+    let keys = &panels.keys;
+    let button = |ui: &mut egui::Ui, glyph, name, tip, action| {
+        let tip = widgets::with_key(tr(tip), &keys.text(action));
+        widgets::icon_button_tip(ui, glyph, 18.0, tr(name), &tip, true).clicked()
     };
     if pending.is_none()
         && button(
@@ -701,6 +703,7 @@ fn action_buttons(
             Glyph::Scale,
             "transform-selection",
             "transform-selection-tip",
+            Action::Transform,
         )
     {
         canvas.begin_transform();
@@ -710,15 +713,28 @@ fn action_buttons(
         Glyph::MirrorHorizontal,
         "flip-horizontal",
         "flip-horizontal",
+        Action::FlipHorizontal,
     ) {
         canvas.flip(true);
     }
-    if button(ui, Glyph::MirrorVertical, "flip-vertical", "flip-vertical") {
+    if button(
+        ui,
+        Glyph::MirrorVertical,
+        "flip-vertical",
+        "flip-vertical",
+        Action::FlipVertical,
+    ) {
         canvas.flip(false);
     }
     if pending.is_some() {
         ui.separator();
-        if button(ui, Glyph::Confirm, "transform-apply", "transform-apply-tip") {
+        if button(
+            ui,
+            Glyph::Confirm,
+            "transform-apply",
+            "transform-apply-tip",
+            Action::ApplyTransform,
+        ) {
             canvas.apply_transform();
         }
         if button(
@@ -726,6 +742,12 @@ fn action_buttons(
             Glyph::Cancel,
             "transform-cancel",
             "transform-cancel-tip",
+            // Escape cancels it when it has no key of its own.
+            if keys.key(Action::CancelTransform).is_some() {
+                Action::CancelTransform
+            } else {
+                Action::Escape
+            },
         ) {
             canvas.cancel_transform();
         }
@@ -743,17 +765,35 @@ fn action_buttons(
     if toggled.clicked() {
         canvas.set_duplicate(!duplicate);
     }
-    if restyle::available(canvas)
-        && button(ui, Glyph::Brush, "restyle-selected", "restyle-selected-tip")
-    {
-        restyle::open(canvas, panels);
-    }
-    if button(ui, Glyph::Delete, "delete-selected", "delete-selected") {
+    let restyle = restyle::available(canvas)
+        && button(
+            ui,
+            Glyph::Brush,
+            "restyle-selected",
+            "restyle-selected-tip",
+            Action::Restyle,
+        );
+    if button(
+        ui,
+        Glyph::Delete,
+        "delete-selected",
+        "delete-selected",
+        Action::DeleteSelected,
+    ) {
         canvas.delete_selected();
     }
     ui.separator();
-    if button(ui, Glyph::Deselect, "edit-deselect", "edit-deselect") {
+    if button(
+        ui,
+        Glyph::Deselect,
+        "edit-deselect",
+        "edit-deselect",
+        Action::Deselect,
+    ) {
         canvas.edit(Session::deselect);
+    }
+    if restyle {
+        restyle::open(canvas, panels);
     }
 }
 
@@ -1177,8 +1217,8 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
                 canvas.edit(|session| session.set_animation(count.round() as u32, speed, wobble));
             panels.report(result);
         }
-        let hide =
-            widgets::text_icon_button(ui, Glyph::MoveDown, tr("bar-hide"), tr("bar-hide-tip"));
+        let tip = widgets::with_key(tr("bar-hide-tip"), &panels.keys.text(Action::AnimationBar));
+        let hide = widgets::text_icon_button(ui, Glyph::MoveDown, tr("bar-hide"), &tip);
         if hide.clicked() {
             panels.shown.animation_bar = false;
         }
