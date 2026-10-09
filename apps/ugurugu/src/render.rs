@@ -334,6 +334,7 @@ impl RenderThread {
                 let mut files = Files::new(hwnd, move |event| {
                     let _ = to_self.send(ToRender::File(Box::new(event)));
                 });
+                files.start_recovery(crate::recovery::default_root());
                 if let Some(path) = open_at_start {
                     files.open_path(path);
                 }
@@ -482,7 +483,10 @@ impl RenderThread {
                 }
             }
             self.collect_display_times();
+            self.files.keep_recovery(&mut self.canvas, Instant::now());
             if self.files.should_close() {
+                // Only a normal close drops the work kept for recovery.
+                self.files.end();
                 break;
             }
         }
@@ -497,7 +501,10 @@ impl RenderThread {
 
     fn wake_timeout(&self) -> Duration {
         let mut timeout = IDLE_WAKE;
-        if let Some(at) = self.repaint_at {
+        for at in [self.repaint_at, self.files.recovery_due()]
+            .into_iter()
+            .flatten()
+        {
             timeout = timeout.min(at.saturating_duration_since(Instant::now()));
         }
         if self.display.presenter.has_pending_display_times() {
@@ -648,6 +655,7 @@ impl RenderThread {
             // Before the widgets run, so focus is what the key was pressed in.
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, &typed);
             files.confirm(ui.ctx(), canvas);
+            files.ask_recovery(ui.ctx(), canvas);
             ui::dialogs(ui.ctx(), canvas, files, settings, panels, &typed);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));

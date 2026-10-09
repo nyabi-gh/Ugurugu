@@ -10,9 +10,11 @@
 use std::sync::Arc;
 
 use ugu_core::command;
+use ugu_core::document::Document;
 use ugu_core::document::LayerId;
 use ugu_core::edit::{EditError, Outcome};
-use ugu_core::ops::Affine;
+use ugu_core::history::{Group, History};
+use ugu_core::ops::{Affine, Sampling};
 use ugu_core::selection::Selection;
 use ugu_core::store::limits;
 
@@ -105,21 +107,8 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         let sampling = self.transform_sampling;
-        let moved = pending.selection.transformed(pending.transform);
         let outcome = self.history.group("Transform selection", |group| {
-            let mask = selecting::stored_mask(group, &pending.selection)?;
-            group.apply(|document| {
-                command::transform_selection(
-                    document,
-                    pending.layer,
-                    mask,
-                    pending.transform,
-                    sampling,
-                    pending.keep_source,
-                )
-            })?;
-            group.select(moved);
-            Ok(())
+            transform_into(group, &pending, sampling)
         })?;
         if let Outcome::Committed(_) = outcome {
             self.ended = Some(Ended::Applied {
@@ -181,4 +170,47 @@ impl Session {
         let _ = self.apply_transform();
         let _ = self.apply_text();
     }
+
+    /// The document as saving after `settle` would write it, leaving the
+    /// session as it is; `None` when nothing is pending or placed.
+    pub fn settled_document(&self) -> Option<Document> {
+        if self.pending.is_none() && self.placed.is_none() {
+            return None;
+        }
+        let mut scratch = History::new(self.document().clone(), true);
+        // A transform cannot fail, and text over the limits is dropped, as
+        // in `settle`.
+        if let Some(pending) = &self.pending
+            && pending.transform != Affine::IDENTITY
+        {
+            let sampling = self.transform_sampling;
+            let _ = scratch.group("", |group| transform_into(group, pending, sampling));
+        }
+        if let Some(drawing) = self.text_drawing() {
+            let color = self.pen.color;
+            let _ = scratch.group("", |group| crate::placing::text_into(group, drawing, color));
+        }
+        Some(scratch.into_document())
+    }
+}
+
+/// The steps that put `pending` in the document; the selection follows it.
+fn transform_into(
+    group: &mut Group<'_>,
+    pending: &Pending,
+    sampling: Sampling,
+) -> Result<(), EditError> {
+    let mask = selecting::stored_mask(group, &pending.selection)?;
+    group.apply(|document| {
+        command::transform_selection(
+            document,
+            pending.layer,
+            mask,
+            pending.transform,
+            sampling,
+            pending.keep_source,
+        )
+    })?;
+    group.select(pending.selection.transformed(pending.transform));
+    Ok(())
 }

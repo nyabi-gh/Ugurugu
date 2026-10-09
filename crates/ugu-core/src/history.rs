@@ -181,6 +181,10 @@ impl History {
         &self.document
     }
 
+    pub fn into_document(self) -> Document {
+        self.document
+    }
+
     pub fn selection(&self) -> Option<&Arc<Selection>> {
         self.selection.as_ref()
     }

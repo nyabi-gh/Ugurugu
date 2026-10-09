@@ -17,6 +17,14 @@ file-insert-image | ugurugu::MainWindow | Insert &image…
 insert-image-failed | ugurugu::MainWindow | Could not insert image
 image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
 file-quit | ugurugu::MainWindow | &Quit
+recovery-title | ugurugu::MainWindow | Recover unsaved work
+recovery-found | ugurugu::MainWindow | Ugurugu found work from a previous session. Choose whether to recover or discard it.
+recovery-recover | ugurugu::MainWindow | Recover
+recovery-discard | ugurugu::MainWindow | Discard
+recovery-later | - | Later | 나중에 | 後で
+recovery-done | ugurugu::MainWindow | Recovered unsaved work.
+recovery-failed | ugurugu::MainWindow | Recovery failed
+recovery-not-saving | ugurugu::MainWindow | Automatic recovery is not saving. Save your work yourself.
 edit-undo | ugurugu::MainWindow | &Undo
 edit-redo | ugurugu::MainWindow | &Redo
 view-zoom-in | ugurugu::MainWindow | Zoom &in

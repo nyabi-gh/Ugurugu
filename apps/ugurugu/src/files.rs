@@ -9,21 +9,30 @@
 //! the same file. A save writes the snapshot taken when it started, and the
 //! document counts as saved only in that state. A PNG export renders the
 //! frame shown when it started, on the file thread.
+//!
+//! Unsaved work is also written for automatic recovery on the file thread,
+//! in order with saves, so a write queued before a save or a clean close
+//! never brings back what they removed.
 
+use std::collections::VecDeque;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ugu_core::document::Document;
+use ugu_core::document::{Document, LayerId};
 use ugu_core::history::StateId;
-use ugu_core::ops::AssetId;
+use ugu_core::ops::{Affine, AssetId};
 use ugu_core::store::Asset;
+use ugu_session::{Session, ToolSettings};
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::cache::Renders;
 use crate::canvas::Canvas;
 use crate::i18n::{tr, tr_with};
+use crate::recovery::{self, Found, Meta};
 
 fn args_name(name: String) -> fluent_bundle::FluentArgs<'static> {
     let mut args = fluent_bundle::FluentArgs::new();
@@ -62,6 +71,20 @@ pub enum FileEvent {
     Exported(PathBuf, Result<(), String>),
     /// An image read to insert, as an asset.
     Inserted(PathBuf, Result<(AssetId, Asset), String>),
+    /// This window's recovery folder is locked, and the folders of windows
+    /// no longer running were found.
+    RecoveryBegun(Result<(File, Vec<Found>), String>),
+    RecoveryWritten(Result<(), String>),
+    /// Work read back from a folder found at start.
+    Recovered(Result<Box<Recovered>, String>),
+}
+
+/// Work read back, and the folder it came from.
+pub struct Recovered {
+    found: Found,
+    document: Document,
+    id: [u8; 16],
+    meta: Meta,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,12 +97,22 @@ pub enum Purpose {
     SaveFolder,
 }
 
+/// What becomes of work left by a window no longer running.
+#[derive(Clone, Copy)]
+enum Answer {
+    Recover,
+    Discard,
+    Later,
+}
+
 /// What waits for unsaved changes to be dealt with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     New,
     Open,
     Close,
+    /// Recovers the work first in `Files::found`.
+    Recover,
 }
 
 enum Job {
@@ -101,10 +134,86 @@ enum Job {
         path: PathBuf,
         fit: [u32; 2],
     },
+    BeginRecovery {
+        root: PathBuf,
+        folder: PathBuf,
+    },
+    WriteRecovery {
+        folder: PathBuf,
+        document: Arc<Document>,
+        id: [u8; 16],
+        meta: Meta,
+    },
+    ForgetRecovery(PathBuf),
+    ReadRecovery(Box<Found>),
+    DiscardRecovery(Box<Found>),
+    /// Removes this window's folder as it closes.
+    EndRecovery {
+        folder: PathBuf,
+        lock: File,
+    },
+    /// Ends the file thread once the jobs before it are done.
+    Stop,
+}
+
+/// What a recovery write was of: the document's revision and whatever is
+/// pending outside it, which changes without a new revision.
+#[derive(Clone, Debug, PartialEq)]
+struct Mark {
+    revision: u64,
+    transform: Option<(LayerId, Affine, bool)>,
+    /// Where, which layout, and what the text is drawn with.
+    text: Option<(LayerId, [f64; 2], usize, ToolSettings, bool)>,
+}
+
+impl Mark {
+    fn of(session: &Session) -> Self {
+        Self {
+            revision: session.revision(),
+            transform: session
+                .pending()
+                .map(|pending| (pending.layer, pending.transform, pending.keep_source)),
+            text: session.placed_text().map(|placed| {
+                (
+                    placed.layer,
+                    placed.at,
+                    Arc::as_ptr(&placed.outline) as usize,
+                    session.pen,
+                    session.text.filled,
+                )
+            }),
+        }
+    }
+}
+
+/// This window's automatic recovery.
+struct Recovering {
+    folder: PathBuf,
+    /// Held from when the folder is made until the window closes.
+    lock: Option<File>,
+    sequence: u64,
+    /// Whether a generation may be on disk.
+    stored: bool,
+    /// The work as last written.
+    written: Option<Mark>,
+    /// Since when the work shown is not on disk, when it last changed, and
+    /// how it is now.
+    unwritten: Option<(Instant, Instant, Mark)>,
+    writing: bool,
+    /// Whether the last write failed, so the failure is said once.
+    failing: bool,
+}
+
+impl Recovering {
+    fn due(&self) -> Option<Instant> {
+        let (since, last, _) = self.unwritten.as_ref()?;
+        (!self.writing).then(|| (*last + recovery::QUIET).min(*since + recovery::LONGEST))
+    }
 }
 
 pub struct Files {
     to_worker: Sender<Job>,
+    worker: Option<JoinHandle<()>>,
     /// Sends events back to the render thread.
     events: Arc<dyn Fn(FileEvent) + Send + Sync>,
     owner: isize,
@@ -125,6 +234,15 @@ pub struct Files {
     /// What it says instead from then on, unless something else is said first.
     upcoming: Option<(String, Instant)>,
     close: bool,
+    recovery: Option<Recovering>,
+    /// Work of windows no longer running, to ask about in turn.
+    found: VecDeque<Found>,
+    /// Asking about recovered work is waiting for it to be read.
+    reading_found: bool,
+    /// The name recovered work goes by until it is saved, and where the
+    /// work had been saved, if anywhere.
+    recovered_name: Option<String>,
+    recovered_from: Option<PathBuf>,
 }
 
 /// A fresh document id, from the same entropy as hash seeds.
@@ -148,16 +266,22 @@ impl Files {
         let events: Arc<dyn Fn(FileEvent) + Send + Sync> = Arc::new(events);
         let (to_worker, jobs) = channel::<Job>();
         let worker_events = events.clone();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("files".to_owned())
             .spawn(move || {
                 for job in jobs {
-                    worker_events(run(job));
+                    if let Job::Stop = job {
+                        break;
+                    }
+                    if let Some(event) = run(job) {
+                        worker_events(event);
+                    }
                 }
             })
             .expect("cannot start the file thread");
         Self {
             to_worker,
+            worker: Some(worker),
             events,
             owner,
             path: None,
@@ -171,6 +295,123 @@ impl Files {
             message: None,
             upcoming: None,
             close: false,
+            recovery: None,
+            found: VecDeque::new(),
+            reading_found: false,
+            recovered_name: None,
+            recovered_from: None,
+        }
+    }
+
+    /// Starts keeping unsaved work under `root`, in a folder of this
+    /// window's, and looks for work left by windows no longer running.
+    pub fn start_recovery(&mut self, root: Option<PathBuf>) {
+        let Some(root) = root else {
+            tracing::warn!("no folder for automatic recovery; unsaved work is not kept");
+            return;
+        };
+        let name: String = new_id().iter().map(|byte| format!("{byte:02x}")).collect();
+        let folder = root.join(name);
+        let _ = self.to_worker.send(Job::BeginRecovery {
+            root,
+            folder: folder.clone(),
+        });
+        self.recovery = Some(Recovering {
+            folder,
+            lock: None,
+            sequence: 0,
+            stored: false,
+            written: None,
+            unwritten: None,
+            writing: false,
+            failing: false,
+        });
+    }
+
+    /// Writes the unsaved work once editing has paused, or has gone on for
+    /// long, and removes what was written once the work is saved.
+    pub fn keep_recovery(&mut self, canvas: &mut Canvas, now: Instant) {
+        let Some(recovering) = self.recovery.as_mut() else {
+            return;
+        };
+        let session = canvas.session();
+        if !session.is_dirty() {
+            recovering.unwritten = None;
+            recovering.written = None;
+            if std::mem::take(&mut recovering.stored) {
+                let _ = self
+                    .to_worker
+                    .send(Job::ForgetRecovery(recovering.folder.clone()));
+            }
+            return;
+        }
+        let mark = Mark::of(session);
+        if recovering.written.as_ref() == Some(&mark) {
+            recovering.unwritten = None;
+            return;
+        }
+        match &mut recovering.unwritten {
+            Some((_, last, seen)) => {
+                if *seen != mark {
+                    *last = now;
+                    *seen = mark;
+                }
+            }
+            None => recovering.unwritten = Some((now, now, mark)),
+        }
+        if recovering.due().is_some_and(|due| due <= now) {
+            self.write_recovery(canvas);
+        }
+    }
+
+    /// When unsaved work is next due to be written.
+    pub fn recovery_due(&self) -> Option<Instant> {
+        self.recovery.as_ref()?.due()
+    }
+
+    /// Writes the work as saving would, with a pending transform or placed
+    /// text in it, leaving them pending.
+    fn write_recovery(&mut self, canvas: &mut Canvas) {
+        let name = self.display_name();
+        let path = self.path.clone();
+        let Some(recovering) = self.recovery.as_mut() else {
+            return;
+        };
+        let mark = Mark::of(canvas.session());
+        let document = match canvas.session().settled_document() {
+            Some(document) => Arc::new(document),
+            None => canvas.snapshot_now(),
+        };
+        recovering.sequence += 1;
+        let meta = Meta::new(recovering.sequence, name, path, document.canvas);
+        let _ = self.to_worker.send(Job::WriteRecovery {
+            folder: recovering.folder.clone(),
+            document,
+            id: self.id,
+            meta,
+        });
+        recovering.writing = true;
+        recovering.stored = true;
+        recovering.written = Some(mark);
+        recovering.unwritten = None;
+    }
+
+    /// Removes this window's recovery folder and waits for the file thread
+    /// to finish, as the window closes normally.
+    pub fn end(&mut self) {
+        if let Some(Recovering {
+            folder,
+            lock: Some(lock),
+            ..
+        }) = self.recovery.take()
+        {
+            let _ = self.to_worker.send(Job::EndRecovery { folder, lock });
+        }
+        // Left for the next start.
+        self.found.clear();
+        let _ = self.to_worker.send(Job::Stop);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
 
@@ -222,10 +463,13 @@ impl Files {
     }
 
     fn display_name(&self) -> String {
-        self.path.as_deref().and_then(Path::file_stem).map_or_else(
-            || "Untitled".to_owned(),
-            |name| name.to_string_lossy().into_owned(),
-        )
+        match self.path.as_deref().and_then(Path::file_stem) {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => self
+                .recovered_name
+                .clone()
+                .unwrap_or_else(|| "Untitled".to_owned()),
+        }
     }
 
     /// Starts `action`, first asking about unsaved changes.
@@ -246,11 +490,19 @@ impl Files {
                 // Clean until edited, as the document at start.
                 canvas.replace(Self::new_canvas(), true);
                 self.path = None;
+                self.recovered_name = None;
+                self.recovered_from = None;
                 self.id = new_id();
                 self.clear_message();
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open(DOCUMENT_TYPE)),
             Action::Close => self.close = true,
+            Action::Recover => {
+                if let Some(found) = self.found.pop_front() {
+                    self.reading_found = true;
+                    let _ = self.to_worker.send(Job::ReadRecovery(Box::new(found)));
+                }
+            }
         }
     }
 
@@ -298,6 +550,7 @@ impl Files {
         let folder = self
             .path
             .as_deref()
+            .or(self.recovered_from.as_deref())
             .and_then(std::path::Path::parent)
             .map(std::path::Path::to_path_buf);
         self.pick(
@@ -399,6 +652,8 @@ impl Files {
                 Ok((document, id)) => {
                     canvas.replace(*document, true);
                     self.path = Some(path);
+                    self.recovered_name = None;
+                    self.recovered_from = None;
                     self.id = id;
                     self.clear_message();
                 }
@@ -443,6 +698,115 @@ impl Files {
                     }
                 }
             }
+            FileEvent::RecoveryBegun(result) => match result {
+                Ok((lock, found)) => {
+                    if let Some(recovering) = self.recovery.as_mut() {
+                        recovering.lock = Some(lock);
+                    }
+                    self.found = found.into();
+                }
+                Err(error) => {
+                    tracing::error!(%error, "cannot start automatic recovery");
+                    self.recovery = None;
+                    self.say(tr("recovery-not-saving").to_owned());
+                }
+            },
+            FileEvent::RecoveryWritten(result) => {
+                let Some(recovering) = self.recovery.as_mut() else {
+                    return;
+                };
+                recovering.writing = false;
+                match result {
+                    Ok(()) => recovering.failing = false,
+                    Err(error) => {
+                        tracing::error!(%error, "cannot write the work for recovery");
+                        // Tried again once the work changes.
+                        recovering.written = None;
+                        if !std::mem::replace(&mut recovering.failing, true) {
+                            self.say(tr("recovery-not-saving").to_owned());
+                        }
+                    }
+                }
+            }
+            FileEvent::Recovered(result) => {
+                self.reading_found = false;
+                match result {
+                    Ok(recovered) => {
+                        let Recovered {
+                            found,
+                            document,
+                            id,
+                            meta,
+                        } = *recovered;
+                        canvas.replace(document, false);
+                        self.path = None;
+                        self.id = id;
+                        self.recovered_name = Some(if meta.name.ends_with("-recovered") {
+                            meta.name
+                        } else {
+                            format!("{}-recovered", meta.name)
+                        });
+                        self.recovered_from = meta.path;
+                        self.say(tr("recovery-done").to_owned());
+                        // In this window's folder before the other one goes.
+                        self.write_recovery(canvas);
+                        let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
+                    }
+                    Err(error) => self.say(format!("{}: {error}", tr("recovery-failed"))),
+                }
+            }
+        }
+    }
+
+    /// The question about work left by a window no longer running, while
+    /// there is some and nothing else is asked.
+    pub fn ask_recovery(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {
+        if self.confirm.is_some() || self.reading_found || self.busy_dialog || self.saving {
+            return;
+        }
+        let Some(found) = self.found.front() else {
+            return;
+        };
+        let meta = &found.meta;
+        let time = ugu_win::clock::local_text(meta.time).unwrap_or_default();
+        let [width, height] = meta.canvas;
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("recovery")).show(ctx, |ui| {
+            ui.heading(tr("recovery-title"));
+            ui.label(tr("recovery-found"));
+            ui.add_space(6.0);
+            ui.strong(&meta.name);
+            ui.label(format!("{time} · {width} × {height}"));
+            if let Some(path) = &meta.path {
+                ui.label(path.display().to_string());
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                for (choice_here, key) in [
+                    (Answer::Recover, "recovery-recover"),
+                    (Answer::Discard, "recovery-discard"),
+                    (Answer::Later, "recovery-later"),
+                ] {
+                    if ui.button(tr(key)).clicked() {
+                        choice = Some(choice_here);
+                    }
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(Answer::Later);
+        }
+        match choice {
+            // Unsaved changes are asked about first, as before opening.
+            Some(Answer::Recover) => self.request(Action::Recover, canvas),
+            Some(Answer::Discard) => {
+                if let Some(found) = self.found.pop_front() {
+                    let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
+                }
+            }
+            // Unlocked, so the next start asks again.
+            Some(Answer::Later) => drop(self.found.pop_front()),
+            None => {}
         }
     }
 
@@ -486,8 +850,8 @@ impl Files {
     }
 }
 
-fn run(job: Job) -> FileEvent {
-    match job {
+fn run(job: Job) -> Option<FileEvent> {
+    Some(match job {
         Job::Save {
             document,
             id,
@@ -553,7 +917,60 @@ fn run(job: Job) -> FileEvent {
             );
             FileEvent::Opened(path, result)
         }
-    }
+        Job::BeginRecovery { root, folder } => FileEvent::RecoveryBegun(
+            recovery::begin(&root, &folder).map_err(|error| error.to_string()),
+        ),
+        Job::WriteRecovery {
+            folder,
+            document,
+            id,
+            meta,
+        } => {
+            let started = std::time::Instant::now();
+            let result = recovery::write(&folder, &document, id, &meta);
+            tracing::info!(
+                ms = started.elapsed().as_secs_f64() * 1000.0,
+                ok = result.is_ok(),
+                sequence = meta.sequence,
+                "work written for recovery"
+            );
+            FileEvent::RecoveryWritten(result)
+        }
+        Job::ForgetRecovery(folder) => {
+            if let Err(error) = recovery::forget(&folder) {
+                tracing::warn!(%error, "cannot remove the work written for recovery");
+            }
+            return None;
+        }
+        Job::ReadRecovery(found) => {
+            let found = *found;
+            FileEvent::Recovered(match recovery::read(&found) {
+                Ok((document, id, meta)) => Ok(Box::new(Recovered {
+                    found,
+                    document,
+                    id,
+                    meta,
+                })),
+                Err(error) => Err(match recovery::set_aside(found) {
+                    Ok(aside) => format!("{error} ({})", aside.display()),
+                    Err(_) => error,
+                }),
+            })
+        }
+        Job::DiscardRecovery(found) => {
+            if let Err(error) = recovery::discard(*found) {
+                tracing::warn!(%error, "cannot remove recovered work");
+            }
+            return None;
+        }
+        Job::EndRecovery { folder, lock } => {
+            if let Err(error) = recovery::end(&folder, lock) {
+                tracing::warn!(%error, "cannot remove the recovery folder");
+            }
+            return None;
+        }
+        Job::Stop => return None,
+    })
 }
 
 /// Renders `frame` without reference layers at the document's size, on the
@@ -925,3 +1342,6 @@ mod tests {
 
 #[cfg(test)]
 mod end_to_end;
+
+#[cfg(test)]
+mod recovering;

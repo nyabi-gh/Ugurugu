@@ -418,6 +418,12 @@ impl Canvas {
         }
     }
 
+    /// Whether renders asked for have not come back yet.
+    #[cfg(test)]
+    pub fn awaits_renders(&self) -> bool {
+        self.requested.is_some() || self.thumbnails_asked
+    }
+
     /// Takes a finished render if it is still wanted.
     pub fn adopt(&mut self, rendered: Rendered) {
         match rendered {

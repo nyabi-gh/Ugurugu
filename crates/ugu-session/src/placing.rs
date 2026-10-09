@@ -14,6 +14,8 @@ use std::sync::Arc;
 use ugu_core::command;
 use ugu_core::document::LayerId;
 use ugu_core::edit::{EditError, Outcome};
+use ugu_core::history::Group;
+use ugu_core::ops::Rgba8;
 use ugu_core::selection::Selection;
 use ugu_core::store::{Brush, Stroke, limits};
 use ugu_core::text::{self, Outline};
@@ -142,31 +144,9 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         let color = self.pen.color;
-        let outcome = self.history.group("Add text", |group| {
-            let clip = match &drawing.clip {
-                Some(selection) => Some(selecting::stored_mask(group, selection)?),
-                None => None,
-            };
-            if let Some(fill) = &drawing.fill {
-                let coverage = selecting::stored_mask(group, fill)?;
-                group.apply(|document| {
-                    command::fill(
-                        document,
-                        drawing.layer,
-                        coverage,
-                        color,
-                        drawing.antialias,
-                        clip,
-                    )
-                })?;
-            }
-            for stroke in drawing.strokes {
-                group.apply(|document| {
-                    command::draw(document, drawing.layer, stroke, false, clip)
-                })?;
-            }
-            Ok(())
-        })?;
+        let outcome = self
+            .history
+            .group("Add text", |group| text_into(group, drawing, color))?;
         if let Outcome::Committed(_) = outcome {
             self.ended = Some(Ended::Applied {
                 revision: self.history.revision(),
@@ -184,4 +164,33 @@ impl Session {
         }
         cancelled
     }
+}
+
+/// The steps that put `drawing` in the document.
+pub(crate) fn text_into(
+    group: &mut Group<'_>,
+    drawing: TextDrawing,
+    color: Rgba8,
+) -> Result<(), EditError> {
+    let clip = match &drawing.clip {
+        Some(selection) => Some(selecting::stored_mask(group, selection)?),
+        None => None,
+    };
+    if let Some(fill) = &drawing.fill {
+        let coverage = selecting::stored_mask(group, fill)?;
+        group.apply(|document| {
+            command::fill(
+                document,
+                drawing.layer,
+                coverage,
+                color,
+                drawing.antialias,
+                clip,
+            )
+        })?;
+    }
+    for stroke in drawing.strokes {
+        group.apply(|document| command::draw(document, drawing.layer, stroke, false, clip))?;
+    }
+    Ok(())
 }

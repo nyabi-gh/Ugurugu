@@ -33,14 +33,18 @@ fn sample(position: [f64; 2], time: u64) -> PointerSample {
     }
 }
 
-/// Takes cache renders until the canvas asks for no more.
+/// Takes cache renders until the canvas asks for no more. Waiting for a
+/// pause instead gave up early on a busy machine.
 fn settle(canvas: &mut Canvas, renders: &Receiver<Rendered>) {
     loop {
         canvas.sync();
-        match renders.recv_timeout(Duration::from_millis(300)) {
-            Ok(rendered) => canvas.adopt(rendered),
-            Err(_) => return,
+        if !canvas.awaits_renders() {
+            return;
         }
+        let rendered = renders
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the render worker answers");
+        canvas.adopt(rendered);
     }
 }
 

@@ -1686,3 +1686,32 @@ fn tools_carry_over_to_another_document() {
     assert_eq!(next.pen.width, 17.0);
     assert_eq!(next.tool(), Tool::Wand);
 }
+
+#[test]
+fn the_settled_document_is_what_applying_gives_and_the_session_stays() {
+    let mut session = session();
+    assert_eq!(session.settled_document(), None);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [10.0, 10.0],
+        [30.0, 20.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    assert!(session.set_transform(Affine::translation(15.0, 5.0)));
+    let revision = session.revision();
+    let settled = session.settled_document().unwrap();
+    assert!(session.pending().is_some());
+    assert_eq!(session.revision(), revision);
+    session.apply_transform().unwrap();
+    assert_eq!(&settled, session.document());
+    // Text clipped to the moved selection.
+    session.set_tool(Tool::Text);
+    session.place_text([30.0, 10.0], boxed_text()).unwrap();
+    let settled = session.settled_document().unwrap();
+    assert!(session.placed_text().is_some());
+    assert_ne!(&settled, session.document());
+    session.apply_text().unwrap();
+    assert_eq!(&settled, session.document());
+}
