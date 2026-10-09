@@ -19,6 +19,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 use ugu_session::Tools;
 
+use crate::shortcuts::Shortcuts;
+
 mod tools;
 
 /// How long settings must stay unchanged before they are written.
@@ -70,6 +72,8 @@ pub struct Settings {
     pub default_save_folder: Option<PathBuf>,
     /// The tools and colour history as last left.
     pub tools: Tools,
+    /// The shortcuts changed from their defaults.
+    pub shortcuts: Shortcuts,
     /// Keys this version does not know, kept to be written back.
     unknown: Map<String, Value>,
 }
@@ -82,18 +86,20 @@ impl Default for Settings {
             wobble_animation: true,
             default_save_folder: None,
             tools: Tools::default(),
+            shortcuts: Shortcuts::default(),
             unknown: Map::new(),
         }
     }
 }
 
 impl Settings {
-    /// What the settings dialog restores: its own settings as on a fresh
-    /// install. The tools, the colour history and what this version cannot
-    /// show stay, as in 2.2.13.
+    /// What the settings dialog restores: its own settings, shortcuts
+    /// included, as on a fresh install. The tools, the colour history and
+    /// what this version cannot show stay, as in 2.2.13.
     pub fn restored(&self) -> Self {
         Self {
             tools: self.tools.clone(),
+            shortcuts: self.shortcuts.restored(),
             unknown: self.unknown.clone(),
             ..Self::default()
         }
@@ -158,6 +164,9 @@ impl Settings {
         if let Some(value) = object.remove("colorHistory") {
             settings.tools.colors = tools::parse_history(&value);
         }
+        if let Some(value) = object.remove("shortcuts") {
+            settings.shortcuts = Shortcuts::parse(&value);
+        }
         if !object.is_empty() {
             let keys: Vec<&String> = object.keys().collect();
             tracing::info!(?keys, "settings this version does not use are kept");
@@ -192,6 +201,9 @@ impl Settings {
                 "colorHistory".to_owned(),
                 tools::history_to_json(&self.tools.colors),
             );
+        }
+        if let Some(shortcuts) = self.shortcuts.to_json() {
+            object.insert("shortcuts".to_owned(), shortcuts);
         }
         let mut text =
             serde_json::to_string_pretty(&Value::Object(object)).expect("settings are plain JSON");
@@ -450,6 +462,14 @@ mod tests {
                 tools.colors.record(ugu_core::ops::Rgba8([1, 2, 3, 4]));
                 tools
             },
+            shortcuts: {
+                let mut shortcuts = Shortcuts::default();
+                let fit = crate::shortcuts::Chord::parse("F").unwrap();
+                shortcuts
+                    .assign(crate::shortcuts::Action::Fit, Some(fit))
+                    .unwrap();
+                shortcuts
+            },
             unknown: Map::new(),
         }
     }
@@ -467,6 +487,7 @@ mod tests {
         let text = std::fs::read_to_string(folder.settings()).unwrap();
         assert!(text.contains("\"format\": \"ugurugu.settings\""), "{text}");
         assert!(text.contains("\"accent\": \"#12abef\""), "{text}");
+        assert!(text.contains("\"fit\": \"F\""), "{text}");
     }
 
     #[test]

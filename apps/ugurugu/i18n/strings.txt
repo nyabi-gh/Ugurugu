@@ -338,3 +338,10 @@ settings-credit-development | ugurugu::SettingsDialog | Development support by s
 settings-credit-icon | ugurugu::SettingsDialog | App icon artwork by seuppi
 settings-restore-defaults | - | Restore defaults | 기본값 복원 | デフォルトに戻す
 settings-close | - | Close | 닫기 | 閉じる
+escape-canvas | ugurugu::MainWindow | Cancel current canvas action
+settings-shortcuts | ugurugu::SettingsDialog | Shortcuts
+settings-shortcuts-hint | ugurugu::SettingsDialog | Click a shortcut field, then press the new key combination.
+settings-shortcut-taken | ugurugu::SettingsDialog | This shortcut is already assigned to %1. | args=action
+settings-shortcut-press | - | Press a key… (Esc cancels) | 키를 누르세요… (Esc: 취소) | キーを押してください…(Esc: 取り消し)
+settings-shortcut-none | - | None | 없음 | なし
+settings-shortcut-clear | - | Clear shortcut | 단축키 지우기 | ショートカットを消去

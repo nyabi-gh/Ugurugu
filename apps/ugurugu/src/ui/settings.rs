@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The settings dialog, as 2.2.13's: tabs for general, drawing, files and
-//! about, each change applied and kept at once, and a button that restores
-//! the defaults. 2.2.13's shortcut tab comes with custom shortcuts (M5-5),
-//! and its choice of wobbling while a stroke is drawn is left out because 3.0
-//! stops playback for a stroke.
+//! The settings dialog, as 2.2.13's: tabs for general, drawing, files,
+//! shortcuts and about, each change applied and kept at once, and a button
+//! that restores the defaults. 2.2.13's choice of wobbling while a stroke is
+//! drawn is left out because 3.0 stops playback for a stroke.
 
 use crate::canvas::Canvas;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
 use crate::settings::{Language, Settings, Store};
+use crate::shortcuts::{Action, Chord, Keymap};
 use crate::theme;
 use crate::widgets;
 
-use super::{Panels, args};
+use super::{Panels, actions, args};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
@@ -22,17 +22,25 @@ pub enum Tab {
     General,
     Drawing,
     Files,
+    Shortcuts,
     About,
 }
 
 impl Tab {
-    const ALL: [Self; 4] = [Self::General, Self::Drawing, Self::Files, Self::About];
+    const ALL: [Self; 5] = [
+        Self::General,
+        Self::Drawing,
+        Self::Files,
+        Self::Shortcuts,
+        Self::About,
+    ];
 
     fn title(self) -> &'static str {
         match self {
             Self::General => tr("settings-general"),
             Self::Drawing => tr("settings-drawing"),
             Self::Files => tr("settings-files"),
+            Self::Shortcuts => tr("settings-shortcuts"),
             Self::About => tr("settings-about"),
         }
     }
@@ -44,6 +52,10 @@ pub struct Dialog {
     tab: Tab,
     /// Whether the accent picker is open.
     picking_accent: bool,
+    /// The action whose new key is awaited.
+    capturing: Option<Action>,
+    /// Why the last key was refused.
+    refusal: Option<String>,
 }
 
 fn language_name(language: Language) -> &'static str {
@@ -63,23 +75,32 @@ pub fn restore_tools(settings: &Settings, canvas: &mut Canvas) {
 
 /// Puts `settings` into effect everywhere but the interface language, which
 /// waits for the next start.
-pub fn apply(ctx: &egui::Context, settings: &Settings, canvas: &mut Canvas, files: &mut Files) {
+pub fn apply(
+    ctx: &egui::Context,
+    settings: &Settings,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    keys: &mut Keymap,
+) {
     theme::set_accent(ctx, settings.accent);
     canvas.allow_animation(settings.wobble_animation);
     files.set_default_save_folder(settings.default_save_folder.clone());
+    *keys = Keymap::new(&settings.shortcuts);
 }
 
 /// Shows the dialog if open, and takes a default save folder chosen in it.
+/// `typed`: chords egui turns into clipboard events, for a new shortcut.
 pub fn show(
     ctx: &egui::Context,
     canvas: &mut Canvas,
     files: &mut Files,
     store: &mut Store,
     panels: &mut Panels,
+    typed: &[Chord],
 ) {
     if let Some(folder) = files.take_chosen_save_folder() {
         store.change(|settings| settings.default_save_folder = Some(folder));
-        apply(ctx, store.get(), canvas, files);
+        apply(ctx, store.get(), canvas, files, &mut panels.keys);
     }
     let Some(dialog) = panels.settings.as_mut() else {
         return;
@@ -99,6 +120,7 @@ pub fn show(
                 {
                     dialog.tab = tab;
                     dialog.picking_accent = false;
+                    dialog.capturing = None;
                 }
             }
         });
@@ -115,6 +137,7 @@ pub fn show(
                     );
                 }
                 Tab::Files => save_folder(ui, files, &mut settings),
+                Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings, typed),
                 Tab::About => about(ui),
             }
         });
@@ -123,6 +146,8 @@ pub fn show(
             if ui.button(tr("settings-restore-defaults")).clicked() {
                 settings = settings.restored();
                 dialog.picking_accent = false;
+                dialog.capturing = None;
+                dialog.refusal = None;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(tr("settings-close")).clicked() {
@@ -133,7 +158,7 @@ pub fn show(
     });
     if settings != before {
         store.change(|kept| *kept = settings);
-        apply(ctx, store.get(), canvas, files);
+        apply(ctx, store.get(), canvas, files, &mut panels.keys);
     }
     if close || modal.should_close() {
         panels.settings = None;
@@ -240,6 +265,145 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
     }
 }
 
+/// What was pressed while a new key is awaited.
+#[derive(Debug, PartialEq)]
+enum Pressed {
+    Key(Chord),
+    Cancel,
+}
+
+/// Takes the first key pressed in this frame, before the dialog's buttons
+/// and its Escape handling see it. Tab still moves the focus and ends the
+/// wait; Space, which pans the canvas, is not taken.
+fn pressed(ctx: &egui::Context, typed: &[Chord]) -> Option<Pressed> {
+    let mut found = typed.first().copied().map(Pressed::Key);
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let &egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            if found.is_some() {
+                return true;
+            }
+            let chord = Chord::new(modifiers, key);
+            match key {
+                egui::Key::Tab => {
+                    found = Some(Pressed::Cancel);
+                    true
+                }
+                egui::Key::Escape if modifiers.is_none() => {
+                    found = Some(Pressed::Cancel);
+                    false
+                }
+                _ if !chord.assignable() => false,
+                _ => {
+                    found = Some(Pressed::Key(chord));
+                    false
+                }
+            }
+        });
+    });
+    found
+}
+
+/// Every action with its key, a button that waits for a new key, and one
+/// that clears it, as 2.2.13's shortcut tab.
+fn shortcuts(
+    ui: &mut egui::Ui,
+    dialog: &mut Dialog,
+    canvas: &Canvas,
+    settings: &mut Settings,
+    typed: &[Chord],
+) {
+    if let Some(action) = dialog.capturing
+        && let Some(pressed) = pressed(ui.ctx(), typed)
+    {
+        dialog.capturing = None;
+        if let Pressed::Key(key) = pressed {
+            dialog.refusal = settings
+                .shortcuts
+                .assign(action, Some(key))
+                .err()
+                .map(|holder| {
+                    tr_with(
+                        "settings-shortcut-taken",
+                        &args([("action", actions::label(holder, canvas).to_owned())]),
+                    )
+                });
+        }
+    }
+    ui.label(egui::RichText::new(tr("settings-shortcuts-hint")).color(theme::MUTED));
+    ui.add_space(4.0);
+    let keys = Keymap::new(&settings.shortcuts);
+    egui::ScrollArea::vertical()
+        .max_height(170.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            egui::Grid::new("settings shortcuts")
+                .num_columns(3)
+                .spacing([12.0, 4.0])
+                .show(ui, |ui| {
+                    for &action in Action::ALL {
+                        shortcut_row(ui, dialog, canvas, settings, &keys, action);
+                        ui.end_row();
+                    }
+                });
+        });
+    if let Some(refusal) = &dialog.refusal {
+        ui.colored_label(theme::accent(), refusal);
+    }
+}
+
+fn shortcut_row(
+    ui: &mut egui::Ui,
+    dialog: &mut Dialog,
+    canvas: &Canvas,
+    settings: &mut Settings,
+    keys: &Keymap,
+    action: Action,
+) {
+    let name = actions::label(action, canvas);
+    widgets::field_label(ui, name);
+    let capturing = dialog.capturing == Some(action);
+    let key = keys.key(action);
+    let text = match key {
+        _ if capturing => tr("settings-shortcut-press").to_owned(),
+        Some(key) => key.text(),
+        None => tr("settings-shortcut-none").to_owned(),
+    };
+    let button =
+        ui.add(egui::Button::selectable(capturing, &text).min_size(egui::vec2(170.0, 0.0)));
+    button.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{name}: {text}"))
+    });
+    if button.clicked() {
+        dialog.capturing = (!capturing).then_some(action);
+        dialog.refusal = None;
+    }
+    let clear = ui
+        .add_enabled(key.is_some(), egui::Button::new("×"))
+        .on_hover_text(tr("settings-shortcut-clear"));
+    clear.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            key.is_some(),
+            format!("{name}: {}", tr("settings-shortcut-clear")),
+        )
+    });
+    if clear.clicked() {
+        // Nothing conflicts with no key.
+        let _ = settings.shortcuts.assign(action, None);
+        dialog.capturing = None;
+        dialog.refusal = None;
+    }
+}
+
 fn about(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new("Ugurugu")
@@ -252,4 +416,71 @@ fn about(ui: &mut egui::Ui) {
     ));
     ui.label(tr("settings-credit-development"));
     ui.label(tr("settings-credit-icon"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a frame with `keys` pressed gives a waiting shortcut, and the
+    /// keys left for the rest of the dialog.
+    fn waiting(
+        keys: &[(egui::Modifiers, egui::Key)],
+        typed: &[Chord],
+    ) -> (Option<Pressed>, Vec<egui::Key>) {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        for &(modifiers, key) in keys {
+            input.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            });
+        }
+        let mut result = (None, Vec::new());
+        let mut output = ctx.run_ui(input, |ui| {
+            let found = pressed(ui.ctx(), typed);
+            let left = ui.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::Key { key, .. } => Some(*key),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            result = (found, left);
+        });
+        output.textures_delta.clear();
+        result
+    }
+
+    #[test]
+    fn a_waiting_shortcut_takes_the_first_key() {
+        let none = egui::Modifiers::NONE;
+        let command = egui::Modifiers::COMMAND;
+        let enter = Chord::new(none, egui::Key::Enter);
+        assert_eq!(
+            waiting(&[(none, egui::Key::Enter), (none, egui::Key::B)], &[]),
+            (Some(Pressed::Key(enter)), vec![egui::Key::B])
+        );
+        // Escape stops waiting, and the dialog does not close on it.
+        assert_eq!(
+            waiting(&[(none, egui::Key::Escape)], &[]),
+            (Some(Pressed::Cancel), vec![])
+        );
+        // Tab stops waiting and still moves the focus.
+        assert_eq!(
+            waiting(&[(none, egui::Key::Tab)], &[]),
+            (Some(Pressed::Cancel), vec![egui::Key::Tab])
+        );
+        // Space is the canvas's.
+        assert_eq!(waiting(&[(none, egui::Key::Space)], &[]), (None, vec![]));
+        let copy = Chord::new(command, egui::Key::C);
+        assert_eq!(waiting(&[], &[copy]), (Some(Pressed::Key(copy)), vec![]));
+        assert_eq!(waiting(&[], &[]), (None, vec![]));
+    }
 }

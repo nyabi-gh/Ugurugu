@@ -16,6 +16,7 @@ mod input;
 mod latency;
 mod render;
 mod settings;
+mod shortcuts;
 mod theme;
 mod ui;
 mod widgets;

@@ -18,7 +18,7 @@ use ugu_render::view::{DocumentView, Placement};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::PointerEvent;
 use winit::event::WindowEvent;
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 use crate::cache::Rendered;
@@ -29,6 +29,7 @@ use crate::ime_probe::ImeProbe;
 use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
 use crate::settings::Store;
+use crate::shortcuts::{self, Chord};
 use crate::theme;
 use crate::ui::{self, Panels};
 
@@ -145,9 +146,10 @@ pub struct RenderThread {
     files: Files,
     settings: Store,
     clipboard: Clipboard,
-    control_held: bool,
-    /// Ctrl+V since the last frame.
-    paste_pressed: bool,
+    modifiers: ModifiersState,
+    /// Copy, cut and paste chords since the last frame, which egui does not
+    /// see as keys.
+    clipboard_chords: Vec<Chord>,
     title: String,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
@@ -320,8 +322,8 @@ impl RenderThread {
                     let _ = to_self.send(ToRender::Cache(Box::new(rendered)));
                 }
             }),
-            control_held: false,
-            paste_pressed: false,
+            modifiers: ModifiersState::empty(),
+            clipboard_chords: Vec::new(),
             clipboard: Clipboard::new({
                 let to_self = to_self.clone();
                 move |event| {
@@ -353,6 +355,7 @@ impl RenderThread {
             &render.settings,
             &mut render.canvas,
             &mut render.files,
+            &mut render.panels,
         );
         Ok(render)
     }
@@ -583,17 +586,19 @@ impl RenderThread {
             ToRender::Window(event) => {
                 match &event {
                     WindowEvent::ModifiersChanged(modifiers) => {
-                        self.control_held = modifiers.state().control_key();
+                        self.modifiers = modifiers.state();
                     }
-                    // egui-winit reports Ctrl+V only when the clipboard holds
-                    // text, and an image from another app is pasted too.
+                    // egui-winit turns these into clipboard events, Ctrl+V
+                    // only when the clipboard holds text, and an image from
+                    // another app is pasted too.
                     WindowEvent::KeyboardInput { event, .. }
-                        if event.state.is_pressed()
-                            && !event.repeat
-                            && self.control_held
-                            && event.physical_key == PhysicalKey::Code(KeyCode::KeyV) =>
+                        if event.state.is_pressed() && !event.repeat =>
                     {
-                        self.paste_pressed = true;
+                        self.clipboard_chords.extend(shortcuts::clipboard_chord(
+                            &event.logical_key,
+                            event.physical_key,
+                            self.modifiers,
+                        ));
                     }
                     _ => {}
                 }
@@ -623,7 +628,7 @@ impl RenderThread {
         let input = self.egui_state.take_egui_input(&self.window);
         let mut canvas_area = [0; 4];
         let mut shown_ants = None;
-        let paste = std::mem::take(&mut self.paste_pressed);
+        let typed = std::mem::take(&mut self.clipboard_chords);
         let Self {
             display,
             canvas,
@@ -641,9 +646,9 @@ impl RenderThread {
         let mut remove_device = false;
         let output = self.egui_ctx.run_ui(input, |ui| {
             // Before the widgets run, so focus is what the key was pressed in.
-            ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, paste);
+            ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, &typed);
             files.confirm(ui.ctx(), canvas);
-            ui::dialogs(ui.ctx(), canvas, files, settings, panels);
+            ui::dialogs(ui.ctx(), canvas, files, settings, panels, &typed);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
             let bar = |fill, x, y| {
@@ -660,7 +665,9 @@ impl RenderThread {
                 .show(ui, |ui| ui::menu_bar(ui, canvas, files, clipboard, panels));
             egui::Panel::top("quick access")
                 .frame(bar(theme::CHROME, 10, 5))
-                .show(ui, |ui| ui::quick_access(ui, canvas, panels));
+                .show(ui, |ui| {
+                    ui::quick_access(ui, canvas, files, clipboard, panels)
+                });
             egui::Panel::bottom("status")
                 .frame(bar(theme::STATUS, 8, 2))
                 .show_separator_line(false)
@@ -699,7 +706,7 @@ impl RenderThread {
                 .resizable(false)
                 .exact_size(48.0)
                 .frame(bar(theme::CHROME, 4, 8))
-                .show(ui, |ui| ui::rail(ui, canvas));
+                .show(ui, |ui| ui::rail(ui, canvas, &panels.keys));
             let left = panels.shown;
             if left.tool_settings || left.color || left.color_history {
                 egui::Panel::left("tool settings")

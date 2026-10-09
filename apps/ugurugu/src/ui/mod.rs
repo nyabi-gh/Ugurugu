@@ -6,6 +6,7 @@
 //! layers on the right, the animation bar under the canvas and the status
 //! bar at the bottom. Only what 3.0 can already do is shown.
 
+mod actions;
 mod brushes;
 mod color;
 mod history;
@@ -27,10 +28,11 @@ use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
 use crate::canvas::{Canvas, Grip, HANDLES, ZOOM_RANGE};
 use crate::clipboard::Clipboard;
-use crate::files::{Action, Files};
+use crate::files::Files;
 use crate::i18n::{tr, tr_with};
 use crate::icons::{self, Glyph};
 use crate::settings::Store;
+use crate::shortcuts::{Action, Keymap};
 use crate::theme;
 use crate::widgets;
 
@@ -59,6 +61,8 @@ pub struct Panels {
     restyle: Option<restyle::Dialog>,
     /// The settings dialog, while open.
     settings: Option<settings::Dialog>,
+    /// Which action each key runs.
+    pub keys: Keymap,
 }
 
 /// Panels the Window menu opens and closes.
@@ -107,174 +111,11 @@ impl Panels {
     }
 }
 
-/// Handles the canvas's shortcuts in this frame's input. Text fields keep
-/// their keys, Enter that commits a composition included.
-pub fn shortcuts(
-    ctx: &egui::Context,
-    canvas: &mut Canvas,
-    files: &mut Files,
-    clipboard: &mut Clipboard,
-    panels: &mut Panels,
-    paste: bool,
-) {
-    // Not `egui_wants_keyboard_input`, which also holds for a focused row or
-    // button and would leave the shortcuts dead after clicking a layer.
-    if ctx.text_edit_focused() || ctx.memory(|memory| memory.top_modal_layer().is_some()) {
-        return;
-    }
-    // A whole chord can arrive within one frame, so each key is matched with
-    // the modifiers it was pressed with, not the frame's last state.
-    let pressed = |modifiers, key| ctx.input_mut(|input| input.consume_key(modifiers, key));
-    let none = egui::Modifiers::NONE;
-    let command = egui::Modifiers::COMMAND;
-    let command_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-    if pressed(command, egui::Key::Z) {
-        tracing::debug!("canvas Ctrl+Z");
-        report_bool(canvas.edit(Session::undo));
-    }
-    if pressed(command, egui::Key::Y) || pressed(command_shift, egui::Key::Z) {
-        report_bool(canvas.edit(Session::redo));
-    }
-    if pressed(none, egui::Key::Enter) {
-        // The IME test counts it.
-        tracing::debug!("canvas Enter");
-        canvas.apply_pending();
-    }
-    if pressed(none, egui::Key::B) {
-        canvas.edit(|session| session.set_tool(Tool::Pen));
-    }
-    if pressed(none, egui::Key::E) {
-        canvas.edit(|session| session.set_tool(Tool::Eraser));
-    }
-    if pressed(none, egui::Key::L) {
-        canvas.edit(|session| session.set_tool(Tool::Select));
-    }
-    if pressed(none, egui::Key::W) {
-        canvas.edit(|session| session.set_tool(Tool::Wand));
-    }
-    if pressed(none, egui::Key::G) {
-        canvas.edit(|session| session.set_tool(Tool::Fill));
-    }
-    if pressed(none, egui::Key::T) {
-        canvas.edit(|session| session.set_tool(Tool::Text));
-    }
-    if pressed(none, egui::Key::I) {
-        canvas.edit(|session| session.set_tool(Tool::Eyedropper));
-    }
-    if pressed(egui::Modifiers::ALT, egui::Key::Delete) {
-        canvas.fill_selection();
-    }
-    if pressed(none, egui::Key::Delete) {
-        canvas.delete_selected();
-    }
-    if pressed(command, egui::Key::A) {
-        canvas.edit(Session::select_all);
-    }
-    // egui turns Ctrl+C and X into these events rather than key presses.
-    let (copy, cut) = ctx.input(|input| {
-        let has = |wanted: &egui::Event| input.events.iter().any(|event| event == wanted);
-        (has(&egui::Event::Copy), has(&egui::Event::Cut))
-    });
-    if copy {
-        clipboard.copy(canvas);
-    }
-    if cut {
-        clipboard.cut(canvas);
-    }
-    if paste {
-        clipboard.paste(canvas);
-    }
-    if pressed(command_shift, egui::Key::I) {
-        canvas.edit(Session::invert_selection);
-    }
-    if pressed(command, egui::Key::D) {
-        canvas.edit(Session::deselect);
-    }
-    if pressed(none, egui::Key::Escape) {
-        canvas.escape();
-    }
-    if pressed(command, egui::Key::Plus) || pressed(command, egui::Key::Equals) {
-        canvas.zoom_in_place(1.0);
-    }
-    if pressed(command, egui::Key::Minus) {
-        canvas.zoom_in_place(-1.0);
-    }
-    if pressed(command, egui::Key::Num1) {
-        canvas.zoom_to(1.0);
-    }
-    if pressed(command, egui::Key::Num0) {
-        canvas.fit();
-    }
-    if pressed(none, egui::Key::P) {
-        canvas.toggle_playback();
-    }
-    if pressed(command, egui::Key::T) {
-        canvas.begin_transform();
-    }
-    if pressed(command_shift, egui::Key::T) {
-        panels.shown.animation_bar = !panels.shown.animation_bar;
-    }
-    if pressed(command, egui::Key::N) {
-        files.request(Action::New, canvas);
-    }
-    if pressed(command, egui::Key::O) {
-        files.request(Action::Open, canvas);
-    }
-    if pressed(command_shift, egui::Key::S) {
-        files.save_as();
-    }
-    if pressed(command, egui::Key::S) {
-        files.save(canvas);
-    }
-    if pressed(command_shift, egui::Key::E) {
-        files.export_png();
-    }
-    if pressed(command, egui::Key::Q) {
-        files.request(Action::Close, canvas);
-    }
-}
+pub use actions::shortcuts;
 
 fn report_bool(result: Result<bool, EditError>) {
     if let Err(error) = result {
         tracing::warn!(%error, "undo or redo failed");
-    }
-}
-
-fn item(ui: &mut egui::Ui, text: &str, shortcut: &str) -> bool {
-    let mut button = egui::Button::new(text);
-    if !shortcut.is_empty() {
-        button = button.shortcut_text(shortcut);
-    }
-    ui.add(button).clicked()
-}
-
-fn toggle_item(ui: &mut egui::Ui, value: &mut bool, text: &str, shortcut: &str) {
-    let mut button = egui::Button::selectable(*value, text);
-    if !shortcut.is_empty() {
-        button = button.shortcut_text(shortcut);
-    }
-    if ui.add(button).clicked() {
-        *value = !*value;
-    }
-}
-
-/// The Window menu's items, also behind the quick access Panels button.
-fn window_items(ui: &mut egui::Ui, shown: &mut Shown) {
-    toggle_item(
-        ui,
-        &mut shown.animation_bar,
-        tr("window-animation-bar"),
-        "Ctrl+Shift+T",
-    );
-    ui.separator();
-    toggle_item(ui, &mut shown.tool_settings, tr("tool-settings"), "");
-    toggle_item(ui, &mut shown.wobble, tr("wobble-dock"), "");
-    toggle_item(ui, &mut shown.color, tr("color-dock"), "");
-    toggle_item(ui, &mut shown.color_history, tr("color-history"), "");
-    toggle_item(ui, &mut shown.layers, tr("layers"), "");
-    ui.separator();
-    if ui.button(tr("window-reset-layout")).clicked() {
-        *shown = Shown::default();
     }
 }
 
@@ -285,228 +126,64 @@ pub fn menu_bar(
     clipboard: &mut Clipboard,
     panels: &mut Panels,
 ) {
+    let mut chosen = None;
     egui::MenuBar::new().ui(ui, |ui| {
-        ui.menu_button(tr("menu-file"), |ui| {
-            if item(ui, tr("file-new"), "Ctrl+N") {
-                files.request(Action::New, canvas);
-            }
-            if item(ui, tr("file-open"), "Ctrl+O") {
-                files.request(Action::Open, canvas);
-            }
-            ui.separator();
-            if item(ui, tr("file-save"), "Ctrl+S") {
-                files.save(canvas);
-            }
-            if item(ui, tr("file-save-as"), "Ctrl+Shift+S") {
-                files.save_as();
-            }
-            ui.separator();
-            if item(ui, tr("file-insert-image"), "") {
-                files.insert_image();
-            }
-            // As 2.2.13: without the animation, there is only the image.
-            let export = if canvas.animation_allowed() {
-                tr("file-export-frame")
-            } else {
-                tr("file-export-image")
-            };
-            if item(ui, export, "Ctrl+Shift+E") {
-                files.export_png();
-            }
-            ui.separator();
-            if item(ui, tr("file-quit"), "Ctrl+Q") {
-                files.request(Action::Close, canvas);
-            }
-        });
-        ui.menu_button(tr("menu-edit"), |ui| {
-            let session = canvas.session();
-            let (can_undo, can_redo) = (
-                session.undo_label().is_some(),
-                session.redo_label().is_some(),
-            );
-            if ui
-                .add_enabled(
-                    can_undo,
-                    egui::Button::new(tr("edit-undo")).shortcut_text("Ctrl+Z"),
-                )
-                .clicked()
-            {
-                report_bool(canvas.edit(Session::undo));
-            }
-            if ui
-                .add_enabled(
-                    can_redo,
-                    egui::Button::new(tr("edit-redo")).shortcut_text("Ctrl+Y"),
-                )
-                .clicked()
-            {
-                report_bool(canvas.edit(Session::redo));
-            }
-            ui.separator();
-            let selected = canvas.session().selection().is_some();
-            let cut = egui::Button::new(tr("edit-cut")).shortcut_text("Ctrl+X");
-            if ui.add_enabled(selected, cut).clicked() {
-                clipboard.cut(canvas);
-            }
-            let copy = egui::Button::new(tr("edit-copy")).shortcut_text("Ctrl+C");
-            if ui
-                .add_enabled(selected, copy)
-                .on_hover_text(tr("edit-copy-tip"))
-                .clicked()
-            {
-                clipboard.copy(canvas);
-            }
-            if ui
-                .add(egui::Button::new(tr("edit-paste")).shortcut_text("Ctrl+V"))
-                .on_hover_text(tr("edit-paste-tip"))
-                .clicked()
-            {
-                clipboard.paste(canvas);
-            }
-            ui.separator();
-            let canvas_size = canvas.session().document().canvas;
-            if item(ui, tr("edit-image-size"), "") {
-                panels.resize = Some(resize::Dialog::Image(resize::ImageSize::new(canvas_size)));
-            }
-            if item(ui, tr("edit-canvas-size"), "") {
-                panels.resize = Some(resize::Dialog::Canvas(resize::CanvasSize::new(canvas_size)));
-            }
-            ui.separator();
-            if item(ui, tr("edit-select-all"), "Ctrl+A") {
-                canvas.edit(Session::select_all);
-            }
-            let invert =
-                egui::Button::new(tr("edit-invert-selection")).shortcut_text("Ctrl+Shift+I");
-            if ui.add_enabled(selected, invert).clicked() {
-                canvas.edit(Session::invert_selection);
-            }
-            let deselect = egui::Button::new(tr("edit-deselect")).shortcut_text("Ctrl+D");
-            if ui.add_enabled(selected, deselect).clicked() {
-                canvas.edit(Session::deselect);
-            }
-            let fill = egui::Button::new(tr("edit-fill-selection")).shortcut_text("Alt+Delete");
-            if ui
-                .add_enabled(selected, fill)
-                .on_hover_text(tr("edit-fill-selection-tip"))
-                .clicked()
-            {
-                canvas.fill_selection();
-            }
-            if ui
-                .add_enabled(
-                    restyle::available(canvas),
-                    egui::Button::new(tr("restyle-selected")),
-                )
-                .on_hover_text(tr("restyle-selected-tip"))
-                .clicked()
-            {
-                restyle::open(canvas, panels);
-            }
-            let delete = egui::Button::new(tr("delete-selected")).shortcut_text("Delete");
-            if ui.add_enabled(selected, delete).clicked() {
-                canvas.delete_selected();
-            }
-            ui.separator();
-            let pending = canvas.session().pending().is_some();
-            let transform = egui::Button::new(tr("transform-selection")).shortcut_text("Ctrl+T");
-            if ui.add_enabled(selected && !pending, transform).clicked() {
-                canvas.begin_transform();
-            }
-            if ui
-                .add_enabled(selected, egui::Button::new(tr("flip-horizontal")))
-                .clicked()
-            {
-                canvas.flip(true);
-            }
-            if ui
-                .add_enabled(selected, egui::Button::new(tr("flip-vertical")))
-                .clicked()
-            {
-                canvas.flip(false);
-            }
-            let apply = egui::Button::new(tr("transform-apply")).shortcut_text("Enter");
-            if ui.add_enabled(pending, apply).clicked() {
-                canvas.apply_transform();
-            }
-            let cancel = egui::Button::new(tr("transform-cancel")).shortcut_text("Esc");
-            if ui.add_enabled(pending, cancel).clicked() {
-                canvas.cancel_transform();
-            }
-            ui.separator();
-            if item(ui, tr("edit-settings"), "") {
-                panels.settings = Some(settings::Dialog::default());
-            }
-        });
-        ui.menu_button(tr("menu-view"), |ui| {
-            if item(ui, tr("view-zoom-in"), "Ctrl++") {
-                canvas.zoom_in_place(1.0);
-            }
-            if item(ui, tr("view-zoom-out"), "Ctrl+-") {
-                canvas.zoom_in_place(-1.0);
-            }
-            if item(ui, tr("view-actual-pixels"), "Ctrl+1") {
-                canvas.zoom_to(1.0);
-            }
-            if item(ui, tr("view-fit"), "Ctrl+0") {
-                canvas.fit();
-            }
-            ui.separator();
-            let mut playing = canvas.is_playing();
-            ui.add_enabled_ui(canvas.animation_allowed(), |ui| {
-                toggle_item(ui, &mut playing, tr("view-animate"), "P");
+        for (title, entries) in actions::MENUS {
+            ui.menu_button(tr(title), |ui| {
+                chosen = chosen.or(actions::items(ui, entries, canvas, panels));
             });
-            if playing != canvas.is_playing() {
-                canvas.toggle_playback();
-            }
-        });
-        ui.menu_button(tr("menu-tools"), |ui| {
-            let tool = canvas.session().tool();
-            for (each, key, shortcut) in [
-                (Tool::Pen, "tool-brush", "B"),
-                (Tool::Eraser, "tool-eraser", "E"),
-                (Tool::Select, "tool-select", "L"),
-                (Tool::Wand, "tool-wand", "W"),
-                (Tool::Fill, "tool-fill", "G"),
-                (Tool::Text, "tool-text", "T"),
-                (Tool::Eyedropper, "tool-eyedropper", "I"),
-            ] {
-                if ui
-                    .add(egui::Button::selectable(tool == each, tr(key)).shortcut_text(shortcut))
-                    .clicked()
-                {
-                    canvas.edit(|session| session.set_tool(each));
-                }
-            }
-        });
-        ui.menu_button(tr("menu-window"), |ui| window_items(ui, &mut panels.shown));
+        }
     });
+    if let Some(action) = chosen {
+        actions::run(action, canvas, files, clipboard, panels);
+    }
 }
 
 /// The canvas or image size, stroke properties or settings dialog, while one
 /// is open.
+/// `typed`: chords egui turns into clipboard events, for a shortcut being
+/// set in the settings.
 pub fn dialogs(
     ctx: &egui::Context,
     canvas: &mut Canvas,
     files: &mut Files,
     store: &mut Store,
     panels: &mut Panels,
+    typed: &[crate::shortcuts::Chord],
 ) {
     resize::show(ctx, canvas, panels);
     restyle::show(ctx, canvas, panels);
-    settings::show(ctx, canvas, files, store, panels);
+    settings::show(ctx, canvas, files, store, panels, typed);
 }
 
 /// Puts the settings read at start into effect.
-pub fn apply_settings(ctx: &egui::Context, store: &Store, canvas: &mut Canvas, files: &mut Files) {
+pub fn apply_settings(
+    ctx: &egui::Context,
+    store: &Store,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    panels: &mut Panels,
+) {
     settings::restore_tools(store.get(), canvas);
-    settings::apply(ctx, store.get(), canvas, files);
+    settings::apply(ctx, store.get(), canvas, files, &mut panels.keys);
 }
 
 /// The quick access bar: panels on the left, undo and redo on the right.
-pub fn quick_access(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+pub fn quick_access(
+    ui: &mut egui::Ui,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    clipboard: &mut Clipboard,
+    panels: &mut Panels,
+) {
     ui.horizontal(|ui| {
         let button = widgets::icon_button(ui, Glyph::Panels, 22.0, tr("panels-tip"), true);
-        egui::Popup::menu(&button).show(|ui| window_items(ui, &mut panels.shown));
+        let chosen = egui::Popup::menu(&button)
+            .show(|ui| actions::items(ui, actions::WINDOW, canvas, panels))
+            .and_then(|shown| shown.inner);
+        if let Some(action) = chosen {
+            actions::run(action, canvas, files, clipboard, panels);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let session = canvas.session();
             let (can_undo, can_redo) = (
@@ -524,24 +201,25 @@ pub fn quick_access(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels)
 }
 
 /// The tool rail.
-pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas) {
+pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     ui.spacing_mut().item_spacing.y = 2.0;
     let tool = canvas.session().tool();
-    for (each, glyph, key, shortcut) in [
-        (Tool::Pen, Glyph::Brush, "tool-brush", "B"),
-        (Tool::Eraser, Glyph::Eraser, "tool-eraser", "E"),
-        (Tool::Select, Glyph::Lasso, "tool-select", "L"),
-        (Tool::Wand, Glyph::Wand, "tool-wand", "W"),
-        (Tool::Fill, Glyph::Bucket, "tool-fill", "G"),
-        (Tool::Text, Glyph::Text, "tool-text-rail", "T"),
+    for (each, action, glyph, key) in [
+        (Tool::Pen, Action::Brush, Glyph::Brush, "tool-brush"),
+        (Tool::Eraser, Action::Eraser, Glyph::Eraser, "tool-eraser"),
+        (Tool::Select, Action::Select, Glyph::Lasso, "tool-select"),
+        (Tool::Wand, Action::Wand, Glyph::Wand, "tool-wand"),
+        (Tool::Fill, Action::Fill, Glyph::Bucket, "tool-fill"),
+        (Tool::Text, Action::Text, Glyph::Text, "tool-text-rail"),
         (
             Tool::Eyedropper,
+            Action::Eyedropper,
             Glyph::Eyedropper,
             "tool-eyedropper-rail",
-            "I",
         ),
     ] {
-        if widgets::tool_button(ui, glyph, tr(key), shortcut, tool == each).clicked() {
+        let shortcut = keys.text(action);
+        if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
             canvas.edit(|session| session.set_tool(each));
         }
     }

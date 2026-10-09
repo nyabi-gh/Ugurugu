@@ -51,7 +51,11 @@ pub fn tool_button(
         ink,
         0.0,
     );
-    response.on_hover_text(format!("{name} ({shortcut})"))
+    if shortcut.is_empty() {
+        response.on_hover_text(name)
+    } else {
+        response.on_hover_text(format!("{name} ({shortcut})"))
+    }
 }
 
 /// A flat button showing only `glyph`, named `name` for the tooltip and
