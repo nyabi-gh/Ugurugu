@@ -3878,6 +3878,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "fluent-bundle",
+ "image",
  "png",
  "pollster",
  "serde_json",
