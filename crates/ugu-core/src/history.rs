@@ -157,8 +157,7 @@ pub struct History {
 }
 
 impl History {
-    /// Starts from `document` as saved; pass `saved: false` for a new,
-    /// never-saved document.
+    /// Starts from `document` as saved; `saved: false` starts it as changed.
     pub fn new(document: Document, saved: bool) -> Self {
         let state = StateId(0);
         Self {

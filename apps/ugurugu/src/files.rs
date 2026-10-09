@@ -243,7 +243,8 @@ impl Files {
     fn proceed(&mut self, action: Action, canvas: &mut Canvas) {
         match action {
             Action::New => {
-                canvas.replace(Self::new_canvas(), false);
+                // Clean until edited, as the document at start.
+                canvas.replace(Self::new_canvas(), true);
                 self.path = None;
                 self.id = new_id();
                 self.clear_message();
@@ -591,6 +592,21 @@ mod tests {
         });
         let canvas = Canvas::new(Files::new_canvas(), |_| {});
         (files, canvas, events)
+    }
+
+    #[test]
+    fn a_new_document_closes_without_asking_until_edited() {
+        let (mut files, mut canvas, _events) = setup();
+        assert_eq!(files.title(&canvas), "Untitled - Ugurugu");
+        files.request(Action::Close, &mut canvas);
+        assert!(files.should_close());
+        files.close = false;
+        canvas.edit(Session::add_layer).unwrap();
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::New));
+        files.confirm = None;
+        files.proceed(Action::New, &mut canvas);
+        assert!(!canvas.session().is_dirty());
     }
 
     fn next(events: &Receiver<FileEvent>) -> FileEvent {

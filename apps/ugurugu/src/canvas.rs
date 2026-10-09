@@ -171,7 +171,8 @@ impl Canvas {
     pub fn new(document: Document, cache_done: impl Fn(Rendered) + Send + 'static) -> Self {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         Self {
-            session: Session::new(document, false),
+            // Nothing to lose until edited, as in 2.2.13.
+            session: Session::new(document, true),
             cache: CacheWorker::start(cache_done),
             split: None,
             preview: None,
