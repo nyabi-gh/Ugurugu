@@ -16,6 +16,11 @@
 
 <p align="center"><b>KR</b> · <a href="README.en.md">EN</a> · <a href="README.ja.md">JP</a></p>
 
+> [!IMPORTANT]
+> **Ugurugu 3.0이 곧 출시됩니다.**
+> - 3.0은 처음에는 Windows만 지원하며, macOS도 이후에 지원할 예정입니다.
+> - 3.0은 새 작업 파일 형식(`.ugurugu`)을 쓰며, 이전 버전의 `.ugu`·`.wagle`·`.wobble`·`.wawa` 파일은 열 수 없습니다.
+
 완성한 그림은 반복 재생되는 GIF·WebP나 배경이 투명한 이미지로 저장할 수
 있고, WiggleWiggleTool의 `.wawa` 그림도 이어서 작업할 수 있습니다.
 

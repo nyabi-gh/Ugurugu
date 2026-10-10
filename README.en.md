@@ -16,6 +16,11 @@
 
 <p align="center"><a href="README.md">KR</a> · <b>EN</b> · <a href="README.ja.md">JP</a></p>
 
+> [!IMPORTANT]
+> **Ugurugu 3.0 is coming soon.**
+> - 3.0 will support Windows only at first; macOS support will follow later.
+> - 3.0 uses a new project format (`.ugurugu`) and will not open `.ugu`, `.wagle`, `.wobble` or `.wawa` files from earlier versions.
+
 Save your work as a looping GIF or WebP or as an image with a transparent
 background, and continue `.wawa` drawings made with WiggleWiggleTool.
 
