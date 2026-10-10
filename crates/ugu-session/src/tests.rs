@@ -1715,3 +1715,20 @@ fn the_settled_document_is_what_applying_gives_and_the_session_stays() {
     session.apply_text().unwrap();
     assert_eq!(&settled, session.document());
 }
+
+#[test]
+fn a_pixel_stroke_is_whole_pixels_wide_and_never_antialiased() {
+    let mut session = session();
+    let layer = session.current_layer();
+    session.choose_preset(Tool::Pen, ugu_core::brush::find("pixel-pencil").unwrap());
+    session.pen.width = 2.6;
+    session.pen.antialias = true;
+    draw(&mut session, 10.0, 60.0);
+    let Op::Paint { stroke, .. } = ops(&session, layer)[0] else {
+        panic!("a stroke");
+    };
+    let stroke = &session.document().store.strokes[&stroke];
+    assert_eq!(stroke.brush.engine, BrushEngine::Pixel);
+    assert_eq!(stroke.width, 3.0);
+    assert!(!stroke.brush.antialias);
+}

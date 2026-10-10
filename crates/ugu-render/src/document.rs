@@ -26,6 +26,7 @@ use crate::compose::premultiplied;
 use crate::composite::{self, Source};
 use crate::dab::{self, Dab};
 use crate::mask::Runs;
+use crate::pixel;
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
 use crate::stroke::{self, Pen, Resampler};
@@ -1080,7 +1081,11 @@ impl Raster {
         paths.resize_with(draws.len(), BezPath::new);
         dabs.resize_with(draws.len(), Vec::new);
         let make = |(stroke, pen): &(&Stroke, &Pen), path: &mut BezPath, dabs: &mut Vec<Dab>| {
-            if stroke.brush.engine == BrushEngine::Line {
+            if stroke.brush.engine == BrushEngine::Pixel {
+                // Whole pixels, filled aliased as a pen's outline is.
+                dabs.clear();
+                pixel_path(&pixel::cells(&stroke.points, pen, frame), path);
+            } else if stroke.brush.engine == BrushEngine::Line {
                 dabs.clear();
                 let spacing =
                     stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
@@ -1893,6 +1898,54 @@ fn collect<'a>(
     }
 }
 
+/// `cells` as rectangles in document pixels: a run and the same run on the
+/// rows under it are one, since the rasteriser's work grows with the edges.
+fn pixel_path(cells: &pixel::Cells, path: &mut BezPath) {
+    path.truncate(0);
+    let mut rect = |[from, to]: [i32; 2], top: i32, bottom: i32| {
+        let [from, to, top, bottom] = [from, to, top, bottom].map(f64::from);
+        path.move_to((from, top));
+        path.line_to((to, top));
+        path.line_to((to, bottom));
+        path.line_to((from, bottom));
+        path.close_path();
+    };
+    // The previous row's runs, each with the row its rectangle began on.
+    let mut open: Vec<([i32; 2], i32)> = Vec::new();
+    let mut next: Vec<([i32; 2], i32)> = Vec::new();
+    let mut previous = None;
+    for row in cells.runs().chunk_by(|a, b| a[0] == b[0]) {
+        let y = row[0][0];
+        if previous != Some(y - 1) {
+            for (span, top) in open.drain(..) {
+                rect(span, top, previous.unwrap_or(y) + 1);
+            }
+        }
+        let mut above = open.iter().copied().peekable();
+        for &[_, from, to] in row {
+            let span = [from, to];
+            while let Some((old, top)) = above.next_if(|(old, _)| *old < span) {
+                rect(old, top, y);
+            }
+            match above.next_if(|(old, _)| *old == span) {
+                Some((_, top)) => next.push((span, top)),
+                None => next.push((span, y)),
+            }
+        }
+        for (old, top) in above {
+            rect(old, top, y);
+        }
+        std::mem::swap(&mut open, &mut next);
+        next.clear();
+        previous = Some(y);
+    }
+    if let Some(last) = previous {
+        for (span, top) in open {
+            rect(span, top, last + 1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2194,6 +2247,40 @@ mod tests {
                 .chunks(4)
                 .all(|pixel| pixel[3] == 0 || pixel[3] == 255)
         );
+    }
+
+    #[test]
+    fn a_pixel_stroke_draws_its_pixels_and_nothing_partial_on_every_frame() {
+        let mut document = document();
+        let id = line(&mut document, 6.3, 80.6, 20.5, RED, false);
+        let stroke = document.store.strokes.get_mut(&id).unwrap();
+        stroke.brush = ugu_core::brush::find("pixel-pencil").unwrap().brush;
+        stroke.width = 3.0;
+        let pixel_stroke = stroke.clone();
+        paint_layer(&mut document).ops = vec![Op::Paint {
+            stroke: id,
+            clip: None,
+        }];
+        paint_layer(&mut document).wobble = Some(Wobble::classic(2.5));
+        let wobble = paint_layer(&mut document).wobble.unwrap();
+        let mut frames = Vec::new();
+        for frame in 0..document.frames {
+            let result = render(&document, i64::from(frame), 2);
+            let pen = Pen::new(&pixel_stroke, wobble, document.frames);
+            let cells = pixel::cells(&pixel_stroke.points, &pen, frame);
+            for y in 0..result.height() {
+                for x in 0..result.width() {
+                    let expected = if cells.contains(i32::from(x), i32::from(y)) {
+                        RED
+                    } else {
+                        [0; 4]
+                    };
+                    assert_eq!(at(&result, x, y), expected, "frame {frame} at {x}, {y}");
+                }
+            }
+            frames.push(cells);
+        }
+        assert!(frames.windows(2).any(|pair| pair[0] != pair[1]), "it moves");
     }
 
     #[test]

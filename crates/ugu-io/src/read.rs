@@ -252,6 +252,7 @@ impl<R: Read + Seek> Entries<R> {
                         EngineDto::Line => BrushEngine::Line,
                         EngineDto::Airbrush => BrushEngine::Airbrush,
                         EngineDto::Spray => BrushEngine::Spray,
+                        EngineDto::Pixel => BrushEngine::Pixel,
                     },
                     tip: match stroke.brush.tip {
                         TipDto::Round => TipShape::Round,

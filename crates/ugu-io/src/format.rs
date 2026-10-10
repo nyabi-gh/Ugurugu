@@ -217,6 +217,7 @@ pub enum EngineDto {
     Line,
     Airbrush,
     Spray,
+    Pixel,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

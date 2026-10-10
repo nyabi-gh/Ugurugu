@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! The built-in brushes and erasers, with 2.2.13's values
-//! (`BrushPresetCatalog`, `EraserPresetCatalog`).
+//! (`BrushPresetCatalog`, `EraserPresetCatalog`), and 3.0's pixel pencil and
+//! eraser.
 
 use crate::store::{Brush, BrushEngine, TipShape};
 
@@ -12,6 +13,7 @@ pub enum Category {
     Marker,
     Airbrush,
     Spray,
+    Pixel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +86,16 @@ const fn spray(
     }
 }
 
+/// A pixel pencil: full opacity and the same width at any pressure.
+const PIXEL: Brush = Brush {
+    engine: BrushEngine::Pixel,
+    tip: TipShape::Square,
+    size_dynamics: 0.0,
+    opacity_dynamics: 0.0,
+    antialias: false,
+    ..Brush::DEFAULT
+};
+
 const fn preset(id: &'static str, category: Category, brush: Brush, size: f32) -> Preset {
     Preset {
         id,
@@ -93,10 +105,10 @@ const fn preset(id: &'static str, category: Category, brush: Brush, size: f32) -
     }
 }
 
-use Category::{Airbrush, Marker, Pen, Spray};
+use Category::{Airbrush, Marker, Pen, Pixel, Spray};
 use TipShape::{Round, Square};
 
-pub const BRUSHES: [Preset; 17] = [
+pub const BRUSHES: [Preset; 18] = [
     preset("ink-pen", Pen, line(1.0, 0.8, Round), 6.0),
     preset("g-pen", Pen, line(1.0, 0.95, Round), 7.0),
     preset("round-pen", Pen, line(1.0, 0.6, Round), 8.0),
@@ -169,10 +181,11 @@ pub const BRUSHES: [Preset; 17] = [
         ),
         48.0,
     ),
+    preset("pixel-pencil", Pixel, PIXEL, 1.0),
 ];
 
-/// Hard, soft and kneaded; their category is that of their engine.
-pub const ERASERS: [Preset; 3] = [
+/// Hard, soft, kneaded and pixel; their category is that of their engine.
+pub const ERASERS: [Preset; 4] = [
     preset(
         "hard-eraser",
         Pen,
@@ -199,6 +212,7 @@ pub const ERASERS: [Preset; 3] = [
         ),
         48.0,
     ),
+    preset("pixel-eraser", Pixel, PIXEL, 1.0),
 ];
 
 /// The brush or eraser with `id`.

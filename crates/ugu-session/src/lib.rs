@@ -28,7 +28,7 @@ use ugu_core::document::{Document, Layer, LayerId, LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::history::{History, LayerRevisions, StateId};
 use ugu_core::ops::{Rgba8, Sampling, Wobble};
-use ugu_core::store::{self, Brush, Point, Stroke};
+use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings};
@@ -348,6 +348,13 @@ impl Session {
         let settings = *self.settings();
         let erase = self.tool == Tool::Eraser;
         self.strokes_started += 1;
+        // A pixel brush draws whole pixels, a whole number of them wide.
+        let pixel = settings.preset.brush.engine == BrushEngine::Pixel;
+        let width = if pixel {
+            settings.width.round()
+        } else {
+            settings.width
+        };
         let template = Stroke {
             points: Arc::from([]),
             color: if erase {
@@ -355,12 +362,12 @@ impl Session {
             } else {
                 settings.color
             },
-            width: settings.width.clamp(
+            width: width.clamp(
                 *store::limits::STROKE_WIDTH.start(),
                 *store::limits::STROKE_WIDTH.end(),
             ),
             brush: Brush {
-                antialias: settings.antialias,
+                antialias: settings.antialias && !pixel,
                 ..settings.preset.brush
             },
             seed: self.seeds.hash_one(self.strokes_started),

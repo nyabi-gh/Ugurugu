@@ -63,9 +63,15 @@ pub(crate) fn sample() -> Document {
     let mut document = Document::new([64, 48]);
     let store = &mut document.store;
     for id in 0..4 {
-        store
-            .strokes
-            .insert(StrokeId(id), stroke(id as f32, u64::MAX - u64::from(id)));
+        let mut stroke = stroke(id as f32, u64::MAX - u64::from(id));
+        // Strokes of other engines, the pixel brush's included.
+        stroke.brush.engine = [
+            BrushEngine::Spray,
+            BrushEngine::Airbrush,
+            BrushEngine::Pixel,
+            BrushEngine::Spray,
+        ][id as usize];
+        store.strokes.insert(StrokeId(id), stroke);
     }
     store.masks.insert(
         MaskId(0),

@@ -2,11 +2,11 @@
 # tools/ts_to_ftl.py turns this into en.ftl, ko.ftl and ja.ftl.
 
 # Menus
-menu-file | ugurugu::MainWindow | &File
-menu-edit | ugurugu::MainWindow | &Edit
-menu-view | ugurugu::MainWindow | &View
-menu-tools | ugurugu::MainWindow | &Tools
-menu-window | ugurugu::MainWindow | &Window
+menu-file | ugurugu::MainWindow | &File | access
+menu-edit | ugurugu::MainWindow | &Edit | access
+menu-view | ugurugu::MainWindow | &View | access
+menu-tools | ugurugu::MainWindow | &Tools | access
+menu-window | ugurugu::MainWindow | &Window | access
 file-new | ugurugu::MainWindow | &New
 file-open | ugurugu::MainWindow | &Open…
 file-save | ugurugu::MainWindow | &Save
@@ -123,6 +123,7 @@ brush-pen | BrushPresets | Pen
 brush-marker | BrushPresets | Marker
 brush-airbrush | BrushPresets | Airbrush
 brush-spray | BrushPresets | Spray
+brush-pixel | - | Pixel | 픽셀 | ピクセル
 ink-pen | BrushPresets | Ink Pen
 g-pen | BrushPresets | G-Pen
 round-pen | BrushPresets | Round Pen
@@ -140,9 +141,11 @@ rough-spray | BrushPresets | Rough Spray
 dust-spray | BrushPresets | Dust Spray
 droplet-spray | BrushPresets | Droplet Spray
 wobble-spray | BrushPresets | Wobble Spray
+pixel-pencil | - | Pixel Pencil | 픽셀 연필 | ピクセル鉛筆
 hard-eraser | EraserPresets | Hard
 soft-eraser | EraserPresets | Soft
 kneaded-eraser | EraserPresets | Kneaded
+pixel-eraser | - | Pixel | 픽셀 | ピクセル
 tools-rail | ugurugu::MainWindow | Tools
 quick-access | ugurugu::MainWindow | Quick access
 panels | ugurugu::MainWindow | Panels
@@ -167,6 +170,8 @@ dock-collapse | PaletteDockTitleBar | Collapse
 dock-close | PaletteDockTitleBar | Close panel
 dock-expand-area | PaletteDockTitleBar | Expand panel dock
 dock-collapse-area | PaletteDockTitleBar | Collapse panel dock
+dock-width-left | - | Width of the left panel dock | 왼쪽 패널 영역 너비 | 左パレットドックの幅
+dock-width-right | - | Width of the right panel dock | 오른쪽 패널 영역 너비 | 右パレットドックの幅
 dock-handle | PaletteDockTitleBar | %1 panel drag handle | args=panel
 dock-move-left | - | Move to the left side | 왼쪽으로 옮기기 | 左側へ移動
 dock-move-right | - | Move to the right side | 오른쪽으로 옮기기 | 右側へ移動

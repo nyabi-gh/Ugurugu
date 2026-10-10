@@ -25,6 +25,7 @@ use crate::dab::{self, Dab};
 use crate::document::{DocumentRenderer, Purpose};
 use crate::live::LiveStroke;
 use crate::mask::Runs;
+use crate::pixel;
 use crate::plan::RenderPlan;
 use crate::raster::{PixelRect, document_level};
 use crate::stream::Held;
@@ -377,8 +378,12 @@ impl Stamp {
         frame: u32,
         clip: Option<&Mask>,
     ) -> Option<PixelRect> {
-        if stroke.brush.engine != BrushEngine::Line {
-            return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
+        match stroke.brush.engine {
+            BrushEngine::Line => {}
+            BrushEngine::Pixel => return apply_pixels(surface, stroke, erase, pen, frame, clip),
+            BrushEngine::Airbrush | BrushEngine::Spray => {
+                return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
+            }
         }
         let rect = clamp(stroke::bounds(&stroke.points, pen), surface.size())?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
@@ -478,6 +483,60 @@ impl Stamp {
         );
         piece
     }
+}
+
+/// `Stamp::apply_stroke` for a pixel brush: its pixels at full coverage.
+fn apply_pixels(
+    surface: &mut TiledSurface,
+    stroke: &Stroke,
+    erase: bool,
+    pen: &Pen,
+    frame: u32,
+    clip: Option<&Mask>,
+) -> Option<PixelRect> {
+    let cells = pixel::cells(&stroke.points, pen, frame);
+    let rect = pixel_rect(&cells, surface.size())?;
+    let color = premultiplied(stroke_color(stroke, erase));
+    surface.ensure(rect);
+    let runs = cells.runs();
+    let mut next = 0;
+    for (y, line) in surface.rows_mut(rect) {
+        let y = y as i32;
+        while next < runs.len() && runs[next][0] < y {
+            next += 1;
+        }
+        while next < runs.len() && runs[next][0] == y {
+            let [_, from, to] = runs[next];
+            let from = from.max(rect[0] as i32);
+            let to = to.min(rect[2] as i32);
+            for x in from..to {
+                if !inside(clip, x as usize, y as usize) {
+                    continue;
+                }
+                let target = &mut line[(x - rect[0] as i32) as usize];
+                if erase {
+                    self::erase(target, color, 255);
+                } else {
+                    paint(target, color, 255);
+                }
+            }
+            next += 1;
+        }
+    }
+    Some(rect)
+}
+
+/// The canvas pixels of `cells` on a canvas of `size`.
+pub fn pixel_rect(cells: &pixel::Cells, size: [u32; 2]) -> Option<PixelRect> {
+    let [left, top, right, bottom] = cells.bounds()?;
+    let clamp = |value: i32, most: u32| value.clamp(0, most as i32) as u32;
+    let rect = [
+        clamp(left, size[0]),
+        clamp(top, size[1]),
+        clamp(right, size[0]),
+        clamp(bottom, size[1]),
+    ];
+    (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
 }
 
 /// The whole pixels `bounds` (left, top, right, bottom) touches on a canvas
@@ -913,7 +972,13 @@ mod tests {
             ..pen
         };
         let find = |id| ugu_core::brush::find(id).unwrap().brush;
-        let brushes = [pen, fading, find("soft-airbrush"), find("rough-spray")];
+        let brushes = [
+            pen,
+            fading,
+            find("soft-airbrush"),
+            find("rough-spray"),
+            find("pixel-pencil"),
+        ];
         for (mut history, brush) in brushes
             .into_iter()
             .flat_map(|brush| histories().map(|history| (history, brush)))

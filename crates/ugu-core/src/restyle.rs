@@ -441,6 +441,8 @@ fn reach(stroke: &Stroke, pressure: f32) -> f64 {
     let line = (width * scale).max(0.5) * 0.5;
     match brush.engine {
         BrushEngine::Line | BrushEngine::Airbrush => line,
+        // A block of whole pixels from the point's pixel, at any pressure.
+        BrushEngine::Pixel => width.round().max(1.0) * std::f64::consts::FRAC_1_SQRT_2 + 1.0,
         BrushEngine::Spray => {
             let particle =
                 f64::from(brush.particle_size) * (1.0 + 0.75 * f64::from(brush.size_jitter));

@@ -22,6 +22,7 @@ use vello_cpu::color::{AlphaColor, Srgb};
 
 use crate::compose::{Stamp, clamp, dest_out, erase, inside, paint, premultiplied, src_over};
 use crate::dab::{self, Dab, Look};
+use crate::pixel;
 use crate::raster::PixelRect;
 use crate::stroke::{self, Pen, Resampler};
 
@@ -59,6 +60,8 @@ pub struct LiveStroke {
     clip: Option<Mask>,
     /// Where a broken line breaks; `None` when it shows whole.
     breaks: Option<Breaks>,
+    /// A pixel brush's pixels so far, in `coverage` at full coverage.
+    pixels: Option<pixel::Cells>,
     /// The walk along the moved samples that no longer move.
     walk: Walk,
     /// Samples in `walk`.
@@ -85,7 +88,8 @@ impl LiveStroke {
         let coverage = spare
             .filter(|spare| [spare.width(), spare.height()] == size)
             .unwrap_or_else(|| Pixmap::new(size[0], size[1]));
-        let dabs = (pen.brush.engine != BrushEngine::Line).then(|| dab::look(&pen.brush));
+        let dabs = matches!(pen.brush.engine, BrushEngine::Airbrush | BrushEngine::Spray)
+            .then(|| dab::look(&pen.brush));
         let spacing = match dabs {
             Some(_) => pen.dab_spacing(frame),
             None => stroke::spacing(pen.width),
@@ -109,6 +113,7 @@ impl LiveStroke {
             placed: Vec::new(),
             clip: None,
             breaks: pen.motion.breaks(pen.seed, frame),
+            pixels: (pen.brush.engine == BrushEngine::Pixel).then(pixel::Cells::default),
             walk: Walk::default(),
             walked: 0,
             shown: Vec::new(),
@@ -175,6 +180,10 @@ impl LiveStroke {
             let alpha = stroke::line_alpha_at(a, &self.pen.brush, f64::from(first.pressure));
             self.line = premultiplied([r, g, b, alpha]);
         }
+        if self.pixels.is_some() {
+            self.points = points.len();
+            return self.update_pixels(points);
+        }
         for point in &points[self.points.min(points.len())..] {
             self.resampler.push(*point);
         }
@@ -231,6 +240,41 @@ impl LiveStroke {
             dirty = union(dirty, Some(rect));
         }
         union(dirty, old_tail)
+    }
+
+    /// `update` for a pixel brush. Its pixels are found again from all the
+    /// points, since a new point can take back the last corner pixel and the
+    /// wobble's moves near the end; only the pixels that changed are written.
+    fn update_pixels(&mut self, points: &[Point]) -> Option<PixelRect> {
+        let cells = pixel::cells(points, &self.pen, self.frame);
+        let before = self.pixels.replace(cells).unwrap_or_default();
+        let cells = self.pixels.as_ref().expect("just set");
+        let (added, removed) = cells.difference(&before);
+        let size = self.size();
+        let width = usize::from(self.coverage.width());
+        let pixels = self.coverage.data_as_u8_slice_mut();
+        let mut dirty = None;
+        for (runs, cover) in [(removed, 0), (added, 255)] {
+            for [y, from, to] in runs {
+                if y < 0 || y >= size[1] as i32 {
+                    continue;
+                }
+                let (from, to) = (from.max(0), to.min(size[0] as i32));
+                if from >= to {
+                    continue;
+                }
+                let row = y as usize * width;
+                for x in from as usize..to as usize {
+                    pixels[(row + x) * 4 + 3] = cover;
+                }
+                dirty = union(
+                    dirty,
+                    Some([from as u32, y as u32, to as u32, y as u32 + 1]),
+                );
+            }
+        }
+        self.written = union(self.written, dirty);
+        dirty
     }
 
     /// `update` for an airbrush or spray. A sample's dabs no longer move once
@@ -545,6 +589,49 @@ mod tests {
                     assert!(x >= left && x < right && y >= top && y < bottom);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_pixel_stroke_drawn_point_by_point_is_its_whole_pixels() {
+        let whole_line = Mover::new(Motion::DEFAULT, 30);
+        for (motion, width) in [
+            (whole_line, 1.0),
+            (whole_line, 4.0),
+            (broken(MotionStyle::Smooth), 1.0),
+            (broken(MotionStyle::Stepped), 3.0),
+        ] {
+            let mut pen = Pen {
+                motion,
+                width,
+                ..pen(false)
+            };
+            pen.brush = ugu_core::brush::find("pixel-pencil").unwrap().brush;
+            let points = points();
+            let mut live = LiveStroke::new([200, 120], pen, 2, [0, 0, 0, 255], false, None);
+            let mut seen: Option<PixelRect> = None;
+            let mut before = vec![0; 200 * 120];
+            for count in 1..=points.len() {
+                let dirty = live.update(&points[..count]);
+                seen = union(seen, dirty);
+                let now = live_coverage(&live);
+                // Every pixel that changed, taken back ones too, was reported.
+                for (index, (&a, &b)) in now.iter().zip(&before).enumerate() {
+                    if a != b {
+                        let (x, y) = ((index % 200) as u32, (index / 200) as u32);
+                        let [left, top, right, bottom] = dirty.unwrap();
+                        assert!(x >= left && x < right && y >= top && y < bottom);
+                    }
+                }
+                before = now;
+            }
+            let cells = crate::pixel::cells(&points, &pen, 2);
+            for (index, &a) in before.iter().enumerate() {
+                let (x, y) = ((index % 200) as i32, (index / 200) as i32);
+                let expected = if cells.contains(x, y) { 255 } else { 0 };
+                assert_eq!(a, expected, "at {x}, {y}");
+            }
+            assert!(seen.is_some());
         }
     }
 

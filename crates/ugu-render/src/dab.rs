@@ -154,7 +154,7 @@ pub fn dabs_of(
                 }
             }
         }
-        BrushEngine::Line => {}
+        BrushEngine::Line | BrushEngine::Pixel => {}
     }
 }
 

@@ -348,6 +348,10 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         " px",
         0,
     );
+    let pixel = settings.preset.brush.engine == ugu_core::store::BrushEngine::Pixel;
+    if pixel {
+        settings.width = settings.width.round().max(1.0);
+    }
     let mut stabilization = settings.stabilizer * 100.0;
     slider_row(
         ui,
@@ -359,7 +363,8 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         0,
     );
     settings.stabilizer = stabilization / 100.0;
-    if tool == Tool::Pen {
+    // A pixel brush never antialiases.
+    if tool == Tool::Pen && !pixel {
         widgets::check_row(
             ui,
             tr("antialiasing"),

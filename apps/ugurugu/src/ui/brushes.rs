@@ -22,11 +22,12 @@ use crate::canvas::Canvas;
 use crate::i18n::tr;
 use crate::theme;
 
-const CATEGORIES: [Category; 4] = [
+const CATEGORIES: [Category; 5] = [
     Category::Pen,
     Category::Marker,
     Category::Airbrush,
     Category::Spray,
+    Category::Pixel,
 ];
 /// 2.2.13's previews in points, and the space above them in their cards.
 const BRUSH_PREVIEW: [f32; 2] = [116.0, 28.0];
@@ -42,6 +43,7 @@ fn category_name(category: Category) -> &'static str {
         Category::Marker => tr("brush-marker"),
         Category::Airbrush => tr("brush-airbrush"),
         Category::Spray => tr("brush-spray"),
+        Category::Pixel => tr("brush-pixel"),
     }
 }
 
@@ -71,17 +73,44 @@ impl Presets {
         let presets: Vec<&'static Preset> = match tool {
             Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
                 let shown = self.category.unwrap_or(current.category);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let width = (ui.available_width() - 12.0) / 4.0;
-                    for category in CATEGORIES {
-                        let tab =
-                            egui::Button::selectable(shown == category, category_name(category));
-                        if ui.add_sized([width, 22.0], tab).clicked() {
-                            self.category = Some(category);
+                // As many equal tabs a row as fit their names, so the tabs
+                // never widen the panel.
+                let gap = 4.0;
+                let widest = CATEGORIES
+                    .iter()
+                    .map(|&category| {
+                        let font = egui::TextStyle::Button.resolve(ui.style());
+                        ui.fonts_mut(|fonts| {
+                            fonts
+                                .layout_no_wrap(
+                                    category_name(category).to_owned(),
+                                    font,
+                                    egui::Color32::WHITE,
+                                )
+                                .size()
+                                .x
+                        })
+                    })
+                    .fold(0.0, f32::max)
+                    + ui.spacing().button_padding.x * 2.0;
+                let available = ui.available_width();
+                let columns = (((available + gap) / (widest + gap)).floor() as usize)
+                    .clamp(1, CATEGORIES.len());
+                let width = (available - gap * (columns - 1) as f32) / columns as f32;
+                for row in CATEGORIES.chunks(columns) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for &category in row {
+                            let tab = egui::Button::selectable(
+                                shown == category,
+                                category_name(category),
+                            );
+                            if ui.add_sized([width, 22.0], tab).clicked() {
+                                self.category = Some(category);
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 BRUSHES
                     .iter()
                     .filter(|preset| preset.category == shown)

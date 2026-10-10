@@ -43,6 +43,11 @@ pub enum BrushEngine {
     Line,
     Airbrush,
     Spray,
+    /// Whole pixels: the points' pixels joined cell by cell, without
+    /// doubled corners, each the tip's block of `width` pixels, moved by
+    /// the wobble in whole pixels, with no pressure and no antialiasing
+    /// (m5-plan decision 14).
+    Pixel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

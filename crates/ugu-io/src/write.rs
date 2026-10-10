@@ -87,6 +87,7 @@ pub fn write<W: Write + Seek>(
                             BrushEngine::Line => EngineDto::Line,
                             BrushEngine::Airbrush => EngineDto::Airbrush,
                             BrushEngine::Spray => EngineDto::Spray,
+                            BrushEngine::Pixel => EngineDto::Pixel,
                         },
                         tip: match stroke.brush.tip {
                             TipShape::Round => TipDto::Round,

@@ -13,6 +13,7 @@ pub mod image;
 pub mod live;
 pub mod mask;
 pub mod moving;
+pub mod pixel;
 pub mod placing;
 pub mod plan;
 pub mod present;

@@ -207,6 +207,13 @@ impl Pen {
         let brush = &self.brush;
         let square = brush.tip == TipShape::Square;
         let shape = match brush.engine {
+            // The block from the point's pixel, and a pixel more for the
+            // move's rounding.
+            BrushEngine::Pixel => {
+                return f64::from(crate::pixel::side(self.width))
+                    + 1.5
+                    + classic::max_displacement(width, self.wobble);
+            }
             BrushEngine::Spray => {
                 let particle = (widest
                     * f64::from(brush.particle_size * (1.0 + brush.size_jitter * 0.75)))
