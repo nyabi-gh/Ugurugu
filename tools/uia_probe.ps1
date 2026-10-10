@@ -5,7 +5,7 @@
 # and other screen readers use (docs/rust/m0-evidence.md section 7): prints the
 # tree, renames the top layer with F2 from its focused row and presses the Add
 # layer button through InvokePattern. Then, from the keyboard alone (M5-14):
-# F10 and Alt+E reach the menus, the settings dialog takes the focus and gives
+# F10, Alt alone and Alt+E reach the menus, the settings dialog takes the focus and gives
 # it back on Escape, and arrows widen the left panel dock. Runs in Windows
 # PowerShell 5.1, which has the .NET UI Automation client.
 #
@@ -126,6 +126,15 @@ try {
     Send '{ESC}'
     Send '{F10}'
     "F10 focuses: '$((Focused).Name)'"
+    Send '{F10}'
+    "F10 again leaves to: '$((Focused).Name)'"
+    # SendKeys cannot press Alt alone.
+    Add-Type 'using System; using System.Runtime.InteropServices; public static class Keys { [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); }'
+    if ([Front]::GetForegroundWindow() -ne $app.MainWindowHandle) { throw 'the app is not in front' }
+    [Keys]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [Keys]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 300
+    "Alt alone focuses: '$((Focused).Name)'"
+    Send '{ESC}'
     Send '%e'
     if (Tab-To 'Settings') {
         Send ' '

@@ -43,3 +43,10 @@ m5-plan 2절 15의 첫 단계다. 2.2.13 writer는 `src/io/serializer/DocumentJs
 - 빠진 것: fill, 자르기·리사이즈, 병합 경계, 레이어 모션, smooth·stepped·broken, reference, clip 마스크, ClearSelection·keep_source, legacy fillMask, procedural fill.
 - 계획: `tests/DocumentSchemaTests.cpp`의 생성 코드를 FixtureGenerator로 옮겨 전 기능 fixture를 더하고, 2.2.13과 3.0으로 렌더해 모든 프레임을 비교한다. procedural fill 예는 `tests/fixtures/legacy-render/*.wagle`을 2.2.13에서 다시 저장해 얻는다(거절 시험용).
 - 연결 지점: `crates/ugu-io/src/read.rs`의 `legacy()`가 이미 JSON을 `Legacy::Json`으로 판별한다.
+
+## 4. 구현과 결과 (2026-10-11)
+
+- `crates/ugu-io/src/legacy.rs`. 시험은 `legacy/tests.rs`(fixture 6개로 대응·거절·손상), 앱은 `files.rs`의 `a_2_2_13_project_opens_as_a_new_document_or_says_why_not`.
+- 3절의 빠진 것은 모두 fixture에 들어갔다(`tests/fixtures/ugu13`, manifest 포함). procedural fill 예는 `.wagle`을 다시 저장하는 대신 생성기가 coverage 없는 fill을 직접 쓴다(2.2.13 serializer가 그대로 저장하고 연다).
+- 8절(smooth 샘플링, clipToLayerBelow, Overlay)은 렌더 비교로 같다고 확인했다(m0-evidence 22절). 7절 f64 → f32는 차이로 드러나지 않았다.
+- 2.2.13과 다르게 정한 것: 가져온 문서는 저장되지 않은 상태(닫으면 묻는다)이고 이름은 파일 이름이다(2.2.13 .wawa 가져오기와 같음). base64는 엄격히 읽는다(2.2.13 Qt는 잘못된 문자를 건너뜀; writer는 늘 표준 base64). 마스크·자산의 내용 해시 id는 다시 매기므로 검사하지 않는다.
