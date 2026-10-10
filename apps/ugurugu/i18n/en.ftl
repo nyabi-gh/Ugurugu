@@ -51,6 +51,17 @@ recovery-discard = Discard
 recovery-later = Later
 recovery-done = Recovered unsaved work.
 recovery-failed = Recovery failed
+
+# Opening a 2.2.13 project
+legacy-imported = Imported { $name } as a new, unsaved document.
+legacy-damaged = This is not an Ugurugu 2.2.13 project, or it is damaged.
+legacy-older = This project is from before Ugurugu 2.2.13. Open it in 2.2.13 and save it, then open it here.
+legacy-newer = This project is from a version newer than Ugurugu 2.2.13.
+legacy-too-much = This project holds more data than a document can.
+legacy-procedural-fill = This project has a fill that is redrawn on every frame, which cannot be shown the same way.
+legacy-merge-canvas = This project crops or resizes the canvas between merged layers, which cannot be shown the same way.
+legacy-large-image = This project has an image wider or taller than 16384 pixels.
+legacy-color = This project has a colour written as { $color }, which Ugurugu 2.2.13 does not write.
 recovery-not-saving = Automatic recovery is not saving. Save your work yourself.
 edit-undo = Undo
 edit-redo = Redo

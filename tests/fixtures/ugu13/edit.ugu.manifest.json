@@ -1,0 +1,86 @@
+{
+    "animationFrames": 8,
+    "canvas": [
+        300,
+        225
+    ],
+    "fileBytes": 325338,
+    "fixture": "edit",
+    "format": "ugurugu 2.2.13 JSON",
+    "framesPerSecond": 25,
+    "layers": [
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Image",
+            "opacity": 1,
+            "strokes": 4
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Base",
+            "opacity": 1,
+            "strokes": 71
+        },
+        {
+            "blend": "multiply",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Blend 0",
+            "opacity": 1,
+            "parent": "Blend group",
+            "strokes": 13
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": true,
+            "kind": "paint",
+            "name": "Blend 1",
+            "opacity": 1,
+            "parent": "Blend group",
+            "strokes": 13
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": true,
+            "kind": "paint",
+            "name": "Blend 2",
+            "opacity": 0.7,
+            "parent": "Blend group",
+            "strokes": 12
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Blend 3",
+            "opacity": 1,
+            "parent": "Blend group",
+            "strokes": 12
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Blend group",
+            "opacity": 0.9,
+            "strokes": 0
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Top",
+            "opacity": 0.8,
+            "strokes": 12
+        }
+    ],
+    "points": 4404,
+    "rasterAssetBytes": 14108,
+    "rasterAssets": 1,
+    "strokes": 137,
+    "wobbleAmount": 1.5
+}

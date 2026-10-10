@@ -33,6 +33,12 @@
 //!   frame as the app does, drawing on that many threads (8 if not given)
 //!   while the frames before are shrunk and their colours taken, and prints
 //!   the time of each pass and the peak working set.
+//! - `ugu-doc compare <file.ugu> <frames> [diffs]`: imports a 2.2.13 project
+//!   and compares every frame with `frame-NN.png` in `frames`, written by
+//!   `ugurugu_fixture_generator frames` (docs/rust/ugu-import.md); `diffs`
+//!   gets a heat map of each frame's differences.
+//! - `ugu-doc import <file.ugu> <out.ugurugu>`: imports a 2.2.13 project, saves
+//!   it and prints how long importing took.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -45,7 +51,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads]";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -85,6 +91,11 @@ fn main() -> ExitCode {
             (Ok(percent), Ok(threads)) => webp(Path::new(file), Path::new(out), percent, threads),
             _ => Err(USAGE.to_owned()),
         },
+        ["compare", file, frames] => compare(Path::new(file), Path::new(frames), None),
+        ["compare", file, frames, diffs] => {
+            compare(Path::new(file), Path::new(frames), Some(Path::new(diffs)))
+        }
+        ["import", file, out] => import_legacy(Path::new(file), Path::new(out)),
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["fills", from, to] => fills(Path::new(from), Path::new(to)),
@@ -1469,4 +1480,163 @@ fn test_image(size: u32) -> Result<Vec<u8>, String> {
         .map_err(|error| error.to_string())?;
     writer.finish().map_err(|error| error.to_string())?;
     Ok(png)
+}
+
+fn open_legacy(path: &Path) -> Result<ugu_io::legacy::Imported, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    ugu_io::legacy::read(std::io::BufReader::new(file)).map_err(|error| error.to_string())
+}
+
+fn import_legacy(path: &Path, out: &Path) -> Result<(), String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut times = Vec::new();
+    let mut imported = None;
+    for _ in 0..5 {
+        let started = Instant::now();
+        imported = Some(ugu_io::legacy::import(&bytes).map_err(|error| error.to_string())?);
+        times.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    times.sort_by(f64::total_cmp);
+    println!(
+        "{}: imported in {:.1} ms (median of 5, {:.1}..{:.1})",
+        path.display(),
+        times[2],
+        times[0],
+        times[4]
+    );
+    save(&imported.expect("imported").document, out)?;
+    info(out)
+}
+
+/// Per-channel differences of one frame against 2.2.13's.
+#[derive(Default)]
+struct Difference {
+    sum: u64,
+    max: u8,
+    over_2: usize,
+    over_8: usize,
+    over_32: usize,
+}
+
+fn compare(path: &Path, frames: &Path, diffs: Option<&Path>) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose};
+
+    let document = open_legacy(path)?.document;
+    let [width, height] = document.canvas;
+    let pixels = width as usize * height as usize;
+    let mut renderer = DocumentRenderer::new(8);
+    set_budget(&mut renderer);
+    if let Some(diffs) = diffs {
+        std::fs::create_dir_all(diffs).map_err(|error| error.to_string())?;
+    }
+    println!("frame  mean    max  >2      >8      >32");
+    let mut total = Difference::default();
+    for frame in 0..document.frames {
+        let mut pixmap = vello_cpu::Pixmap::new(width as u16, height as u16);
+        renderer.render(&document, i64::from(frame), Purpose::Display, &mut pixmap);
+        let ours: Vec<[u8; 4]> = pixmap
+            .take_rgba8(vello_cpu::peniko::ImageAlphaType::AlphaPremultiplied)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&pixel| Rgba8::from_premultiplied(pixel).0)
+            .collect();
+        let name = frames.join(format!("frame-{frame:02}.png"));
+        let theirs = read_png(&name, [width, height])?;
+        let mut difference = Difference::default();
+        let mut heat = Vec::with_capacity(pixels * 4);
+        for (a, b) in ours.iter().zip(theirs.as_chunks::<4>().0) {
+            let largest = (0..4)
+                .map(|channel| a[channel].abs_diff(b[channel]))
+                .max()
+                .unwrap_or(0);
+            difference.sum += (0..4)
+                .map(|channel| u64::from(a[channel].abs_diff(b[channel])))
+                .sum::<u64>();
+            difference.max = difference.max.max(largest);
+            difference.over_2 += usize::from(largest > 2);
+            difference.over_8 += usize::from(largest > 8);
+            difference.over_32 += usize::from(largest > 32);
+            let shade = b[0] / 4 + b[1] / 4 + b[2] / 4;
+            heat.extend_from_slice(&if largest > 8 {
+                [255, 0, 0, 255]
+            } else if largest > 2 {
+                [255, 160, 0, 255]
+            } else {
+                [shade, shade, shade, 255]
+            });
+        }
+        let share = |count: usize| 100.0 * count as f64 / pixels as f64;
+        println!(
+            "{frame:>5}  {:.3}  {:>3}  {:>6.3}% {:>6.3}% {:>6.3}%",
+            difference.sum as f64 / (pixels * 4) as f64,
+            difference.max,
+            share(difference.over_2),
+            share(difference.over_8),
+            share(difference.over_32)
+        );
+        if let Some(diffs) = diffs {
+            write_png(
+                &diffs.join(format!("diff-{frame:02}.png")),
+                [width, height],
+                &heat,
+            )?;
+            write_png(
+                &diffs.join(format!("ours-{frame:02}.png")),
+                [width, height],
+                ours.as_flattened(),
+            )?;
+        }
+        total.sum += difference.sum;
+        total.max = total.max.max(difference.max);
+        total.over_2 += difference.over_2;
+        total.over_8 += difference.over_8;
+        total.over_32 += difference.over_32;
+    }
+    let all = pixels * document.frames as usize;
+    let share = |count: usize| 100.0 * count as f64 / all as f64;
+    println!(
+        "  all  {:.3}  {:>3}  {:>6.3}% {:>6.3}% {:>6.3}%",
+        total.sum as f64 / (all * 4) as f64,
+        total.max,
+        share(total.over_2),
+        share(total.over_8),
+        share(total.over_32)
+    );
+    Ok(())
+}
+
+fn read_png(path: &Path, size: [u32; 2]) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
+    let mut pixels = vec![0; reader.output_buffer_size().ok_or("too large")?];
+    let info = reader
+        .next_frame(&mut pixels)
+        .map_err(|error| error.to_string())?;
+    if [info.width, info.height] != size || info.color_type != png::ColorType::Rgba {
+        return Err(format!(
+            "{}: {}x{} {:?}, not {}x{} RGBA",
+            path.display(),
+            info.width,
+            info.height,
+            info.color_type,
+            size[0],
+            size[1]
+        ));
+    }
+    pixels.truncate(info.buffer_size());
+    Ok(pixels)
+}
+
+fn write_png(path: &Path, [width, height]: [u32; 2], rgba: &[u8]) -> Result<(), String> {
+    let file = std::fs::File::create(path).map_err(|error| error.to_string())?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|error| error.to_string())
 }

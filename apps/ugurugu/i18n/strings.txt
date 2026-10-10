@@ -49,6 +49,17 @@ recovery-discard | ugurugu::MainWindow | Discard
 recovery-later | - | Later | 나중에 | 後で
 recovery-done | ugurugu::MainWindow | Recovered unsaved work.
 recovery-failed | ugurugu::MainWindow | Recovery failed
+
+# Opening a 2.2.13 project
+legacy-imported | - | Imported %1 as a new, unsaved document. | %1을(를) 저장되지 않은 새 문서로 가져왔습니다. | %1 を未保存の新しいドキュメントとして読み込みました。 | args=name
+legacy-damaged | - | This is not an Ugurugu 2.2.13 project, or it is damaged. | Ugurugu 2.2.13 프로젝트가 아니거나 손상되었습니다. | Ugurugu 2.2.13 のプロジェクトではないか、破損しています。
+legacy-older | - | This project is from before Ugurugu 2.2.13. Open it in 2.2.13 and save it, then open it here. | Ugurugu 2.2.13 이전의 프로젝트입니다. 2.2.13에서 열어 저장한 뒤 여기서 여세요. | Ugurugu 2.2.13 より前のプロジェクトです。2.2.13 で開いて保存してから、ここで開いてください。
+legacy-newer | - | This project is from a version newer than Ugurugu 2.2.13. | Ugurugu 2.2.13보다 새 버전의 프로젝트입니다. | Ugurugu 2.2.13 より新しいバージョンのプロジェクトです。
+legacy-too-much | - | This project holds more data than a document can. | 문서가 담을 수 있는 것보다 데이터가 많습니다. | ドキュメントに入るよりも多くのデータがあります。
+legacy-procedural-fill | - | This project has a fill that is redrawn on every frame, which cannot be shown the same way. | 프레임마다 다시 칠하는 채우기가 있어 같은 모습으로 보일 수 없습니다. | フレームごとに塗り直す塗りつぶしがあり、同じ見た目で表示できません。
+legacy-merge-canvas | - | This project crops or resizes the canvas between merged layers, which cannot be shown the same way. | 병합한 레이어 사이에서 캔버스를 자르거나 크기를 바꿔 같은 모습으로 보일 수 없습니다. | 結合したレイヤーの間でキャンバスを切り抜くかサイズを変えているため、同じ見た目で表示できません。
+legacy-large-image | - | This project has an image wider or taller than 16384 pixels. | 너비나 높이가 16384픽셀을 넘는 이미지가 있습니다. | 幅か高さが 16384 ピクセルを超える画像があります。
+legacy-color | - | This project has a colour written as %1, which Ugurugu 2.2.13 does not write. | Ugurugu 2.2.13이 쓰지 않는 형식의 색 %1이(가) 있습니다. | Ugurugu 2.2.13 が書かない形式の色 %1 があります。 | args=color
 recovery-not-saving | ugurugu::MainWindow | Automatic recovery is not saving. Save your work yourself.
 edit-undo | ugurugu::MainWindow | &Undo
 edit-redo | ugurugu::MainWindow | &Redo

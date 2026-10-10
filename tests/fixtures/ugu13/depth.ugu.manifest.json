@@ -1,0 +1,169 @@
+{
+    "animationFrames": 4,
+    "canvas": [
+        256,
+        256
+    ],
+    "fileBytes": 262875,
+    "fixture": "depth",
+    "format": "ugurugu 2.2.13 JSON",
+    "framesPerSecond": 25,
+    "layers": [
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Under",
+            "opacity": 1,
+            "strokes": 20
+        },
+        {
+            "blend": "multiply",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 0",
+            "opacity": 1,
+            "parent": "Level 0",
+            "strokes": 6
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 1",
+            "opacity": 1,
+            "parent": "Level 1",
+            "strokes": 6
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 2",
+            "opacity": 1,
+            "parent": "Level 2",
+            "strokes": 6
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 3",
+            "opacity": 1,
+            "parent": "Level 3",
+            "strokes": 6
+        },
+        {
+            "blend": "multiply",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 4",
+            "opacity": 1,
+            "parent": "Level 4",
+            "strokes": 6
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 5",
+            "opacity": 1,
+            "parent": "Level 5",
+            "strokes": 6
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 6",
+            "opacity": 1,
+            "parent": "Level 6",
+            "strokes": 6
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Paint 7",
+            "opacity": 1,
+            "parent": "Level 7",
+            "strokes": 6
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 7",
+            "opacity": 0.6499999999999999,
+            "parent": "Level 6",
+            "strokes": 0
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 6",
+            "opacity": 0.7,
+            "parent": "Level 5",
+            "strokes": 0
+        },
+        {
+            "blend": "multiply",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 5",
+            "opacity": 0.75,
+            "parent": "Level 4",
+            "strokes": 0
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 4",
+            "opacity": 0.8,
+            "parent": "Level 3",
+            "strokes": 0
+        },
+        {
+            "blend": "overlay",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 3",
+            "opacity": 0.85,
+            "parent": "Level 2",
+            "strokes": 0
+        },
+        {
+            "blend": "screen",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 2",
+            "opacity": 0.9,
+            "parent": "Level 1",
+            "strokes": 0
+        },
+        {
+            "blend": "multiply",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 1",
+            "opacity": 0.95,
+            "parent": "Level 0",
+            "strokes": 0
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "group",
+            "name": "Level 0",
+            "opacity": 1,
+            "strokes": 0
+        }
+    ],
+    "points": 4080,
+    "rasterAssetBytes": 0,
+    "rasterAssets": 0,
+    "strokes": 68,
+    "wobbleAmount": 1.6
+}

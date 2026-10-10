@@ -51,6 +51,17 @@ recovery-discard = 破棄
 recovery-later = 後で
 recovery-done = 未保存の作業を復元しました。
 recovery-failed = 復元に失敗しました
+
+# Opening a 2.2.13 project
+legacy-imported = { $name } を未保存の新しいドキュメントとして読み込みました。
+legacy-damaged = Ugurugu 2.2.13 のプロジェクトではないか、破損しています。
+legacy-older = Ugurugu 2.2.13 より前のプロジェクトです。2.2.13 で開いて保存してから、ここで開いてください。
+legacy-newer = Ugurugu 2.2.13 より新しいバージョンのプロジェクトです。
+legacy-too-much = ドキュメントに入るよりも多くのデータがあります。
+legacy-procedural-fill = フレームごとに塗り直す塗りつぶしがあり、同じ見た目で表示できません。
+legacy-merge-canvas = 結合したレイヤーの間でキャンバスを切り抜くかサイズを変えているため、同じ見た目で表示できません。
+legacy-large-image = 幅か高さが 16384 ピクセルを超える画像があります。
+legacy-color = Ugurugu 2.2.13 が書かない形式の色 { $color } があります。
 recovery-not-saving = 自動復元が保存できていません。手動で保存してください。
 edit-undo = 元に戻す
 edit-redo = やり直す

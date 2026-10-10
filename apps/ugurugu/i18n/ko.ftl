@@ -51,6 +51,17 @@ recovery-discard = 폐기
 recovery-later = 나중에
 recovery-done = 저장하지 않은 작업을 복구했습니다.
 recovery-failed = 복구 실패
+
+# Opening a 2.2.13 project
+legacy-imported = { $name }을(를) 저장되지 않은 새 문서로 가져왔습니다.
+legacy-damaged = Ugurugu 2.2.13 프로젝트가 아니거나 손상되었습니다.
+legacy-older = Ugurugu 2.2.13 이전의 프로젝트입니다. 2.2.13에서 열어 저장한 뒤 여기서 여세요.
+legacy-newer = Ugurugu 2.2.13보다 새 버전의 프로젝트입니다.
+legacy-too-much = 문서가 담을 수 있는 것보다 데이터가 많습니다.
+legacy-procedural-fill = 프레임마다 다시 칠하는 채우기가 있어 같은 모습으로 보일 수 없습니다.
+legacy-merge-canvas = 병합한 레이어 사이에서 캔버스를 자르거나 크기를 바꿔 같은 모습으로 보일 수 없습니다.
+legacy-large-image = 너비나 높이가 16384픽셀을 넘는 이미지가 있습니다.
+legacy-color = Ugurugu 2.2.13이 쓰지 않는 형식의 색 { $color }이(가) 있습니다.
 recovery-not-saving = 자동 복구가 저장되지 않고 있습니다. 직접 저장하세요.
 edit-undo = 실행 취소
 edit-redo = 다시 실행

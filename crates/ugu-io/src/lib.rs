@@ -9,6 +9,7 @@ pub mod format;
 pub mod gif;
 pub mod image;
 pub mod import;
+pub mod legacy;
 pub mod read;
 pub mod save;
 pub mod webp;

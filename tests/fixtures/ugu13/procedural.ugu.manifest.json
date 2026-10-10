@@ -1,0 +1,26 @@
+{
+    "animationFrames": 4,
+    "canvas": [
+        160,
+        120
+    ],
+    "fileBytes": 2916,
+    "fixture": "procedural",
+    "format": "ugurugu 2.2.13 JSON",
+    "framesPerSecond": 25,
+    "layers": [
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Ring",
+            "opacity": 1,
+            "strokes": 2
+        }
+    ],
+    "points": 42,
+    "rasterAssetBytes": 0,
+    "rasterAssets": 0,
+    "strokes": 2,
+    "wobbleAmount": 3
+}

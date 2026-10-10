@@ -1,0 +1,42 @@
+{
+    "animationFrames": 6,
+    "canvas": [
+        320,
+        240
+    ],
+    "fileBytes": 72856,
+    "fixture": "fill",
+    "format": "ugurugu 2.2.13 JSON",
+    "framesPerSecond": 25,
+    "layers": [
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Lines",
+            "opacity": 1,
+            "strokes": 10
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Fills",
+            "opacity": 1,
+            "strokes": 4
+        },
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Clipped",
+            "opacity": 1,
+            "strokes": 8
+        }
+    ],
+    "points": 1084,
+    "rasterAssetBytes": 0,
+    "rasterAssets": 0,
+    "strokes": 22,
+    "wobbleAmount": 1.6
+}

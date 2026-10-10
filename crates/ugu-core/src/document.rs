@@ -22,8 +22,9 @@ pub mod limits {
     pub const MOTION_DETAIL: std::ops::RangeInclusive<u32> = 1..=24;
     pub const BREAK_RANGE: std::ops::RangeInclusive<f32> = 2.0..=256.0;
     pub const LAYERS: usize = 256;
-    /// Nesting of groups; a top-level layer is at depth 1.
-    pub const LAYER_DEPTH: usize = 8;
+    /// Nesting of groups; a top-level layer is at depth 1. 2.2.13 edits
+    /// down to its depth 8 counted from 0, so 2.x projects open.
+    pub const LAYER_DEPTH: usize = 9;
     pub const LAYER_NAME_CHARS: usize = 256;
     /// Operations in all layers, isolated sections included.
     pub const OPERATIONS: usize = 20_000;
@@ -446,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_nest_at_most_eight_deep() {
+    fn groups_nest_at_most_nine_deep() {
         let mut nested = paint_layer(100, vec![], [64, 64]);
         for id in 1..limits::LAYER_DEPTH as u32 {
             nested = group(id, vec![nested]);

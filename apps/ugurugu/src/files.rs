@@ -56,6 +56,11 @@ const DOCUMENT_TYPE: FileType = FileType {
     name: "Ugurugu document",
     extensions: &["ugurugu"],
 };
+/// What opens: documents, and 2.2.13 projects, imported as new ones.
+const OPEN_TYPE: FileType = FileType {
+    name: "Ugurugu document",
+    extensions: &["ugurugu", "ugu"],
+};
 const PNG_TYPE: FileType = FileType {
     name: "PNG image",
     extensions: &["png"],
@@ -92,7 +97,7 @@ const PROGRESS_DELAY: Duration = Duration::from_millis(300);
 pub enum FileEvent {
     /// A dialog closed: the chosen path, or `None` when cancelled.
     Picked(Purpose, Option<PathBuf>),
-    Opened(PathBuf, Result<(Box<Document>, [u8; 16]), String>),
+    Opened(PathBuf, Result<Opened, String>),
     Saved {
         path: PathBuf,
         state: StateId,
@@ -115,6 +120,12 @@ pub enum FileEvent {
     RecoveryWritten(Result<(), String>),
     /// Work read back from a folder found at start.
     Recovered(Result<Box<Recovered>, String>),
+}
+
+pub enum Opened {
+    Document(Box<Document>, [u8; 16]),
+    /// A 2.2.13 project, which becomes a new document.
+    Imported(Box<ugu_io::legacy::Imported>),
 }
 
 /// Work read back, and the folder it came from.
@@ -292,10 +303,10 @@ pub struct Files {
     found: VecDeque<Found>,
     /// Asking about recovered work is waiting for it to be read.
     reading_found: bool,
-    /// The name recovered work goes by until it is saved, and where the
-    /// work had been saved, if anywhere.
-    recovered_name: Option<String>,
-    recovered_from: Option<PathBuf>,
+    /// The name recovered or imported work goes by until it is saved, and
+    /// the file it came from, if any.
+    unsaved_name: Option<String>,
+    unsaved_from: Option<PathBuf>,
     exporting: Option<Exporting>,
     /// The animation export options asked for, while they are.
     animation_dialog: Option<AnimationDialog>,
@@ -363,8 +374,8 @@ impl Files {
             recovery: None,
             found: VecDeque::new(),
             reading_found: false,
-            recovered_name: None,
-            recovered_from: None,
+            unsaved_name: None,
+            unsaved_from: None,
             exporting: None,
             animation_dialog: None,
             new_document: None,
@@ -547,7 +558,7 @@ impl Files {
         match self.path.as_deref().and_then(Path::file_stem) {
             Some(name) => name.to_string_lossy().into_owned(),
             None => self
-                .recovered_name
+                .unsaved_name
                 .clone()
                 .unwrap_or_else(|| "Untitled".to_owned()),
         }
@@ -572,7 +583,7 @@ impl Files {
             Action::New => {
                 self.new_document = Some(canvas.session().document().canvas.map(i64::from));
             }
-            Action::Open => self.pick(Purpose::Open, Dialog::Open(DOCUMENT_TYPE)),
+            Action::Open => self.pick(Purpose::Open, Dialog::Open(OPEN_TYPE)),
             Action::Close => self.close = true,
             Action::Recover => {
                 if let Some(found) = self.found.pop_front() {
@@ -635,7 +646,7 @@ impl Files {
         let folder = self
             .path
             .as_deref()
-            .or(self.recovered_from.as_deref())
+            .or(self.unsaved_from.as_deref())
             .and_then(std::path::Path::parent)
             .map(std::path::Path::to_path_buf);
         self.pick(
@@ -740,8 +751,8 @@ impl Files {
         // Clean until edited, as the document at start.
         canvas.replace(Document::new(size), true);
         self.path = None;
-        self.recovered_name = None;
-        self.recovered_from = None;
+        self.unsaved_name = None;
+        self.unsaved_from = None;
         self.id = new_id();
         self.clear_message();
     }
@@ -1061,13 +1072,29 @@ impl Files {
                 Err(error) => format!("{}: {error}", tr("preset-export-failed")),
             }),
             FileEvent::Opened(path, result) => match result {
-                Ok((document, id)) => {
+                Ok(Opened::Document(document, id)) => {
                     canvas.replace(*document, true);
                     self.path = Some(path);
-                    self.recovered_name = None;
-                    self.recovered_from = None;
+                    self.unsaved_name = None;
+                    self.unsaved_from = None;
                     self.id = id;
                     self.clear_message();
+                }
+                // Like 2.2.13's .wawa import: a new document not yet saved,
+                // named after the file, saved as .ugurugu next to it.
+                Ok(Opened::Imported(imported)) => {
+                    let ugu_io::legacy::Imported { document, active } = *imported;
+                    canvas.replace(document, false);
+                    if let Some(active) = active {
+                        canvas.edit(|session| session.select_layer(active));
+                    }
+                    self.path = None;
+                    self.unsaved_name = path
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned());
+                    self.id = new_id();
+                    self.say(tr_with("legacy-imported", &args_name(file_name(&path))));
+                    self.unsaved_from = Some(path);
                 }
                 Err(error) => self.say(format!("{}: {error}", path.display())),
             },
@@ -1164,12 +1191,12 @@ impl Files {
                         canvas.replace(document, false);
                         self.path = None;
                         self.id = id;
-                        self.recovered_name = Some(if meta.name.ends_with("-recovered") {
+                        self.unsaved_name = Some(if meta.name.ends_with("-recovered") {
                             meta.name
                         } else {
                             format!("{}-recovered", meta.name)
                         });
-                        self.recovered_from = meta.path;
+                        self.unsaved_from = meta.path;
                         self.say(tr("recovery-done").to_owned());
                         // In this window's folder before the other one goes.
                         self.write_recovery(canvas);
@@ -1337,13 +1364,7 @@ fn run(job: Job) -> Option<FileEvent> {
         }
         Job::Open(path) => {
             let started = std::time::Instant::now();
-            let result = std::fs::File::open(&path)
-                .map_err(|error| error.to_string())
-                .and_then(|file| {
-                    ugu_io::read::read(std::io::BufReader::new(file))
-                        .map(|(document, id)| (Box::new(document), id))
-                        .map_err(|error| error.to_string())
-                });
+            let result = open(&path);
             tracing::info!(
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 ok = result.is_ok(),
@@ -1730,6 +1751,42 @@ mod tests {
     }
 
     #[test]
+    fn a_2_2_13_project_opens_as_a_new_document_or_says_why_not() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("legacy");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ugu13");
+        let project = folder.join("edit.ugu");
+        std::fs::copy(fixtures.join("edit.ugu"), &project).unwrap();
+        files.open_path(project.clone());
+        files.handle(next(&events), &mut canvas);
+        let session = canvas.session();
+        assert_eq!(session.document().canvas, [300, 225]);
+        assert!(session.is_dirty());
+        // "Base", active when 2.2.13 saved it.
+        assert_eq!(session.current_layer(), session.document().layers[1].id);
+        assert_eq!(files.path, None);
+        assert!(files.title(&canvas).starts_with("edit*"));
+        assert!(
+            files
+                .message()
+                .is_some_and(|text| text.contains("edit.ugu"))
+        );
+        assert_ne!(files.id, [0; 16]);
+        assert_eq!(files.unsaved_from, Some(project));
+
+        let refused = folder.join("procedural.ugu");
+        std::fs::copy(fixtures.join("procedural.ugu"), &refused).unwrap();
+        files.open_path(refused);
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(canvas.session().document().canvas, [300, 225]);
+        assert!(
+            files
+                .message()
+                .is_some_and(|text| text.ends_with(tr("legacy-procedural-fill")))
+        );
+    }
+
+    #[test]
     fn an_exported_png_is_the_rendered_frame_without_reference_layers() {
         use std::sync::Arc as Shared;
         use ugu_core::ops::{Op, Rgba8, StrokeId, Wobble};
@@ -1880,3 +1937,46 @@ mod end_to_end;
 
 #[cfg(test)]
 mod recovering;
+
+/// Reads a document, or imports a 2.2.13 project.
+fn open(path: &Path) -> Result<Opened, String> {
+    let file = File::open(path).map_err(|error| error.to_string())?;
+    match ugu_io::read::read(std::io::BufReader::new(file)) {
+        Ok((document, id)) => Ok(Opened::Document(Box::new(document), id)),
+        Err(ugu_io::read::ReadError::Legacy(ugu_io::read::Legacy::Json)) => {
+            let file = File::open(path).map_err(|error| error.to_string())?;
+            ugu_io::legacy::read(std::io::BufReader::new(file))
+                .map(|imported| Opened::Imported(Box::new(imported)))
+                .map_err(|error| legacy_error(&error))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Why a 2.x project does not open, in the interface language.
+fn legacy_error(error: &ugu_io::legacy::LegacyError) -> String {
+    use ugu_io::legacy::{LegacyError, Refusal};
+    let key = match error {
+        LegacyError::Io(error) => return error.to_string(),
+        LegacyError::Damaged(reason) => {
+            tracing::info!(%reason, "a 2.x project did not import");
+            "legacy-damaged"
+        }
+        LegacyError::Older(_) => "legacy-older",
+        LegacyError::Newer(_) => "legacy-newer",
+        LegacyError::TooLarge(_) | LegacyError::Refused(Refusal::TooMuchData) => "legacy-too-much",
+        LegacyError::Refused(Refusal::ProceduralFill) => "legacy-procedural-fill",
+        LegacyError::Refused(Refusal::CanvasChangeInMerge) => "legacy-merge-canvas",
+        LegacyError::Refused(Refusal::LargeImage) => "legacy-large-image",
+        LegacyError::Refused(Refusal::Color(color)) => {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("color", color.clone());
+            return tr_with("legacy-color", &args);
+        }
+        LegacyError::Invalid(invalid) => {
+            tracing::info!(%invalid, "a 2.x project did not import");
+            "legacy-damaged"
+        }
+    };
+    tr(key).to_owned()
+}

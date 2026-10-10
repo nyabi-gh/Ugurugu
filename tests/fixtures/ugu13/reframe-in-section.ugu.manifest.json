@@ -1,0 +1,26 @@
+{
+    "animationFrames": 4,
+    "canvas": [
+        220,
+        160
+    ],
+    "fileBytes": 4468,
+    "fixture": "reframe-in-section",
+    "format": "ugurugu 2.2.13 JSON",
+    "framesPerSecond": 25,
+    "layers": [
+        {
+            "blend": "normal",
+            "clipToLayerBelow": false,
+            "kind": "paint",
+            "name": "Base",
+            "opacity": 1,
+            "strokes": 8
+        }
+    ],
+    "points": 63,
+    "rasterAssetBytes": 0,
+    "rasterAssets": 0,
+    "strokes": 8,
+    "wobbleAmount": 1.6
+}

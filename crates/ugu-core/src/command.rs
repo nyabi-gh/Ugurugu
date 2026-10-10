@@ -566,7 +566,8 @@ mod tests {
     fn moving_a_layer_too_deep_is_refused() {
         let mut document = Document::new([64, 64]);
         let mut parent = None;
-        for id in 2..=9 {
+        let deepest = crate::document::limits::LAYER_DEPTH as u32 + 1;
+        for id in 2..=deepest {
             let group = Layer {
                 id: LayerId(id),
                 name: format!("Group {id}"),
@@ -592,8 +593,9 @@ mod tests {
             parent = Some(LayerId(id));
         }
         let before = document.clone();
-        // Group 9 sits at depth 8, so a layer inside it would be at depth 9.
-        let changes = move_layer(&document, LayerId(1), Some(LayerId(9)), 0).unwrap();
+        // The deepest group is at the depth limit, so a layer inside it would
+        // be one deeper.
+        let changes = move_layer(&document, LayerId(1), Some(LayerId(deepest)), 0).unwrap();
         assert!(matches!(
             commit(&mut document, changes),
             Err(EditError::Document(_))
