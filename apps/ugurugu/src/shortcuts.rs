@@ -184,6 +184,39 @@ pub fn clipboard_chord(
     })
 }
 
+/// Alt pressed and let go with nothing in between, which goes to the menus
+/// as F10 does, as in Windows and 2.2.13. Another key, or a press of the
+/// pen or mouse (Alt picks a colour or takes from a selection), cancels it.
+#[derive(Default)]
+pub struct AltTap {
+    armed: bool,
+}
+
+impl AltTap {
+    /// A key from the window; true when it completes a tap.
+    pub fn key(&mut self, logical: &winit::keyboard::Key, pressed: bool, repeat: bool) -> bool {
+        use winit::keyboard::{Key as Logical, NamedKey};
+        let alt = matches!(logical, Logical::Named(NamedKey::Alt));
+        match (alt, pressed) {
+            (true, true) => {
+                if !repeat {
+                    self.armed = true;
+                }
+                false
+            }
+            (true, false) => std::mem::take(&mut self.armed),
+            (false, _) => {
+                self.armed = false;
+                false
+            }
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        self.armed = false;
+    }
+}
+
 macro_rules! actions {
     ($($action:ident $id:literal $label:literal [$($default:expr)?] [$($alias:expr),*];)*) => {
         /// Everything the menus do, and the canvas's Escape.
@@ -441,6 +474,27 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alt_alone_goes_to_the_menus_and_anything_between_cancels_it() {
+        use winit::keyboard::{Key as Logical, NamedKey};
+        let alt = Logical::Named(NamedKey::Alt);
+        let e = Logical::Character("e".into());
+        let mut tap = AltTap::default();
+        assert!(!tap.key(&alt, true, false));
+        assert!(!tap.key(&alt, true, true));
+        assert!(tap.key(&alt, false, false));
+        // Alt+E opens the Edit menu itself.
+        tap.key(&alt, true, false);
+        tap.key(&e, true, false);
+        tap.key(&e, false, false);
+        assert!(!tap.key(&alt, false, false));
+        tap.key(&alt, true, false);
+        tap.cancel();
+        assert!(!tap.key(&alt, false, false));
+        // A release without a press, as after switching windows with Alt+Tab.
+        assert!(!tap.key(&alt, false, false));
+    }
 
     #[test]
     fn every_action_has_its_own_name_and_default_key() {

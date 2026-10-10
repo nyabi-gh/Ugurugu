@@ -184,6 +184,9 @@ fn the_menus_open_from_the_keyboard() {
     window.key(NONE, Key::F10);
     assert_eq!(window.label(), tr("menu-file"));
     assert!(!window.popup());
+    window.key(NONE, Key::F10);
+    assert_eq!(window.label(), "", "F10 on a title leaves the menus");
+    window.key(NONE, Key::F10);
     window.key(NONE, Key::ArrowDown);
     assert!(window.popup(), "Down opens the focused menu");
     window.key(NONE, Key::ArrowRight);

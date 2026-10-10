@@ -149,6 +149,7 @@ pub struct RenderThread {
     /// Copy, cut and paste chords since the last frame, which egui does not
     /// see as keys.
     clipboard_chords: Vec<Chord>,
+    alt_tap: shortcuts::AltTap,
     title: String,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
@@ -326,6 +327,7 @@ impl RenderThread {
             }),
             modifiers: ModifiersState::empty(),
             clipboard_chords: Vec::new(),
+            alt_tap: shortcuts::AltTap::default(),
             clipboard: Clipboard::new({
                 let to_self = to_self.clone();
                 move |event| {
@@ -578,6 +580,16 @@ impl RenderThread {
                         .route(events, pixels_per_point, modifiers, pan_held, |position| {
                             canvas.contains(position) && !under_egui(position)
                         });
+                if routed
+                    .canvas
+                    .iter()
+                    .any(|input| matches!(input, CanvasInput::Begin(..)))
+                    || routed.egui.iter().any(|event| {
+                        matches!(event, egui::Event::PointerButton { pressed: true, .. })
+                    })
+                {
+                    self.alt_tap.cancel();
+                }
                 self.egui_state.egui_input_mut().events.extend(routed.egui);
                 for input in routed.canvas {
                     // egui never sees canvas presses, so it would keep a
@@ -600,15 +612,32 @@ impl RenderThread {
                     // egui-winit turns these into clipboard events, Ctrl+V
                     // only when the clipboard holds text, and an image from
                     // another app is pasted too.
-                    WindowEvent::KeyboardInput { event, .. }
-                        if event.state.is_pressed() && !event.repeat =>
-                    {
-                        self.clipboard_chords.extend(shortcuts::clipboard_chord(
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if event.state.is_pressed() && !event.repeat {
+                            self.clipboard_chords.extend(shortcuts::clipboard_chord(
+                                &event.logical_key,
+                                event.physical_key,
+                                self.modifiers,
+                            ));
+                        }
+                        if self.alt_tap.key(
                             &event.logical_key,
-                            event.physical_key,
-                            self.modifiers,
-                        ));
+                            event.state.is_pressed(),
+                            event.repeat,
+                        ) {
+                            self.egui_state
+                                .egui_input_mut()
+                                .events
+                                .push(egui::Event::Key {
+                                    key: egui::Key::F10,
+                                    physical_key: None,
+                                    pressed: true,
+                                    repeat: false,
+                                    modifiers: egui::Modifiers::NONE,
+                                });
+                        }
                     }
+                    WindowEvent::Focused(false) => self.alt_tap.cancel(),
                     _ => {}
                 }
                 if let WindowEvent::Resized(size) = &event {

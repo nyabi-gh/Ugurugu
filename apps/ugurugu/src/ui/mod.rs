@@ -107,8 +107,9 @@ fn report_bool(result: Result<bool, EditError>) {
     }
 }
 
-/// The menus. From the keyboard, as in Windows: F10 goes to the first title,
-/// Alt and a title's letter opens that menu, Down opens the focused one, and
+/// The menus. From the keyboard, as in Windows: F10 or Alt alone goes to the
+/// first title and, from a title, back, Alt and a title's letter opens that
+/// menu, Down opens the focused one, and
 /// Left and Right go to the next menu while one is open.
 pub fn menu_bar(
     ui: &mut egui::Ui,
@@ -156,6 +157,7 @@ fn menu_keys(ctx: &egui::Context, menus: &[Option<egui::Id>; 5]) -> (Option<usiz
     let focused_menu = menus.iter().position(|id| id.is_some() && *id == focused);
     let count = menus.len();
     let mut found = (None, false);
+    let mut leave = false;
     ctx.input_mut(|input| {
         input.events.retain(|event| {
             let &egui::Event::Key {
@@ -167,6 +169,14 @@ fn menu_keys(ctx: &egui::Context, menus: &[Option<egui::Id>; 5]) -> (Option<usiz
             else {
                 return true;
             };
+            if modifiers.is_none()
+                && key == egui::Key::F10
+                && open_menu.is_none()
+                && focused_menu.is_some()
+            {
+                leave = true;
+                return false;
+            }
             let to = if modifiers.is_none() {
                 match (key, open_menu, focused_menu) {
                     (egui::Key::F10, ..) => Some((0, false)),
@@ -192,6 +202,9 @@ fn menu_keys(ctx: &egui::Context, menus: &[Option<egui::Id>; 5]) -> (Option<usiz
             false
         });
     });
+    if leave && found.0.is_none() {
+        ctx.memory_mut(|memory| memory.surrender_focus(focused.expect("a menu")));
+    }
     found
 }
 
