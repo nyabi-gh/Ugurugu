@@ -20,9 +20,7 @@ use ugu_core::store::{BrushEngine, Mask, Stroke};
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
-use vello_cpu::{
-    Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources,
-};
+use vello_cpu::{Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, Resources};
 
 use crate::compose::premultiplied;
 use crate::composite::{self, Source};
@@ -716,14 +714,7 @@ impl DocumentRenderer {
 impl Raster {
     fn new(level: vello_cpu::Level, threads: u16) -> Self {
         Self {
-            context: RenderContext::new_with(
-                1,
-                1,
-                RenderSettings {
-                    level,
-                    num_threads: threads,
-                },
-            ),
+            context: crate::raster::context(level, threads),
             resources: Resources::new(),
             threads: usize::from(threads.max(1)),
             paths: Vec::new(),

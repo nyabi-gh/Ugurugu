@@ -14,9 +14,7 @@ use ugu_core::store::Mask;
 use vello_cpu::color::{AlphaColor, Srgb};
 use vello_cpu::kurbo::{Affine, BezPath, Rect};
 use vello_cpu::peniko::{ImageQuality, ImageSampler};
-use vello_cpu::{
-    Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources,
-};
+use vello_cpu::{Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, Resources};
 
 use crate::compose::{Split, clamp, paint};
 use crate::document::{affine, moved_bounds, quality};
@@ -168,14 +166,7 @@ impl Split {
             moved: Pixmap::new(1, 1),
             cover: Pixmap::new(1, 1),
             shown: None,
-            context: RenderContext::new_with(
-                1,
-                1,
-                RenderSettings {
-                    level: document_level(),
-                    num_threads: threads,
-                },
-            ),
+            context: crate::raster::context(document_level(), threads),
             threads,
             resources: Resources::new(),
         })

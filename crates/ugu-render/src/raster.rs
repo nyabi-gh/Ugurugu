@@ -18,6 +18,20 @@ pub fn document_level() -> vello_cpu::Level {
     vello_cpu::Level::baseline()
 }
 
+/// A Vello context drawing with `threads` workers. Vello gives one worker
+/// a thread of its own and copies every path to it; drawing on the calling
+/// thread takes as long and does not keep the copies (④ 192 → 122MiB).
+pub fn context(level: vello_cpu::Level, threads: u16) -> vello_cpu::RenderContext {
+    vello_cpu::RenderContext::new_with(
+        1,
+        1,
+        vello_cpu::RenderSettings {
+            level,
+            num_threads: if threads == 1 { 0 } else { threads },
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
