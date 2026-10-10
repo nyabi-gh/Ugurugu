@@ -4,11 +4,11 @@
 # tools/ts_to_ftl.py turns this into en.ftl, ko.ftl and ja.ftl.
 
 # Menus
-menu-file = ファイル
-menu-edit = 編集
-menu-view = 表示
-menu-tools = ツール
-menu-window = ウィンドウ
+menu-file = ファイル(F)
+menu-edit = 編集(E)
+menu-view = 表示(V)
+menu-tools = ツール(T)
+menu-window = ウィンドウ(W)
 file-new = 新規
 file-open = 開く…
 file-save = 保存
