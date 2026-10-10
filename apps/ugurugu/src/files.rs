@@ -33,11 +33,17 @@ use crate::canvas::Canvas;
 use crate::export::{self, Animation, Exporting, Job as ExportJob, Outcome};
 use crate::i18n::{tr, tr_with};
 use crate::recovery::{self, Found, Meta};
+use crate::settings::preset::{self, PresetError};
 
 fn args_name(name: String) -> fluent_bundle::FluentArgs<'static> {
     let mut args = fluent_bundle::FluentArgs::new();
     args.set("name", name);
     args
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
 }
 
 fn args_path(path: &Path) -> fluent_bundle::FluentArgs<'static> {
@@ -68,6 +74,10 @@ const WEBP_TYPE: FileType = FileType {
     name: "WebP image",
     extensions: &["webp"],
 };
+const TOOLS_TYPE: FileType = FileType {
+    name: "Ugurugu tool preset",
+    extensions: &[preset::EXTENSION],
+};
 /// What an image can be inserted from, as 2.2.13 offers.
 const IMAGE_TYPE: FileType = FileType {
     name: "Image",
@@ -96,6 +106,9 @@ pub enum FileEvent {
     },
     /// An image read to insert, as an asset.
     Inserted(PathBuf, Result<(AssetId, Asset), String>),
+    /// A tool preset file read.
+    ToolsRead(PathBuf, Result<Vec<u8>, PresetError>),
+    ToolsWritten(PathBuf, Result<(), String>),
     /// This window's recovery folder is locked, and the folders of windows
     /// no longer running were found.
     RecoveryBegun(Result<(File, Vec<Found>), String>),
@@ -119,6 +132,8 @@ pub enum Purpose {
     ExportImage,
     ExportAnimation,
     InsertImage,
+    ImportTools,
+    ExportTools,
     /// The default save folder, for the settings.
     SaveFolder,
 }
@@ -162,6 +177,11 @@ enum Job {
     Insert {
         path: PathBuf,
         fit: [u32; 2],
+    },
+    ReadTools(PathBuf),
+    WriteTools {
+        path: PathBuf,
+        bytes: Vec<u8>,
     },
     BeginRecovery {
         root: PathBuf,
@@ -650,6 +670,16 @@ impl Files {
         self.pick(Purpose::InsertImage, Dialog::Open(IMAGE_TYPE));
     }
 
+    /// Asks which tool preset to take the tools and wobble from.
+    pub fn import_tools(&mut self) {
+        self.pick(Purpose::ImportTools, Dialog::Open(TOOLS_TYPE));
+    }
+
+    /// Asks where to write the tools and wobble as a preset.
+    pub fn export_tools(&mut self) {
+        self.pick_save(Purpose::ExportTools, &[TOOLS_TYPE]);
+    }
+
     /// Asks where to export the frame shown, one export at a time.
     pub fn export_image(&mut self) {
         if self.exporting.is_none() {
@@ -886,9 +916,45 @@ impl Files {
                         let fit = canvas.session().document().canvas;
                         let _ = self.to_worker.send(Job::Insert { path, fit });
                     }
+                    Purpose::ImportTools => {
+                        let _ = self.to_worker.send(Job::ReadTools(path));
+                    }
+                    Purpose::ExportTools => {
+                        let session = canvas.session();
+                        let bytes = preset::write(&session.tools(), session.document().wobble);
+                        let _ = self.to_worker.send(Job::WriteTools { path, bytes });
+                    }
                     Purpose::SaveFolder => self.chosen_save_folder = Some(path),
                 }
             }
+            FileEvent::ToolsRead(path, read) => {
+                let session = canvas.session();
+                let taken = read.and_then(|bytes| {
+                    preset::read(&bytes, session.tools(), session.document().wobble)
+                });
+                let failed = |reason: &str| format!("{}: {reason}", tr("preset-import-failed"));
+                match taken {
+                    Ok((tools, wobble)) => {
+                        let applied = canvas.edit(|session| {
+                            session.set_tools(tools);
+                            let document = session.document();
+                            let (frames, speed) = (document.frames, document.frames_per_second);
+                            session.set_animation(frames, speed, wobble)
+                        });
+                        self.say(match applied {
+                            Ok(_) => tr_with("preset-imported", &args_name(file_name(&path))),
+                            Err(error) => failed(&format!("{error:?}")),
+                        });
+                    }
+                    Err(PresetError::Unreadable(error)) => self.say(failed(&error)),
+                    Err(PresetError::TooLarge) => self.say(failed(tr("preset-too-large"))),
+                    Err(PresetError::NotPreset) => self.say(failed(tr("preset-not-preset"))),
+                }
+            }
+            FileEvent::ToolsWritten(path, result) => self.say(match result {
+                Ok(()) => tr_with("preset-exported", &args_name(file_name(&path))),
+                Err(error) => format!("{}: {error}", tr("preset-export-failed")),
+            }),
             FileEvent::Opened(path, result) => match result {
                 Ok((document, id)) => {
                     canvas.replace(*document, true);
@@ -903,10 +969,7 @@ impl Files {
             FileEvent::Inserted(path, result) => match result {
                 Ok((id, asset)) => {
                     canvas.place_image(id, asset);
-                    let name = path
-                        .file_name()
-                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                    self.say(tr_with("image-inserted", &args_name(name)));
+                    self.say(tr_with("image-inserted", &args_name(file_name(&path))));
                 }
                 Err(error) => {
                     self.say(format!("{}: {error}", tr("insert-image-failed")));
@@ -1126,6 +1189,19 @@ fn run(job: Job) -> Option<FileEvent> {
                 state,
                 result,
             }
+        }
+        Job::ReadTools(path) => {
+            let read = preset::load(&path);
+            FileEvent::ToolsRead(path, read)
+        }
+        Job::WriteTools { path, bytes } => {
+            let result =
+                ugu_io::save::replace_with(&path, &ugu_win::file::replace_file, |mut file, _| {
+                    std::io::Write::write_all(&mut file, &bytes)?;
+                    Ok(())
+                })
+                .map_err(|error| error.to_string());
+            FileEvent::ToolsWritten(path, result)
         }
         Job::Insert { path, fit } => {
             let started = std::time::Instant::now();
@@ -1348,6 +1424,62 @@ mod tests {
             panic!("a paint layer");
         };
         assert!(matches!(paint.ops[..], [ugu_core::ops::Op::Paint { .. }]));
+    }
+
+    #[test]
+    fn a_tool_preset_carries_the_tools_and_wobble_to_another_window() {
+        use ugu_core::ops::{MotionStyle, Wobble};
+        use ugu_session::Tool;
+
+        let (mut files, mut canvas, events) = setup();
+        let path = folder("preset").join(format!("mine.{}", preset::EXTENSION));
+        let mut wobble = Wobble::classic(6.0);
+        wobble.motion.style = MotionStyle::Stepped;
+        canvas.edit(|session| {
+            let mut tools = session.tools();
+            tools.tool = Tool::Fill;
+            tools.fill.tolerance = 40;
+            session.set_tools(tools);
+            let document = session.document();
+            let (frames, speed) = (document.frames, document.frames_per_second);
+            session.set_animation(frames, speed, wobble).unwrap();
+        });
+        files.handle(
+            FileEvent::Picked(Purpose::ExportTools, Some(path.clone())),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        let exported = tr_with("preset-exported", &args_name(file_name(&path)));
+        assert_eq!(files.message(), Some(exported.as_str()));
+
+        let (mut files, mut canvas, events) = setup();
+        let before = canvas.session().document().wobble;
+        files.handle(
+            FileEvent::Picked(Purpose::ImportTools, Some(path.clone())),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        let imported = tr_with("preset-imported", &args_name(file_name(&path)));
+        assert_eq!(files.message(), Some(imported.as_str()));
+        let tools = canvas.session().tools();
+        assert_eq!((tools.tool, tools.fill.tolerance), (Tool::Fill, 40));
+        assert_eq!(canvas.session().document().wobble, wobble);
+        // The wobble is the document's, so it is undone; the tools are not.
+        assert!(canvas.edit(|session| session.undo()).unwrap());
+        assert_eq!(canvas.session().document().wobble, before);
+        assert_eq!(canvas.session().tools().tool, Tool::Fill);
+
+        std::fs::write(&path, b"{}").unwrap();
+        files.handle(
+            FileEvent::Picked(Purpose::ImportTools, Some(path)),
+            &mut canvas,
+        );
+        files.handle(next(&events), &mut canvas);
+        assert!(
+            files
+                .message()
+                .is_some_and(|message| message.ends_with(tr("preset-not-preset")))
+        );
     }
 
     #[test]

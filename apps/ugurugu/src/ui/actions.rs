@@ -81,6 +81,9 @@ pub const TOOLS: &[Entry] = &[
     Do(A::Fill),
     Do(A::Text),
     Do(A::Eyedropper),
+    Gap,
+    Do(A::ImportTools),
+    Do(A::ExportTools),
 ];
 
 /// Also behind the quick access Panels button.
@@ -246,6 +249,8 @@ pub fn run(
         A::Export => files.export_image(),
         A::ExportGif => files.export_animation(canvas, Animation::Gif),
         A::ExportWebP => files.export_animation(canvas, Animation::WebP),
+        A::ImportTools => files.import_tools(),
+        A::ExportTools => files.export_tools(),
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool(canvas.edit(Session::undo)),
         A::Redo => report_bool(canvas.edit(Session::redo)),

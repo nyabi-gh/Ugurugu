@@ -21,6 +21,7 @@ use ugu_session::Tools;
 
 use crate::shortcuts::Shortcuts;
 
+pub mod preset;
 mod tools;
 
 /// How long settings must stay unchanged before they are written.

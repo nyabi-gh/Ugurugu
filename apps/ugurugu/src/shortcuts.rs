@@ -275,6 +275,8 @@ actions! {
     Fill "bucket" "tool-fill" [plain(Key::G)] [];
     Text "text" "tool-text" [plain(Key::T)] [];
     Eyedropper "eyedropper" "tool-eyedropper" [plain(Key::I)] [];
+    ImportTools "importToolPreset" "tools-import" [] [];
+    ExportTools "exportToolPreset" "tools-export" [] [];
     AnimationBar "showTimeline" "window-animation-bar" [ctrl_shift(Key::T)] [];
     ToolSettings "toolSettings" "tool-settings" [] [];
     WobbleDock "wobbleDock" "wobble-dock" [] [];

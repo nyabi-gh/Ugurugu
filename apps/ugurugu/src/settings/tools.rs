@@ -100,29 +100,44 @@ pub(super) fn parse_color(text: &str) -> Option<Rgba8> {
     Some(Rgba8([channel(0)?, channel(2)?, channel(4)?, channel(6)?]))
 }
 
-/// The preset named `id` among `presets`, else the first.
-fn preset(id: Option<&Value>, presets: &'static [Preset]) -> &'static Preset {
+/// The preset named `id` among `presets`, else `kept`.
+fn preset(
+    id: Option<&Value>,
+    presets: &'static [Preset],
+    kept: &'static Preset,
+) -> &'static Preset {
     let Some(id) = id else {
-        return &presets[0];
+        return kept;
     };
     presets
         .iter()
         .find(|preset| id.as_str() == Some(preset.id))
         .unwrap_or_else(|| {
             tracing::warn!(%id, "unknown preset in the settings");
-            &presets[0]
+            kept
         })
 }
 
 pub(super) fn parse(value: &Value) -> Tools {
-    let mut tools = Tools::default();
+    read(value, Tools::default())
+}
+
+/// `tools` with what `value` holds taken over them.
+pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
     let Some(top) = value.as_object() else {
         tracing::warn!("the tool settings are not an object");
         return tools;
     };
     named(top, "tool", &TOOLS, &mut tools.tool);
 
-    // Every preset's width and stabilizer, the ones in use included.
+    // Every preset's width and stabilizer, the ones in use included; one
+    // at its own is the same as one not kept.
+    for settings in [tools.pen, tools.eraser] {
+        let kept = (settings.width, settings.stabilizer);
+        if kept != (settings.preset.size, 0.0) {
+            tools.remembered.insert(settings.preset.id, kept);
+        }
+    }
     if let Some(presets) = object(value, "presets") {
         for (id, kept) in presets {
             let Some(preset) = brush::find(id) else {
@@ -151,8 +166,12 @@ pub(super) fn parse(value: &Value) -> Tools {
         }
     };
     let brush = object(value, "brush");
-    let pen = preset(brush.and_then(|brush| brush.get("preset")), &brush::BRUSHES);
-    tools.pen = settings_of(pen, ToolSettings::PEN);
+    let pen = preset(
+        brush.and_then(|brush| brush.get("preset")),
+        &brush::BRUSHES,
+        tools.pen.preset,
+    );
+    tools.pen = settings_of(pen, tools.pen);
     if let Some(brush) = brush {
         if let Some(text) = brush.get("color") {
             match text.as_str().and_then(parse_color) {
@@ -165,10 +184,11 @@ pub(super) fn parse(value: &Value) -> Tools {
     let eraser = preset(
         object(value, "eraser").and_then(|eraser| eraser.get("preset")),
         &brush::ERASERS,
+        tools.eraser.preset,
     );
     tools.eraser = ToolSettings {
         antialias: eraser.brush.antialias,
-        ..settings_of(eraser, ToolSettings::ERASER)
+        ..settings_of(eraser, tools.eraser)
     };
     tools.remembered.remove(pen.id);
     tools.remembered.remove(eraser.id);
@@ -353,6 +373,30 @@ mod tests {
         assert_eq!(tools.fill.reads, Reads::Marked);
         assert_eq!(tools.text.size, *TextSettings::SIZE.start());
         assert_eq!(tools.text.family, None);
+    }
+
+    #[test]
+    fn what_is_missing_stays_as_it_was() {
+        let kept = changed();
+        assert_eq!(read(&json!({}), kept.clone()), kept);
+        let tools = read(
+            &json!({
+                "brush": { "preset": brush::BRUSHES[1].id },
+                "fill": { "tolerance": 9 },
+            }),
+            kept.clone(),
+        );
+        assert_eq!(tools.pen.preset.id, brush::BRUSHES[1].id);
+        assert_eq!(tools.pen.color, kept.pen.color);
+        assert_eq!(tools.fill.tolerance, 9);
+        assert_eq!(tools.fill.reads, kept.fill.reads);
+        assert_eq!(tools.text, kept.text);
+        // The brush left keeps its width for when it is chosen again.
+        assert_eq!(
+            tools.remembered.get(kept.pen.preset.id),
+            Some(&(kept.pen.width, kept.pen.stabilizer))
+        );
+        assert!(!tools.remembered.contains_key(brush::BRUSHES[1].id));
     }
 
     #[test]

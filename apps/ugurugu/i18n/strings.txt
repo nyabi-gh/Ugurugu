@@ -34,6 +34,14 @@ export-cancel | ugurugu::MainWindow | Cancel
 export-canceled | ugurugu::MainWindow | Export canceled
 export-done | ugurugu::MainWindow | Exported %1 | args=path
 export-failed | ugurugu::MainWindow | Export failed
+tools-import | - | Import tool preset… | 도구 프리셋 가져오기… | ツールプリセットを読み込む…
+tools-export | - | Export tool preset… | 도구 프리셋 내보내기… | ツールプリセットを書き出す…
+preset-imported | ugurugu::MainWindow | Imported preset %1 | args=name
+preset-exported | ugurugu::MainWindow | Exported preset %1 | args=name
+preset-import-failed | ugurugu::MainWindow | Preset import failed
+preset-export-failed | ugurugu::MainWindow | Preset export failed
+preset-too-large | ugurugu::MainWindow | The preset could not be read or is too large.
+preset-not-preset | - | The file is not an Ugurugu tool preset. | Ugurugu 도구 프리셋 파일이 아닙니다. | Uguruguのツールプリセットではありません。
 recovery-title | ugurugu::MainWindow | Recover unsaved work
 recovery-found | ugurugu::MainWindow | Ugurugu found work from a previous session. Choose whether to recover or discard it.
 recovery-recover | ugurugu::MainWindow | Recover
