@@ -1321,6 +1321,7 @@ fn run(job: Job) -> Option<FileEvent> {
             path,
             state,
         } => {
+            remove_stale_temporaries(&path);
             let started = std::time::Instant::now();
             let result = ugu_io::save::save(&document, id, &path, &ugu_win::file::replace_file)
                 .map_err(|error| error.to_string());
@@ -1937,6 +1938,14 @@ mod end_to_end;
 
 #[cfg(test)]
 mod recovering;
+
+/// Removes what a window killed while writing `path` left beside it.
+pub fn remove_stale_temporaries(path: &Path) {
+    let removed = ugu_win::file::remove_stale_temporaries(ugu_io::save::others_temporaries(path));
+    if removed > 0 {
+        tracing::info!(removed, ?path, "temporary files of ended processes removed");
+    }
+}
 
 /// Reads a document, or imports a 2.2.13 project.
 fn open(path: &Path) -> Result<Opened, String> {

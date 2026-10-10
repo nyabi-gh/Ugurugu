@@ -10,14 +10,27 @@
 //! The selection is not part of the document, but each change to it is an
 //! undo step of its own, as in 2.2.13; such a step leaves the document state
 //! as it is, so it never makes the document dirty.
+//!
+//! The oldest steps are dropped once there are `limits::STEPS` of them or
+//! what they hold apart from the document passes `limits::BYTES`, so a long
+//! session does not keep growing (2.2.13 keeps 64 steps).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::document::{Document, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError, Outcome, commit};
+use crate::ops::Op;
 use crate::selection::Selection;
+
+pub mod limits {
+    /// Undo steps kept.
+    pub const STEPS: usize = 500;
+    /// What undo steps hold apart from the document: earlier selections, and
+    /// the strokes, masks, images and layers they would bring back.
+    pub const BYTES: usize = 256 * 1024 * 1024;
+}
 
 /// Identifies a document state; equal ids mean equal content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -134,6 +147,8 @@ fn each(layer: &Layer, visit: &mut impl FnMut(LayerId)) {
 }
 
 struct Entry {
+    /// What it holds apart from the document, from `held`.
+    bytes: usize,
     label: String,
     /// Applied to go back to `before` (undo) or forward to `after` (redo).
     changes: Vec<Change>,
@@ -147,8 +162,10 @@ struct Entry {
 pub struct History {
     document: Document,
     selection: Option<Arc<Selection>>,
-    undo: Vec<Entry>,
+    undo: VecDeque<Entry>,
     redo: Vec<Entry>,
+    /// `bytes` of the entries in `undo`.
+    undo_bytes: usize,
     state: StateId,
     next_state: u64,
     saved: Option<StateId>,
@@ -163,8 +180,9 @@ impl History {
         Self {
             document,
             selection: None,
-            undo: Vec::new(),
+            undo: VecDeque::new(),
             redo: Vec::new(),
+            undo_bytes: 0,
             state,
             next_state: 1,
             saved: saved.then_some(state),
@@ -197,7 +215,8 @@ impl History {
         }
         let previous = std::mem::replace(&mut self.selection, selection.map(Arc::new));
         self.redo.clear();
-        self.undo.push(Entry {
+        self.push_undo(Entry {
+            bytes: 0,
             label: label.to_owned(),
             changes: Vec::new(),
             selection: Some(previous),
@@ -228,7 +247,7 @@ impl History {
     }
 
     pub fn undo_label(&self) -> Option<&str> {
-        self.undo.last().map(|entry| entry.label.as_str())
+        self.undo.back().map(|entry| entry.label.as_str())
     }
 
     pub fn redo_label(&self) -> Option<&str> {
@@ -275,7 +294,8 @@ impl History {
             self.revision += 1;
         }
         self.redo.clear();
-        self.undo.push(Entry {
+        self.push_undo(Entry {
+            bytes: 0,
             label: label.to_owned(),
             changes: changes.clone(),
             selection: previous,
@@ -287,13 +307,14 @@ impl History {
 
     /// Returns `false` when there is nothing to undo.
     pub fn undo(&mut self) -> Result<bool, EditError> {
-        let Some(mut entry) = self.undo.pop() else {
+        let Some(mut entry) = self.undo.pop_back() else {
             return Ok(false);
         };
+        self.undo_bytes -= entry.bytes;
         let applied = self.reapply(&mut entry, true);
         match applied {
             Ok(()) => self.redo.push(entry),
-            Err(_) => self.undo.push(entry),
+            Err(_) => self.push_undo(entry),
         }
         applied.map(|()| true)
     }
@@ -305,10 +326,23 @@ impl History {
         };
         let applied = self.reapply(&mut entry, false);
         match applied {
-            Ok(()) => self.undo.push(entry),
+            Ok(()) => self.push_undo(entry),
             Err(_) => self.redo.push(entry),
         }
         applied.map(|()| true)
+    }
+
+    /// Adds the newest undo step, dropping the oldest beyond the limits.
+    fn push_undo(&mut self, mut entry: Entry) {
+        entry.bytes = held(&entry);
+        self.undo_bytes += entry.bytes;
+        self.undo.push_back(entry);
+        while self.undo.len() > limits::STEPS
+            || (self.undo_bytes > limits::BYTES && self.undo.len() > 1)
+        {
+            let dropped = self.undo.pop_front().expect("more than one");
+            self.undo_bytes -= dropped.bytes;
+        }
     }
 
     /// Applies an entry's changes and turns it into the entry that reverses
@@ -328,6 +362,43 @@ impl History {
             std::mem::swap(selection, &mut self.selection);
         }
         Ok(())
+    }
+}
+
+/// What an undo step holds apart from the document, in bytes, roughly.
+fn held(entry: &Entry) -> usize {
+    let selection = match &entry.selection {
+        Some(Some(selection)) => selection.bytes(),
+        _ => 0,
+    };
+    selection
+        + entry
+            .changes
+            .iter()
+            .map(|change| match change {
+                Change::InsertStroke(_, stroke) => stroke.points.len() * 12,
+                Change::InsertMask(_, mask) => mask.bits.len(),
+                Change::InsertAsset(_, asset) => asset.png.len(),
+                Change::InsertLayer { layer, .. } | Change::ReplaceLayer(layer) => {
+                    operations(layer) * std::mem::size_of::<Op>()
+                }
+                _ => 0,
+            })
+            .sum::<usize>()
+}
+
+fn operations(layer: &Layer) -> usize {
+    fn count(ops: &[Op]) -> usize {
+        ops.iter()
+            .map(|op| match op {
+                Op::Isolated(section) => 1 + count(&section.ops),
+                _ => 1,
+            })
+            .sum()
+    }
+    match &layer.kind {
+        LayerKind::Paint(paint) => count(&paint.ops),
+        LayerKind::Group(group) => group.children.iter().map(operations).sum(),
     }
 }
 
@@ -435,6 +506,54 @@ mod tests {
         assert!(history.redo().unwrap());
         assert_eq!(history.document(), &two);
         assert!(!history.redo().unwrap());
+    }
+
+    fn undo_count(history: &mut History) -> usize {
+        let mut count = 0;
+        while history.undo().unwrap() {
+            count += 1;
+        }
+        count
+    }
+
+    #[test]
+    fn only_the_newest_steps_are_kept() {
+        let mut history = History::new(Document::new([64, 64]), true);
+        for step in 0..limits::STEPS + 20 {
+            draw_at(&mut history, step as f32 % 60.0);
+        }
+        let all = history.document().clone();
+        assert_eq!(undo_count(&mut history), limits::STEPS);
+        // The 20 oldest strokes stay, as they can no longer be undone.
+        let LayerKind::Paint(paint) = &history.document().layers[0].kind else {
+            panic!("a paint layer");
+        };
+        assert_eq!(paint.ops.len(), 20);
+        while history.redo().unwrap() {}
+        assert_eq!(history.document(), &all);
+    }
+
+    #[test]
+    fn steps_holding_large_selections_are_dropped_past_the_byte_limit() {
+        let canvas = [4096, 4096];
+        let mut history = History::new(Document::new(canvas), true);
+        let whole = Selection::all(canvas).unwrap();
+        // Each step keeps the selection before it: 2MiB for the whole canvas.
+        for step in 0..300 {
+            let next = if step % 2 == 0 {
+                Some(whole.clone())
+            } else {
+                None
+            };
+            assert!(history.select("Select", next));
+        }
+        assert!(history.undo_bytes <= limits::BYTES);
+        let kept = undo_count(&mut history);
+        // Every other step holds a whole-canvas selection.
+        assert!(
+            kept >= 2 * (limits::BYTES / whole.bytes()) - 1 && kept < 300,
+            "{kept}"
+        );
     }
 
     #[test]

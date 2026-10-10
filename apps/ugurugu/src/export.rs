@@ -217,6 +217,7 @@ impl Exporting {
                 let cancel = cancel.clone();
                 let done = done.clone();
                 move || {
+                    crate::files::remove_stale_temporaries(&path);
                     let started = std::time::Instant::now();
                     let outcome = match job {
                         Job::Still { frame } => still(document, frame, &path, &renders, &cancel),

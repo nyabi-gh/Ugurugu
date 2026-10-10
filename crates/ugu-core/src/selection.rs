@@ -149,6 +149,11 @@ fn centres(from: f64, to: f64, edge: usize) -> (usize, usize) {
 }
 
 impl Selection {
+    /// Its mask's size in bytes.
+    pub fn bytes(&self) -> usize {
+        self.mask.bits.len()
+    }
+
     /// Every pixel of a canvas of `canvas`; `None` for an empty canvas.
     pub fn all(canvas: [u32; 2]) -> Option<Self> {
         let [width, height] = canvas.map(|edge| edge as i32);

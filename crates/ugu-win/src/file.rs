@@ -7,6 +7,10 @@ use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
+use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, STILL_ACTIVE};
+use windows::Win32::System::Threading::{
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACEFILE_IGNORE_MERGE_ERRORS, ReplaceFileW,
 };
@@ -50,10 +54,48 @@ pub fn replace_file(replacement: &Path, target: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the temporary files that processes no longer running left
+/// beside `target` (`ugu_io::save::others_temporaries`), and says how many.
+pub fn remove_stale_temporaries(others: Vec<(std::path::PathBuf, u32)>) -> usize {
+    others
+        .into_iter()
+        .filter(|(path, pid)| !running(*pid) && std::fs::remove_file(path).is_ok())
+        .count()
+}
+
+/// Whether process `pid` is still running. One that cannot be looked at
+/// counts as running, so its files are left alone.
+pub fn running(pid: u32) -> bool {
+    // SAFETY: the handle is used only while open and closed after.
+    unsafe {
+        let process = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(process) => process,
+            Err(error) => return error.code() != ERROR_INVALID_PARAMETER.to_hresult(),
+        };
+        let mut code = 0;
+        let looked = GetExitCodeProcess(process, &mut code);
+        let _ = CloseHandle(process);
+        looked.is_err() || code == STILL_ACTIVE.0 as u32
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn this_process_runs_and_an_ended_one_does_not() {
+        assert!(running(std::process::id()));
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "exit"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // Its id may be taken again later, but not this soon.
+        assert!(!running(pid));
+    }
 
     struct Folder(std::path::PathBuf);
 

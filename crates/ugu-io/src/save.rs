@@ -112,6 +112,31 @@ pub fn replace_with(
 
 /// A name in the target's folder, so that replacing is a rename on one
 /// volume, and unlikely to collide: `.<name>.<pid>-<n>.tmp`.
+/// Temporary files for `target` that another process started, with that
+/// process's id. One killed while writing leaves its file behind; the caller
+/// removes those whose process has ended.
+pub fn others_temporaries(target: &Path) -> Vec<(PathBuf, u32)> {
+    let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
+        return Vec::new();
+    };
+    let prefix = format!(".{}.", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let file = path.file_name()?.to_str()?;
+            let (pid, _) = file
+                .strip_prefix(&prefix)?
+                .strip_suffix(".tmp")?
+                .split_once('-')?;
+            let pid: u32 = pid.parse().ok()?;
+            (pid != std::process::id()).then_some((path, pid))
+        })
+        .collect()
+}
+
 fn temporary_path(target: &Path) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -128,6 +153,23 @@ mod tests {
     use super::*;
     use crate::read::read;
     use crate::tests::sample;
+
+    #[test]
+    fn temporaries_of_other_processes_are_found_by_their_name() {
+        let folder = Folder::new("others");
+        let target = folder.0.join("drawing.ugurugu");
+        let other = folder.0.join(".drawing.ugurugu.4242-0.tmp");
+        let own = temporary_path(&target);
+        for path in [
+            &other,
+            &own,
+            &folder.0.join(".other.ugurugu.4242-0.tmp"),
+            &folder.0.join(".drawing.ugurugu.x-0.tmp"),
+        ] {
+            std::fs::write(path, b"part").unwrap();
+        }
+        assert_eq!(others_temporaries(&target), [(other, 4242)]);
+    }
 
     struct Folder(PathBuf);
 
