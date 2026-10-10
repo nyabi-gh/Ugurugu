@@ -191,7 +191,9 @@ struct Shown {
     shapes: Vec<egui::epaint::ClippedShape>,
     pixels_per_point: f32,
     canvas_area: [u32; 4],
+    /// Where the pixels shown go, and where the document is.
     placement: Placement,
+    document: Placement,
     canvas_size: [u32; 2],
 }
 
@@ -812,7 +814,8 @@ impl RenderThread {
             shapes: output.shapes,
             pixels_per_point: output.pixels_per_point,
             canvas_area: canvas_area.map(|edge| edge.max(0) as u32),
-            placement: self.canvas.placement(),
+            placement: self.canvas.shown_placement(),
+            document: self.canvas.placement(),
             canvas_size: {
                 let display = self.canvas.display();
                 [u32::from(display.width()), u32::from(display.height())]
@@ -834,6 +837,7 @@ impl RenderThread {
         let pixels_per_point = shown.pixels_per_point;
         let canvas_area = shown.canvas_area;
         let placement = shown.placement;
+        let document = shown.document;
         let primitives = self
             .egui_ctx
             .tessellate(shown.shapes.clone(), pixels_per_point);
@@ -875,7 +879,7 @@ impl RenderThread {
                 ants,
                 shown_ants.map_or(0.0, |(_, _, phase)| phase),
                 canvas_area,
-                placement,
+                [placement, document],
                 egui_renderer,
                 &primitives,
                 pixels_per_point,
@@ -936,8 +940,9 @@ impl RenderThread {
     }
 }
 
-/// Draws the document into `canvas_area` as `placement` places it, then
-/// egui over it, into the next buffer of `presenter`, and submits it.
+/// Draws the pixels shown into `canvas_area` as the first placement places
+/// them and the selection where the second places the document, then egui
+/// over them, into the next buffer of `presenter`, and submits it.
 /// Returns `None` when there is no buffer to draw into now.
 #[expect(clippy::too_many_arguments, reason = "one frame's parts, used once")]
 fn draw(
@@ -948,7 +953,7 @@ fn draw(
     ants: &mut Ants,
     ants_phase: f32,
     canvas_area: [u32; 4],
-    placement: Placement,
+    [placement, document]: [Placement; 2],
     egui_renderer: &mut egui_wgpu::Renderer,
     primitives: &[egui::ClippedPrimitive],
     pixels_per_point: f32,
@@ -992,7 +997,7 @@ fn draw(
             queue,
             &mut pass,
             canvas_area,
-            placement,
+            document,
             pixels_per_point,
             ants_phase,
             size,

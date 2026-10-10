@@ -1175,4 +1175,126 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_dragged_transform_glanced_at_matches_the_shown_one() {
+        use ugu_core::ops::{Affine as Transform, Sampling};
+        let centre = [65.0, 45.0];
+        let transforms = [
+            Transform::translation(8.0, -4.0),
+            Transform::rotation_about(0.52, centre),
+            Transform::scaling_about([-1.7, 1.3], centre),
+            Transform::translation(-12.0, 5.0),
+        ];
+        let mask = ugu_core::ops::MaskId(0);
+        for history in histories() {
+            if history.document().canvas != [120, 80] {
+                continue;
+            }
+            let document = history.document();
+            let selection = document.store.masks.get(&mask).unwrap();
+            for layer in paint_layers(&history) {
+                for keep_source in [false, true] {
+                    let (mut split, _) = split(&history, layer, 4);
+                    let mut moving = split.begin_move(selection, 2).unwrap();
+                    let mut same = split.glance(&moving, whole(document), 1, 2).unwrap();
+                    let mut corner = split.glance(&moving, [37, 21, 120, 80], 1, 2).unwrap();
+                    let mut small = split.glance(&moving, whole(document), 2, 2).unwrap();
+                    assert_eq!(corner.origin(), [37, 21]);
+                    assert_eq!(small.pixels().width(), 60);
+                    small.show(Transform::IDENTITY, Sampling::Smooth, keep_source);
+                    let (_, mean) = differences(small.pixels(), &halved(&render(document, 4)));
+                    assert!(mean < 0.1, "{layer:?} unmoved: {mean}");
+                    for transform in transforms {
+                        for glance in [&mut same, &mut corner, &mut small] {
+                            glance.show(transform, Sampling::Smooth, keep_source);
+                        }
+                        split.show_move(&mut moving, transform, Sampling::Smooth, keep_source);
+                        let mut shown = canvas(document);
+                        composite(&split, None, whole(document), &mut shown);
+                        let most = max_difference(same.pixels(), &shown);
+                        assert!(most <= 2, "{layer:?} {transform:?}: differs by {most}");
+                        let crop = cropped(&shown, [37, 21, 120, 80]);
+                        assert!(max_difference(corner.pixels(), &crop) <= 2);
+                        // Averaging before blending, and sampling the smaller
+                        // pixels, blur edges, but the picture is in place.
+                        let (most, mean) = differences(small.pixels(), &halved(&shown));
+                        assert!(
+                            mean < 1.5,
+                            "{layer:?} {transform:?}: mean {mean}, most {most}"
+                        );
+                    }
+                    for glance in [&mut same, &mut small] {
+                        glance.show(Transform::IDENTITY, Sampling::Smooth, keep_source);
+                    }
+                    assert!(
+                        same.pixels().data_as_u8_slice() == render(document, 4).data_as_u8_slice()
+                    );
+                }
+            }
+        }
+    }
+
+    fn cropped(pixmap: &Pixmap, [left, top, right, bottom]: PixelRect) -> Pixmap {
+        let mut out = Pixmap::new((right - left) as u16, (bottom - top) as u16);
+        let width = usize::from(pixmap.width());
+        let from = pixmap.data_as_u8_slice().as_chunks::<4>().0;
+        for (row, line) in out
+            .data_as_u8_slice_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .chunks_exact_mut((right - left) as usize)
+            .enumerate()
+        {
+            let at = (top as usize + row) * width + left as usize;
+            line.copy_from_slice(&from[at..at + line.len()]);
+        }
+        out
+    }
+
+    fn halved(pixmap: &Pixmap) -> Pixmap {
+        let [width, height] = [pixmap.width(), pixmap.height()].map(usize::from);
+        let from = pixmap.data_as_u8_slice().as_chunks::<4>().0;
+        let mut out = Pixmap::new(width.div_ceil(2) as u16, height.div_ceil(2) as u16);
+        let out_width = usize::from(out.width());
+        for (index, pixel) in out
+            .data_as_u8_slice_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
+            let [x, y] = [index % out_width * 2, index / out_width * 2];
+            let mut sum = [0u32; 4];
+            let mut count = 0;
+            for [dx, dy] in [[0, 0], [1, 0], [0, 1], [1, 1]] {
+                if x + dx < width && y + dy < height {
+                    count += 1;
+                    for channel in 0..4 {
+                        sum[channel] += u32::from(from[(y + dy) * width + x + dx][channel]);
+                    }
+                }
+            }
+            *pixel = sum.map(|value| ((value + count / 2) / count) as u8);
+        }
+        out
+    }
+
+    /// The largest and the mean difference of any channel.
+    fn differences(a: &Pixmap, b: &Pixmap) -> (u8, f64) {
+        let (a, b) = (a.data_as_u8_slice(), b.data_as_u8_slice());
+        assert_eq!(a.len(), b.len());
+        let most = a
+            .iter()
+            .zip(b)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        let sum: u64 = a
+            .iter()
+            .zip(b)
+            .map(|(a, b)| u64::from(a.abs_diff(*b)))
+            .sum();
+        (most, sum as f64 / a.len() as f64)
+    }
 }

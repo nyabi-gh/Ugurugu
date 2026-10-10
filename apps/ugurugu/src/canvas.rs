@@ -117,6 +117,8 @@ pub struct Canvas {
     held: Option<(Arc<Pixmap>, u32)>,
     /// Display pixels not yet uploaded.
     upload: Option<PixelRect>,
+    /// The size, shrink and origin of the pixels shown when last uploaded.
+    uploaded: Option<([u16; 2], u32, [u32; 2])>,
     stamp: Stamp,
     interaction: Interaction,
     /// Shift and Alt.
@@ -182,6 +184,7 @@ impl Canvas {
             display: Pixmap::new(width, height),
             held: None,
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
+            uploaded: None,
             stamp: Stamp::default(),
             interaction: Interaction::Idle,
             modifiers: (false, false),
@@ -1034,9 +1037,18 @@ impl Canvas {
         self.upload = Some([0, 0, u32::from(width), u32::from(height)]);
     }
 
-    /// The display pixels changed since the last call.
+    /// The display pixels changed since the last call; all of them when
+    /// other pixels are shown than at the last call.
     pub fn take_upload(&mut self) -> Option<PixelRect> {
-        self.upload.take()
+        let (pixels, shrink, origin) = self.shown();
+        let size = [pixels.width(), pixels.height()];
+        let now = Some((size, shrink, origin));
+        let rect = self.upload.take();
+        if self.uploaded != now {
+            self.uploaded = now;
+            return Some([0, 0, u32::from(size[0]), u32::from(size[1])]);
+        }
+        rect
     }
 
     /// What the canvas shows: the playback frame, the frame playback
@@ -1045,26 +1057,43 @@ impl Canvas {
         self.shown().0
     }
 
-    /// The pixels shown and how much smaller than the canvas they are.
-    fn shown(&self) -> (&Pixmap, u32) {
-        let frame = match &self.playback {
-            Some(playback) => Some(&playback.shown),
-            None => self.held.as_ref(),
-        };
-        frame.map_or((&self.display, 1), |(pixels, shrink)| (pixels, *shrink))
+    /// The pixels shown, how much smaller than the canvas they are, and
+    /// where on the canvas they start.
+    fn shown(&self) -> (&Pixmap, u32, [u32; 2]) {
+        if let Some((pixels, shrink)) = &self.playback.as_ref().map(|playback| &playback.shown) {
+            return (pixels, *shrink, [0, 0]);
+        }
+        if let Some(glance) = self.preview.as_ref().and_then(transform::Preview::glance) {
+            return (glance.pixels(), glance.shrink(), glance.origin());
+        }
+        match &self.held {
+            Some((pixels, shrink)) => (pixels, *shrink, [0, 0]),
+            None => (&self.display, 1, [0, 0]),
+        }
     }
 
     /// Where the document is drawn, in client physical pixels.
     pub fn placement(&self) -> Placement {
         let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
-        // A playback frame drawn smaller has fewer pixels to spread out.
-        let shrink = self.shown().1;
         Placement {
             offset: [
                 (f64::from(origin[0]) + self.offset[0]) as f32,
                 (f64::from(origin[1]) + self.offset[1]) as f32,
             ],
-            scale: (self.scale * f64::from(shrink)) as f32,
+            scale: self.scale as f32,
+        }
+    }
+
+    /// Where the pixels shown are drawn: pixels drawn smaller spread over
+    /// more screen pixels, and a part of the canvas starts where it is.
+    pub fn shown_placement(&self) -> Placement {
+        let (_, shrink, origin) = self.shown();
+        let document = self.placement();
+        Placement {
+            offset: std::array::from_fn(|axis| {
+                document.offset[axis] + origin[axis] as f32 * document.scale
+            }),
+            scale: document.scale * shrink as f32,
         }
     }
 }
@@ -1239,7 +1268,7 @@ mod tests {
         // Stopped, the frame stays until the split of it arrives.
         canvas.toggle_playback();
         assert_eq!(canvas.display().width(), 160);
-        assert_eq!(canvas.placement().scale, 1.0);
+        assert_eq!(canvas.shown_placement().scale, 1.0);
         canvas.sync();
         while canvas.split.is_none() {
             let rendered = renders
@@ -1248,7 +1277,7 @@ mod tests {
             canvas.adopt(rendered);
         }
         assert_eq!(canvas.display().width(), 320);
-        assert_eq!(canvas.placement().scale, 0.5);
+        assert_eq!(canvas.shown_placement().scale, 0.5);
     }
 
     #[test]

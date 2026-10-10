@@ -6,14 +6,18 @@
 //! would be applied.
 
 use ugu_core::ops::{Affine, Sampling};
-use ugu_render::moving::Moving;
+use ugu_render::moving::{Glance, Moving};
+use ugu_render::raster::PixelRect;
 use ugu_session::{Ended, FillError};
 
-use super::{Canvas, Interaction, Key};
+use super::{Canvas, Interaction, Key, preview_shrink, union};
 
 /// Logical pixels from a handle's middle that still grab it.
 const HANDLE_REACH: f64 = 7.0;
 const SNAP: f64 = std::f64::consts::PI / 12.0;
+/// Selections smaller than this many pixels are shown at full size while
+/// dragged: changing them takes a few milliseconds.
+const GLANCE_LEAST: f64 = 1024.0 * 1024.0;
 
 /// What a drag on the transform box changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,10 +28,24 @@ pub enum Grip {
     Rotate,
 }
 
+/// What a preview shows: the transform, sampling and whether the selected
+/// part stays.
+type Shown = (Affine, Sampling, bool);
+
 /// The preview of a pending transform and what it shows.
 pub(super) struct Preview {
     moving: Moving,
-    shown: Option<(Affine, Sampling, bool)>,
+    shown: Option<Shown>,
+    /// While a large selection is dragged: the transform where it is seen,
+    /// as small as it is seen, and what it shows; the layer follows when the
+    /// drag ends.
+    glance: Option<(Glance, Option<Shown>)>,
+}
+
+impl Preview {
+    pub(super) fn glance(&self) -> Option<&Glance> {
+        self.glance.as_ref().map(|(glance, _)| glance)
+    }
 }
 
 /// The selected part's box: left, top, right, bottom before the transform.
@@ -278,10 +296,40 @@ impl Canvas {
         self.refresh_text_preview();
     }
 
+    /// Where and how small a dragged transform is shown: the part of the
+    /// canvas in view, as small as keeps a pixel for every screen pixel.
+    /// `None` when no large selection is dragged, or when that would be no
+    /// fewer pixels than the canvas.
+    fn glance_view(&self) -> Option<(PixelRect, u32)> {
+        if !matches!(self.interaction, Interaction::Transforming { .. }) {
+            return None;
+        }
+        let ([left, top, right, bottom], _) = source_box(self)?;
+        if (right - left) * (bottom - top) < GLANCE_LEAST {
+            return None;
+        }
+        let area = self.area?;
+        let size = self.session.document().canvas;
+        let [left, top] = self.to_document([f64::from(area[0]), f64::from(area[1])]);
+        let [right, bottom] = self.to_document([f64::from(area[2]), f64::from(area[3])]);
+        let rect = ugu_render::compose::clamp([left, top, right, bottom], size)?;
+        let shrink = preview_shrink(self.scale);
+        let rect = [
+            rect[0] / shrink * shrink,
+            rect[1] / shrink * shrink,
+            rect[2],
+            rect[3],
+        ];
+        let pixels = u64::from(rect[2] - rect[0]) * u64::from(rect[3] - rect[1])
+            / u64::from(shrink * shrink);
+        (pixels * 2 <= u64::from(size[0]) * u64::from(size[1])).then_some((rect, shrink))
+    }
+
     /// Shows the pending transform on the split's layer, once the split of
     /// the state it applies to is here.
     pub(super) fn refresh_preview(&mut self) {
         let key = self.key();
+        let view = self.glance_view();
         let Some(pending) = self.session.pending() else {
             self.preview = None;
             return;
@@ -293,15 +341,16 @@ impl Canvas {
         if *shown != key || split.layer != pending.layer {
             return;
         }
+        let threads =
+            std::thread::available_parallelism().map_or(1, |count| count.get().min(8)) as u16;
         if self.preview.is_none() {
-            let threads =
-                std::thread::available_parallelism().map_or(1, |count| count.get().min(8)) as u16;
             let Some(moving) = split.begin_move(pending.selection.mask(), threads) else {
                 return;
             };
             self.preview = Some(Preview {
                 moving,
                 shown: None,
+                glance: None,
             });
         }
         let preview = self.preview.as_mut().expect("made above");
@@ -310,6 +359,33 @@ impl Canvas {
             self.session.transform_sampling,
             pending.keep_source,
         );
+        if let Some(view) = view {
+            let started = std::time::Instant::now();
+            if preview.glance().map(Glance::view) != Some(view) {
+                preview.glance = split
+                    .glance(&preview.moving, view.0, view.1, threads)
+                    .map(|glance| (glance, None));
+                tracing::debug!(
+                    ms = started.elapsed().as_secs_f64() * 1000.0,
+                    ?view,
+                    "transform glance made"
+                );
+            }
+            if let Some((glance, glanced)) = &mut preview.glance {
+                if *glanced != Some(wanted) {
+                    let started = std::time::Instant::now();
+                    let rect = glance.show(wanted.0, wanted.1, wanted.2);
+                    *glanced = Some(wanted);
+                    self.upload = union(self.upload, rect);
+                    tracing::debug!(
+                        ms = started.elapsed().as_secs_f64() * 1000.0,
+                        "transform glanced"
+                    );
+                }
+                return;
+            }
+        }
+        preview.glance = None;
         if preview.shown == Some(wanted) {
             return;
         }

@@ -39,10 +39,13 @@ impl Canvas {
         if !(0.0..width).contains(&x) || !(0.0..height).contains(&y) {
             return;
         }
-        let (pixels, shrink) = self.shown();
+        let (pixels, shrink, origin) = self.shown();
         let shrink = f64::from(shrink);
-        let column = ((x / shrink) as usize).min(usize::from(pixels.width()) - 1);
-        let row = ((y / shrink) as usize).min(usize::from(pixels.height()) - 1);
+        let at = |value: f64, origin: u32, edge: u16| {
+            (((value - f64::from(origin)) / shrink).max(0.0) as usize).min(usize::from(edge) - 1)
+        };
+        let column = at(x, origin[0], pixels.width());
+        let row = at(y, origin[1], pixels.height());
         let pixel = pixels.data_as_u8_slice().as_chunks::<4>().0
             [row * usize::from(pixels.width()) + column];
         self.session.pick_color(pixel);
