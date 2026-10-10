@@ -361,7 +361,8 @@ impl Selection {
         transform.inverse()?;
         let [left, top, width, height] = self.mask.bounds;
         let row_bytes = Mask::row_bytes(width);
-        let bits = |row: i32| &self.mask.bits[row as usize * row_bytes..(row as usize + 1) * row_bytes];
+        let bits =
+            |row: i32| &self.mask.bits[row as usize * row_bytes..(row as usize + 1) * row_bytes];
         let mut pixels = Canvas::empty(self.canvas);
         let [canvas_width, canvas_height] = self.canvas.map(f64::from);
         let mut row = 0;
