@@ -151,7 +151,7 @@ impl Session {
         let (to_render, messages) = mpsc::channel();
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
-        let open_at_start = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+        let open_at_start = std::env::args_os().nth(1).map(document_argument);
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -280,5 +280,31 @@ impl ApplicationHandler<UiEvent> for App {
             session.forward_pointer_input();
         }
         event_loop.set_control_flow(ControlFlow::Wait);
+    }
+}
+
+/// The document named on the command line as an absolute path in Windows's
+/// own form: the shell, which starts the file dialogs in the document's
+/// folder, reads neither `/` nor a relative path.
+fn document_argument(argument: std::ffi::OsString) -> std::path::PathBuf {
+    let path = std::path::PathBuf::from(argument);
+    std::path::absolute(&path).unwrap_or(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_document_argument_is_made_absolute_in_windows_form() {
+        assert_eq!(
+            document_argument(r"C:/Pictures/cats\tabby.ugurugu".into()),
+            std::path::PathBuf::from(r"C:\Pictures\cats\tabby.ugurugu")
+        );
+        let relative = document_argument("tabby.ugurugu".into());
+        assert_eq!(
+            relative,
+            std::env::current_dir().unwrap().join("tabby.ugurugu")
+        );
     }
 }

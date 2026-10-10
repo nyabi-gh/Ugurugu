@@ -27,8 +27,11 @@ use vello_cpu::peniko::ImageAlphaType;
 
 use crate::cache::Renders;
 
-/// The sizes an animation can be exported at, as 2.2.13 offers them.
-pub const SCALES: [u32; 5] = [100, 75, 50, 33, 25];
+/// Long edges an animation can be exported at below the document's own:
+/// animated images are mostly a few hundred pixels across.
+const EDGES: [u32; 6] = [2048, 1024, 768, 512, 384, 256];
+/// The long edge offered until another is chosen.
+pub const FIRST_EDGE: u32 = 512;
 
 /// Frames drawn ahead of the export thread.
 const QUEUE: usize = 2;
@@ -69,12 +72,33 @@ pub enum Job {
     },
 }
 
-/// `canvas` at `percent`, as 2.2.13 works it out.
-pub fn scaled(canvas: [u32; 2], percent: u32) -> [u32; 2] {
-    if percent >= 100 {
-        return canvas;
-    }
-    canvas.map(|edge| (edge * percent / 100).max(1))
+/// The sizes offered, largest first: the document's own, then each of
+/// `EDGES` below it, keeping its shape.
+pub fn sizes(canvas: [u32; 2]) -> Vec<[u32; 2]> {
+    let long = canvas[0].max(canvas[1]);
+    std::iter::once(canvas)
+        .chain(
+            EDGES
+                .iter()
+                .filter(|&&edge| edge < long)
+                .map(|&edge| fit(canvas, edge)),
+        )
+        .collect()
+}
+
+/// `canvas` shrunk to a long edge of `edge`.
+pub fn fit(canvas: [u32; 2], edge: u32) -> [u32; 2] {
+    let long = u64::from(canvas[0].max(canvas[1]));
+    canvas.map(|side| ((u64::from(side) * u64::from(edge) + long / 2) / long).max(1) as u32)
+}
+
+/// Of `sizes`, largest first, the largest whose long edge is no longer than
+/// `edge`, else the smallest.
+pub fn nearest(sizes: &[[u32; 2]], edge: u32) -> usize {
+    sizes
+        .iter()
+        .position(|size| size[0].max(size[1]) <= edge)
+        .unwrap_or(sizes.len() - 1)
 }
 
 /// About how much memory an animation of `frames` at `size` from a document
@@ -666,7 +690,7 @@ mod tests {
     #[test]
     fn an_animation_is_every_frame_at_the_size_chosen() {
         let folder = folder("animation");
-        let size = scaled([40, 30], 50);
+        let size = fit([40, 30], 20);
         assert_eq!(size, [20, 15]);
         for (format, name, delays) in [
             // 1/12 s each, in hundredths adding up: 8, 9, 8.
@@ -721,7 +745,7 @@ mod tests {
     #[test]
     fn the_estimate_counts_what_the_encoders_keep_and_what_is_on_its_way() {
         let canvas = [2048, 2048];
-        let half = scaled(canvas, 50);
+        let half = fit(canvas, 1024);
         let mib = |bytes: u64| bytes / (1024 * 1024);
         let gif = |size, threads| animation_bytes(Animation::Gif, canvas, size, 30, threads);
         // The frame being drawn and shrunk, the frames on their way, two
@@ -741,8 +765,34 @@ mod tests {
         assert_eq!(webp(two), Some(2.min(threads())));
         assert_eq!(webp(two - 1), Some(1));
         assert_eq!(webp(one - 1), None);
-        assert_eq!(scaled([10, 3], 25), [2, 1]);
-        assert_eq!(scaled([10, 3], 100), [10, 3]);
+    }
+
+    #[test]
+    fn the_sizes_offered_are_the_document_s_and_smaller_long_edges() {
+        assert_eq!(
+            sizes([4096, 2048]),
+            [
+                [4096, 2048],
+                [2048, 1024],
+                [1024, 512],
+                [768, 384],
+                [512, 256],
+                [384, 192],
+                [256, 128]
+            ]
+        );
+        assert_eq!(
+            sizes([600, 300]),
+            [[600, 300], [512, 256], [384, 192], [256, 128]]
+        );
+        assert_eq!(sizes([200, 100]), [[200, 100]]);
+        assert_eq!(fit([10, 3], 5), [5, 2]);
+        assert_eq!(fit([3000, 1], 256), [256, 1]);
+        let large = sizes([4096, 4096]);
+        assert_eq!(large[nearest(&large, FIRST_EDGE)], [512, 512]);
+        assert_eq!(large[nearest(&large, 700)], [512, 512]);
+        assert_eq!(nearest(&large, 100), large.len() - 1);
+        assert_eq!(nearest(&sizes([300, 200]), FIRST_EDGE), 0);
     }
 
     #[test]

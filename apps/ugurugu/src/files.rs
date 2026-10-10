@@ -141,8 +141,8 @@ pub enum Purpose {
 /// The animation export options being chosen.
 struct AnimationDialog {
     format: Animation,
-    /// Into `export::SCALES`.
-    scale: usize,
+    /// Into `export::sizes` of the document.
+    size: usize,
     keep_transparency: bool,
     budget: u64,
 }
@@ -278,6 +278,10 @@ pub struct Files {
     default_save_folder: Option<PathBuf>,
     /// A default save folder chosen, for the settings to take.
     chosen_save_folder: Option<PathBuf>,
+    /// The long edge animations were last exported at, from the settings.
+    export_edge: Option<u32>,
+    /// One chosen since, for the settings.
+    chosen_export_edge: Option<u32>,
     /// What the status bar says.
     message: Option<String>,
     /// What it says instead from then on, unless something else is said first.
@@ -349,6 +353,8 @@ impl Files {
             busy_dialog: false,
             default_save_folder: None,
             chosen_save_folder: None,
+            export_edge: None,
+            chosen_export_edge: None,
             message: None,
             upcoming: None,
             close: false,
@@ -615,6 +621,14 @@ impl Files {
         self.chosen_save_folder.take()
     }
 
+    pub fn set_export_edge(&mut self, edge: Option<u32>) {
+        self.export_edge = edge;
+    }
+
+    pub fn take_chosen_export_edge(&mut self) -> Option<u32> {
+        self.chosen_export_edge.take()
+    }
+
     /// Saves as `file_type` under the document's name, in its folder, or in
     /// the default save folder for a document never saved, as 2.2.13 does.
     fn pick_save(&mut self, purpose: Purpose, file_types: &'static [FileType]) {
@@ -695,18 +709,24 @@ impl Files {
         }
         let document = canvas.session().document();
         let budget = crate::budget::Budget::now(0).render as u64;
-        // The largest size that fits, as 2.2.13 opens on.
-        let scale = export::SCALES
-            .iter()
-            .position(|&percent| {
-                let size = export::scaled(document.canvas, percent);
-                export::threads_within(format, document.canvas, size, document.frames, budget)
-                    .is_some()
+        // The size last chosen, or the next smaller one that fits.
+        let sizes = export::sizes(document.canvas);
+        let preferred = export::nearest(&sizes, self.export_edge.unwrap_or(export::FIRST_EDGE));
+        let size = (preferred..sizes.len())
+            .find(|&index| {
+                export::threads_within(
+                    format,
+                    document.canvas,
+                    sizes[index],
+                    document.frames,
+                    budget,
+                )
+                .is_some()
             })
-            .unwrap_or(export::SCALES.len() - 1);
+            .unwrap_or(sizes.len() - 1);
         self.animation_dialog = Some(AnimationDialog {
             format,
-            scale,
+            size,
             keep_transparency: true,
             budget,
         });
@@ -719,11 +739,11 @@ impl Files {
         };
         let document = canvas.session().document();
         let transparent = document.background.0[3] < 255;
-        let sizes = export::SCALES.map(|percent| export::scaled(document.canvas, percent));
+        let sizes = export::sizes(document.canvas);
         let threads = export::threads_within(
             dialog.format,
             document.canvas,
-            sizes[dialog.scale],
+            sizes[dialog.size],
             document.frames,
             dialog.budget,
         );
@@ -731,21 +751,18 @@ impl Files {
         let bytes = export::animation_bytes(
             dialog.format,
             document.canvas,
-            sizes[dialog.scale],
+            sizes[dialog.size],
             document.frames,
             threads.unwrap_or(1),
         );
         let mebibytes = format!("{:.0}", bytes as f64 / (1024.0 * 1024.0));
         let label = |index: usize| {
             let [width, height] = sizes[index];
-            tr_with(
-                "export-scale",
-                &crate::i18n::args([
-                    ("percent", export::SCALES[index].to_string()),
-                    ("width", width.to_string()),
-                    ("height", height.to_string()),
-                ]),
-            )
+            if index == 0 {
+                format!("{}  ({width} × {height})", tr("export-size-original"))
+            } else {
+                format!("{width} × {height}")
+            }
         };
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::new("animation export")).show(ctx, |ui| {
@@ -757,11 +774,21 @@ impl Files {
             ui.horizontal(|ui| {
                 ui.label(tr("export-size"));
                 egui::ComboBox::from_id_salt("gif size")
-                    .selected_text(label(dialog.scale))
+                    .selected_text(label(dialog.size))
                     .show_ui(ui, |ui| {
                         for index in 0..sizes.len() {
-                            ui.selectable_value(&mut dialog.scale, index, label(index));
+                            ui.selectable_value(&mut dialog.size, index, label(index));
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        let mut info = egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            true,
+                            tr("export-size"),
+                        );
+                        info.current_text_value = Some(label(dialog.size));
+                        info
                     });
             });
             let mut keep = transparent && dialog.keep_transparency;
@@ -807,9 +834,11 @@ impl Files {
         match choice {
             Some(true) => {
                 let format = dialog.format;
+                let [width, height] = sizes[dialog.size];
+                self.chosen_export_edge = Some(width.max(height));
                 self.animation_job = Some(ExportJob::Animation {
                     format,
-                    size: sizes[dialog.scale],
+                    size: sizes[dialog.size],
                     keep_transparency: transparent && dialog.keep_transparency,
                     threads: threads.unwrap_or(1),
                 });

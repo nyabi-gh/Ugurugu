@@ -25,7 +25,7 @@ export-webp | ugurugu::MainWindow | Export animated &WebP…
 export-webp-title | ugurugu::MainWindow | Export animated WebP
 export-confirm | ugurugu::MainWindow | Export
 export-size | ugurugu::GifExportDialog | Size
-export-scale | ugurugu::GifExportDialog | %1%  (%2 × %3) | args=percent,width,height
+export-size-original | - | Original size | 원본 크기 | 元のサイズ
 export-keep-transparency | ugurugu::GifExportDialog | Keep transparent areas
 export-opaque-background | ugurugu::GifExportDialog | The canvas background is opaque, so there is nothing to keep transparent.
 export-estimate | ugurugu::GifExportDialog | %1 frames, about %2 MiB while encoding. | args=frames,mebibytes

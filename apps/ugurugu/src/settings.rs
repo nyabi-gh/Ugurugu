@@ -17,6 +17,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
+use ugu_core::document::limits;
 use ugu_session::Tools;
 
 use crate::shortcuts::Shortcuts;
@@ -71,6 +72,8 @@ pub struct Settings {
     /// Where new documents are first saved and exported, `None` for
     /// Documents.
     pub default_save_folder: Option<PathBuf>,
+    /// The long edge animations were last exported at.
+    pub export_edge: Option<u32>,
     /// The tools and colour history as last left.
     pub tools: Tools,
     /// The shortcuts changed from their defaults.
@@ -86,6 +89,7 @@ impl Default for Settings {
             accent: None,
             wobble_animation: true,
             default_save_folder: None,
+            export_edge: None,
             tools: Tools::default(),
             shortcuts: Shortcuts::default(),
             unknown: Map::new(),
@@ -99,6 +103,7 @@ impl Settings {
     /// what this version cannot show stay, as in 2.2.13.
     pub fn restored(&self) -> Self {
         Self {
+            export_edge: self.export_edge,
             tools: self.tools.clone(),
             shortcuts: self.shortcuts.restored(),
             unknown: self.unknown.clone(),
@@ -159,6 +164,14 @@ impl Settings {
                 tracing::warn!(?folder, "the default save folder is not a full path");
             }
         }
+        if let Some(edge) = take(&mut object, "exportSize", Value::as_u64) {
+            match u32::try_from(edge) {
+                Ok(edge) if limits::CANVAS_EDGE.contains(&edge) => {
+                    settings.export_edge = Some(edge)
+                }
+                _ => tracing::warn!(edge, "the export size in the settings is out of range"),
+            }
+        }
         if let Some(value) = object.remove("tools") {
             settings.tools = tools::parse(&value);
         }
@@ -195,6 +208,9 @@ impl Settings {
                 "defaultSaveFolder".to_owned(),
                 folder.to_string_lossy().into_owned().into(),
             );
+        }
+        if let Some(edge) = self.export_edge {
+            object.insert("exportSize".to_owned(), edge.into());
         }
         object.insert("tools".to_owned(), tools::to_json(&self.tools));
         if !self.tools.colors.colors().is_empty() {
@@ -455,6 +471,7 @@ mod tests {
             accent: Some([0x12, 0xab, 0xef]),
             wobble_animation: false,
             default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),
+            export_edge: Some(384),
             tools: {
                 let mut tools = Tools {
                     tool: ugu_session::Tool::Fill,
@@ -526,7 +543,7 @@ mod tests {
         let settings = Settings::parse(
             r##"{"format": "ugurugu.settings", "version": 1, "language": "fr",
                 "accent": "#12abef", "wobbleAnimation": "yes",
-                "defaultSaveFolder": "relative\\folder"}"##,
+                "defaultSaveFolder": "relative\\folder", "exportSize": 9000}"##,
         );
         assert_eq!(
             settings,

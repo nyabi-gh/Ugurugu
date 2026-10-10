@@ -1318,7 +1318,8 @@ pub fn status_bar(
     let mut cancel = false;
     ui.horizontal(|ui| {
         if let Some(export) = export {
-            ui.spinner();
+            // No spinner: it asks for a frame every frame, which kept the
+            // render thread drawing throughout an export.
             ui.label(export);
             cancel = ui.button(tr("export-cancel")).clicked();
             ui.separator();

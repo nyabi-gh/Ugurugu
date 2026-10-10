@@ -88,6 +88,7 @@ pub fn apply(
     theme::set_accent(ctx, settings.accent);
     canvas.allow_animation(settings.wobble_animation);
     files.set_default_save_folder(settings.default_save_folder.clone());
+    files.set_export_edge(settings.export_edge);
     *keys = Keymap::new(&settings.shortcuts);
 }
 
@@ -104,6 +105,10 @@ pub fn show(
     if let Some(folder) = files.take_chosen_save_folder() {
         store.change(|settings| settings.default_save_folder = Some(folder));
         apply(ctx, store.get(), canvas, files, &mut panels.keys);
+    }
+    if let Some(edge) = files.take_chosen_export_edge() {
+        store.change(|settings| settings.export_edge = Some(edge));
+        files.set_export_edge(Some(edge));
     }
     let Some(dialog) = panels.settings.as_mut() else {
         return;
