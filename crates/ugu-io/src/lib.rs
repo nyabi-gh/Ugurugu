@@ -4,12 +4,14 @@
 //! The `.ugurugu` file format (docs/rust/adr-operations-and-format.md section 4)
 //! and image export.
 
+pub mod animation;
 pub mod format;
 pub mod gif;
 pub mod image;
 pub mod import;
 pub mod read;
 pub mod save;
+pub mod webp;
 pub mod write;
 
 #[cfg(test)]

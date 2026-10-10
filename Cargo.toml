@@ -21,6 +21,8 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 # Placed text: Parley lays it out; Skrifa (as in egui) and Kurbo (as in Vello)
 # give its outlines.
 kurbo = "=0.13.1"
+# Animated WebP export: libwebp 1.6.0's own sources, built with `cc`.
+libwebp-sys = "=0.14.4"
 parley = "=0.11.1"
 png = "=0.18.1"
 pollster = "=1.0.1"
@@ -54,6 +56,10 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Coding WebP in tests is too slow unoptimised.
+[profile.dev.package.libwebp-sys]
+opt-level = 3
 
 [profile.release]
 debug = "line-tables-only"

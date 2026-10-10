@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-// Writes 2.2.13's GIFs of fixed test frames, the golden files the Rust GIF
-// writer is compared with (crates/ugu-io/src/gif.rs, docs/rust/m5-plan.md
-// M5-8). The frames come from integer formulas the Rust tests repeat.
+// Writes 2.2.13's GIFs and WebPs of fixed test frames, the golden files the
+// Rust writers are compared with (crates/ugu-io/src/gif.rs and webp.rs,
+// docs/rust/m5-plan.md M5-8 and M5-9). The frames come from integer formulas
+// the Rust tests repeat. The output's extension picks the format; WebP
+// frames last ten times the GIF delays, in milliseconds.
 //
-// Usage: ugurugu_gif_golden_probe <opaque|transparent|few|large> <out.gif>
+// Usage: ugurugu_animation_golden_probe <opaque|transparent|few|large>
+//            <out.gif|out.webp>
 
 #include "io/GifWriter.hpp"
+#include "io/WebPWriter.hpp"
 
 #include <QImage>
 #include <QString>
@@ -49,8 +53,8 @@ int main(int argc, char **argv)
     QTextStream err(stderr);
     if (argc != 3)
     {
-        err << "usage: ugurugu_gif_golden_probe "
-               "<opaque|transparent|few|large> <out.gif>\n";
+        err << "usage: ugurugu_animation_golden_probe "
+               "<opaque|transparent|few|large> <out.gif|out.webp>\n";
         return 2;
     }
     const QString name = QString::fromLocal8Bit(argv[1]);
@@ -83,9 +87,24 @@ int main(int argc, char **argv)
         }
         frames.append(image);
     }
+    const QString path = QString::fromLocal8Bit(argv[2]);
     QString error;
-    if (!ugurugu::GifWriter::write(
-            QString::fromLocal8Bit(argv[2]), frames, shape.delays, &error))
+    bool written = false;
+    if (path.endsWith(QStringLiteral(".webp")))
+    {
+        QVector<int> milliseconds;
+        for (const int delay : shape.delays)
+        {
+            milliseconds.append(delay * 10);
+        }
+        written =
+            ugurugu::WebPWriter::write(path, frames, milliseconds, &error);
+    }
+    else
+    {
+        written = ugurugu::GifWriter::write(path, frames, shape.delays, &error);
+    }
+    if (!written)
     {
         err << error << "\n";
         return 1;

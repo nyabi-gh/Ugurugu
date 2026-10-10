@@ -7,6 +7,7 @@ use ugu_session::{Session, Tool};
 
 use crate::canvas::Canvas;
 use crate::clipboard::Clipboard;
+use crate::export::Animation;
 use crate::files::{self, Files};
 use crate::i18n::tr;
 use crate::shortcuts::{Action, Chord, Keymap};
@@ -31,6 +32,7 @@ pub const FILE: &[Entry] = &[
     Do(A::InsertImage),
     Do(A::Export),
     Do(A::ExportGif),
+    Do(A::ExportWebP),
     Gap,
     Do(A::Quit),
 ];
@@ -151,7 +153,7 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         A::ApplyTransform => pending || session.placed_text().is_some(),
         A::CancelTransform => pending,
         // As 2.2.13: without the animation there is nothing to animate.
-        A::Animate | A::ExportGif => canvas.animation_allowed(),
+        A::Animate | A::ExportGif | A::ExportWebP => canvas.animation_allowed(),
         _ => true,
     }
 }
@@ -242,7 +244,8 @@ pub fn run(
         A::SaveAs => files.save_as(),
         A::InsertImage => files.insert_image(),
         A::Export => files.export_image(),
-        A::ExportGif => files.export_gif(canvas),
+        A::ExportGif => files.export_animation(canvas, Animation::Gif),
+        A::ExportWebP => files.export_animation(canvas, Animation::WebP),
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool(canvas.edit(Session::undo)),
         A::Redo => report_bool(canvas.edit(Session::redo)),

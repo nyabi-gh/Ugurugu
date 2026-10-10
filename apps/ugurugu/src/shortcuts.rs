@@ -241,6 +241,7 @@ actions! {
     InsertImage "insertImage" "file-insert-image" [] [];
     Export "exportPng" "file-export-frame" [ctrl_shift(Key::E)] [];
     ExportGif "exportGif" "export-gif" [ctrl(Key::E)] [];
+    ExportWebP "exportWebP" "export-webp" [] [];
     Quit "quit" "file-quit" [ctrl(Key::Q)] [];
     Undo "undo" "edit-undo" [ctrl(Key::Z)] [alt(Key::Backspace)];
     Redo "redo" "edit-redo" [ctrl(Key::Y)] [ctrl_shift(Key::Z)];

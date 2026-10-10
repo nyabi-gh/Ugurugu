@@ -45,7 +45,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads]";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -75,6 +75,14 @@ fn main() -> ExitCode {
             .and_then(|percent| gif(Path::new(file), Path::new(out), percent, 8)),
         ["gif", file, out, percent, threads] => match (percent.parse(), threads.parse()) {
             (Ok(percent), Ok(threads)) => gif(Path::new(file), Path::new(out), percent, threads),
+            _ => Err(USAGE.to_owned()),
+        },
+        ["webp", file, out, percent] => percent
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|percent| webp(Path::new(file), Path::new(out), percent, 8)),
+        ["webp", file, out, percent, threads] => match (percent.parse(), threads.parse()) {
+            (Ok(percent), Ok(threads)) => webp(Path::new(file), Path::new(out), percent, threads),
             _ => Err(USAGE.to_owned()),
         },
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
@@ -480,10 +488,11 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
     });
     let first_pass = started.elapsed().as_secs_f64();
     let coding_started = Instant::now();
-    let delays: Vec<u16> = ugu_io::gif::delays(frames, f64::from(document.frames_per_second), 100)
-        .into_iter()
-        .map(|delay| delay.min(u32::from(u16::MAX)) as u16)
-        .collect();
+    let delays: Vec<u16> =
+        ugu_io::animation::delays(frames, f64::from(document.frames_per_second), 100)
+            .into_iter()
+            .map(|delay| delay.min(u32::from(u16::MAX)) as u16)
+            .collect();
     let coders = std::thread::available_parallelism().map_or(1, usize::from);
     let file = std::fs::File::create(out).map_err(|error| error.to_string())?;
     quantized
@@ -507,6 +516,104 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
         "  total {:.2}s, {:.1}MB, peak working set {:.0} MiB",
         first_pass + coding,
         bytes as f64 / 1e6,
+        peak_working_set_mib()
+    );
+    Ok(())
+}
+
+/// Times exporting `path` as an animated WebP at `percent` as the app does
+/// it, drawing on `threads` threads, and prints the peak working set.
+fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose};
+
+    let document = open(path)?;
+    let canvas = document.canvas;
+    let size = if percent >= 100 {
+        canvas
+    } else {
+        canvas.map(|edge| (edge * percent / 100).max(1))
+    };
+    let frames = document.frames;
+    println!(
+        "{}: {} frames of {}x{} at {percent}% = {}x{}",
+        path.display(),
+        frames,
+        canvas[0],
+        canvas[1],
+        size[0],
+        size[1]
+    );
+    let delays = ugu_io::animation::delays(frames, f64::from(document.frames_per_second), 1000);
+    let coders = std::thread::available_parallelism().map_or(1, usize::from);
+    let runs = ugu_io::webp::runs(frames as usize, coders);
+    println!("  {} runs: {:?}", runs.len(), runs);
+    let started = Instant::now();
+    // As the app: one thread draws the runs' frames in turn, each run codes
+    // on a thread of its own.
+    let (drawing, coded) = std::thread::scope(|scope| {
+        let (senders, receivers): (Vec<_>, Vec<_>) = runs
+            .iter()
+            .map(|_| std::sync::mpsc::sync_channel::<vello_cpu::Pixmap>(1))
+            .unzip();
+        let runs = &runs;
+        let document = &document;
+        let drawer = scope.spawn(move || {
+            let mut renderer = DocumentRenderer::new(threads);
+            let mut busy = 0.0;
+            let longest = runs.iter().map(|run| run.len()).max().unwrap_or(0);
+            for step in 0..longest {
+                for (run, sender) in runs.iter().zip(&senders) {
+                    let index = run.start + step;
+                    if index >= run.end {
+                        continue;
+                    }
+                    let mut pixmap = vello_cpu::Pixmap::new(canvas[0] as u16, canvas[1] as u16);
+                    let started = Instant::now();
+                    renderer.render(document, index as i64, Purpose::Export, &mut pixmap);
+                    busy += started.elapsed().as_secs_f64();
+                    let _ = sender.send(pixmap);
+                }
+            }
+            drop(senders);
+            busy
+        });
+        let coders: Vec<_> = runs
+            .iter()
+            .zip(receivers)
+            .map(|(range, drawn)| {
+                let delays = &delays;
+                scope.spawn(move || {
+                    let mut run = ugu_io::webp::Run::new(size, range.start == 0, &|| false)?;
+                    for (offset, pixmap) in drawn.into_iter().enumerate() {
+                        let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
+                        let straight: Vec<u8> = shrunk
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .flat_map(|&pixel| Rgba8::from_premultiplied(pixel).0)
+                            .collect();
+                        run.add(&straight, delays[range.start + offset])?;
+                    }
+                    run.finish()
+                })
+            })
+            .collect();
+        let coded: Result<Vec<_>, std::io::Error> = coders
+            .into_iter()
+            .map(|coder| coder.join().expect("coding"))
+            .collect();
+        (drawer.join().expect("drawing"), coded)
+    });
+    let coded = coded.map_err(|error| error.to_string())?;
+    let coding = started.elapsed().as_secs_f64();
+    let mut bytes = Vec::new();
+    ugu_io::webp::join(coded, size, &mut bytes).map_err(|error| error.to_string())?;
+    std::fs::write(out, &bytes).map_err(|error| error.to_string())?;
+    println!("  drawing {drawing:.2}s, drawing and coding {coding:.2}s");
+    println!(
+        "  total {:.2}s, {:.1}MB, peak working set {:.0} MiB",
+        started.elapsed().as_secs_f64(),
+        bytes.len() as f64 / 1e6,
         peak_working_set_mib()
     );
     Ok(())

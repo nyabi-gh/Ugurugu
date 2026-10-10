@@ -656,7 +656,7 @@ impl RenderThread {
             ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, &typed);
             files.confirm(ui.ctx(), canvas);
             files.ask_recovery(ui.ctx(), canvas);
-            files.ask_gif(ui.ctx(), canvas);
+            files.ask_animation(ui.ctx(), canvas);
             ui::dialogs(ui.ctx(), canvas, files, settings, panels, &typed);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));

@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-// Times 2.2.13's animated GIF export of a document without the window, as
-// ExportWorker::writeAnimation does it (exact frames scaled to the size
-// chosen, then GifWriter), and prints the peak working set. Compared with
-// `ugu-doc gif` (docs/rust/m5-plan.md M5-8).
+// Times 2.2.13's animated GIF or WebP export of a document without the
+// window, as ExportWorker::writeAnimation does it (exact frames scaled to the
+// size chosen, then GifWriter or WebPWriter), and prints the peak working
+// set. The output's extension picks the format. Compared with `ugu-doc gif`
+// and `ugu-doc webp` (docs/rust/m5-plan.md M5-8 and M5-9).
 //
-// Usage: ugurugu_gif_export_probe <document.ugu> <out.gif> <percent>
+// Usage: ugurugu_animation_export_probe <document.ugu> <out.gif|out.webp>
+//            <percent>
 
 #include "io/AnimationExportPolicy.hpp"
 #include "io/DocumentSerializer.hpp"
 #include "io/GifWriter.hpp"
+#include "io/WebPWriter.hpp"
 #include "render/RenderEngine.hpp"
 
 #include <QElapsedTimer>
@@ -23,8 +26,9 @@
 #endif
 #include <algorithm>
 #include <cstdio>
-#include <psapi.h>
 #include <windows.h>
+// psapi.h needs windows.h before it.
+#include <psapi.h>
 
 namespace
 {
@@ -44,8 +48,8 @@ int main(int argc, char **argv)
     if (argc != 4)
     {
         std::fprintf(stderr,
-            "usage: ugurugu_gif_export_probe <document.ugu> <out.gif> "
-            "<percent>\n");
+            "usage: ugurugu_animation_export_probe <document.ugu> "
+            "<out.gif|out.webp> <percent>\n");
         return 2;
     }
     QFile file(QString::fromLocal8Bit(argv[1]));
@@ -99,13 +103,21 @@ int main(int argc, char **argv)
         drawing += frameTimer.elapsed();
         return image;
     };
+    const QString path = QString::fromLocal8Bit(argv[2]);
     const bool written =
-        ugurugu::GifWriter::write(QString::fromLocal8Bit(argv[2]),
-            frameCount,
-            renderFrame,
-            ugurugu::AnimationExportPolicy::frameDurations(
-                frameCount, document.framesPerSecond, 100),
-            &error);
+        path.endsWith(QStringLiteral(".webp"))
+            ? ugurugu::WebPWriter::write(path,
+                  frameCount,
+                  renderFrame,
+                  ugurugu::AnimationExportPolicy::frameDurations(
+                      frameCount, document.framesPerSecond, 1000),
+                  &error)
+            : ugurugu::GifWriter::write(path,
+                  frameCount,
+                  renderFrame,
+                  ugurugu::AnimationExportPolicy::frameDurations(
+                      frameCount, document.framesPerSecond, 100),
+                  &error);
     if (!written)
     {
         std::fprintf(stderr, "export failed: %s\n", qPrintable(error));

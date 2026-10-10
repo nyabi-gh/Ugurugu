@@ -30,7 +30,7 @@ use ugu_session::{Session, ToolSettings};
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
-use crate::export::{self, Exporting, Job as ExportJob, Outcome};
+use crate::export::{self, Animation, Exporting, Job as ExportJob, Outcome};
 use crate::i18n::{tr, tr_with};
 use crate::recovery::{self, Found, Meta};
 
@@ -63,6 +63,10 @@ const STILL_TYPES: &[FileType] = &[PNG_TYPE, JPEG_TYPE];
 const GIF_TYPE: FileType = FileType {
     name: "GIF image",
     extensions: &["gif"],
+};
+const WEBP_TYPE: FileType = FileType {
+    name: "WebP image",
+    extensions: &["webp"],
 };
 /// What an image can be inserted from, as 2.2.13 offers.
 const IMAGE_TYPE: FileType = FileType {
@@ -113,14 +117,15 @@ pub enum Purpose {
     Open,
     SaveAs,
     ExportImage,
-    ExportGif,
+    ExportAnimation,
     InsertImage,
     /// The default save folder, for the settings.
     SaveFolder,
 }
 
 /// The animation export options being chosen.
-struct GifDialog {
+struct AnimationDialog {
+    format: Animation,
     /// Into `export::SCALES`.
     scale: usize,
     keep_transparency: bool,
@@ -269,9 +274,9 @@ pub struct Files {
     recovered_from: Option<PathBuf>,
     exporting: Option<Exporting>,
     /// The animation export options asked for, while they are.
-    gif_dialog: Option<GifDialog>,
+    animation_dialog: Option<AnimationDialog>,
     /// The animation export chosen, waiting for where it goes.
-    gif_job: Option<ExportJob>,
+    animation_job: Option<ExportJob>,
     /// Cancelled exports whose threads may still be finishing.
     cancelled: Vec<Exporting>,
     exports: u64,
@@ -333,8 +338,8 @@ impl Files {
             recovered_name: None,
             recovered_from: None,
             exporting: None,
-            gif_dialog: None,
-            gif_job: None,
+            animation_dialog: None,
+            animation_job: None,
             cancelled: Vec::new(),
             exports: 0,
         }
@@ -652,9 +657,9 @@ impl Files {
         }
     }
 
-    /// Asks how to export the animation as a GIF, then where; one export
+    /// Asks how to export the animation as `format`, then where; one export
     /// at a time.
-    pub fn export_gif(&mut self, canvas: &Canvas) {
+    pub fn export_animation(&mut self, canvas: &Canvas, format: Animation) {
         if self.exporting.is_some() || self.busy_dialog {
             return;
         }
@@ -665,11 +670,17 @@ impl Files {
             .iter()
             .position(|&percent| {
                 let size = export::scaled(document.canvas, percent);
-                export::gif_bytes(document.canvas, size, document.frames, export::threads())
-                    <= budget
+                export::animation_bytes(
+                    format,
+                    document.canvas,
+                    size,
+                    document.frames,
+                    export::threads(),
+                ) <= budget
             })
             .unwrap_or(export::SCALES.len() - 1);
-        self.gif_dialog = Some(GifDialog {
+        self.animation_dialog = Some(AnimationDialog {
+            format,
             scale,
             keep_transparency: true,
             budget,
@@ -677,14 +688,15 @@ impl Files {
     }
 
     /// The animation export options, while they are asked for.
-    pub fn ask_gif(&mut self, ctx: &egui::Context, canvas: &Canvas) {
-        let Some(dialog) = self.gif_dialog.as_mut() else {
+    pub fn ask_animation(&mut self, ctx: &egui::Context, canvas: &Canvas) {
+        let Some(dialog) = self.animation_dialog.as_mut() else {
             return;
         };
         let document = canvas.session().document();
         let transparent = document.background.0[3] < 255;
         let sizes = export::SCALES.map(|percent| export::scaled(document.canvas, percent));
-        let bytes = export::gif_bytes(
+        let bytes = export::animation_bytes(
+            dialog.format,
             document.canvas,
             sizes[dialog.scale],
             document.frames,
@@ -704,8 +716,11 @@ impl Files {
             )
         };
         let mut choice = None;
-        let modal = egui::Modal::new(egui::Id::new("gif export")).show(ctx, |ui| {
-            ui.heading(tr("export-gif-title"));
+        let modal = egui::Modal::new(egui::Id::new("animation export")).show(ctx, |ui| {
+            ui.heading(tr(match dialog.format {
+                Animation::Gif => "export-gif-title",
+                Animation::WebP => "export-webp-title",
+            }));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(tr("export-size"));
@@ -759,14 +774,20 @@ impl Files {
         }
         match choice {
             Some(true) => {
-                self.gif_job = Some(ExportJob::Gif {
+                let format = dialog.format;
+                self.animation_job = Some(ExportJob::Animation {
+                    format,
                     size: sizes[dialog.scale],
                     keep_transparency: transparent && dialog.keep_transparency,
                 });
-                self.gif_dialog = None;
-                self.pick_save(Purpose::ExportGif, &[GIF_TYPE]);
+                self.animation_dialog = None;
+                let types: &'static [FileType] = match format {
+                    Animation::Gif => &[GIF_TYPE],
+                    Animation::WebP => &[WEBP_TYPE],
+                };
+                self.pick_save(Purpose::ExportAnimation, types);
             }
-            Some(false) => self.gif_dialog = None,
+            Some(false) => self.animation_dialog = None,
             None => {}
         }
     }
@@ -843,7 +864,7 @@ impl Files {
                 self.busy_dialog = false;
                 let Some(path) = path else {
                     self.after_save = None;
-                    self.gif_job = None;
+                    self.animation_job = None;
                     return;
                 };
                 match purpose {
@@ -853,8 +874,8 @@ impl Files {
                         let frame = canvas.session().frame();
                         self.start_export(path, canvas, ExportJob::Still { frame });
                     }
-                    Purpose::ExportGif => {
-                        if let Some(job) = self.gif_job.take() {
+                    Purpose::ExportAnimation => {
+                        if let Some(job) = self.animation_job.take() {
                             self.start_export(path, canvas, job);
                         }
                     }

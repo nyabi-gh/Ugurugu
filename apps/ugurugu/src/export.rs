@@ -9,8 +9,8 @@
 //!
 //! An animation's frames are drawn one after another by the render worker,
 //! after the canvas's own work, and handed through a short queue to the
-//! export thread, which shrinks them and takes their colours; the GIF is
-//! then coded on several threads.
+//! export thread, which shrinks them. A GIF takes their colours, then is
+//! coded on several threads; a WebP codes each frame as it comes.
 
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,11 @@ pub const SCALES: [u32; 5] = [100, 75, 50, 33, 25];
 /// Frames drawn ahead of the export thread.
 const QUEUE: usize = 2;
 
+/// Whole frames libwebp holds while coding one, measured.
+const WEBP_FRAMES: u64 = 12;
+/// A losslessly coded frame is at most about this much smaller, measured.
+const WEBP_FILE: u64 = 2;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Done,
@@ -38,13 +43,21 @@ pub enum Outcome {
     Failed(String),
 }
 
+/// The animated formats, as 2.2.13 offers them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Animation {
+    Gif,
+    WebP,
+}
+
 /// What is exported.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Job {
     /// One frame at the document's size, as the file's extension says.
     Still { frame: i64 },
-    /// Every frame as an animated GIF.
-    Gif {
+    /// Every frame.
+    Animation {
+        format: Animation,
         size: [u32; 2],
         keep_transparency: bool,
     },
@@ -58,17 +71,34 @@ pub fn scaled(canvas: [u32; 2], percent: u32) -> [u32; 2] {
     canvas.map(|edge| (edge * percent / 100).max(1))
 }
 
-/// About how much memory a GIF of `frames` at `size` from a document of
-/// `canvas` takes: two bytes a pixel of every frame between the two passes,
-/// the frames on their way at the document's size and shrunk, and what each
-/// coding thread holds.
-pub fn gif_bytes(canvas: [u32; 2], size: [u32; 2], frames: u32, threads: usize) -> u64 {
+/// About how much memory an animation of `frames` at `size` from a document
+/// of `canvas` takes: the frames on their way at the document's size and
+/// shrunk, then for a GIF two bytes a pixel of every frame between its two
+/// passes and what each coding thread holds, and for a WebP what each run's
+/// encoder holds (WEBP_FRAMES frames) and the file so far (a WEBP_FILE-th of
+/// each frame).
+pub fn animation_bytes(
+    format: Animation,
+    canvas: [u32; 2],
+    size: [u32; 2],
+    frames: u32,
+    threads: usize,
+) -> u64 {
     let pixels = |[width, height]: [u32; 2]| u64::from(width) * u64::from(height);
-    let keys = pixels(size) * 2 * u64::from(frames);
     let drawn = pixels(canvas) * 4 * (QUEUE as u64 + 2);
     let shrunk = pixels(size) * 4 * 2;
-    let coding = threads as u64 * (4 * 1024 * 1024 + pixels(size) * 2);
-    keys + drawn + shrunk + coding
+    let coding = match format {
+        Animation::Gif => {
+            pixels(size) * 2 * u64::from(frames)
+                + threads as u64 * (4 * 1024 * 1024 + pixels(size) * 2)
+        }
+        Animation::WebP => {
+            let runs = ugu_io::webp::runs(frames as usize, threads).len() as u64;
+            runs * (pixels(canvas) * 4 + pixels(size) * 4 * WEBP_FRAMES)
+                + pixels(size) * 4 * u64::from(frames) / WEBP_FILE
+        }
+    };
+    drawn + shrunk + coding
 }
 
 pub fn threads() -> usize {
@@ -99,10 +129,17 @@ impl Exporting {
     ) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicUsize::new(0));
-        // Drawing each frame, then coding it.
         let steps = match job {
             Job::Still { .. } => 1,
-            Job::Gif { .. } => document.frames as usize * 2,
+            // Taking each frame's colours, then coding it.
+            Job::Animation {
+                format: Animation::Gif,
+                ..
+            } => document.frames as usize * 2,
+            Job::Animation {
+                format: Animation::WebP,
+                ..
+            } => document.frames as usize,
         };
         let thread = std::thread::Builder::new()
             .name("export".to_owned())
@@ -113,11 +150,13 @@ impl Exporting {
                     let started = std::time::Instant::now();
                     let outcome = match job {
                         Job::Still { frame } => still(document, frame, &path, &renders, &cancel),
-                        Job::Gif {
+                        Job::Animation {
+                            format,
                             size,
                             keep_transparency,
-                        } => gif(
+                        } => animation(
                             document,
+                            format,
                             size,
                             keep_transparency,
                             &path,
@@ -206,7 +245,7 @@ pub fn still(
     }
 }
 
-/// Premultiplied frame pixels as the GIF takes them: straight, rounded as
+/// Premultiplied frame pixels as the encoders take them: straight, rounded as
 /// Qt does, or put over white when transparency is not kept, as 2.2.13.
 fn straight(pixels: &[u8], keep_transparency: bool) -> Vec<u8> {
     pixels
@@ -229,25 +268,22 @@ fn straight(pixels: &[u8], keep_transparency: bool) -> Vec<u8> {
         .collect()
 }
 
-/// Every frame of `document` at `size` as an animated GIF at `path`.
-pub fn gif(
-    document: Arc<Document>,
+/// Draws every frame of `document` on the render worker, after the
+/// canvas's own work, and hands each to `take` at `size` as the encoders
+/// take it.
+fn each_frame(
+    document: &Arc<Document>,
     size: [u32; 2],
     keep_transparency: bool,
-    path: &Path,
     renders: &Renders,
     cancel: &AtomicBool,
-    done: &AtomicUsize,
-) -> Outcome {
+    mut take: impl FnMut(usize, &[u8]) -> Result<(), Outcome>,
+) -> Result<(), Outcome> {
     let cancelled = || cancel.load(Ordering::Relaxed);
     let frames = document.frames;
     let canvas = document.canvas;
-    let delays: Vec<u16> = ugu_io::gif::delays(frames, f64::from(document.frames_per_second), 100)
-        .into_iter()
-        .map(|delay| delay.min(u32::from(u16::MAX)) as u16)
-        .collect();
     let (to_export, drawn) = sync_channel(QUEUE);
-    let quantized = std::thread::scope(|scope| {
+    let taken = std::thread::scope(|scope| {
         scope.spawn(|| {
             for frame in 0..frames {
                 if cancelled() {
@@ -262,30 +298,105 @@ pub fn gif(
             }
             drop(to_export);
         });
-        let mut quantizer = ugu_io::gif::Quantizer::new(size);
         let mut taken = 0;
         for pixmap in drawn {
             if cancelled() {
                 // The drawing thread stops at its next frame.
-                return None;
+                return Err(Outcome::Cancelled);
             }
             let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
-            quantizer.add(&straight(&shrunk, keep_transparency));
+            take(taken, &straight(&shrunk, keep_transparency))?;
             taken += 1;
-            done.store(taken, Ordering::Relaxed);
         }
-        Some((taken, quantizer.finish()))
-    });
-    let Some((taken, quantized)) = quantized else {
-        return Outcome::Cancelled;
-    };
+        Ok(taken)
+    })?;
     if cancelled() {
-        return Outcome::Cancelled;
+        return Err(Outcome::Cancelled);
     }
     if taken != frames as usize {
-        return Outcome::Failed("the render worker has stopped".to_owned());
+        return Err(Outcome::Failed("the render worker has stopped".to_owned()));
     }
-    let written = ugu_io::save::replace_with(path, &replace_unless(cancel), |file, _| {
+    Ok(())
+}
+
+/// What became of writing the file.
+fn written(written: Result<(), ugu_io::save::SaveError>, cancel: &AtomicBool) -> Outcome {
+    match written {
+        Ok(()) => Outcome::Done,
+        Err(_) if cancel.load(Ordering::Relaxed) => Outcome::Cancelled,
+        Err(error) => Outcome::Failed(error.to_string()),
+    }
+}
+
+/// Every frame of `document` at `size` as an animated GIF or WebP at
+/// `path`.
+#[allow(clippy::too_many_arguments)]
+pub fn animation(
+    document: Arc<Document>,
+    format: Animation,
+    size: [u32; 2],
+    keep_transparency: bool,
+    path: &Path,
+    renders: &Renders,
+    cancel: &AtomicBool,
+    done: &AtomicUsize,
+) -> Outcome {
+    let outcome = match format {
+        Animation::Gif => gif(
+            &document,
+            size,
+            keep_transparency,
+            path,
+            renders,
+            cancel,
+            done,
+        ),
+        Animation::WebP => webp(
+            &document,
+            size,
+            keep_transparency,
+            path,
+            renders,
+            cancel,
+            done,
+        ),
+    };
+    outcome.unwrap_or_else(|outcome| outcome)
+}
+
+/// The GIF's colours from every frame, then its frames coded on several
+/// threads.
+fn gif(
+    document: &Arc<Document>,
+    size: [u32; 2],
+    keep_transparency: bool,
+    path: &Path,
+    renders: &Renders,
+    cancel: &AtomicBool,
+    done: &AtomicUsize,
+) -> Result<Outcome, Outcome> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    let delays: Vec<u16> =
+        ugu_io::animation::delays(document.frames, f64::from(document.frames_per_second), 100)
+            .into_iter()
+            .map(|delay| delay.min(u32::from(u16::MAX)) as u16)
+            .collect();
+    let mut quantizer = ugu_io::gif::Quantizer::new(size);
+    each_frame(
+        document,
+        size,
+        keep_transparency,
+        renders,
+        cancel,
+        |index, frame| {
+            quantizer.add(frame);
+            done.store(index + 1, Ordering::Relaxed);
+            Ok(())
+        },
+    )?;
+    let quantized = quantizer.finish();
+    let taken = delays.len();
+    let result = ugu_io::save::replace_with(path, &replace_unless(cancel), |file, _| {
         quantized
             .write(
                 BufWriter::new(file),
@@ -296,11 +407,98 @@ pub fn gif(
             )
             .map_err(ugu_io::save::SaveError::from)
     });
-    match written {
-        Ok(()) => Outcome::Done,
-        Err(_) if cancelled() => Outcome::Cancelled,
-        Err(error) => Outcome::Failed(error.to_string()),
-    }
+    Ok(written(result, cancel))
+}
+
+/// The frames cut into runs coded at once (`ugu_io::webp`), each run fed
+/// its frames in turn by one drawing thread, then joined.
+fn webp(
+    document: &Arc<Document>,
+    size: [u32; 2],
+    keep_transparency: bool,
+    path: &Path,
+    renders: &Renders,
+    cancel: &AtomicBool,
+    done: &AtomicUsize,
+) -> Result<Outcome, Outcome> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    let failed = |error: std::io::Error| {
+        if cancelled() {
+            Outcome::Cancelled
+        } else {
+            Outcome::Failed(error.to_string())
+        }
+    };
+    let frames = document.frames as usize;
+    let canvas = document.canvas;
+    let delays =
+        ugu_io::animation::delays(document.frames, f64::from(document.frames_per_second), 1000);
+    let runs = ugu_io::webp::runs(frames, threads());
+    let coded = std::thread::scope(|scope| {
+        let (senders, receivers): (Vec<_>, Vec<_>) = runs.iter().map(|_| sync_channel(1)).unzip();
+        let runs = &runs;
+        scope.spawn(move || {
+            let longest = runs.iter().map(|run| run.len()).max().unwrap_or(0);
+            'drawing: for step in 0..longest {
+                for (run, sender) in runs.iter().zip(&senders) {
+                    let index = run.start + step;
+                    if index >= run.end {
+                        continue;
+                    }
+                    if cancelled() {
+                        break 'drawing;
+                    }
+                    let Some(pixmap) = renders.export(document.clone(), index as i64) else {
+                        break 'drawing;
+                    };
+                    if sender.send(pixmap).is_err() {
+                        break 'drawing;
+                    }
+                }
+            }
+            // Ends the runs below.
+            drop(senders);
+        });
+        let coders: Vec<_> = runs
+            .iter()
+            .zip(receivers)
+            .map(|(range, drawn)| {
+                let delays = &delays;
+                scope.spawn(move || {
+                    let mut run = ugu_io::webp::Run::new(size, range.start == 0, &cancelled)
+                        .map_err(failed)?;
+                    let mut taken = 0;
+                    for pixmap in drawn {
+                        let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
+                        drop(pixmap);
+                        run.add(
+                            &straight(&shrunk, keep_transparency),
+                            delays[range.start + taken],
+                        )
+                        .map_err(failed)?;
+                        taken += 1;
+                        done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if taken != range.len() {
+                        return Err(if cancelled() {
+                            Outcome::Cancelled
+                        } else {
+                            Outcome::Failed("the render worker has stopped".to_owned())
+                        });
+                    }
+                    run.finish().map_err(failed)
+                })
+            })
+            .collect();
+        coders
+            .into_iter()
+            .map(|coder| coder.join().expect("a WebP run panicked"))
+            .collect::<Result<Vec<_>, Outcome>>()
+    })?;
+    let result = ugu_io::save::replace_with(path, &replace_unless(cancel), |file, _| {
+        ugu_io::webp::join(coded, size, BufWriter::new(file)).map_err(ugu_io::save::SaveError::from)
+    });
+    Ok(written(result, cancel))
 }
 
 #[cfg(test)]
@@ -374,7 +572,8 @@ mod tests {
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
     }
 
-    fn animation(
+    fn animated(
+        format: Animation,
         background: [u8; 4],
         size: [u32; 2],
         keep: bool,
@@ -386,8 +585,9 @@ mod tests {
         document.frames = 3;
         document.frames_per_second = 12.0;
         let worker = CacheWorker::start(|_| {});
-        gif(
+        animation(
             Arc::new(document),
+            format,
             size,
             keep,
             path,
@@ -399,74 +599,100 @@ mod tests {
 
     fn decoded(path: &Path) -> Vec<(u32, image::RgbaImage)> {
         let file = std::io::BufReader::new(std::fs::File::open(path).unwrap());
-        image::AnimationDecoder::into_frames(image::codecs::gif::GifDecoder::new(file).unwrap())
+        let frames = if path
+            .extension()
+            .is_some_and(|extension| extension == "webp")
+        {
+            image::AnimationDecoder::into_frames(
+                image::codecs::webp::WebPDecoder::new(file).unwrap(),
+            )
+        } else {
+            image::AnimationDecoder::into_frames(image::codecs::gif::GifDecoder::new(file).unwrap())
+        };
+        let frames: Vec<_> = frames
             .map(|frame| {
                 let frame = frame.unwrap();
                 let (numerator, denominator) = frame.delay().numer_denom_ms();
                 (numerator / denominator, frame.into_buffer())
             })
-            .collect()
+            .collect();
+        if frames.is_empty() {
+            // A still image, without a duration.
+            return vec![(0, image::open(path).unwrap().to_rgba8())];
+        }
+        frames
     }
 
     #[test]
     fn an_animation_is_every_frame_at_the_size_chosen() {
-        let folder = folder("gif");
-        let path = folder.join("motion.gif");
+        let folder = folder("animation");
         let size = scaled([40, 30], 50);
         assert_eq!(size, [20, 15]);
-        assert_eq!(
-            animation([200, 100, 50, 255], size, true, &path, false),
-            Outcome::Done
-        );
-        let frames = decoded(&path);
-        // 1/12 s each, in hundredths adding up: 8, 9, 8.
-        assert_eq!(
-            frames.iter().map(|(delay, _)| *delay).collect::<Vec<_>>(),
-            [80, 90, 80]
-        );
-        for (_, frame) in &frames {
-            assert_eq!(frame.dimensions(), (20, 15));
-            assert!(frame.pixels().all(|pixel| pixel.0 == [200, 100, 50, 255]));
+        for (format, name, delays) in [
+            // 1/12 s each, in hundredths adding up: 8, 9, 8.
+            (Animation::Gif, "motion.gif", &[80, 90, 80][..]),
+            // libwebp writes frames that never change as a still image, as
+            // 2.2.13's file is.
+            (Animation::WebP, "motion.webp", &[0]),
+        ] {
+            let path = folder.join(name);
+            let animated =
+                |background, keep| animated(format, background, size, keep, &path, false);
+            assert_eq!(animated([200, 100, 50, 255], true), Outcome::Done);
+            let frames = decoded(&path);
+            assert_eq!(
+                frames.iter().map(|(delay, _)| *delay).collect::<Vec<_>>(),
+                delays,
+                "{name}"
+            );
+            for (_, frame) in &frames {
+                assert_eq!(frame.dimensions(), (20, 15));
+                assert!(frame.pixels().all(|pixel| pixel.0 == [200, 100, 50, 255]));
+            }
+            // A transparent background stays so, or becomes white paper.
+            assert_eq!(animated([0, 0, 0, 0], true), Outcome::Done);
+            assert!(decoded(&path)[0].1.pixels().all(|pixel| pixel.0[3] == 0));
+            assert_eq!(animated([0, 0, 0, 0], false), Outcome::Done);
+            assert!(
+                decoded(&path)[0]
+                    .1
+                    .pixels()
+                    .all(|pixel| pixel.0 == [255; 4]),
+                "{name}"
+            );
         }
-        // A transparent background stays so, or becomes white paper.
-        assert_eq!(
-            animation([0, 0, 0, 0], size, true, &path, false),
-            Outcome::Done
-        );
-        assert!(decoded(&path)[0].1.pixels().all(|pixel| pixel.0[3] == 0));
-        assert_eq!(
-            animation([0, 0, 0, 0], size, false, &path, false),
-            Outcome::Done
-        );
-        assert!(
-            decoded(&path)[0]
-                .1
-                .pixels()
-                .all(|pixel| pixel.0 == [255; 4])
-        );
     }
 
     #[test]
     fn a_cancelled_animation_leaves_the_target_as_it_was() {
-        let folder = folder("gif-cancelled");
-        let target = folder.join("motion.gif");
-        std::fs::write(&target, b"the old file").unwrap();
-        assert_eq!(
-            animation([200, 100, 50, 255], [40, 30], true, &target, true),
-            Outcome::Cancelled
-        );
-        assert_eq!(std::fs::read(&target).unwrap(), b"the old file");
-        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
+        for (format, name) in [(Animation::Gif, "gif"), (Animation::WebP, "webp")] {
+            let folder = folder(&format!("{name}-cancelled"));
+            let target = folder.join(format!("motion.{name}"));
+            std::fs::write(&target, b"the old file").unwrap();
+            assert_eq!(
+                animated(format, [200, 100, 50, 255], [40, 30], true, &target, true),
+                Outcome::Cancelled
+            );
+            assert_eq!(std::fs::read(&target).unwrap(), b"the old file");
+            assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
+        }
     }
 
     #[test]
-    fn the_estimate_counts_the_kept_keys_and_what_is_on_its_way() {
+    fn the_estimate_counts_what_the_encoders_keep_and_what_is_on_its_way() {
         let canvas = [2048, 2048];
         let half = scaled(canvas, 50);
         let mib = |bytes: u64| bytes / (1024 * 1024);
+        let gif = |size, threads| animation_bytes(Animation::Gif, canvas, size, 30, threads);
         // Two bytes a pixel of 30 frames, then the drawn and shrunk frames.
-        assert_eq!(mib(gif_bytes(canvas, half, 30, 1)), 60 + 64 + 8 + 4 + 2);
-        assert!(gif_bytes(canvas, canvas, 30, 8) > gif_bytes(canvas, half, 30, 8));
+        assert_eq!(mib(gif(half, 1)), 60 + 64 + 8 + 4 + 2);
+        assert!(gif(canvas, 8) > gif(half, 8));
+        // Seven runs, each with a frame drawn and its encoder's frames, and
+        // part of every frame's pixels.
+        assert_eq!(
+            mib(animation_bytes(Animation::WebP, canvas, half, 30, 8)),
+            64 + 8 + 7 * (16 + 4 * WEBP_FRAMES) + 4 * 30 / WEBP_FILE
+        );
         assert_eq!(scaled([10, 3], 25), [2, 1]);
         assert_eq!(scaled([10, 3], 100), [10, 3]);
     }
