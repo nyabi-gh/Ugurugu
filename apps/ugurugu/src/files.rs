@@ -777,7 +777,7 @@ impl Files {
                     .selected_text(label(dialog.size))
                     .show_ui(ui, |ui| {
                         for index in 0..sizes.len() {
-                            ui.selectable_value(&mut dialog.size, index, label(index));
+                            crate::widgets::choice(ui, &mut dialog.size, index, label(index));
                         }
                     })
                     .response
@@ -1162,24 +1162,37 @@ impl Files {
         let Some(action) = self.confirm else {
             return;
         };
-        let name = self.display_name();
         let mut choice = None;
+        let mut cancel = false;
         let modal = egui::Modal::new(egui::Id::new("unsaved changes")).show(ctx, |ui| {
-            ui.heading(format!("Save changes to {name}?"));
-            ui.label("Your changes will be lost if you don't save them.");
+            ui.heading(tr("unsaved-title"));
+            ui.label(tr("unsaved-text"));
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
+                let save = ui.button(tr("unsaved-save"));
+                let discard = ui.button(tr("unsaved-discard"));
+                let back = ui.button(tr("unsaved-cancel"));
+                // As 2.2.13: S and N press the buttons, and Enter presses
+                // Save, the default, unless another button has the focus.
+                let (s, n, enter) = ui.input_mut(|input| {
+                    let none = egui::Modifiers::NONE;
+                    (
+                        input.consume_key(none, egui::Key::S),
+                        input.consume_key(none, egui::Key::N),
+                        input.key_pressed(egui::Key::Enter),
+                    )
+                });
+                let elsewhere = !(discard.has_focus() || back.has_focus() || save.has_focus());
+                if save.clicked() || s || (enter && elsewhere) {
                     choice = Some(true);
-                }
-                if ui.button("Don't save").clicked() {
+                } else if discard.clicked() || n {
                     choice = Some(false);
-                }
-                if ui.button("Cancel").clicked() {
-                    self.confirm = None;
+                } else if back.clicked() {
+                    cancel = true;
                 }
             });
         });
-        if modal.should_close() {
+        if cancel || modal.should_close() {
             self.confirm = None;
         }
         match choice {

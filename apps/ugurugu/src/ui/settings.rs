@@ -184,7 +184,8 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
                 .width(180.0)
                 .show_ui(ui, |ui| {
                     for language in Language::ALL {
-                        ui.selectable_value(
+                        widgets::choice(
+                            ui,
                             &mut settings.language,
                             language,
                             language_name(language),

@@ -3,7 +3,9 @@
 
 //! The colour dock, after 2.2.13's `ColorWheel` and `ColorPairSwatch`: a
 //! hue ring around a saturation and value square, and the current colour
-//! over the previous one. 2.2.13's triangle field is left for later.
+//! over the previous one. 2.2.13's triangle field is left for later. Unlike
+//! 2.2.13, whose wheel takes only the pointer, the colour's `#AARRGGBB` can
+//! be typed, so that a colour can be chosen from the keyboard.
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -32,6 +34,23 @@ pub struct ColorDock {
     dragging_ring: bool,
     /// The pen colour when the dock was last shown.
     seen: Option<Rgba8>,
+    /// The colour being typed.
+    pub typing: Option<String>,
+}
+
+/// A colour typed as `#AARRGGBB`, or `#RRGGBB` keeping `alpha`; the `#` may
+/// be left out.
+fn parse_hex(text: &str, alpha: u8) -> Option<Rgba8> {
+    let digits = text.trim().trim_start_matches('#');
+    if !digits.chars().all(|digit| digit.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    match digits.len() {
+        6 => Some(Rgba8([byte(0)?, byte(2)?, byte(4)?, alpha])),
+        8 => Some(Rgba8([byte(2)?, byte(4)?, byte(6)?, byte(0)?])),
+        _ => None,
+    }
 }
 
 fn hsv_to_rgb([h, s, v]: [f32; 3]) -> [f32; 3] {
@@ -255,15 +274,47 @@ impl ColorDock {
                 canvas.edit(|session| session.pen.color = previous);
             }
             ui.vertical(|ui| {
-                ui.label(
+                let label = ui.label(
                     egui::RichText::new(tr("color-current"))
                         .size(theme::SMALL)
                         .color(theme::MUTED),
                 );
-                let [r, g, b, a] = picked.0;
-                ui.label(format!("#{a:02X}{r:02X}{g:02X}{b:02X}"));
+                if let Some(typed) = self.hex_field(ui, picked, label.id)
+                    && typed != picked
+                {
+                    self.previous = Some(picked);
+                    self.seen = Some(typed);
+                    canvas.edit(|session| session.pen.color = typed);
+                }
             });
         });
+    }
+
+    /// The colour as text, which takes a typed colour when Enter or Tab
+    /// leaves it. Escape, or text that is not a colour, leaves the colour.
+    fn hex_field(&mut self, ui: &mut Ui, picked: Rgba8, label: egui::Id) -> Option<Rgba8> {
+        let id = ui.id().with("colour hex");
+        let mut text = match &self.typing {
+            Some(text) if ui.memory(|memory| memory.has_focus(id)) => text.clone(),
+            _ => hex(picked),
+        };
+        let response = ui
+            .add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(id)
+                    .desired_width(84.0)
+                    .char_limit(9),
+            )
+            .labelled_by(label);
+        if response.has_focus() {
+            self.typing = Some(text);
+            return None;
+        }
+        let typed = self.typing.take();
+        if !response.lost_focus() || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            return None;
+        }
+        parse_hex(&typed?, picked.0[3])
     }
 }
 
@@ -306,5 +357,14 @@ mod tests {
         dock.dragged_from = Some(blue);
         dock.follow(green);
         assert_eq!(dock.previous, Some(red));
+    }
+
+    #[test]
+    fn a_typed_colour_reads_as_2_2_13_names_it() {
+        assert_eq!(parse_hex("#80FF0000", 255), Some(Rgba8([255, 0, 0, 128])));
+        assert_eq!(parse_hex(" 00ff7f ", 64), Some(Rgba8([0, 255, 127, 64])));
+        for wrong in ["", "#", "#12345", "#1234567", "#GG0000", "#+1FF00"] {
+            assert_eq!(parse_hex(wrong, 255), None, "{wrong}");
+        }
     }
 }

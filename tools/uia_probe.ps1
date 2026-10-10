@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-# Checks what the Rust M0 app exposes to UI Automation, the interface Narrator
+# Checks what the Rust app exposes to UI Automation, the interface Narrator
 # and other screen readers use (docs/rust/m0-evidence.md section 7): prints the
 # tree, renames the top layer with F2 from its focused row and presses the Add
-# layer button through InvokePattern. Runs in Windows PowerShell 5.1, which
-# has the .NET UI Automation client.
+# layer button through InvokePattern. Then, from the keyboard alone (M5-14):
+# F10 and Alt+E reach the menus, the settings dialog takes the focus and gives
+# it back on Escape, and arrows widen the left panel dock. Runs in Windows
+# PowerShell 5.1, which has the .NET UI Automation client.
 #
 # Usage: powershell -File uia_probe.ps1 <ugurugu.exe> <output-dir>
 
@@ -17,6 +19,10 @@ $log = Join-Path $Out 'app.log'
 $env:UGURUGU_LOG = 'info'
 # Elements are found by their English names.
 $env:UGURUGU_LANGUAGE = 'en'
+# Its own settings and recovery, which the dock step changes.
+$env:UGURUGU_SETTINGS_PATH = Join-Path $Out 'settings.json'
+$env:UGURUGU_RECOVERY_PATH = Join-Path $Out 'recovery'
+Remove-Item -ErrorAction SilentlyContinue $env:UGURUGU_SETTINGS_PATH
 $app = Start-Process -FilePath $Exe -PassThru -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Out 'stderr.log')
 
 function Get-Tree($root) {
@@ -102,6 +108,40 @@ try {
         'Add layer invoked'
     } else { 'no Add layer button' }
     Start-Sleep -Milliseconds 500
+
+    # Keyboard alone. SendKeys goes to whatever is in front, so check first.
+    function Send($keys) {
+        if ([Front]::GetForegroundWindow() -ne $app.MainWindowHandle) { throw 'the app is not in front' }
+        [System.Windows.Forms.SendKeys]::SendWait($keys)
+        Start-Sleep -Milliseconds 300
+    }
+    function Focused { [System.Windows.Automation.AutomationElement]::FocusedElement.Current }
+    function Tab-To($prefix) {
+        for ($i = 0; $i -lt 150; $i++) {
+            if ((Focused).Name.StartsWith($prefix)) { return $true }
+            Send '{TAB}'
+        }
+        $false
+    }
+    Send '{ESC}'
+    Send '{F10}'
+    "F10 focuses: '$((Focused).Name)'"
+    Send '%e'
+    if (Tab-To 'Settings') {
+        Send ' '
+        Start-Sleep -Milliseconds 300
+        $dialog = @(Get-Tree $window | Where-Object Name -eq 'Restore defaults').Count -gt 0
+        "settings dialog open: $dialog, focus in it: '$((Focused).Name)'"
+        Send '{ESC}'
+        $closed = @(Get-Tree $window | Where-Object Name -eq 'Restore defaults').Count -eq 0
+        "after Escape closed: $closed, focus back on: '$((Focused).Name)'"
+    } else { 'Tab did not reach Settings in the Edit menu' }
+    if (Tab-To 'Width of the left panel dock') {
+        $before = (Focused).BoundingRectangle.X
+        Send '{RIGHT}{RIGHT}'
+        $after = (Focused).BoundingRectangle.X
+        "left dock edge moved by Right twice: $($after - $before) px, focus: '$((Focused).Name)'"
+    } else { 'Tab did not reach the left dock edge' }
 } finally {
     if (-not $app.HasExited) { $app.CloseMainWindow() | Out-Null; if (-not $app.WaitForExit(5000)) { $app.Kill() } }
 }

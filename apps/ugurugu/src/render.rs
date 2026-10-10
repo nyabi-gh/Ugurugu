@@ -30,7 +30,6 @@ use crate::input::{CanvasInput, InputRouter};
 use crate::latency::LatencyLog;
 use crate::settings::Store;
 use crate::shortcuts::{self, Chord};
-use crate::theme;
 use crate::ui::{self, Panels};
 
 pub enum ToRender {
@@ -635,8 +634,6 @@ impl RenderThread {
     fn frame(&mut self) {
         let started = Instant::now();
         let input = self.egui_state.take_egui_input(&self.window);
-        let mut canvas_area = [0; 4];
-        let mut shown_ants = None;
         let typed = std::mem::take(&mut self.clipboard_chords);
         let Self {
             display,
@@ -651,120 +648,45 @@ impl RenderThread {
             ..
         } = self;
         let adapter_summary = &display.gpu.summary;
-        let software = display.gpu.is_software();
+        let warning = display
+            .gpu
+            .is_software()
+            .then_some("No usable GPU: drawing with the slow software display");
+        let sample_count = canvas.sample_count();
         let mut remove_device = false;
+        let mut shown = None;
         let output = self.egui_ctx.run_ui(input, |ui| {
-            // Before the widgets run, so focus is what the key was pressed in.
-            ui::shortcuts(ui.ctx(), canvas, files, clipboard, panels, &typed);
-            files.confirm(ui.ctx(), canvas);
-            files.ask_recovery(ui.ctx(), canvas);
-            files.ask_animation(ui.ctx(), canvas);
-            ui::dialogs(ui.ctx(), canvas, files, settings, panels, &typed);
             remove_device =
                 *diagnostics && ui.ctx().input(|input| input.key_pressed(egui::Key::F9));
-            let bar = |fill, x, y| {
-                egui::Frame::new()
-                    .fill(fill)
-                    .inner_margin(egui::Margin::symmetric(x, y))
+            let mut row = |ui: &mut egui::Ui| {
+                ui.label(adapter_summary.as_str());
+                ui.separator();
+                ui.label(format!("samples {sample_count}"));
+                if let Some(summary) = display_latency.summary() {
+                    ui.separator();
+                    ui.label(format!("input to display {summary}"));
+                }
             };
-            egui::Panel::top("menu")
-                .frame(bar(theme::CHROME, 6, 2))
-                .show_separator_line(false)
-                .show(ui, |ui| ui::menu_bar(ui, canvas, files, clipboard, panels));
-            egui::Panel::top("quick access")
-                .frame(bar(theme::CHROME, 10, 5))
-                .show(ui, |ui| {
-                    ui::quick_access(ui, canvas, files, clipboard, panels)
-                });
-            egui::Panel::bottom("status")
-                .frame(bar(theme::STATUS, 8, 2))
-                .show_separator_line(false)
-                .show(ui, |ui| {
-                    let warning =
-                        software.then_some("No usable GPU: drawing with the slow software display");
-                    let message = warning
-                        .or(canvas.notice())
-                        .map(|text| (text, true))
-                        .or(files.message().map(|text| (text, false)));
-                    let message = message.map(|(text, warn)| (text.to_owned(), warn));
-                    if let Some(due) = files.message_due() {
-                        ui.ctx()
-                            .request_repaint_after(due.saturating_duration_since(Instant::now()));
-                    }
-                    let pointer = panels.pointer;
-                    let export = files.export_status();
-                    if export.is_some() {
-                        // The progress moves on without input.
-                        ui.ctx().request_repaint_after(Duration::from_millis(200));
-                    }
-                    let cancel = ui::status_bar(
-                        ui,
-                        canvas,
-                        message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
-                        export.as_deref(),
-                        pointer,
-                    );
-                    if cancel {
-                        files.cancel_export();
-                    }
-                    if *diagnostics {
-                        ui.horizontal(|ui| {
-                            ui.label(adapter_summary.as_str());
-                            ui.separator();
-                            ui.label(format!("samples {}", canvas.sample_count()));
-                            if let Some(summary) = display_latency.summary() {
-                                ui.separator();
-                                ui.label(format!("input to display {summary}"));
-                            }
-                        });
-                    }
-                });
-            egui::Panel::left("tool rail")
-                .resizable(false)
-                .exact_size(48.0)
-                .frame(bar(theme::CHROME, 4, 8))
-                .show(ui, |ui| ui::rail(ui, canvas, &panels.keys));
             let mut probe = |ui: &mut egui::Ui| ime.show(ui);
-            let extra: Option<&mut dyn FnMut(&mut egui::Ui)> =
-                if *diagnostics { Some(&mut probe) } else { None };
-            ui::dock_areas(ui, canvas, panels, extra);
-            if panels.layout.animation_bar {
-                egui::Panel::bottom("animation bar")
-                    .frame(
-                        egui::Frame::new()
-                            .fill(theme::CHROME)
-                            .inner_margin(egui::Margin {
-                                left: 12,
-                                right: 14,
-                                top: 9,
-                                bottom: 9,
-                            }),
-                    )
-                    .show(ui, |ui| ui::animation_bar(ui, canvas, panels));
-            }
-            // No panel fill: the canvas is drawn under egui.
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ui, |ui| {
-                    canvas_area = canvas.layout(ui);
-                    shown_ants = ui::selection_overlay(ui, canvas);
-                    ui::text_overlay(ui, canvas);
-                    ui::pick_cursor(ui, canvas);
-                    ui::selection_actions(ui, canvas, panels);
-                    let ppp = f64::from(ui.ctx().pixels_per_point());
-                    let area = ui.max_rect();
-                    panels.pointer = ui
-                        .input(|input| input.pointer.hover_pos())
-                        .filter(|pointer| area.contains(*pointer))
-                        .map(|pointer| {
-                            canvas.document_point([
-                                f64::from(pointer.x) * ppp,
-                                f64::from(pointer.y) * ppp,
-                            ])
-                        });
-                });
-            ui::dock_floating(ui, canvas, panels);
+            shown = Some(ui::window(
+                ui,
+                ui::Parts {
+                    canvas,
+                    files,
+                    clipboard,
+                    settings,
+                    panels,
+                    typed: &typed,
+                    warning,
+                    diagnostics: if *diagnostics { Some(&mut row) } else { None },
+                    probe: if *diagnostics { Some(&mut probe) } else { None },
+                },
+            ));
         });
+        let ui::Shown {
+            canvas_area,
+            ants: shown_ants,
+        } = shown.expect("the frame ran");
         // Tools change through the panels, shortcuts and the canvas.
         let tools = self.canvas.session().tools();
         if tools != self.settings.get().tools {

@@ -795,7 +795,7 @@ impl LayerDock {
                     .selected_text(blend_name(blend))
                     .show_ui(ui, |ui| {
                         for each in BLENDS {
-                            ui.selectable_value(&mut chosen, each, blend_name(each));
+                            widgets::choice(ui, &mut chosen, each, blend_name(each));
                         }
                     })
                     .response
@@ -830,9 +830,9 @@ impl LayerDock {
                     .width(ui.available_width())
                     .selected_text(shown)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut target, None, tr("group-none"));
+                        widgets::choice(ui, &mut target, None, tr("group-none"));
                         for (id, name) in &groups {
-                            ui.selectable_value(&mut target, Some(*id), name);
+                            widgets::choice(ui, &mut target, Some(*id), name);
                         }
                     })
                     .response

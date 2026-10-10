@@ -176,6 +176,9 @@ fn area(
             .push(Target::end(strip.response.rect, side));
         return;
     }
+    // egui's id for the panel's resize handle, which Tab stops at.
+    let handle = id.with("__resize");
+    resize_from_keys(ui.ctx(), panels, side, id, handle);
     let shown = bar(id)
         .resizable(true)
         .default_size(area.width)
@@ -241,6 +244,70 @@ fn area(
     if ui.input(|input| input.pointer.primary_down()) {
         panels.layout.area_mut(side).width = shown.response.rect.width();
     }
+    if let Some(response) = ui.ctx().read_response(handle) {
+        let width = shown.response.rect.width();
+        response.widget_info(|| {
+            egui::WidgetInfo::slider(
+                true,
+                f64::from(width.round()),
+                tr(match side {
+                    Side::Left => "dock-width-left",
+                    Side::Right => "dock-width-right",
+                }),
+            )
+        });
+    }
+}
+
+/// Widens or narrows the area by a step for each Left or Right pressed while
+/// its resize handle has the focus: from the keyboard, what dragging the
+/// handle does.
+fn resize_from_keys(ctx: &egui::Context, panels: &mut Panels, side: Side, id: Id, handle: Id) {
+    const STEP: f32 = 16.0;
+    if !ctx.memory(|memory| memory.has_focus(handle)) {
+        return;
+    }
+    let mut growth = 0.0;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let &egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            let outwards = match (key, side) {
+                (egui::Key::ArrowRight, Side::Left) | (egui::Key::ArrowLeft, Side::Right) => 1.0,
+                (egui::Key::ArrowLeft, Side::Left) | (egui::Key::ArrowRight, Side::Right) => -1.0,
+                _ => return true,
+            };
+            if !modifiers.is_none() {
+                return true;
+            }
+            if pressed {
+                growth += outwards * STEP;
+            }
+            false
+        });
+    });
+    if growth == 0.0 {
+        return;
+    }
+    // The arrow moved the focus too before this frame's widgets.
+    ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else {
+        return;
+    };
+    let width = (state.outer_rect.width() + growth).clamp(*WIDTHS.start(), *WIDTHS.end());
+    match side {
+        Side::Left => state.outer_rect.max.x = state.outer_rect.min.x + width,
+        Side::Right => state.outer_rect.min.x = state.outer_rect.max.x - width,
+    }
+    ctx.data_mut(|data| data.insert_persisted(id, state));
+    panels.layout.area_mut(side).width = width;
 }
 
 /// Keeps how far down from `top` the group fronted by `front` reached,
@@ -449,6 +516,8 @@ fn move_menu(ui: &mut Ui, panels: &mut Panels, holder: Holder, moved: &[Panel]) 
     ] {
         if !here && ui.button(tr(key)).clicked() {
             panels.docks.chosen = Some((moved.to_vec(), place));
+            // Chosen with Space or Enter too, which egui does not close on.
+            ui.close();
         }
     }
 }

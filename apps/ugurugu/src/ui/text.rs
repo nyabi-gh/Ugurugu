@@ -42,10 +42,10 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         .width(ui.available_width())
         .height(320.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(&mut family, None, tr("text-font-default"));
+            widgets::choice(ui, &mut family, None, tr("text-font-default"));
             for name in canvas.font_families().to_vec() {
                 let chosen = Some(name.clone());
-                ui.selectable_value(&mut family, chosen, name);
+                widgets::choice(ui, &mut family, chosen, name);
             }
         });
     if family != canvas.session().text.family {

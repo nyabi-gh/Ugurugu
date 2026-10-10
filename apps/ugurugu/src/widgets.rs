@@ -376,3 +376,18 @@ pub fn check_row(ui: &mut Ui, label: &str, name: &str, checked: &mut bool) -> Re
     })
     .inner
 }
+
+/// An item of a drop-down list that closes the list when chosen. egui closes
+/// a popup only on a pointer click, and left it open after Space or Enter.
+pub fn choice<T: PartialEq>(
+    ui: &mut Ui,
+    current: &mut T,
+    value: T,
+    text: impl Into<egui::WidgetText>,
+) -> Response {
+    let response = ui.selectable_value(current, value, text);
+    if response.clicked() {
+        ui.close();
+    }
+    response
+}

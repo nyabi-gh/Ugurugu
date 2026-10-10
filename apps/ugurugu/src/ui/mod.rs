@@ -10,12 +10,16 @@ mod actions;
 mod brushes;
 mod color;
 mod dock;
+mod focus;
 mod history;
+#[cfg(test)]
+mod keyboard;
 mod layers;
 mod resize;
 mod restyle;
 mod settings;
 mod text;
+mod window;
 
 use crate::i18n::args;
 use std::sync::Arc;
@@ -43,7 +47,7 @@ use crate::widgets;
 #[derive(Default)]
 pub struct Panels {
     pub layers: layers::LayerDock,
-    color: color::ColorDock,
+    pub color: color::ColorDock,
     presets: brushes::Presets,
     /// Where the panels are, and whether they and the animation bar are
     /// open.
@@ -68,6 +72,9 @@ pub struct Panels {
     settings: Option<settings::Dialog>,
     /// Which action each key runs.
     pub keys: Keymap,
+    focus: focus::Return,
+    /// The menu titles' ids, from the last frame.
+    menus: [Option<egui::Id>; 5],
 }
 
 impl Panels {
@@ -91,7 +98,8 @@ impl Panels {
 }
 
 pub use actions::shortcuts;
-pub use dock::{areas as dock_areas, floating as dock_floating};
+use dock::{areas as dock_areas, floating as dock_floating};
+pub use window::{Parts, Shown, window};
 
 fn report_bool(result: Result<bool, EditError>) {
     if let Err(error) = result {
@@ -99,6 +107,9 @@ fn report_bool(result: Result<bool, EditError>) {
     }
 }
 
+/// The menus. From the keyboard, as in Windows: F10 goes to the first title,
+/// Alt and a title's letter opens that menu, Down opens the focused one, and
+/// Left and Right go to the next menu while one is open.
 pub fn menu_bar(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
@@ -106,17 +117,82 @@ pub fn menu_bar(
     clipboard: &mut Clipboard,
     panels: &mut Panels,
 ) {
+    let (go_to, open) = menu_keys(ui.ctx(), &panels.menus);
     let mut chosen = None;
     egui::MenuBar::new().ui(ui, |ui| {
-        for (title, entries) in actions::MENUS {
-            ui.menu_button(tr(title), |ui| {
+        for (index, (title, _, entries)) in actions::MENUS.iter().enumerate() {
+            let title = ui.menu_button(tr(title), |ui| {
                 chosen = chosen.or(actions::items(ui, entries, canvas, panels));
             });
+            let id = title.response.id;
+            panels.menus[index] = Some(id);
+            if go_to == Some(index) {
+                title.response.request_focus();
+                // Not also to the control the arrow points at.
+                ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                let popup = egui::Popup::default_response_id(&title.response);
+                if open && !egui::Popup::is_id_open(ui.ctx(), popup) {
+                    egui::Popup::open_id(ui.ctx(), popup);
+                } else if !open {
+                    egui::Popup::close_all(ui.ctx());
+                }
+            }
         }
     });
     if let Some(action) = chosen {
         actions::run(action, canvas, files, clipboard, panels);
     }
+}
+
+/// The menu the keys of this frame go to, if any, and whether to open it.
+/// Takes those keys.
+fn menu_keys(ctx: &egui::Context, menus: &[Option<egui::Id>; 5]) -> (Option<usize>, bool) {
+    if ctx.text_edit_focused() || ctx.memory(|memory| memory.top_modal_layer().is_some()) {
+        return (None, false);
+    }
+    let popup_of = |id: egui::Id| egui::Popup::is_id_open(ctx, id.with("popup"));
+    let open_menu = menus.iter().position(|id| id.is_some_and(popup_of));
+    let focused = ctx.memory(|memory| memory.focused());
+    let focused_menu = menus.iter().position(|id| id.is_some() && *id == focused);
+    let count = menus.len();
+    let mut found = (None, false);
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let &egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            let to = if modifiers.is_none() {
+                match (key, open_menu, focused_menu) {
+                    (egui::Key::F10, ..) => Some((0, false)),
+                    (egui::Key::ArrowRight, Some(menu), _) => Some(((menu + 1) % count, true)),
+                    (egui::Key::ArrowLeft, Some(menu), _) => {
+                        Some(((menu + count - 1) % count, true))
+                    }
+                    (egui::Key::ArrowDown, None, Some(menu)) => Some((menu, true)),
+                    _ => None,
+                }
+            } else if modifiers.alt && !modifiers.ctrl && !modifiers.shift && !modifiers.mac_cmd {
+                actions::MENUS
+                    .iter()
+                    .position(|(_, letter, _)| *letter == key)
+                    .map(|menu| (menu, true))
+            } else {
+                None
+            };
+            let Some((menu, open)) = to else {
+                return true;
+            };
+            found = (Some(menu), open);
+            false
+        });
+    });
+    found
 }
 
 /// The canvas or image size, stroke properties or settings dialog, while one
@@ -832,9 +908,9 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         .width(ui.available_width())
         .selected_text(scope(panels.wobble_layer))
         .show_ui(ui, |ui| {
-            ui.selectable_value(&mut panels.wobble_layer, false, scope(false));
+            widgets::choice(ui, &mut panels.wobble_layer, false, scope(false));
             ui.add_enabled_ui(layer_wobble.is_some(), |ui| {
-                ui.selectable_value(&mut panels.wobble_layer, true, scope(true));
+                widgets::choice(ui, &mut panels.wobble_layer, true, scope(true));
             });
         })
         .response
@@ -904,7 +980,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
                     MotionStyle::Smooth,
                     MotionStyle::Stepped,
                 ] {
-                    ui.selectable_value(&mut motion.style, style, style_name(style));
+                    widgets::choice(ui, &mut motion.style, style, style_name(style));
                 }
             })
             .response

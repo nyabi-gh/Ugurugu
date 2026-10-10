@@ -100,12 +100,14 @@ pub const WINDOW: &[Entry] = &[
     Do(A::ResetLayout),
 ];
 
-pub const MENUS: [(&str, &[Entry]); 5] = [
-    ("menu-file", FILE),
-    ("menu-edit", EDIT),
-    ("menu-view", VIEW),
-    ("menu-tools", TOOLS),
-    ("menu-window", WINDOW),
+/// Each menu's title, the letter that opens it with Alt (2.2.13's "&File"
+/// and "파일(&F)"), and its entries.
+pub const MENUS: [(&str, egui::Key, &[Entry]); 5] = [
+    ("menu-file", egui::Key::F, FILE),
+    ("menu-edit", egui::Key::E, EDIT),
+    ("menu-view", egui::Key::V, VIEW),
+    ("menu-tools", egui::Key::T, TOOLS),
+    ("menu-window", egui::Key::W, WINDOW),
 ];
 
 pub fn tool(action: Action) -> Option<Tool> {
@@ -224,6 +226,9 @@ pub fn items(
         }
         if response.clicked() {
             chosen = Some(action);
+            // egui closes a menu only on a pointer click, not on Space or
+            // Enter.
+            ui.close();
         }
     }
     chosen
@@ -325,22 +330,28 @@ pub fn shortcuts(
     panels: &mut Panels,
     typed: &[Chord],
 ) {
-    for (chord, action) in take_pressed(ctx, &panels.keys, typed) {
+    for (chord, action) in take_pressed(ctx, &panels.keys, typed, canvas) {
         // The IME test counts these.
         tracing::debug!("canvas {}", chord.text());
-        if enabled(action, canvas) {
-            run(action, canvas, files, clipboard, panels);
-        }
+        run(action, canvas, files, clipboard, panels);
     }
 }
 
-/// Takes the keys of actions out of this frame's input, unless a text field,
-/// a dialog or an open menu has the keyboard.
-fn take_pressed(ctx: &egui::Context, keys: &Keymap, typed: &[Chord]) -> Vec<(Chord, Action)> {
+/// Takes the keys of actions that can run out of this frame's input, unless
+/// a text field, a dialog or an open menu has the keyboard. The key of one
+/// that cannot run is left to the focused control, as 2.2.13's disabled
+/// actions leave theirs: Enter, which applies a transform, presses a button.
+fn take_pressed(
+    ctx: &egui::Context,
+    keys: &Keymap,
+    typed: &[Chord],
+    canvas: &Canvas,
+) -> Vec<(Chord, Action)> {
     // Not `egui_wants_keyboard_input`, which also holds for a focused row or
     // button and would leave the shortcuts dead after clicking a layer. An
     // open menu closes on Escape, which would otherwise be the canvas's.
     if ctx.text_edit_focused()
+        || was_typing(ctx)
         || ctx.memory(|memory| memory.top_modal_layer().is_some())
         || egui::Popup::is_any_open(ctx)
     {
@@ -361,19 +372,36 @@ fn take_pressed(ctx: &egui::Context, keys: &Keymap, typed: &[Chord]) -> Vec<(Cho
                 return true;
             };
             let chord = Chord::new(modifiers, key);
-            let Some(action) = keys.action(chord) else {
+            let Some(action) = keys.action(chord).filter(|&action| enabled(action, canvas)) else {
                 return true;
             };
             pressed.push((chord, action));
             false
         });
     });
-    pressed.extend(
-        typed
-            .iter()
-            .filter_map(|&chord| Some((chord, keys.action(chord)?))),
-    );
+    pressed.extend(typed.iter().filter_map(|&chord| {
+        let action = keys
+            .action(chord)
+            .filter(|&action| enabled(action, canvas))?;
+        Some((chord, action))
+    }));
     pressed
+}
+
+fn typing_id() -> egui::Id {
+    egui::Id::new("text field focused")
+}
+
+/// Keeps whether a text field has the focus at the end of a frame.
+pub fn end_frame(ctx: &egui::Context) {
+    let typing = ctx.text_edit_focused();
+    ctx.data_mut(|data| data.insert_temp(typing_id(), typing));
+}
+
+/// Whether a text field had the focus before this frame: Escape takes it
+/// away before the frame's widgets, and was the canvas's too.
+fn was_typing(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp(typing_id())).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -384,7 +412,7 @@ mod tests {
     fn the_menus_hold_every_action_but_escape_once() {
         let mut held: Vec<Action> = MENUS
             .iter()
-            .flat_map(|(_, entries)| entries.iter())
+            .flat_map(|(_, _, entries)| entries.iter())
             .filter_map(|entry| match entry {
                 Do(action) => Some(*action),
                 Gap => None,
@@ -406,6 +434,7 @@ mod tests {
     /// the shortcuts took from it.
     fn frame(
         ctx: &egui::Context,
+        canvas: &Canvas,
         keys: &[(egui::Modifiers, egui::Key)],
         typed: &[Chord],
         focus_text: bool,
@@ -422,7 +451,7 @@ mod tests {
         }
         let mut taken = Vec::new();
         let mut output = ctx.run_ui(input, |ui| {
-            taken = take_pressed(ui.ctx(), &Keymap::default(), typed)
+            taken = take_pressed(ui.ctx(), &Keymap::default(), typed, canvas)
                 .into_iter()
                 .map(|(_, action)| action)
                 .collect();
@@ -439,9 +468,19 @@ mod tests {
         taken
     }
 
+    /// A canvas whose selection is being transformed, so the keys below
+    /// can all run.
+    fn transforming() -> Canvas {
+        let mut canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
+        canvas.edit(Session::select_all);
+        canvas.begin_transform();
+        canvas
+    }
+
     #[test]
     fn a_text_field_keeps_the_keys() {
         let ctx = egui::Context::default();
+        let canvas = transforming();
         let command = egui::Modifiers::COMMAND;
         let none = egui::Modifiers::NONE;
         let keys = [
@@ -451,15 +490,61 @@ mod tests {
         ];
         let copy = [Chord::new(command, egui::Key::C)];
         // Focus moves at the end of a frame.
-        frame(&ctx, &[], &[], true);
-        assert_eq!(frame(&ctx, &keys, &copy, true), []);
-        frame(&ctx, &[], &[], false);
+        frame(&ctx, &canvas, &[], &[], true);
+        assert_eq!(frame(&ctx, &canvas, &keys, &copy, true), []);
+        frame(&ctx, &canvas, &[], &[], false);
         assert_eq!(
-            frame(&ctx, &keys, &copy, false),
+            frame(&ctx, &canvas, &keys, &copy, false),
             [A::Undo, A::ApplyTransform, A::Brush, A::Copy]
         );
         // Nor do they reach the canvas while a menu is open.
         egui::Popup::open_id(&ctx, egui::Id::new("menu"));
-        assert_eq!(frame(&ctx, &keys, &copy, false), []);
+        assert_eq!(frame(&ctx, &canvas, &keys, &copy, false), []);
+    }
+
+    #[test]
+    fn the_key_of_an_action_that_cannot_run_is_left() {
+        let ctx = egui::Context::default();
+        let canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
+        let none = egui::Modifiers::NONE;
+        let keys = [
+            (egui::Modifiers::COMMAND, egui::Key::Z),
+            (none, egui::Key::Enter),
+            (none, egui::Key::Delete),
+            (none, egui::Key::B),
+        ];
+        let copy = [Chord::new(egui::Modifiers::COMMAND, egui::Key::C)];
+        let mut left = Vec::new();
+        let mut taken = Vec::new();
+        let mut input = egui::RawInput::default();
+        for &(modifiers, key) in &keys {
+            input.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            });
+        }
+        let mut output = ctx.run_ui(input, |ui| {
+            taken = take_pressed(ui.ctx(), &Keymap::default(), &copy, &canvas)
+                .into_iter()
+                .map(|(_, action)| action)
+                .collect();
+            left = ui.input(|input| {
+                [
+                    egui::Key::Z,
+                    egui::Key::Enter,
+                    egui::Key::Delete,
+                    egui::Key::B,
+                ]
+                .into_iter()
+                .filter(|&key| input.key_pressed(key))
+                .collect::<Vec<_>>()
+            });
+        });
+        output.textures_delta.clear();
+        assert_eq!(taken, [A::Brush]);
+        assert_eq!(left, [egui::Key::Z, egui::Key::Enter, egui::Key::Delete]);
     }
 }
