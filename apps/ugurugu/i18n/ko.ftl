@@ -170,6 +170,9 @@ dock-close = 패널 닫기
 dock-expand-area = 패널 영역 펼치기
 dock-collapse-area = 패널 영역 접기
 dock-handle = { $panel } 패널 이동 손잡이
+dock-move-left = 왼쪽으로 옮기기
+dock-move-right = 오른쪽으로 옮기기
+dock-float = 캔버스 위에 띄우기
 
 # Tool settings
 tool-settings = 도구 설정

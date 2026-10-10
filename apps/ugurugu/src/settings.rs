@@ -20,6 +20,7 @@ use serde_json::{Map, Value};
 use ugu_core::document::limits;
 use ugu_session::Tools;
 
+use crate::layout::Layout;
 use crate::shortcuts::Shortcuts;
 
 pub mod preset;
@@ -78,6 +79,8 @@ pub struct Settings {
     pub tools: Tools,
     /// The shortcuts changed from their defaults.
     pub shortcuts: Shortcuts,
+    /// Where the panels are.
+    pub layout: Layout,
     /// Keys this version does not know, kept to be written back.
     unknown: Map<String, Value>,
 }
@@ -92,6 +95,7 @@ impl Default for Settings {
             export_edge: None,
             tools: Tools::default(),
             shortcuts: Shortcuts::default(),
+            layout: Layout::default(),
             unknown: Map::new(),
         }
     }
@@ -100,12 +104,13 @@ impl Default for Settings {
 impl Settings {
     /// What the settings dialog restores: its own settings, shortcuts
     /// included, as on a fresh install. The tools, the colour history and
-    /// what this version cannot show stay, as in 2.2.13.
+    /// panel layout and what this version cannot show stay, as in 2.2.13.
     pub fn restored(&self) -> Self {
         Self {
             export_edge: self.export_edge,
             tools: self.tools.clone(),
             shortcuts: self.shortcuts.restored(),
+            layout: self.layout.clone(),
             unknown: self.unknown.clone(),
             ..Self::default()
         }
@@ -181,6 +186,9 @@ impl Settings {
         if let Some(value) = object.remove("shortcuts") {
             settings.shortcuts = Shortcuts::parse(&value);
         }
+        if let Some(value) = object.remove("panels") {
+            settings.layout = Layout::parse(&value);
+        }
         if !object.is_empty() {
             let keys: Vec<&String> = object.keys().collect();
             tracing::info!(?keys, "settings this version does not use are kept");
@@ -221,6 +229,9 @@ impl Settings {
         }
         if let Some(shortcuts) = self.shortcuts.to_json() {
             object.insert("shortcuts".to_owned(), shortcuts);
+        }
+        if self.layout != Layout::default() {
+            object.insert("panels".to_owned(), self.layout.to_json());
         }
         let mut text =
             serde_json::to_string_pretty(&Value::Object(object)).expect("settings are plain JSON");
@@ -487,6 +498,14 @@ mod tests {
                     .assign(crate::shortcuts::Action::Fit, Some(fit))
                     .unwrap();
                 shortcuts
+            },
+            layout: {
+                let mut layout = Layout::default();
+                layout.move_to(
+                    crate::layout::Panel::Layers,
+                    crate::layout::Place::Float([12.0, 34.0]),
+                );
+                layout
             },
             unknown: Map::new(),
         }

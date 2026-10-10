@@ -168,6 +168,9 @@ dock-close | PaletteDockTitleBar | Close panel
 dock-expand-area | PaletteDockTitleBar | Expand panel dock
 dock-collapse-area | PaletteDockTitleBar | Collapse panel dock
 dock-handle | PaletteDockTitleBar | %1 panel drag handle | args=panel
+dock-move-left | - | Move to the left side | 왼쪽으로 옮기기 | 左側へ移動
+dock-move-right | - | Move to the right side | 오른쪽으로 옮기기 | 右側へ移動
+dock-float | - | Float over the canvas | 캔버스 위에 띄우기 | キャンバスの上に浮かべる
 
 # Tool settings
 tool-settings | ugurugu::ToolDock | Tool settings

@@ -665,9 +665,6 @@ impl RenderThread {
                     .fill(fill)
                     .inner_margin(egui::Margin::symmetric(x, y))
             };
-            let dock = egui::Frame::new()
-                .fill(theme::PANEL)
-                .inner_margin(egui::Margin::same(8));
             egui::Panel::top("menu")
                 .frame(bar(theme::CHROME, 6, 2))
                 .show_separator_line(false)
@@ -725,51 +722,11 @@ impl RenderThread {
                 .exact_size(48.0)
                 .frame(bar(theme::CHROME, 4, 8))
                 .show(ui, |ui| ui::rail(ui, canvas, &panels.keys));
-            let left = panels.shown;
-            if left.tool_settings || left.color || left.color_history {
-                egui::Panel::left("tool settings")
-                    .resizable(true)
-                    .default_size(260.0)
-                    .size_range(150.0..=460.0)
-                    .frame(dock)
-                    .show(ui, |ui| {
-                        if panels.shown.tool_settings {
-                            ui::tool_settings(ui, canvas, panels);
-                            ui.separator();
-                        }
-                        if panels.shown.color {
-                            ui::color(ui, canvas, panels);
-                        }
-                        if panels.shown.color_history {
-                            if left.color {
-                                ui.separator();
-                            }
-                            ui::color_history(ui, canvas, panels);
-                        }
-                    });
-            }
-            let shown = panels.shown;
-            if shown.wobble || shown.layers || *diagnostics {
-                egui::Panel::right("docks")
-                    .resizable(true)
-                    .default_size(300.0)
-                    .size_range(150.0..=460.0)
-                    .frame(dock)
-                    .show(ui, |ui| {
-                        if shown.wobble {
-                            ui::wobble(ui, canvas, panels);
-                            ui.separator();
-                        }
-                        if *diagnostics {
-                            ime.show(ui);
-                            ui.separator();
-                        }
-                        if shown.layers {
-                            ui::layers(ui, canvas, panels);
-                        }
-                    });
-            }
-            if panels.shown.animation_bar {
+            let mut probe = |ui: &mut egui::Ui| ime.show(ui);
+            let extra: Option<&mut dyn FnMut(&mut egui::Ui)> =
+                if *diagnostics { Some(&mut probe) } else { None };
+            ui::dock_areas(ui, canvas, panels, extra);
+            if panels.layout.animation_bar {
                 egui::Panel::bottom("animation bar")
                     .frame(
                         egui::Frame::new()
@@ -804,11 +761,16 @@ impl RenderThread {
                             ])
                         });
                 });
+            ui::dock_floating(ui, canvas, panels);
         });
         // Tools change through the panels, shortcuts and the canvas.
         let tools = self.canvas.session().tools();
         if tools != self.settings.get().tools {
             self.settings.change(|settings| settings.tools = tools);
+        }
+        if self.panels.layout != self.settings.get().layout {
+            let layout = self.panels.layout.clone();
+            self.settings.change(|settings| settings.layout = layout);
         }
         let laid_out = Instant::now();
         let mut platform_output = output.platform_output;

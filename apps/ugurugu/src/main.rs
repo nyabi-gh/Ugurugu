@@ -15,6 +15,7 @@ mod icons;
 mod ime_probe;
 mod input;
 mod latency;
+mod layout;
 mod recovery;
 mod render;
 mod settings;

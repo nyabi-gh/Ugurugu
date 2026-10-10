@@ -12,7 +12,8 @@ use crate::files::{self, Files};
 use crate::i18n::tr;
 use crate::shortcuts::{Action, Chord, Keymap};
 
-use super::{Panels, Shown, report_bool, resize, restyle, settings};
+use super::{Panels, report_bool, resize, restyle, settings};
+use crate::layout::{Layout, Panel};
 
 pub enum Entry {
     Do(Action),
@@ -120,17 +121,22 @@ pub fn tool(action: Action) -> Option<Tool> {
     })
 }
 
-/// A panel the Window menu shows and hides.
-fn panel(action: Action, shown: &mut Shown) -> Option<&mut bool> {
+/// What the Window menu shows and hides: a panel, or with `None` the
+/// animation bar.
+fn panel(action: Action) -> Option<Option<Panel>> {
     Some(match action {
-        A::AnimationBar => &mut shown.animation_bar,
-        A::ToolSettings => &mut shown.tool_settings,
-        A::WobbleDock => &mut shown.wobble,
-        A::ColorDock => &mut shown.color,
-        A::ColorHistory => &mut shown.color_history,
-        A::Layers => &mut shown.layers,
+        A::AnimationBar => None,
+        A::ToolSettings => Some(Panel::ToolSettings),
+        A::WobbleDock => Some(Panel::Wobble),
+        A::ColorDock => Some(Panel::Color),
+        A::ColorHistory => Some(Panel::ColorHistory),
+        A::Layers => Some(Panel::Layers),
         _ => return None,
     })
+}
+
+fn is_open(layout: &Layout, panel: Option<Panel>) -> bool {
+    panel.map_or(layout.animation_bar, |panel| layout.is_open(panel))
 }
 
 /// Whether it can run now. A key runs it only then, as 2.2.13's disabled
@@ -162,13 +168,12 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
 }
 
 /// Whether a menu shows it as on, for those that turn something on.
-fn checked(action: Action, canvas: &Canvas, shown: &Shown) -> Option<bool> {
+fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     if let Some(tool) = tool(action) {
         return Some(canvas.session().tool() == tool);
     }
-    let mut shown = *shown;
-    if let Some(on) = panel(action, &mut shown) {
-        return Some(*on);
+    if let Some(panel) = panel(action) {
+        return Some(is_open(layout, panel));
     }
     (action == A::Animate).then(|| canvas.is_playing())
 }
@@ -205,7 +210,7 @@ pub fn items(
             continue;
         };
         let text = label(action, canvas);
-        let mut button = match checked(action, canvas, &panels.shown) {
+        let mut button = match checked(action, canvas, &panels.layout) {
             Some(on) => egui::Button::selectable(on, text),
             None => egui::Button::new(text),
         };
@@ -235,8 +240,12 @@ pub fn run(
         canvas.edit(|session| session.set_tool(tool));
         return;
     }
-    if let Some(on) = panel(action, &mut panels.shown) {
-        *on = !*on;
+    if let Some(panel) = panel(action) {
+        let open = !is_open(&panels.layout, panel);
+        match panel {
+            Some(panel) => panels.layout.set_open(panel, open),
+            None => panels.layout.animation_bar = open,
+        }
         return;
     }
     let canvas_size = canvas.session().document().canvas;
@@ -287,7 +296,7 @@ pub fn run(
         A::ActualPixels => canvas.zoom_to(1.0),
         A::Fit => canvas.fit(),
         A::Animate => canvas.toggle_playback(),
-        A::ResetLayout => panels.shown = Shown::default(),
+        A::ResetLayout => panels.set_layout(Layout::default()),
         A::Brush
         | A::Eraser
         | A::Select

@@ -9,6 +9,7 @@
 mod actions;
 mod brushes;
 mod color;
+mod dock;
 mod history;
 mod layers;
 mod resize;
@@ -31,6 +32,7 @@ use crate::clipboard::Clipboard;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
 use crate::icons::{self, Glyph};
+use crate::layout::Layout;
 use crate::settings::Store;
 use crate::shortcuts::{Action, Keymap};
 use crate::theme;
@@ -43,7 +45,10 @@ pub struct Panels {
     pub layers: layers::LayerDock,
     color: color::ColorDock,
     presets: brushes::Presets,
-    pub shown: Shown,
+    /// Where the panels are, and whether they and the animation bar are
+    /// open.
+    pub layout: Layout,
+    docks: dock::Docks,
     /// Frames and frames per second being edited.
     animation: Option<(f32, f32)>,
     /// Wobble being edited, from a drag or typing.
@@ -65,31 +70,13 @@ pub struct Panels {
     pub keys: Keymap,
 }
 
-/// Panels the Window menu opens and closes.
-#[derive(Clone, Copy)]
-pub struct Shown {
-    pub tool_settings: bool,
-    pub wobble: bool,
-    pub color: bool,
-    pub color_history: bool,
-    pub layers: bool,
-    pub animation_bar: bool,
-}
-
-impl Default for Shown {
-    fn default() -> Self {
-        Self {
-            tool_settings: true,
-            wobble: true,
-            color: true,
-            color_history: true,
-            layers: true,
-            animation_bar: true,
-        }
-    }
-}
-
 impl Panels {
+    /// Puts `layout` in place of the one shown.
+    pub fn set_layout(&mut self, layout: Layout) {
+        self.layout = layout;
+        self.docks.replaced();
+    }
+
     /// Reports a refused edit until the next edit that goes through.
     fn report(&mut self, result: Result<Outcome, EditError>) {
         match result {
@@ -104,6 +91,7 @@ impl Panels {
 }
 
 pub use actions::shortcuts;
+pub use dock::{areas as dock_areas, floating as dock_floating};
 
 fn report_bool(result: Result<bool, EditError>) {
     if let Err(error) = result {
@@ -157,6 +145,7 @@ pub fn apply_settings(
     panels: &mut Panels,
 ) {
     settings::restore_tools(store.get(), canvas);
+    panels.set_layout(store.get().layout.clone());
     settings::apply(ctx, store.get(), canvas, files, &mut panels.keys);
 }
 
@@ -217,25 +206,6 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     }
 }
 
-/// A dock's header: its name, and a button that closes it.
-fn dock_header(ui: &mut egui::Ui, title: &str, open: &mut bool) {
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(title)
-                .size(theme::SMALL)
-                .color(theme::MUTED),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let close = ui
-                .add(egui::Button::new(egui::RichText::new("×").color(theme::MUTED)).frame(false))
-                .on_hover_text(tr("dock-close"));
-            if close.clicked() {
-                *open = false;
-            }
-        });
-    });
-}
-
 /// A slider with its number field, on one row under a field label.
 fn slider_row(
     ui: &mut egui::Ui,
@@ -260,7 +230,6 @@ fn slider_row(
 }
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    dock_header(ui, tr("tool-settings"), &mut panels.shown.tool_settings);
     let tool = canvas.session().tool();
     ui.add_space(4.0);
     match tool {
@@ -845,7 +814,6 @@ fn ants(ui: &mut egui::Ui, canvas: &Canvas, path: &[[f64; 2]], offset: f32) {
 }
 
 pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    dock_header(ui, tr("wobble-dock"), &mut panels.shown.wobble);
     let document = canvas.session().document();
     let current = canvas.session().current_layer();
     let layer_wobble = match document.layer(current).map(|layer| &layer.kind) {
@@ -1092,17 +1060,14 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
 }
 
 pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    dock_header(ui, tr("color-dock"), &mut panels.shown.color);
     panels.color.show(ui, canvas);
 }
 
-pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    dock_header(ui, tr("color-history"), &mut panels.shown.color_history);
+pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas) {
     history::show(ui, canvas);
 }
 
 pub fn layers(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    dock_header(ui, tr("layers"), &mut panels.shown.layers);
     let Panels {
         layers, refusal, ..
     } = panels;
@@ -1212,7 +1177,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
         let tip = widgets::with_key(tr("bar-hide-tip"), &panels.keys.text(Action::AnimationBar));
         let hide = widgets::text_icon_button(ui, Glyph::MoveDown, tr("bar-hide"), &tip);
         if hide.clicked() {
-            panels.shown.animation_bar = false;
+            panels.layout.animation_bar = false;
         }
     });
 }

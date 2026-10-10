@@ -170,6 +170,9 @@ dock-close = Close panel
 dock-expand-area = Expand panel dock
 dock-collapse-area = Collapse panel dock
 dock-handle = { $panel } panel drag handle
+dock-move-left = Move to the left side
+dock-move-right = Move to the right side
+dock-float = Float over the canvas
 
 # Tool settings
 tool-settings = Tool settings

@@ -170,6 +170,9 @@ dock-close = パネルを閉じる
 dock-expand-area = パレットドックを展開
 dock-collapse-area = パレットドックを折りたたむ
 dock-handle = { $panel }パネルの移動ハンドル
+dock-move-left = 左側へ移動
+dock-move-right = 右側へ移動
+dock-float = キャンバスの上に浮かべる
 
 # Tool settings
 tool-settings = ツール設定
