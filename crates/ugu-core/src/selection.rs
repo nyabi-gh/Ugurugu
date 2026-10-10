@@ -52,79 +52,91 @@ fn straight(pixel: [u8; 4]) -> [u8; 4] {
     crate::ops::Rgba8::from_premultiplied(pixel).0
 }
 
-/// Pixels as one byte each over a whole canvas, for combining.
+/// Pixels as bits over a whole canvas, each row padded to whole bytes as
+/// in a `Mask`, for combining.
 struct Canvas {
     size: [usize; 2],
-    pixels: Vec<bool>,
+    row_bytes: usize,
+    bits: Vec<u8>,
 }
 
 impl Canvas {
     fn empty(size: [u32; 2]) -> Self {
         let size = size.map(|edge| edge as usize);
+        let row_bytes = size[0].div_ceil(8);
         Self {
             size,
-            pixels: vec![false; size[0] * size[1]],
+            row_bytes,
+            bits: vec![0; row_bytes * size[1]],
         }
     }
 
     fn of(selection: &Selection) -> Self {
         let mut canvas = Self::empty(selection.canvas);
-        let [left, top, width, height] = selection.mask.bounds;
-        let row_bytes = Mask::row_bytes(width);
-        for row in 0..height as usize {
-            let bits = &selection.mask.bits[row * row_bytes..(row + 1) * row_bytes];
-            let start = (top as usize + row) * canvas.size[0] + left as usize;
-            for column in 0..width as usize {
-                canvas.pixels[start + column] = bits[column / 8] & (0x80 >> (column % 8)) != 0;
+        let [left, top, width, _] = selection.mask.bounds;
+        let mask_bytes = Mask::row_bytes(width);
+        let shift = left as usize % 8;
+        for (row, source) in selection.mask.bits.chunks_exact(mask_bytes).enumerate() {
+            let at = (top as usize + row) * canvas.row_bytes + left as usize / 8;
+            let out = &mut canvas.bits[at..(top as usize + row + 1) * canvas.row_bytes];
+            // The mask's bits past its width are clear, so they set nothing.
+            for (index, &byte) in source.iter().enumerate() {
+                out[index] |= byte >> shift;
+                if shift != 0
+                    && let Some(next) = out.get_mut(index + 1)
+                {
+                    *next |= byte << (8 - shift);
+                }
             }
         }
         canvas
     }
 
+    fn get(&self, x: usize, y: usize) -> bool {
+        self.bits[y * self.row_bytes + x / 8] & (0x80 >> (x % 8)) != 0
+    }
+
     /// Sets the pixels from `from` to `to` (exclusive) on row `y`.
     fn fill(&mut self, y: usize, from: usize, to: usize) {
-        let start = y * self.size[0];
-        self.pixels[start + from..start + to].fill(true);
+        if from >= to {
+            return;
+        }
+        let row = &mut self.bits[y * self.row_bytes..(y + 1) * self.row_bytes];
+        let [first, last] = [from / 8, (to - 1) / 8];
+        let head = 0xffu8 >> (from % 8);
+        let tail = 0xffu8 << (7 - (to - 1) % 8);
+        if first == last {
+            row[first] |= head & tail;
+        } else {
+            row[first] |= head;
+            row[first + 1..last].fill(0xff);
+            row[last] |= tail;
+        }
+    }
+
+    /// Flips every pixel, leaving the padding after each row clear.
+    fn invert(&mut self) {
+        let width = self.size[0];
+        let padding = if width.is_multiple_of(8) {
+            0xff
+        } else {
+            0xffu8 << (8 - width % 8)
+        };
+        for row in self.bits.chunks_exact_mut(self.row_bytes) {
+            for byte in row.iter_mut() {
+                *byte = !*byte;
+            }
+            if let Some(last) = row.last_mut() {
+                *last &= padding;
+            }
+        }
     }
 
     /// The selection of the pixels set; `None` when there are none.
-    fn selection(&self) -> Option<Selection> {
-        let [width, height] = self.size;
-        let rows = (0..height).filter(|&y| self.pixels[y * width..(y + 1) * width].contains(&true));
-        let (top, bottom) = rows.fold((usize::MAX, 0), |(top, _), y| (top.min(y), y + 1));
-        if top >= bottom {
-            return None;
-        }
-        let (mut left, mut right) = (usize::MAX, 0);
-        for y in top..bottom {
-            let row = &self.pixels[y * width..(y + 1) * width];
-            if let Some(first) = row.iter().position(|&set| set) {
-                left = left.min(first);
-                right = right.max(row.iter().rposition(|&set| set).unwrap_or(first) + 1);
-            }
-        }
-        let mask_width = right - left;
-        let row_bytes = Mask::row_bytes(mask_width as i32);
-        let mut bits = vec![0u8; row_bytes * (bottom - top)];
-        for y in top..bottom {
-            let row = &self.pixels[y * width + left..y * width + right];
-            let out = &mut bits[(y - top) * row_bytes..(y - top + 1) * row_bytes];
-            for (column, _) in row.iter().enumerate().filter(|(_, set)| **set) {
-                out[column / 8] |= 0x80 >> (column % 8);
-            }
-        }
-        Some(Selection {
-            canvas: [width as u32, height as u32],
-            mask: Mask {
-                bounds: [
-                    left as i32,
-                    top as i32,
-                    mask_width as i32,
-                    (bottom - top) as i32,
-                ],
-                bits: Arc::from(bits),
-            },
-        })
+    fn selection(self) -> Option<Selection> {
+        let [width, height] = self.size.map(|edge| edge as i32);
+        let canvas = [width as u32, height as u32];
+        tight(canvas, [0, 0, width, height], self.bits)
     }
 }
 
@@ -309,16 +321,15 @@ impl Selection {
         let mut reached = Canvas::empty(canvas);
         let mut pending = vec![[seed_x, seed_y]];
         while let Some([x, y]) = pending.pop() {
-            let row = y * width;
-            if reached.pixels[row + x] || !open(x, y) {
+            if reached.get(x, y) || !open(x, y) {
                 continue;
             }
             let mut left = x;
-            while left > 0 && !reached.pixels[row + left - 1] && open(left - 1, y) {
+            while left > 0 && !reached.get(left - 1, y) && open(left - 1, y) {
                 left -= 1;
             }
             let mut right = x;
-            while right + 1 < width && !reached.pixels[row + right + 1] && open(right + 1, y) {
+            while right + 1 < width && !reached.get(right + 1, y) && open(right + 1, y) {
                 right += 1;
             }
             reached.fill(y, left, right + 1);
@@ -326,12 +337,11 @@ impl Selection {
                 if next >= height {
                     continue;
                 }
-                let row = next * width;
                 let mut x = left;
                 while x <= right {
-                    if !reached.pixels[row + x] && open(x, next) {
+                    if !reached.get(x, next) && open(x, next) {
                         pending.push([x, next]);
-                        while x < right && !reached.pixels[row + x + 1] && open(x + 1, next) {
+                        while x < right && !reached.get(x + 1, next) && open(x + 1, next) {
                             x += 1;
                         }
                     }
@@ -351,40 +361,19 @@ impl Selection {
         transform.inverse()?;
         let [left, top, width, height] = self.mask.bounds;
         let row_bytes = Mask::row_bytes(width);
-        let runs = |row: i32| {
-            let bits = &self.mask.bits[row as usize * row_bytes..(row as usize + 1) * row_bytes];
-            let set = |x: i32| bits[x as usize / 8] & (0x80 >> (x % 8)) != 0;
-            let mut runs = Vec::new();
-            let mut x = 0;
-            while x < width {
-                if bits[x as usize / 8] == 0 && x % 8 == 0 {
-                    x += 8;
-                    continue;
-                }
-                if !set(x) {
-                    x += 1;
-                    continue;
-                }
-                let start = x;
-                while x < width && set(x) {
-                    x += 1;
-                }
-                runs.push([start, x]);
-            }
-            runs
-        };
+        let bits = |row: i32| &self.mask.bits[row as usize * row_bytes..(row as usize + 1) * row_bytes];
         let mut pixels = Canvas::empty(self.canvas);
         let [canvas_width, canvas_height] = self.canvas.map(f64::from);
         let mut row = 0;
         while row < height {
             // Rows with the same runs make rectangles, moved as one.
-            let same = runs(row);
+            let same = bits(row);
             let mut end = row + 1;
-            while end < height && runs(end) == same {
+            while end < height && bits(end) == same {
                 end += 1;
             }
             let [y0, y1] = [top + row, top + end].map(f64::from);
-            for [from, to] in same {
+            for [from, to] in runs(same, width) {
                 let [x0, x1] = [left + from, left + to].map(f64::from);
                 // Quarter turns land on whole pixels give or take rounding.
                 let snap = |value: f64| {
@@ -424,11 +413,11 @@ impl Selection {
             (_, Some(current), Some(shape)) => {
                 let mut pixels = Canvas::of(current);
                 let other = Canvas::of(&shape);
-                for (pixel, &set) in pixels.pixels.iter_mut().zip(&other.pixels) {
+                for (byte, &set) in pixels.bits.iter_mut().zip(&other.bits) {
                     if how == Combine::Add {
-                        *pixel |= set;
+                        *byte |= set;
                     } else {
-                        *pixel &= !set;
+                        *byte &= !set;
                     }
                 }
                 pixels.selection()
@@ -439,9 +428,7 @@ impl Selection {
     /// The canvas pixels not selected; `None` when every one was.
     pub fn invert(&self) -> Option<Self> {
         let mut pixels = Canvas::of(self);
-        for pixel in &mut pixels.pixels {
-            *pixel = !*pixel;
-        }
+        pixels.invert();
         pixels.selection()
     }
 
@@ -569,6 +556,34 @@ impl Selection {
     pub fn outline(&self) -> Vec<Vec<[i32; 2]>> {
         self.mask.outline()
     }
+}
+
+/// The runs of set bits in a row of `width` bits, as from and to
+/// (exclusive).
+fn runs(bits: &[u8], width: i32) -> Vec<[i32; 2]> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (index, &byte) in bits.iter().enumerate() {
+        let at = index as i32 * 8;
+        if (byte == 0 && start.is_none()) || (byte == 0xff && start.is_some()) {
+            continue;
+        }
+        for bit in 0..8 {
+            let set = byte & (0x80 >> bit) != 0;
+            match (set, start) {
+                (true, None) => start = Some(at + bit),
+                (false, Some(from)) => {
+                    runs.push([from, at + bit]);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Some(from) = start {
+        runs.push([from, width]);
+    }
+    runs
 }
 
 /// Copies `width` bits from bit `from` of `source` to the start of `out`,
@@ -960,11 +975,16 @@ mod tests {
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
         for density in [2, 5, 8] {
             let mut pixels = Canvas::empty(CANVAS);
-            for pixel in &mut pixels.pixels {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                *pixel = state % 10 < density;
+            let [width, height] = pixels.size;
+            for y in 0..height {
+                for x in 0..width {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    if state % 10 < density {
+                        pixels.fill(y, x, x + 1);
+                    }
+                }
             }
             let selection = pixels.selection().unwrap();
             let mut traced = Vec::new();
