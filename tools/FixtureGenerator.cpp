@@ -989,6 +989,53 @@ Document depth()
     return document;
 }
 
+// moves: fixture 2 with what M5-15's session did 177 times on its top
+// layer: three strokes, then everything selected and moved by a fraction of
+// a pixel, smoothly (docs/rust/m0-evidence.md section 23).
+std::optional<Document> manyMoves()
+{
+    Document document = mixedWork();
+    const QSize canvas = document.size;
+    const QUuid layerId = document.layers.last().id;
+    document.activeLayerId = layerId;
+    DocumentController controller;
+    QString error;
+    if (!controller.loadDocument(document, &error))
+    {
+        std::fprintf(stderr, "cannot load: %s\n", qPrintable(error));
+        return std::nullopt;
+    }
+    Steps steps{controller};
+    QImage all(canvas, QImage::Format_Grayscale8);
+    all.fill(255);
+    for (int round = 0; round < 177 && steps.ok; ++round)
+    {
+        for (int index = 0; index < 3; ++index)
+        {
+            StrokeShape shape;
+            shape.points = 30;
+            shape.reach = 0.05;
+            Stroke stroke =
+                makeStroke(QStringLiteral("moves/%1/%2").arg(round).arg(index),
+                    canvas,
+                    shape);
+            stroke.color.setAlpha(255);
+            steps.add(layerId, std::move(stroke), "stroke");
+        }
+        steps.check(controller.transformSelection(layerId,
+                        steps.ids(layerId),
+                        QTransform::fromTranslate(48.19, 32.13),
+                        all,
+                        SamplingMode::Smooth),
+            "move everything");
+    }
+    if (!steps.ok)
+    {
+        return std::nullopt;
+    }
+    return controller.document();
+}
+
 // procedural: a fill that floods the layer again on every frame, as files
 // first saved before schema 4 still hold. 3.0 refuses it.
 Document procedural()
@@ -1184,7 +1231,7 @@ int main(int argc, char **argv)
     if (argc != 3)
     {
         std::fprintf(stderr,
-            "usage: %s <1|2|4|5|motion|fill|edit|depth|procedural|"
+            "usage: %s <1|2|4|5|motion|fill|edit|depth|moves|procedural|"
             "reframe-in-section> <output.ugu>\n"
             "       %s frames <document.ugu> <directory>\n",
             argv[0],
@@ -1224,6 +1271,10 @@ int main(int argc, char **argv)
     else if (id == QLatin1String("depth"))
     {
         document = depth();
+    }
+    else if (id == QLatin1String("moves"))
+    {
+        document = manyMoves();
     }
     else if (id == QLatin1String("procedural"))
     {

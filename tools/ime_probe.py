@@ -16,6 +16,7 @@ import ctypes.wintypes as wt
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 LANGUAGE = sys.argv[1]
 EXE = os.path.abspath(sys.argv[2])
 OUT = sys.argv[3]
-PLACE = [int(value) for value in sys.argv[4].split(",")] if len(sys.argv) > 4 else [100, 100]
+PLACE = [int(value) for value in sys.argv[4].split(",")] if len(sys.argv) > 4 else [100, 20]
 os.makedirs(OUT, exist_ok=True)
 LOG = os.path.join(OUT, "app.log")
 
@@ -88,6 +89,12 @@ def type_keys(letters):
         tap(ord(letter.upper()))
 
 
+def window_name(handle):
+    text = ctypes.create_unicode_buffer(256)
+    user32.GetWindowTextW(ctypes.c_void_p(handle), text, 256)
+    return text.value
+
+
 def click(x, y):
     left, top = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
     width, height = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
@@ -98,7 +105,9 @@ def click(x, y):
     time.sleep(0.15)
     under = user32.GetAncestor(user32.WindowFromPoint(wt.POINT(int(x), int(y))), 2)
     if under != HWND or user32.GetForegroundWindow() != HWND:
-        raise SystemExit("the app is not under the cursor; no click sent")
+        names = [window_name(handle) for handle in (under, user32.GetForegroundWindow())]
+        raise SystemExit(f"the app is not under the cursor at {x:.0f},{y:.0f} (under: {names[0]!r}, "
+                         f"in front: {names[1]!r}); no click sent")
     send([INPUT(type=0, u=_INPUT(mi=MOUSEINPUT(0, 0, 0, 0x2, 0, 0))),
           INPUT(type=0, u=_INPUT(mi=MOUSEINPUT(0, 0, 0, 0x4, 0, 0)))])
     time.sleep(0.3)
@@ -276,10 +285,14 @@ def japanese(results, line_rect, text_rect):
 # logged by the UI module.
 # Fresh settings each run: the app keeps the last tool, and a run that
 # starts with the text tool puts the "canvas" click in the tool's field.
+# Its own recovery folder too, emptied first: work of a stopped run would be
+# offered at start and take the keys meant for the fields.
 SETTINGS = os.path.join(OUT, "settings.json")
 if os.path.exists(SETTINGS):
     os.remove(SETTINGS)
-env = dict(os.environ, UGURUGU_DIAGNOSTICS="1", UGURUGU_SETTINGS_PATH=SETTINGS,
+RECOVERY = os.path.join(OUT, "recovery")
+shutil.rmtree(RECOVERY, ignore_errors=True)
+env = dict(os.environ, UGURUGU_DIAGNOSTICS="1", UGURUGU_SETTINGS_PATH=SETTINGS, UGURUGU_RECOVERY_PATH=RECOVERY,
            UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug,ugurugu::ui::text=trace")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)
@@ -295,7 +308,7 @@ try:
     assert HWND, "no window"
     ORIGINAL_LAYOUT = window_layout()
     time.sleep(1.5)
-    user32.SetWindowPos(HWND, 0, PLACE[0], PLACE[1], 1600, 1000, 0x0004)
+    user32.SetWindowPos(HWND, 0, PLACE[0], PLACE[1], 2400, 2050, 0x0004)
     send([key(VK_MENU), key(VK_MENU, True)])
     user32.SetForegroundWindow(HWND)
     time.sleep(1.0)
@@ -309,7 +322,8 @@ try:
     user32.GetClientRect(HWND, ctypes.byref(client))
     origin = wt.POINT(0, 0)
     user32.ClientToScreen(HWND, ctypes.byref(origin))
-    click(origin.x + 200, origin.y + 200)
+    # The canvas fills the middle of the window, between the docks.
+    click(origin.x + client.right // 2, origin.y + client.bottom // 3)
     enter_before, undo_before = count("canvas Enter"), count("canvas Ctrl+Z")
     tap(VK_RETURN, 0.3)
     chord(VK_CONTROL, ord("Z"))
