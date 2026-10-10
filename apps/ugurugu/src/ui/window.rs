@@ -64,6 +64,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     files.confirm(ui.ctx(), canvas);
     files.ask_recovery(ui.ctx(), canvas);
     files.ask_animation(ui.ctx(), canvas);
+    files.ask_new_document(ui.ctx(), canvas);
     super::dialogs(ui.ctx(), canvas, files, settings, panels, typed);
     let bar = |fill, x, y| {
         egui::Frame::new()

@@ -1720,7 +1720,9 @@ fn the_settled_document_is_what_applying_gives_and_the_session_stays() {
 fn a_pixel_stroke_is_whole_pixels_wide_and_never_antialiased() {
     let mut session = session();
     let layer = session.current_layer();
+    session.fill.antialias = true;
     session.choose_preset(Tool::Pen, ugu_core::brush::find("pixel-pencil").unwrap());
+    assert!(!session.fill.antialias, "pixel art fills aliased");
     session.pen.width = 2.6;
     session.pen.antialias = true;
     draw(&mut session, 10.0, 60.0);

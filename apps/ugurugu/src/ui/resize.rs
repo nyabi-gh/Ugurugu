@@ -279,37 +279,6 @@ pub(super) fn heading(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.add_space(6.0);
 }
 
-/// A whole number field; `signed` shows a plus on positive values.
-fn whole(
-    ui: &mut egui::Ui,
-    value: &mut i64,
-    range: std::ops::RangeInclusive<i64>,
-    signed: bool,
-    name: &str,
-) -> egui::Response {
-    let response = ui.add_sized(
-        [96.0, 26.0],
-        egui::DragValue::new(value)
-            .range(range)
-            .speed(1.0)
-            .suffix(" px")
-            .custom_formatter(move |value, _| {
-                if signed && value > 0.0 {
-                    format!("+{value}")
-                } else {
-                    format!("{value}")
-                }
-            }),
-    );
-    let shown = *value as f64;
-    response.widget_info(|| {
-        let mut info = egui::WidgetInfo::drag_value(true, shown);
-        info.label = Some(name.to_owned());
-        info
-    });
-    response
-}
-
 fn summary(ui: &mut egui::Ui, from: [u32; 2], to: [u32; 2]) {
     ui.label(tr_with(
         "size-change",
@@ -447,7 +416,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         if dialog.relative {
             let mut delta = i64::from(size[axis]) - current;
             super::form_row(ui, tr(change), |ui| {
-                whole(
+                widgets::whole(
                     ui,
                     &mut delta,
                     low - current..=high - current,
@@ -459,7 +428,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         } else {
             let mut edge = i64::from(size[axis]);
             super::form_row(ui, tr(label), |ui| {
-                whole(ui, &mut edge, low..=high, false, tr(name))
+                widgets::whole(ui, &mut edge, low..=high, false, tr(name))
             });
             size[axis] = clamp_edge(edge);
         }
@@ -497,7 +466,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         (1, "canvas-size-offset-y", "canvas-size-offset-y-name"),
     ] {
         super::form_row(ui, tr(label), |ui| {
-            whole(ui, &mut offset[axis], -reach..=reach, true, tr(name))
+            widgets::whole(ui, &mut offset[axis], -reach..=reach, true, tr(name))
         });
     }
     let offset = offset.map(|value| value as i32);
@@ -543,7 +512,7 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize) -> bool {
         let mut edge = i64::from(dialog.size[axis]);
         let [low, high] = ranges[axis].map(i64::from);
         super::form_row(ui, tr(label), |ui| {
-            whole(ui, &mut edge, low..=high, false, tr(name))
+            widgets::whole(ui, &mut edge, low..=high, false, tr(name))
         });
         let edge = clamp_edge(edge);
         if edge != dialog.size[axis] {

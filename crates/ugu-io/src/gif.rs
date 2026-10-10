@@ -8,6 +8,12 @@
 //! the last (disposal 2), and its own LZW coder. Frames come in straight
 //! alpha. The first pass keeps each pixel's 15-bit colour key, two bytes a
 //! pixel, as 2.2.13 does; the second codes the frames on several threads.
+//!
+//! Unlike 2.2.13, an animation of no more colours than the palette holds
+//! keeps them exactly instead (m5-plan M5-17): pixel art's colours would
+//! otherwise be merged and moved by the 15-bit keys. While that can still
+//! be so, the first pass also keeps each pixel's colour's number, a byte a
+//! pixel.
 
 use std::io::{self, Write};
 
@@ -49,6 +55,16 @@ pub struct Quantizer {
     histogram: Vec<Bucket>,
     frames: Vec<Vec<u16>>,
     transparency: bool,
+    /// The opaque colours so far, while they are no more than 256.
+    exact: Option<Exact>,
+}
+
+/// Every opaque colour of the animation in the order first seen, and each
+/// frame's pixels as their numbers.
+struct Exact {
+    colors: Vec<[u8; 3]>,
+    numbers: std::collections::HashMap<[u8; 3], u8>,
+    frames: Vec<Vec<u8>>,
 }
 
 /// The palette and every frame's colour keys, ready to be written.
@@ -59,6 +75,9 @@ pub struct Quantized {
     map: Vec<u8>,
     frames: Vec<Vec<u16>>,
     transparency: bool,
+    /// Each frame's pixels as palette indices, when the palette holds
+    /// every colour; the keys then only say which pixels are transparent.
+    exact: Option<Vec<Vec<u8>>>,
 }
 
 /// RGB555, so median cut works over at most 32768 colours.
@@ -73,6 +92,11 @@ impl Quantizer {
             histogram: vec![Bucket::default(); KEYS],
             frames: Vec::new(),
             transparency: false,
+            exact: Some(Exact {
+                colors: Vec::new(),
+                numbers: std::collections::HashMap::new(),
+                frames: Vec::new(),
+            }),
         }
     }
 
@@ -81,15 +105,41 @@ impl Quantizer {
         let pixels = frame.as_chunks::<4>().0;
         debug_assert_eq!(pixels.len(), (self.size[0] * self.size[1]) as usize);
         let mut keys = Vec::with_capacity(pixels.len());
+        let mut numbers = self
+            .exact
+            .as_ref()
+            .map(|_| Vec::with_capacity(pixels.len()));
+        // Neighbouring pixels are mostly the same colour.
+        let mut last: Option<([u8; 3], u8)> = None;
         for &[red, green, blue, alpha] in pixels {
             let key = key([red, green, blue]);
             // All or nothing: partial alpha collapses at a threshold.
             if alpha < 128 {
                 self.transparency = true;
                 keys.push(key | TRANSPARENT);
+                if let Some(numbers) = &mut numbers {
+                    numbers.push(0);
+                }
                 continue;
             }
             keys.push(key);
+            if let (Some(numbers), Some(exact)) = (&mut numbers, &mut self.exact) {
+                let color = [red, green, blue];
+                let number = match last {
+                    Some((seen, number)) if seen == color => Some(number),
+                    _ => exact.number(color),
+                };
+                match number {
+                    Some(number) => {
+                        last = Some((color, number));
+                        numbers.push(number);
+                    }
+                    None => {
+                        self.exact = None;
+                        numbers.clear();
+                    }
+                }
+            }
             let bucket = &mut self.histogram[usize::from(key)];
             bucket.count += 1;
             bucket.red += u64::from(red);
@@ -97,9 +147,47 @@ impl Quantizer {
             bucket.blue += u64::from(blue);
         }
         self.frames.push(keys);
+        if let (Some(numbers), Some(exact)) = (numbers, &mut self.exact) {
+            exact.frames.push(numbers);
+        }
     }
 
     pub fn finish(self) -> Quantized {
+        let room = if self.transparency { 255 } else { 256 };
+        if let Some(exact) = self.exact
+            && exact.colors.len() <= room
+        {
+            // Index 0 is transparent when any pixel is.
+            let shift = u8::from(self.transparency);
+            let mut palette = Vec::with_capacity(exact.colors.len() + 1);
+            if self.transparency {
+                palette.push([0; 3]);
+            }
+            palette.extend(&exact.colors);
+            let frames = exact
+                .frames
+                .into_iter()
+                .zip(&self.frames)
+                .map(|(mut numbers, keys)| {
+                    for (number, &key) in numbers.iter_mut().zip(keys) {
+                        *number = if key & TRANSPARENT != 0 {
+                            0
+                        } else {
+                            *number + shift
+                        };
+                    }
+                    numbers
+                })
+                .collect();
+            return Quantized {
+                size: self.size,
+                palette,
+                map: Vec::new(),
+                frames: self.frames,
+                transparency: self.transparency,
+                exact: Some(frames),
+            };
+        }
         let entries: Vec<Entry> = self
             .histogram
             .iter()
@@ -118,7 +206,28 @@ impl Quantizer {
             map,
             frames: self.frames,
             transparency: self.transparency,
+            exact: None,
         }
+    }
+}
+
+/// A frame to code: its colour keys, or its palette indices.
+enum Frame {
+    Keys(Vec<u16>),
+    Indices(Vec<u8>),
+}
+
+impl Exact {
+    /// `color`'s number, given one if it is new; `None` once there would be
+    /// more than 256.
+    fn number(&mut self, color: [u8; 3]) -> Option<u8> {
+        if let Some(&number) = self.numbers.get(&color) {
+            return Some(number);
+        }
+        let number = u8::try_from(self.colors.len()).ok()?;
+        self.colors.push(color);
+        self.numbers.insert(color, number);
+        Some(number)
     }
 }
 
@@ -381,6 +490,11 @@ impl Quantized {
         self.frames.len()
     }
 
+    /// Whether the palette holds every colour exactly.
+    pub fn is_exact(&self) -> bool {
+        self.exact.is_some()
+    }
+
     /// Writes the GIF, coding up to `threads` frames at once and handing
     /// each frame's number to `progress` as it is written. Stops with an
     /// `Interrupted` error once `cancelled` says so.
@@ -417,11 +531,14 @@ impl Quantized {
         let minimum_code_size = table_bits.max(2);
         let threads = threads.max(1);
         let frames = std::mem::take(&mut self.frames);
+        let mut pending: Box<dyn Iterator<Item = Frame>> = match self.exact.take() {
+            Some(exact) => Box::new(exact.into_iter().map(Frame::Indices)),
+            None => Box::new(frames.into_iter().map(Frame::Keys)),
+        };
         let mut coders: Vec<Lzw> = Vec::new();
         let mut written = 0;
-        let mut pending = frames.into_iter();
         loop {
-            let batch: Vec<Vec<u16>> = pending.by_ref().take(threads).collect();
+            let batch: Vec<Frame> = pending.by_ref().take(threads).collect();
             if batch.is_empty() {
                 break;
             }
@@ -436,10 +553,12 @@ impl Quantized {
                 let handles: Vec<_> = batch
                     .into_iter()
                     .zip(coders.iter_mut())
-                    .map(|(keys, coder)| {
+                    .map(|(frame, coder)| {
                         scope.spawn(move || {
-                            let indices = this.indices(&keys);
-                            drop(keys);
+                            let indices = match frame {
+                                Frame::Keys(keys) => this.indices(&keys),
+                                Frame::Indices(indices) => indices,
+                            };
                             coder.compress(&indices, minimum_code_size)
                         })
                     })
@@ -555,7 +674,6 @@ pub(crate) mod tests {
                 "transparent",
                 include_bytes!("../tests/gif/transparent.gif"),
             ),
-            ("few", include_bytes!("../tests/gif/few.gif")),
             // Long enough for the LZW dictionary to fill and clear.
             ("large", include_bytes!("../tests/gif/large.gif")),
         ] {
@@ -566,6 +684,52 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn up_to_256_colours_are_kept_exactly() {
+        // Colours one apart, which 15-bit keys merge, and see-through.
+        let size = [32, 16];
+        let colour = |x: u32, y: u32, frame: u32| -> [u8; 4] {
+            let index = (x / 2 + y * 16 + frame * 7) % 255;
+            if index == 0 {
+                [0; 4]
+            } else {
+                [index as u8, 255 - index as u8, (index * 3) as u8 | 1, 255]
+            }
+        };
+        let frames: Vec<Vec<u8>> = (0..3)
+            .map(|frame| {
+                (0..size[1])
+                    .flat_map(|y| (0..size[0]).flat_map(move |x| colour(x, y, frame)))
+                    .collect()
+            })
+            .collect();
+        let mut quantizer = Quantizer::new(size);
+        for frame in &frames {
+            quantizer.add(frame);
+        }
+        let quantized = quantizer.finish();
+        assert!(quantized.is_exact());
+        let mut bytes = Vec::new();
+        quantized
+            .write(&mut bytes, &[5, 5, 5], 2, &|| false, &mut |_| {})
+            .unwrap();
+        let decoded = ::image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes))
+            .map(::image::AnimationDecoder::into_frames)
+            .unwrap();
+        for (frame, original) in decoded.zip(&frames) {
+            let frame = frame.unwrap().into_buffer();
+            assert!(frame.as_raw() == original);
+        }
+
+        // One more colour than the palette holds gives 2.2.13's palette.
+        let mut quantizer = Quantizer::new([257, 1]);
+        let many: Vec<u8> = (0..257u32)
+            .flat_map(|index| [(index % 256) as u8, (index / 256) as u8, 7, 255])
+            .collect();
+        quantizer.add(&many);
+        assert!(!quantizer.finish().is_exact());
     }
 
     #[test]

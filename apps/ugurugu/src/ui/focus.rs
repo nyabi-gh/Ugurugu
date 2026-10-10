@@ -36,10 +36,13 @@ impl Return {
             if beneath {
                 self.opener = focused;
             }
-            if modal.is_some()
-                && layer
-                    .is_some_and(|layer| !ctx.memory(|memory| memory.is_above_modal_layer(layer)))
-            {
+            // Nothing in the dialog has the focus: nothing does, or what is
+            // under it.
+            let outside = match layer {
+                Some(layer) => !ctx.memory(|memory| memory.is_above_modal_layer(layer)),
+                None => true,
+            };
+            if modal.is_some() && outside {
                 ctx.memory_mut(|memory| {
                     if let Some(id) = focused {
                         memory.surrender_focus(id);

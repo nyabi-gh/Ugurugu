@@ -287,8 +287,12 @@ fn unsaved_changes_are_answered_from_the_keyboard() {
     assert!(!window.dialog());
     assert_eq!(window.canvas.session().document().layers.len(), 2);
     window.key(Modifiers::COMMAND, Key::N);
-    // N is "Don't save", as in 2.2.13.
+    // N is "Don't save", as in 2.2.13; then the new document's size.
     window.key(NONE, Key::N);
+    window.frame(Vec::new());
+    assert_eq!(window.label(), tr("size-width"));
+    window.key(NONE, Key::Enter);
+    window.frame(Vec::new());
     assert!(!window.dialog());
     assert_eq!(window.canvas.session().document().layers.len(), 1);
 }
@@ -310,4 +314,34 @@ fn enter_chooses_a_layer_row() {
     window.tab_to_label(&name);
     window.key(NONE, Key::Enter);
     assert_eq!(window.canvas.session().current_layer(), first);
+}
+
+#[test]
+fn a_new_document_s_size_is_chosen_from_the_keyboard() {
+    let mut window = Window::new();
+    window.key(Modifiers::COMMAND, Key::N);
+    window.frame(Vec::new());
+    assert!(window.dialog());
+    assert_eq!(
+        window.label(),
+        tr("size-width"),
+        "the width takes the focus"
+    );
+    window.tab_to_label("32 × 32");
+    window.key(NONE, Key::Space);
+    window.tab_to_label(tr("dialog-ok"));
+    window.key(NONE, Key::Space);
+    window.frame(Vec::new());
+    assert!(!window.dialog());
+    assert_eq!(window.canvas.session().document().canvas, [32, 32]);
+
+    // Arrows change the field, and Enter in it takes the size.
+    window.key(Modifiers::COMMAND, Key::N);
+    window.frame(Vec::new());
+    window.key(NONE, Key::ArrowDown);
+    window.key(NONE, Key::ArrowDown);
+    window.key(NONE, Key::Enter);
+    window.frame(Vec::new());
+    assert!(!window.dialog());
+    assert_eq!(window.canvas.session().document().canvas, [30, 32]);
 }

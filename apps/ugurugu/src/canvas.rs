@@ -45,7 +45,12 @@ pub use transform::{Grip, HANDLES};
 /// Shown around the document, opaque straight RGBA.
 pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
 const ZOOM_STEP: f64 = 1.25;
-pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=32.0;
+/// Up to 6400%, which fits 16×16 pixel art to a window (2.2.13: 1600%).
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=64.0;
+/// Fitting enlarges a document no larger than this, by a whole number of
+/// times so each pixel stays square: pixel art. Larger ones fit at most at
+/// 100%, as in 2.2.13.
+const SMALL_EDGE: f64 = 256.0;
 
 /// Frames play in order, none skipped. A frame not rendered yet holds the
 /// one on screen, and the timing starts again from when it arrives, so a
@@ -289,7 +294,8 @@ impl Canvas {
         self.to_document(position)
     }
 
-    /// Shows the whole document, at most at 100%.
+    /// Shows the whole document: at most at 100%, or for a small document as
+    /// many whole times as fit.
     pub fn fit(&mut self) {
         if let Some(area) = self.area {
             self.place(area);
@@ -1036,7 +1042,12 @@ impl Canvas {
         if room[0] <= 0.0 || room[1] <= 0.0 {
             return;
         }
-        self.scale = (room[0] / size[0]).min(room[1] / size[1]).min(1.0);
+        let fits = (room[0] / size[0]).min(room[1] / size[1]);
+        self.scale = if fits >= 2.0 && size[0].max(size[1]) <= SMALL_EDGE {
+            fits.floor().min(*ZOOM_RANGE.end())
+        } else {
+            fits.min(1.0)
+        };
         self.offset =
             std::array::from_fn(|axis| ((room[axis] - size[axis] * self.scale) / 2.0).round());
         self.placed = true;
@@ -1245,6 +1256,22 @@ mod tests {
     fn playback_samples_are_as_far_apart_on_screen_as_at_100_percent() {
         let details = [2.0, 1.0, 0.73, 0.5, 0.3, 0.001].map(|scale| super::preview(scale).detail);
         assert_eq!(details, [16, 16, 21, 32, 53, 1024]);
+    }
+
+    #[test]
+    fn fitting_enlarges_only_small_documents_by_whole_times() {
+        let scale = |canvas: [u32; 2]| {
+            let mut canvas = super::Canvas::new(Document::new(canvas), |_| {});
+            canvas.set_area([0, 0, 1000, 700]);
+            canvas.fit();
+            canvas.placement().scale
+        };
+        assert_eq!(scale([16, 16]), 43.0);
+        assert_eq!(scale([8, 8]), 64.0, "no further than the zoom goes");
+        assert_eq!(scale([256, 200]), 3.0);
+        assert_eq!(scale([300, 200]), 1.0, "a larger one at most at 100%");
+        assert_eq!(scale([400, 300]), 1.0);
+        assert!(scale([2000, 1000]) < 1.0);
     }
 
     #[test]

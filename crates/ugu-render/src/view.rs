@@ -4,7 +4,8 @@
 //! Shows the document on the GPU: changed document pixels are uploaded as
 //! they are, and the shader maps each screen pixel to a document pixel by
 //! the view's scale and offset. At 100% and above a screen pixel shows one
-//! document pixel exactly; below, neighbouring pixels are blended.
+//! document pixel exactly; below, neighbouring pixels are blended. From
+//! `GRID_SCALE` up, a grid can mark the document pixels (m5-plan M5-17).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +22,9 @@ struct View {
     scale: f32,
     blended: f32,
     size: vec2<f32>,
-    _pad: vec2<f32>,
+    // Above 0.5, the pixel grid shows.
+    grid: f32,
+    _pad: f32,
     workspace: vec4<f32>,
 }
 
@@ -51,7 +54,13 @@ fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     // A transparent background shows a checkerboard of 8 screen pixels.
     let cell = vec2<i32>(floor(position.xy / 8.0));
     let light = select(0.8, 1.0, ((cell.x + cell.y) & 1) == 0);
-    return ink + vec4<f32>(light, light, light, 1.0) * (1.0 - ink.a);
+    var color = ink + vec4<f32>(light, light, light, 1.0) * (1.0 - ink.a);
+    // A screen pixel wide along each document pixel's top and left edges.
+    let inside = fract(at) * view.scale;
+    if (view.grid > 0.5 && (inside.x < 1.0 || inside.y < 1.0)) {
+        color = vec4<f32>(mix(color.rgb, vec3<f32>(0.5), 0.35), 1.0);
+    }
+    return color;
 }
 ";
 
@@ -64,7 +73,15 @@ pub struct Placement {
     pub scale: f32,
 }
 
-fn uniform_bytes(placement: Placement, size: [u32; 2], workspace: [f32; 4]) -> [u8; 48] {
+/// Screen pixels per document pixel from which the pixel grid shows.
+pub const GRID_SCALE: f32 = 8.0;
+
+fn uniform_bytes(
+    placement: Placement,
+    size: [u32; 2],
+    grid: bool,
+    workspace: [f32; 4],
+) -> [u8; 48] {
     let values = [
         placement.offset[0],
         placement.offset[1],
@@ -72,7 +89,11 @@ fn uniform_bytes(placement: Placement, size: [u32; 2], workspace: [f32; 4]) -> [
         if placement.scale < 1.0 { 1.0 } else { 0.0 },
         size[0] as f32,
         size[1] as f32,
-        0.0,
+        if grid && placement.scale >= GRID_SCALE {
+            1.0
+        } else {
+            0.0
+        },
         0.0,
         workspace[0],
         workspace[1],
@@ -94,7 +115,7 @@ pub struct DocumentView {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     workspace: [f32; 4],
-    uploaded: Option<(Placement, [u32; 2])>,
+    uploaded: Option<(Placement, [u32; 2], bool)>,
     staging: Option<Staging>,
 }
 
@@ -382,13 +403,15 @@ impl DocumentView {
     }
 
     /// Draws into `area` (left, top, right, bottom target pixels) of a
-    /// target of `target_size`, the document placed by `placement`.
+    /// target of `target_size`, the document placed by `placement`, with the
+    /// pixel grid when `grid` and it is enlarged enough.
     pub fn draw(
         &mut self,
         queue: &wgpu::Queue,
         pass: &mut wgpu::RenderPass<'_>,
         area: [u32; 4],
         placement: Placement,
+        grid: bool,
         target_size: [u32; 2],
     ) {
         let right = area[2].min(target_size[0]);
@@ -397,13 +420,13 @@ impl DocumentView {
             return;
         }
         let size = [self.texture.width(), self.texture.height()];
-        if self.uploaded != Some((placement, size)) {
+        if self.uploaded != Some((placement, size, grid)) {
             queue.write_buffer(
                 &self.uniform,
                 0,
-                &uniform_bytes(placement, size, self.workspace),
+                &uniform_bytes(placement, size, grid, self.workspace),
             );
-            self.uploaded = Some((placement, size));
+            self.uploaded = Some((placement, size, grid));
         }
         pass.set_viewport(
             area[0] as f32,
@@ -439,11 +462,21 @@ pub(crate) mod tests {
     /// Draws `document` into the whole of a `target`-sized image and reads
     /// it back.
     fn render(document: &Pixmap, placement: Placement, target: [u32; 2]) -> Option<Vec<u8>> {
+        render_grid(document, placement, false, target)
+    }
+
+    fn render_grid(
+        document: &Pixmap,
+        placement: Placement,
+        grid: bool,
+        target: [u32; 2],
+    ) -> Option<Vec<u8>> {
         render_with(target, |device, queue, format| {
             let mut view = DocumentView::new(device, format, WORKSPACE);
             view.update(device, queue, document, None);
             move |queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>| {
-                view.draw(queue, pass, [0, 0, target[0], target[1]], placement, target);
+                let area = [0, 0, target[0], target[1]];
+                view.draw(queue, pass, area, placement, grid, target);
             }
         })
     }
@@ -603,7 +636,14 @@ pub(crate) mod tests {
             view.update(device, queue, &changed, Some(rect));
             view.update(device, queue, &changed, Some(rect));
             move |queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>| {
-                view.draw(queue, pass, [0, 0, size[0], size[1]], placement, size);
+                view.draw(
+                    queue,
+                    pass,
+                    [0, 0, size[0], size[1]],
+                    placement,
+                    false,
+                    size,
+                );
             }
         });
         let Some(shown) = shown else {
@@ -631,5 +671,31 @@ pub(crate) mod tests {
         for pixel in shown.chunks(4) {
             assert!((100..=155).contains(&pixel[0]), "{pixel:?}");
         }
+    }
+
+    #[test]
+    fn the_grid_marks_each_pixel_s_top_and_left_edges_when_enlarged_enough() {
+        let mut document = Pixmap::new(2, 2);
+        document.data_as_u8_slice_mut().fill(255);
+        let at = |shown: &[u8], x: usize, y: usize| shown[(y * 20 + x) * 4];
+        let enlarged = |scale| Placement {
+            offset: [0.0, 0.0],
+            scale,
+        };
+        let Some(shown) = render_grid(&document, enlarged(10.0), true, [20, 20]) else {
+            eprintln!("skipped: no DX12 adapter");
+            return;
+        };
+        for (x, y) in [(0, 5), (10, 5), (5, 0), (5, 10)] {
+            assert!(at(&shown, x, y) < 230, "{x}, {y}: {}", at(&shown, x, y));
+        }
+        for (x, y) in [(5, 5), (15, 15), (9, 9)] {
+            assert_eq!(at(&shown, x, y), 255, "{x}, {y}");
+        }
+        // Not below `GRID_SCALE`, nor when turned off.
+        let shown = render_grid(&document, enlarged(5.0), true, [20, 20]).unwrap();
+        assert!((0..10).all(|y| (0..10).all(|x| at(&shown, x, y) == 255)));
+        let shown = render_grid(&document, enlarged(10.0), false, [20, 20]).unwrap();
+        assert!(shown.iter().all(|&channel| channel == 255));
     }
 }

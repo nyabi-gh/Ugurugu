@@ -32,6 +32,10 @@ use crate::cache::Renders;
 const EDGES: [u32; 6] = [2048, 1024, 768, 512, 384, 256];
 /// The long edge offered until another is chosen.
 pub const FIRST_EDGE: u32 = 512;
+/// Whole enlargements offered, each pixel a block (m5-plan M5-17), while
+/// the long edge stays within `MOST_ENLARGED`.
+const ENLARGEMENTS: [u32; 3] = [8, 4, 2];
+const MOST_ENLARGED: u32 = 4096;
 
 /// Frames drawn ahead of the export thread.
 const QUEUE: usize = 2;
@@ -72,11 +76,15 @@ pub enum Job {
     },
 }
 
-/// The sizes offered, largest first: the document's own, then each of
-/// `EDGES` below it, keeping its shape.
+/// The sizes offered, largest first: the whole enlargements that fit, the
+/// document's own, then each of `EDGES` below it, keeping its shape.
 pub fn sizes(canvas: [u32; 2]) -> Vec<[u32; 2]> {
     let long = canvas[0].max(canvas[1]);
-    std::iter::once(canvas)
+    ENLARGEMENTS
+        .iter()
+        .filter(|&&times| long * times <= MOST_ENLARGED)
+        .map(|&times| canvas.map(|side| side * times))
+        .chain(std::iter::once(canvas))
         .chain(
             EDGES
                 .iter()
@@ -92,13 +100,30 @@ pub fn fit(canvas: [u32; 2], edge: u32) -> [u32; 2] {
     canvas.map(|side| ((u64::from(side) * u64::from(edge) + long / 2) / long).max(1) as u32)
 }
 
-/// Of `sizes`, largest first, the largest whose long edge is no longer than
-/// `edge`, else the smallest.
-pub fn nearest(sizes: &[[u32; 2]], edge: u32) -> usize {
-    sizes
+/// Of `sizes` of `canvas`, the largest no larger than the document whose
+/// long edge is no longer than `edge`, else the smallest. An enlargement is
+/// only ever chosen by hand.
+pub fn nearest(canvas: [u32; 2], sizes: &[[u32; 2]], edge: u32) -> usize {
+    let own = original(canvas, sizes);
+    sizes[own..]
         .iter()
         .position(|size| size[0].max(size[1]) <= edge)
-        .unwrap_or(sizes.len() - 1)
+        .map_or(sizes.len() - 1, |index| own + index)
+}
+
+/// Where the document's own size is in its `sizes`.
+pub fn original(canvas: [u32; 2], sizes: &[[u32; 2]]) -> usize {
+    sizes.iter().position(|&size| size == canvas).unwrap_or(0)
+}
+
+/// Premultiplied RGBA8 `pixels` of `from` made `to`: shrunk by averaging,
+/// or enlarged a whole number of times with each pixel a block.
+pub fn resized(pixels: Vec<u8>, from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+    if to[0] > from[0] {
+        ugu_io::image::enlarge(&pixels, from, to[0] / from[0])
+    } else {
+        ugu_io::image::shrink(pixels, from, to)
+    }
 }
 
 /// About how much memory an animation of `frames` at `size` from a document
@@ -324,7 +349,7 @@ fn drawn(
     size: [u32; 2],
 ) -> Option<Vec<u8>> {
     let pixmap = renders.export(document.clone(), frame)?;
-    Some(ugu_io::image::shrink(
+    Some(resized(
         pixmap.take_rgba8(ImageAlphaType::AlphaPremultiplied),
         document.canvas,
         size,
@@ -727,6 +752,92 @@ mod tests {
         }
     }
 
+    /// A small document of pixel strokes in three colours on white.
+    fn pixel_art() -> Document {
+        use ugu_core::document::LayerKind;
+        use ugu_core::ops::{Op, StrokeId};
+        use ugu_core::store::{Point, Stroke};
+        let mut document = Document::new([16, 12]);
+        document.background = Rgba8([255; 4]);
+        document.frames = 2;
+        let brush = ugu_core::brush::find("pixel-pencil").unwrap().brush;
+        let mut ops = Vec::new();
+        for (index, (color, from, to)) in [
+            ([200, 30, 40, 255], [1.5, 1.5], [14.5, 9.5]),
+            ([20, 120, 220, 255], [2.5, 10.5], [12.5, 3.5]),
+            ([250, 200, 0, 255], [7.5, 0.5], [7.5, 11.5]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let id = StrokeId(index as u32);
+            let points: Vec<Point> = [from, to]
+                .into_iter()
+                .map(|[x, y]| Point {
+                    x,
+                    y,
+                    pressure: 1.0,
+                })
+                .collect();
+            document.store.strokes.insert(
+                id,
+                Stroke {
+                    points: points.into(),
+                    color: Rgba8(color),
+                    width: 1.0,
+                    brush,
+                    seed: index as u64,
+                },
+            );
+            ops.push(Op::Paint {
+                stroke: id,
+                clip: None,
+            });
+        }
+        if let LayerKind::Paint(paint) = &mut document.layers[0].kind {
+            paint.ops = ops;
+        }
+        document
+    }
+
+    #[test]
+    fn enlarged_eight_times_each_pixel_is_an_eight_by_eight_block() {
+        let folder = folder("enlarged");
+        let worker = CacheWorker::start(|_| {});
+        let document = Arc::new(pixel_art());
+        let export = |format, size, name: &str| {
+            let path = folder.join(name);
+            let outcome = animation(
+                document.clone(),
+                format,
+                size,
+                true,
+                threads(),
+                &path,
+                &worker.renders(),
+                &AtomicBool::new(false),
+                &AtomicUsize::new(0),
+            );
+            assert_eq!(outcome, Outcome::Done);
+            decoded(&path)
+        };
+        for (format, extension) in [(Animation::Gif, "gif"), (Animation::WebP, "webp")] {
+            let original = export(format, [16, 12], &format!("one.{extension}"));
+            let enlarged = export(format, [128, 96], &format!("eight.{extension}"));
+            assert_eq!(original.len(), enlarged.len());
+            for ((_, small), (_, large)) in original.iter().zip(&enlarged) {
+                assert_eq!(large.dimensions(), (128, 96));
+                for (x, y, pixel) in large.enumerate_pixels() {
+                    assert_eq!(
+                        *pixel,
+                        *small.get_pixel(x / 8, y / 8),
+                        "{extension} {x}, {y}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_cancelled_animation_leaves_the_target_as_it_was() {
         for (format, name) in [(Animation::Gif, "gif"), (Animation::WebP, "webp")] {
@@ -783,16 +894,44 @@ mod tests {
         );
         assert_eq!(
             sizes([600, 300]),
-            [[600, 300], [512, 256], [384, 192], [256, 128]]
+            [
+                [2400, 1200],
+                [1200, 600],
+                [600, 300],
+                [512, 256],
+                [384, 192],
+                [256, 128]
+            ]
         );
-        assert_eq!(sizes([200, 100]), [[200, 100]]);
+        assert_eq!(
+            sizes([200, 100]),
+            [[1600, 800], [800, 400], [400, 200], [200, 100]]
+        );
+        assert_eq!(
+            sizes([1024, 32])[..3],
+            [[4096, 128], [2048, 64], [1024, 32]]
+        );
         assert_eq!(fit([10, 3], 5), [5, 2]);
         assert_eq!(fit([3000, 1], 256), [256, 1]);
         let large = sizes([4096, 4096]);
-        assert_eq!(large[nearest(&large, FIRST_EDGE)], [512, 512]);
-        assert_eq!(large[nearest(&large, 700)], [512, 512]);
-        assert_eq!(nearest(&large, 100), large.len() - 1);
-        assert_eq!(nearest(&sizes([300, 200]), FIRST_EDGE), 0);
+        let nearest_large = |edge| nearest([4096, 4096], &large, edge);
+        assert_eq!(large[nearest_large(FIRST_EDGE)], [512, 512]);
+        assert_eq!(large[nearest_large(700)], [512, 512]);
+        assert_eq!(nearest_large(100), large.len() - 1);
+        let small = sizes([32, 16]);
+        // An enlargement only by hand, even after one was chosen.
+        assert_eq!(small[nearest([32, 16], &small, FIRST_EDGE)], [32, 16]);
+        assert_eq!(small[nearest([32, 16], &small, 256)], [32, 16]);
+    }
+
+    #[test]
+    fn an_enlargement_makes_each_pixel_a_block() {
+        let pixels = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let enlarged = resized(pixels, [2, 1], [6, 3]);
+        let left = [1, 2, 3, 4].repeat(3);
+        let right = [5, 6, 7, 8].repeat(3);
+        let row = [left, right].concat();
+        assert_eq!(enlarged, row.repeat(3));
     }
 
     #[test]

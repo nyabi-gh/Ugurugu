@@ -73,6 +73,26 @@ fn spans(from: u32, to: u32) -> Vec<(usize, Vec<u32>)> {
         .collect()
 }
 
+/// RGBA8 rows of `from` made `times` as wide and high, each pixel a block.
+pub fn enlarge(pixels: &[u8], from: [u32; 2], times: u32) -> Vec<u8> {
+    let times = times as usize;
+    let width = from[0] as usize;
+    let mut out = Vec::with_capacity(pixels.len() * times * times);
+    for row in pixels.chunks_exact(width * 4) {
+        let start = out.len();
+        for pixel in row.as_chunks::<4>().0 {
+            for _ in 0..times {
+                out.extend_from_slice(pixel);
+            }
+        }
+        let end = out.len();
+        for _ in 1..times {
+            out.extend_from_within(start..end);
+        }
+    }
+    out
+}
+
 /// Premultiplied RGBA8 rows of `from` made `to`, no larger, each pixel the
 /// average of the area it covers. Bands of rows are shrunk on several
 /// threads, each holding only the few source rows its next row covers.

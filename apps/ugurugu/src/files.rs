@@ -22,7 +22,7 @@ use std::sync::mpsc::{Sender, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ugu_core::document::{Document, LayerId};
+use ugu_core::document::{Document, LayerId, limits};
 use ugu_core::history::StateId;
 use ugu_core::ops::{Affine, AssetId};
 use ugu_core::store::Asset;
@@ -299,6 +299,8 @@ pub struct Files {
     exporting: Option<Exporting>,
     /// The animation export options asked for, while they are.
     animation_dialog: Option<AnimationDialog>,
+    /// The new document's size, while it is asked for.
+    new_document: Option<[i64; 2]>,
     /// The animation export chosen, waiting for where it goes.
     animation_job: Option<ExportJob>,
     /// Cancelled exports whose threads may still be finishing.
@@ -365,6 +367,7 @@ impl Files {
             recovered_from: None,
             exporting: None,
             animation_dialog: None,
+            new_document: None,
             animation_job: None,
             cancelled: Vec::new(),
             exports: 0,
@@ -564,14 +567,10 @@ impl Files {
 
     fn proceed(&mut self, action: Action, canvas: &mut Canvas) {
         match action {
+            // As 2.2.13, the size is asked for after unsaved changes are,
+            // starting from the document's.
             Action::New => {
-                // Clean until edited, as the document at start.
-                canvas.replace(Self::new_canvas(), true);
-                self.path = None;
-                self.recovered_name = None;
-                self.recovered_from = None;
-                self.id = new_id();
-                self.clear_message();
+                self.new_document = Some(canvas.session().document().canvas.map(i64::from));
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open(DOCUMENT_TYPE)),
             Action::Close => self.close = true,
@@ -711,7 +710,11 @@ impl Files {
         let budget = crate::budget::Budget::now(0).render as u64;
         // The size last chosen, or the next smaller one that fits.
         let sizes = export::sizes(document.canvas);
-        let preferred = export::nearest(&sizes, self.export_edge.unwrap_or(export::FIRST_EDGE));
+        let preferred = export::nearest(
+            document.canvas,
+            &sizes,
+            self.export_edge.unwrap_or(export::FIRST_EDGE),
+        );
         let size = (preferred..sizes.len())
             .find(|&index| {
                 export::threads_within(
@@ -730,6 +733,75 @@ impl Files {
             keep_transparency: true,
             budget,
         });
+    }
+
+    /// Starts a new document of `size`.
+    fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2]) {
+        // Clean until edited, as the document at start.
+        canvas.replace(Document::new(size), true);
+        self.path = None;
+        self.recovered_name = None;
+        self.recovered_from = None;
+        self.id = new_id();
+        self.clear_message();
+    }
+
+    /// The new document's size, while it is asked for: any size from a pixel
+    /// (2.2.13: from 64), with pixel art's usual squares a press away.
+    pub fn ask_new_document(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {
+        let Some(size) = self.new_document.as_mut() else {
+            return;
+        };
+        let edges = i64::from(*limits::CANVAS_EDGE.start())..=i64::from(*limits::CANVAS_EDGE.end());
+        let mut chosen = None;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("new document")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.heading(tr("new-title"));
+            ui.add_space(6.0);
+            egui::Grid::new("new document size")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    for (axis, name) in [(0, "size-width"), (1, "size-height")] {
+                        ui.label(tr(name));
+                        crate::widgets::whole(ui, &mut size[axis], edges.clone(), false, tr(name));
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(4.0);
+            // Enter presses OK, unless it presses another focused button.
+            let mut button_focused = false;
+            ui.horizontal(|ui| {
+                for edge in [16, 32, 64, 128] {
+                    let button = ui.button(format!("{edge} × {edge}"));
+                    button_focused |= button.has_focus();
+                    if button.clicked() {
+                        *size = [edge, edge];
+                    }
+                }
+            });
+            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let back = ui.button(tr("dialog-cancel"));
+                button_focused |= back.has_focus();
+                if back.clicked() {
+                    cancel = true;
+                }
+                let ok = ui.button(tr("dialog-ok"));
+                let enter =
+                    ui.input(|input| input.key_pressed(egui::Key::Enter)) && !button_focused;
+                if ok.clicked() || enter {
+                    chosen = Some(size.map(|edge| edge.clamp(*edges.start(), *edges.end()) as u32));
+                }
+            });
+        });
+        if let Some(size) = chosen {
+            self.new_document = None;
+            self.start_new(canvas, size);
+        } else if cancel || modal.should_close() {
+            self.new_document = None;
+        }
     }
 
     /// The animation export options, while they are asked for.
@@ -756,10 +828,14 @@ impl Files {
             threads.unwrap_or(1),
         );
         let mebibytes = format!("{:.0}", bytes as f64 / (1024.0 * 1024.0));
+        let original = export::original(document.canvas, &sizes);
         let label = |index: usize| {
             let [width, height] = sizes[index];
-            if index == 0 {
+            if index == original {
                 format!("{}  ({width} × {height})", tr("export-size-original"))
+            } else if index < original {
+                let percent = width / document.canvas[0] * 100;
+                format!("{width} × {height}  ({percent}%)")
             } else {
                 format!("{width} × {height}")
             }
@@ -1360,7 +1436,11 @@ mod tests {
         assert_eq!(files.confirm, Some(Action::New));
         files.confirm = None;
         files.proceed(Action::New, &mut canvas);
+        // Its size is asked for, starting from the document's.
+        assert_eq!(files.new_document, Some([1024, 768]));
+        files.start_new(&mut canvas, [64, 48]);
         assert!(!canvas.session().is_dirty());
+        assert_eq!(canvas.session().document().canvas, [64, 48]);
     }
 
     fn next(events: &Receiver<FileEvent>) -> FileEvent {

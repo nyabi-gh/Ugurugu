@@ -70,6 +70,8 @@ pub struct Settings {
     pub accent: Option<[u8; 3]>,
     /// Off stops the canvas from playing the wobble.
     pub wobble_animation: bool,
+    /// The grid over the document's pixels when enlarged enough.
+    pub pixel_grid: bool,
     /// Where new documents are first saved and exported, `None` for
     /// Documents.
     pub default_save_folder: Option<PathBuf>,
@@ -91,6 +93,7 @@ impl Default for Settings {
             language: Language::System,
             accent: None,
             wobble_animation: true,
+            pixel_grid: true,
             default_save_folder: None,
             export_edge: None,
             tools: Tools::default(),
@@ -161,6 +164,9 @@ impl Settings {
         if let Some(on) = take(&mut object, "wobbleAnimation", Value::as_bool) {
             settings.wobble_animation = on;
         }
+        if let Some(on) = take(&mut object, "pixelGrid", Value::as_bool) {
+            settings.pixel_grid = on;
+        }
         if let Some(folder) = take(&mut object, "defaultSaveFolder", string) {
             let folder = PathBuf::from(folder);
             if folder.is_absolute() {
@@ -211,6 +217,7 @@ impl Settings {
             );
         }
         object.insert("wobbleAnimation".to_owned(), self.wobble_animation.into());
+        object.insert("pixelGrid".to_owned(), self.pixel_grid.into());
         if let Some(folder) = &self.default_save_folder {
             object.insert(
                 "defaultSaveFolder".to_owned(),
@@ -481,6 +488,7 @@ mod tests {
             language: Language::Korean,
             accent: Some([0x12, 0xab, 0xef]),
             wobble_animation: false,
+            pixel_grid: false,
             default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),
             export_edge: Some(384),
             tools: {
@@ -533,7 +541,10 @@ mod tests {
         let object: Map<String, Value> = serde_json::from_str(&text).unwrap();
         let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["format", "tools", "version", "wobbleAnimation"]);
+        assert_eq!(
+            keys,
+            ["format", "pixelGrid", "tools", "version", "wobbleAnimation"]
+        );
     }
 
     #[test]

@@ -278,6 +278,7 @@ edit-image-size | ugurugu::MainWindow | Change image size…
 edit-canvas-size | ugurugu::MainWindow | Change canvas size…
 dialog-ok | - | OK | 확인 | OK
 dialog-cancel | - | Cancel | 취소 | キャンセル
+new-title | ugurugu::MainWindow | New document
 size-width | ugurugu::CanvasSizeDialog | Width
 size-height | ugurugu::CanvasSizeDialog | Height
 size-change | ugurugu::CanvasSizeDialog | %1 × %2 px  →  %3 × %4 px | args=width,height,new_width,new_height
@@ -367,6 +368,8 @@ settings-theme-color | ugurugu::SettingsDialog | Theme color
 settings-restart | ugurugu::SettingsDialog | Restart Ugurugu to apply language changes.
 settings-drawing | ugurugu::SettingsDialog | Drawing
 settings-wobble-animation | ugurugu::SettingsDialog | Wobble animation
+settings-pixel-grid | - | Pixel grid | 픽셀 격자 | ピクセルグリッド
+settings-pixel-grid-tip | - | Shows each pixel's edges from 800% up. | 800% 이상으로 확대하면 픽셀 경계를 보입니다. | 800%以上に拡大するとピクセルの境界を表示します。
 settings-files | ugurugu::SettingsDialog | Files
 settings-default-folder | ugurugu::SettingsDialog | Default save folder
 settings-default-folder-hint | ugurugu::SettingsDialog | New projects and exports start in this folder.

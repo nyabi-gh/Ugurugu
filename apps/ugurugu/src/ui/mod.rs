@@ -308,6 +308,12 @@ fn slider_row(
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let tool = canvas.session().tool();
     ui.add_space(4.0);
+    // A placed image or pasted pixels wait with another tool too, and their
+    // resampling is chosen here, pixel art's whole pixels included.
+    if tool != Tool::Select && canvas.session().pending().is_some() {
+        sampling_choice(ui, canvas);
+        ui.add_space(6.0);
+    }
     match tool {
         Tool::Select => return selection_settings(ui, canvas),
         Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
@@ -363,8 +369,9 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         0,
     );
     settings.stabilizer = stabilization / 100.0;
-    // A pixel brush never antialiases.
-    if tool == Tool::Pen && !pixel {
+    // A pixel brush never antialiases. Unlike 2.2.13's, whose erasers
+    // always antialias, an eraser has the choice too.
+    if matches!(tool, Tool::Pen | Tool::Eraser) && !pixel {
         widgets::check_row(
             ui,
             tr("antialiasing"),
@@ -408,20 +415,7 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         });
     }
     ui.add_space(6.0);
-    widgets::field_label(ui, tr("transform-method"));
-    let current = canvas.session().transform_sampling;
-    for (sampling, title, description) in [
-        (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
-        (Sampling::Nearest, "sampling-pixels", "sampling-pixels-tip"),
-    ] {
-        if ui
-            .radio(current == sampling, tr(title))
-            .on_hover_text(tr(description))
-            .clicked()
-        {
-            canvas.set_transform_sampling(sampling);
-        }
-    }
+    sampling_choice(ui, canvas);
     ui.add_space(6.0);
     widgets::field_label(ui, tr("selection-shape"));
     let current = canvas.session().selection_shape;
@@ -483,6 +477,24 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
     }
     if fill != canvas.session().fill {
         canvas.edit(|session| session.fill = fill);
+    }
+}
+
+/// How a transform resamples.
+fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    widgets::field_label(ui, tr("transform-method"));
+    let current = canvas.session().transform_sampling;
+    for (sampling, title, description) in [
+        (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
+        (Sampling::Nearest, "sampling-pixels", "sampling-pixels-tip"),
+    ] {
+        if ui
+            .radio(current == sampling, tr(title))
+            .on_hover_text(tr(description))
+            .clicked()
+        {
+            canvas.set_transform_sampling(sampling);
+        }
     }
 }
 

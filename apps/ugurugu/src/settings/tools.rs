@@ -181,15 +181,25 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
         }
         boolean(brush, "antialias", &mut tools.pen.antialias);
     }
+    let eraser_value = object(value, "eraser");
     let eraser = preset(
-        object(value, "eraser").and_then(|eraser| eraser.get("preset")),
+        eraser_value.and_then(|eraser| eraser.get("preset")),
         &brush::ERASERS,
         tools.eraser.preset,
     );
+    // Another eraser starts from its own antialiasing, as choosing it does.
+    let antialias = if eraser.id == tools.eraser.preset.id {
+        tools.eraser.antialias
+    } else {
+        eraser.brush.antialias
+    };
     tools.eraser = ToolSettings {
-        antialias: eraser.brush.antialias,
+        antialias,
         ..settings_of(eraser, tools.eraser)
     };
+    if let Some(eraser) = eraser_value {
+        boolean(eraser, "antialias", &mut tools.eraser.antialias);
+    }
     tools.remembered.remove(pen.id);
     tools.remembered.remove(eraser.id);
 
@@ -257,7 +267,10 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "color": color_text(tools.pen.color),
             "antialias": tools.pen.antialias,
         },
-        "eraser": { "preset": tools.eraser.preset.id },
+        "eraser": {
+            "preset": tools.eraser.preset.id,
+            "antialias": tools.eraser.antialias,
+        },
         "presets": presets,
         "selection": {
             "shape": name(&SHAPES, tools.selection_shape),
@@ -319,7 +332,8 @@ mod tests {
             preset: &brush::ERASERS[2],
             width: 80.0,
             stabilizer: 0.0,
-            antialias: brush::ERASERS[2].brush.antialias,
+            // Not the preset's own.
+            antialias: !brush::ERASERS[2].brush.antialias,
             ..ToolSettings::ERASER
         };
         tools.remembered.insert(brush::BRUSHES[0].id, (12.0, 0.25));

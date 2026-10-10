@@ -377,6 +377,37 @@ pub fn check_row(ui: &mut Ui, label: &str, name: &str, checked: &mut bool) -> Re
     .inner
 }
 
+/// A whole number field; `signed` shows a plus on positive values.
+pub fn whole(
+    ui: &mut egui::Ui,
+    value: &mut i64,
+    range: std::ops::RangeInclusive<i64>,
+    signed: bool,
+    name: &str,
+) -> egui::Response {
+    let response = ui.add_sized(
+        [96.0, 26.0],
+        egui::DragValue::new(value)
+            .range(range)
+            .speed(1.0)
+            .suffix(" px")
+            .custom_formatter(move |value, _| {
+                if signed && value > 0.0 {
+                    format!("+{value}")
+                } else {
+                    format!("{value}")
+                }
+            }),
+    );
+    let shown = *value as f64;
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::drag_value(true, shown);
+        info.label = Some(name.to_owned());
+        info
+    });
+    response
+}
+
 /// An item of a drop-down list that closes the list when chosen. egui closes
 /// a popup only on a pointer click, and left it open after Space or Enter.
 pub fn choice<T: PartialEq>(

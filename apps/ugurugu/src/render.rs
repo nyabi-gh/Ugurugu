@@ -194,6 +194,7 @@ struct Shown {
     placement: Placement,
     document: Placement,
     canvas_size: [u32; 2],
+    pixel_grid: bool,
 }
 
 impl Display {
@@ -742,6 +743,7 @@ impl RenderThread {
                 let display = self.canvas.display();
                 [u32::from(display.width()), u32::from(display.height())]
             },
+            pixel_grid: self.settings.get().pixel_grid,
         };
         let same_picture = upload.is_none()
             && shown_ants.is_none()
@@ -760,6 +762,7 @@ impl RenderThread {
         let canvas_area = shown.canvas_area;
         let placement = shown.placement;
         let document = shown.document;
+        let pixel_grid = shown.pixel_grid;
         let primitives = self
             .egui_ctx
             .tessellate(shown.shapes.clone(), pixels_per_point);
@@ -802,6 +805,7 @@ impl RenderThread {
                 shown_ants.map_or(0.0, |(_, _, phase)| phase),
                 canvas_area,
                 [placement, document],
+                pixel_grid,
                 egui_renderer,
                 &primitives,
                 pixels_per_point,
@@ -876,6 +880,7 @@ fn draw(
     ants_phase: f32,
     canvas_area: [u32; 4],
     [placement, document]: [Placement; 2],
+    pixel_grid: bool,
     egui_renderer: &mut egui_wgpu::Renderer,
     primitives: &[egui::ClippedPrimitive],
     pixels_per_point: f32,
@@ -914,7 +919,7 @@ fn draw(
                 multiview_mask: None,
             })
             .forget_lifetime();
-        canvas.draw(queue, &mut pass, canvas_area, placement, size);
+        canvas.draw(queue, &mut pass, canvas_area, placement, pixel_grid, size);
         ants.draw(
             queue,
             &mut pass,

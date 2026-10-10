@@ -255,6 +255,11 @@ impl Session {
         if tool == Tool::Eraser {
             settings.antialias = preset.brush.antialias;
         }
+        // Pixel art fills without blending edges too; it can be turned on
+        // again.
+        if preset.brush.engine == BrushEngine::Pixel && tool != Tool::Eraser {
+            self.fill.antialias = false;
+        }
     }
 
     /// Goes up on every change, undo and redo included.

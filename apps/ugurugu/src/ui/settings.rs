@@ -143,6 +143,8 @@ pub fn show(
                         &mut settings.wobble_animation,
                         tr("settings-wobble-animation"),
                     );
+                    widgets::checkbox(ui, &mut settings.pixel_grid, tr("settings-pixel-grid"))
+                        .on_hover_text(tr("settings-pixel-grid-tip"));
                 }
                 Tab::Files => save_folder(ui, files, &mut settings),
                 Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings, typed),
