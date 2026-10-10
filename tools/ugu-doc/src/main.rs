@@ -432,7 +432,7 @@ fn pen_only(from: &Path, to: &Path) -> Result<(), String> {
 /// The app's GIF export (apps/ugurugu/src/export.rs) without the app: the
 /// same frames, shrinking, colours and coding, keeping transparency.
 fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String> {
-    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::document::DocumentRenderer;
 
     let document = open(path)?;
     let canvas = document.canvas;
@@ -452,17 +452,20 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
         size[1]
     );
     let started = Instant::now();
-    let (to_export, drawn) = std::sync::mpsc::sync_channel::<vello_cpu::Pixmap>(2);
+    let stage = export_stage();
+    let (to_export, drawn) = std::sync::mpsc::sync_channel::<Vec<u8>>(2);
     let (drawing, quantized, taking) = std::thread::scope(|scope| {
         let drawer = scope.spawn(|| {
             let mut renderer = DocumentRenderer::new(threads);
+            set_budget(&mut renderer);
             let mut busy = 0.0;
             for frame in 0..i64::from(frames) {
-                let mut pixmap = vello_cpu::Pixmap::new(canvas[0] as u16, canvas[1] as u16);
                 let started = Instant::now();
-                renderer.render(&document, frame, Purpose::Export, &mut pixmap);
+                let Some(shrunk) = drawn_frame(&mut renderer, &document, frame, size, stage) else {
+                    continue;
+                };
                 busy += started.elapsed().as_secs_f64();
-                if to_export.send(pixmap).is_err() {
+                if to_export.send(shrunk).is_err() {
                     break;
                 }
             }
@@ -472,9 +475,11 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
         });
         let mut quantizer = ugu_io::gif::Quantizer::new(size);
         let mut taking = 0.0;
-        for pixmap in drawn {
+        for shrunk in drawn {
+            if stage == Stage::Shrink {
+                continue;
+            }
             let started = Instant::now();
-            let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
             let straight: Vec<u8> = shrunk
                 .as_chunks::<4>()
                 .0
@@ -487,6 +492,13 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
         (drawer.join().expect("drawing"), quantizer.finish(), taking)
     });
     let first_pass = started.elapsed().as_secs_f64();
+    if stage != Stage::Code {
+        println!(
+            "  drawing {drawing:.2}s, {first_pass:.2}s in all, peak working set {:.0} MiB",
+            peak_working_set_mib()
+        );
+        return Ok(());
+    }
     let coding_started = Instant::now();
     let delays: Vec<u16> =
         ugu_io::animation::delays(frames, f64::from(document.frames_per_second), 100)
@@ -509,7 +521,7 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
         .map_err(|error| error.to_string())?
         .len();
     println!(
-        "  drawing {drawing:.2}s, shrinking and colours {taking:.2}s, first pass {first_pass:.2}s"
+        "  drawing and shrinking {drawing:.2}s, colours {taking:.2}s, first pass {first_pass:.2}s"
     );
     println!("  coding on {coders} threads {coding:.2}s");
     println!(
@@ -524,7 +536,7 @@ fn gif(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String
 /// Times exporting `path` as an animated WebP at `percent` as the app does
 /// it, drawing on `threads` threads, and prints the peak working set.
 fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), String> {
-    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::document::DocumentRenderer;
 
     let document = open(path)?;
     let canvas = document.canvas;
@@ -544,21 +556,26 @@ fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), Strin
         size[1]
     );
     let delays = ugu_io::animation::delays(frames, f64::from(document.frames_per_second), 1000);
-    let coders = std::thread::available_parallelism().map_or(1, usize::from);
+    let coders = std::env::var("UGU_EXPORT_RUNS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
     let runs = ugu_io::webp::runs(frames as usize, coders);
-    println!("  {} runs: {:?}", runs.len(), runs);
+    let stage = export_stage();
+    println!("  {} runs: {:?}, stage {stage:?}", runs.len(), runs);
     let started = Instant::now();
     // As the app: one thread draws the runs' frames in turn, each run codes
     // on a thread of its own.
     let (drawing, coded) = std::thread::scope(|scope| {
         let (senders, receivers): (Vec<_>, Vec<_>) = runs
             .iter()
-            .map(|_| std::sync::mpsc::sync_channel::<vello_cpu::Pixmap>(1))
+            .map(|_| std::sync::mpsc::sync_channel::<Vec<u8>>(1))
             .unzip();
         let runs = &runs;
         let document = &document;
         let drawer = scope.spawn(move || {
             let mut renderer = DocumentRenderer::new(threads);
+            set_budget(&mut renderer);
             let mut busy = 0.0;
             let longest = runs.iter().map(|run| run.len()).max().unwrap_or(0);
             for step in 0..longest {
@@ -567,11 +584,14 @@ fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), Strin
                     if index >= run.end {
                         continue;
                     }
-                    let mut pixmap = vello_cpu::Pixmap::new(canvas[0] as u16, canvas[1] as u16);
                     let started = Instant::now();
-                    renderer.render(document, index as i64, Purpose::Export, &mut pixmap);
+                    let Some(shrunk) =
+                        drawn_frame(&mut renderer, document, index as i64, size, stage)
+                    else {
+                        continue;
+                    };
                     busy += started.elapsed().as_secs_f64();
-                    let _ = sender.send(pixmap);
+                    let _ = sender.send(shrunk);
                 }
             }
             drop(senders);
@@ -583,18 +603,26 @@ fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), Strin
             .map(|(range, drawn)| {
                 let delays = &delays;
                 scope.spawn(move || {
-                    let mut run = ugu_io::webp::Run::new(size, range.start == 0, &|| false)?;
-                    for (offset, pixmap) in drawn.into_iter().enumerate() {
-                        let shrunk = ugu_io::image::shrink(pixmap.data_as_u8_slice(), canvas, size);
+                    let mut run = if stage == Stage::Code {
+                        Some(ugu_io::webp::Run::new(size, range.start == 0, &|| false)?)
+                    } else {
+                        None
+                    };
+                    for (offset, shrunk) in drawn.into_iter().enumerate() {
+                        if stage == Stage::Shrink {
+                            continue;
+                        }
                         let straight: Vec<u8> = shrunk
                             .as_chunks::<4>()
                             .0
                             .iter()
                             .flat_map(|&pixel| Rgba8::from_premultiplied(pixel).0)
                             .collect();
-                        run.add(&straight, delays[range.start + offset])?;
+                        if let Some(run) = &mut run {
+                            run.add(&straight, delays[range.start + offset])?;
+                        }
                     }
-                    run.finish()
+                    run.map(|run| run.finish()).transpose()
                 })
             })
             .collect();
@@ -606,10 +634,17 @@ fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), Strin
     });
     let coded = coded.map_err(|error| error.to_string())?;
     let coding = started.elapsed().as_secs_f64();
+    let Some(coded) = coded.into_iter().collect::<Option<Vec<_>>>() else {
+        println!(
+            "  drawing {drawing:.2}s, {coding:.2}s in all, peak working set {:.0} MiB",
+            peak_working_set_mib()
+        );
+        return Ok(());
+    };
     let mut bytes = Vec::new();
     ugu_io::webp::join(coded, size, &mut bytes).map_err(|error| error.to_string())?;
     std::fs::write(out, &bytes).map_err(|error| error.to_string())?;
-    println!("  drawing {drawing:.2}s, drawing and coding {coding:.2}s");
+    println!("  drawing and shrinking {drawing:.2}s, drawing and coding {coding:.2}s");
     println!(
         "  total {:.2}s, {:.1}MB, peak working set {:.0} MiB",
         started.elapsed().as_secs_f64(),
@@ -617,6 +652,49 @@ fn webp(path: &Path, out: &Path, percent: u32, threads: u16) -> Result<(), Strin
         peak_working_set_mib()
     );
     Ok(())
+}
+
+/// `frame` drawn at the document's size for export and shrunk to `size`,
+/// as the app does; `None` when `stage` stops at drawing.
+fn drawn_frame(
+    renderer: &mut ugu_render::document::DocumentRenderer,
+    document: &Document,
+    frame: i64,
+    size: [u32; 2],
+    stage: Stage,
+) -> Option<Vec<u8>> {
+    let canvas = document.canvas;
+    let mut pixmap = vello_cpu::Pixmap::new(canvas[0] as u16, canvas[1] as u16);
+    renderer.render(
+        document,
+        frame,
+        ugu_render::document::Purpose::Export,
+        &mut pixmap,
+    );
+    (stage != Stage::Draw).then(|| {
+        ugu_io::image::shrink(
+            pixmap.take_rgba8(vello_cpu::peniko::ImageAlphaType::AlphaPremultiplied),
+            canvas,
+            size,
+        )
+    })
+}
+
+/// How far `gif` and `webp` take each frame, from `UGU_EXPORT_STAGE`
+/// (`draw`, `shrink`, else all the way), to tell apart what holds memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+    Draw,
+    Shrink,
+    Code,
+}
+
+fn export_stage() -> Stage {
+    match std::env::var("UGU_EXPORT_STAGE").as_deref() {
+        Ok("draw") => Stage::Draw,
+        Ok("shrink") => Stage::Shrink,
+        _ => Stage::Code,
+    }
 }
 
 fn peak_working_set_mib() -> f64 {

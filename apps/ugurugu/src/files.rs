@@ -670,13 +670,8 @@ impl Files {
             .iter()
             .position(|&percent| {
                 let size = export::scaled(document.canvas, percent);
-                export::animation_bytes(
-                    format,
-                    document.canvas,
-                    size,
-                    document.frames,
-                    export::threads(),
-                ) <= budget
+                export::threads_within(format, document.canvas, size, document.frames, budget)
+                    .is_some()
             })
             .unwrap_or(export::SCALES.len() - 1);
         self.animation_dialog = Some(AnimationDialog {
@@ -695,14 +690,21 @@ impl Files {
         let document = canvas.session().document();
         let transparent = document.background.0[3] < 255;
         let sizes = export::SCALES.map(|percent| export::scaled(document.canvas, percent));
+        let threads = export::threads_within(
+            dialog.format,
+            document.canvas,
+            sizes[dialog.scale],
+            document.frames,
+            dialog.budget,
+        );
+        let fits = threads.is_some();
         let bytes = export::animation_bytes(
             dialog.format,
             document.canvas,
             sizes[dialog.scale],
             document.frames,
-            export::threads(),
+            threads.unwrap_or(1),
         );
-        let fits = bytes <= dialog.budget;
         let mebibytes = format!("{:.0}", bytes as f64 / (1024.0 * 1024.0));
         let label = |index: usize| {
             let [width, height] = sizes[index];
@@ -779,6 +781,7 @@ impl Files {
                     format,
                     size: sizes[dialog.scale],
                     keep_transparency: transparent && dialog.keep_transparency,
+                    threads: threads.unwrap_or(1),
                 });
                 self.animation_dialog = None;
                 let types: &'static [FileType] = match format {

@@ -74,43 +74,74 @@ fn spans(from: u32, to: u32) -> Vec<(usize, Vec<u32>)> {
 }
 
 /// Premultiplied RGBA8 rows of `from` made `to`, no larger, each pixel the
-/// average of the area it covers.
-pub fn shrink(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+/// average of the area it covers. Bands of rows are shrunk on several
+/// threads, each holding only the few source rows its next row covers.
+pub fn shrink(pixels: Vec<u8>, from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
     if from == to {
-        return pixels.to_vec();
+        return pixels;
     }
     let columns = spans(from[0], to[0]);
     let rows = spans(from[1], to[1]);
     let source = pixels.as_chunks::<4>().0;
-    // Across first, kept in 2^16 parts, then down.
-    let mut across = vec![[0u32; 4]; (to[0] * from[1]) as usize];
-    for y in 0..from[1] as usize {
-        let row = &source[y * from[0] as usize..][..from[0] as usize];
-        for (x, (first, weights)) in columns.iter().enumerate() {
-            let mut sum = [0u32; 4];
-            for (pixel, &weight) in row[*first..].iter().zip(weights) {
-                for channel in 0..4 {
-                    sum[channel] += u32::from(pixel[channel]) * weight;
-                }
-            }
-            across[y * to[0] as usize + x] = sum.map(|channel| (channel + 128) >> 8);
+    let row_bytes = to[0] as usize * 4;
+    let mut out = vec![0; row_bytes * to[1] as usize];
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let band = rows.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (rows, out) in rows.chunks(band).zip(out.chunks_mut(band * row_bytes)) {
+            let columns = &columns;
+            scope.spawn(move || shrink_rows(source, from[0] as usize, columns, rows, out));
         }
-    }
-    let mut out = Vec::with_capacity((to[0] * to[1] * 4) as usize);
-    for (first, weights) in &rows {
-        for x in 0..to[0] as usize {
+    });
+    out
+}
+
+/// `rows` of the shrunk image into `out`.
+fn shrink_rows(
+    source: &[[u8; 4]],
+    from_width: usize,
+    columns: &[(usize, Vec<u32>)],
+    rows: &[(usize, Vec<u32>)],
+    out: &mut [u8],
+) {
+    let width = columns.len();
+    // Source rows from `top` on, summed across in 2^16 parts.
+    let mut across: Vec<[u32; 4]> = Vec::new();
+    let mut top = 0;
+    for ((first, weights), out) in rows.iter().zip(out.chunks_exact_mut(width * 4)) {
+        let passed = first.saturating_sub(top).min(across.len() / width);
+        across.drain(..passed * width);
+        top = if across.is_empty() {
+            *first
+        } else {
+            top + passed
+        };
+        while top + across.len() / width < first + weights.len() {
+            let y = top + across.len() / width;
+            let row = &source[y * from_width..][..from_width];
+            across.extend(columns.iter().map(|(first, weights)| {
+                let mut sum = [0u32; 4];
+                for (pixel, &weight) in row[*first..].iter().zip(weights) {
+                    for channel in 0..4 {
+                        sum[channel] += u32::from(pixel[channel]) * weight;
+                    }
+                }
+                sum.map(|channel| (channel + 128) >> 8)
+            }));
+        }
+        let start = (first - top) * width;
+        for (x, out) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let mut sum = [0u64; 4];
             for (offset, &weight) in weights.iter().enumerate() {
-                let pixel = across[(first + offset) * to[0] as usize + x];
+                let pixel = across[start + offset * width + x];
                 for channel in 0..4 {
                     sum[channel] += u64::from(pixel[channel]) * u64::from(weight);
                 }
             }
             // 2^8 parts across times 2^16 down.
-            out.extend(sum.map(|channel| ((channel + (1 << 23)) >> 24).min(255) as u8));
+            *out = sum.map(|channel| ((channel + (1 << 23)) >> 24).min(255) as u8);
         }
     }
-    out
 }
 
 /// The file formats a still image is exported as.
@@ -279,7 +310,7 @@ mod tests {
     fn shrinking_averages_the_area_each_pixel_covers() {
         let flat: Vec<u8> = [[40, 80, 120, 200]; 12].concat();
         assert_eq!(
-            shrink(&flat, [4, 3], [2, 1]),
+            shrink(flat.clone(), [4, 3], [2, 1]),
             [[40, 80, 120, 200]; 2].concat()
         );
         // Two by two into one.
@@ -290,14 +321,68 @@ mod tests {
             [255, 255, 255, 255],
         ]
         .concat();
-        assert_eq!(shrink(&square, [2, 2], [1, 1]), [89, 114, 64, 139]);
+        assert_eq!(shrink(square, [2, 2], [1, 1]), [89, 114, 64, 139]);
         // Three into two: the middle one is shared half and half.
         let row = [[0, 0, 0, 255], [90, 90, 90, 255], [180, 180, 180, 255]].concat();
         assert_eq!(
-            shrink(&row, [3, 1], [2, 1]),
+            shrink(row, [3, 1], [2, 1]),
             [[30, 30, 30, 255], [150, 150, 150, 255]].concat()
         );
-        assert_eq!(shrink(&flat, [4, 3], [4, 3]), flat);
+        assert_eq!(shrink(flat.clone(), [4, 3], [4, 3]), flat);
+    }
+
+    /// The whole image summed across, then down, as one pass.
+    fn shrink_whole(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+        let columns = spans(from[0], to[0]);
+        let rows = spans(from[1], to[1]);
+        let source = pixels.as_chunks::<4>().0;
+        let mut across = vec![[0u32; 4]; (to[0] * from[1]) as usize];
+        for y in 0..from[1] as usize {
+            let row = &source[y * from[0] as usize..][..from[0] as usize];
+            for (x, (first, weights)) in columns.iter().enumerate() {
+                let mut sum = [0u32; 4];
+                for (pixel, &weight) in row[*first..].iter().zip(weights) {
+                    for channel in 0..4 {
+                        sum[channel] += u32::from(pixel[channel]) * weight;
+                    }
+                }
+                across[y * to[0] as usize + x] = sum.map(|channel| (channel + 128) >> 8);
+            }
+        }
+        let mut out = Vec::new();
+        for (first, weights) in &rows {
+            for x in 0..to[0] as usize {
+                let mut sum = [0u64; 4];
+                for (offset, &weight) in weights.iter().enumerate() {
+                    let pixel = across[(first + offset) * to[0] as usize + x];
+                    for channel in 0..4 {
+                        sum[channel] += u64::from(pixel[channel]) * u64::from(weight);
+                    }
+                }
+                out.extend(sum.map(|channel| ((channel + (1 << 23)) >> 24).min(255) as u8));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn shrinking_in_bands_is_shrinking_the_whole() {
+        let from = [301, 257];
+        let pixels: Vec<u8> = (0..from[0] * from[1])
+            .flat_map(|index| {
+                let alpha = (index * 7 % 256) as u8;
+                let colour = |seed: u32| ((index * seed % 251) as u8).min(alpha);
+                [colour(13), colour(29), colour(47), alpha]
+            })
+            .collect();
+        for percent in [75, 50, 33, 25, 1] {
+            let to = from.map(|edge| (edge * percent / 100).max(1));
+            assert_eq!(
+                shrink(pixels.clone(), from, to),
+                shrink_whole(&pixels, from, to),
+                "{percent}%"
+            );
+        }
     }
 
     #[test]
