@@ -6,6 +6,9 @@
 //! the view's scale and offset. At 100% and above a screen pixel shows one
 //! document pixel exactly; below, neighbouring pixels are blended.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use vello_cpu::Pixmap;
 
 use crate::raster::PixelRect;
@@ -92,6 +95,19 @@ pub struct DocumentView {
     bind_group: wgpu::BindGroup,
     workspace: [f32; 4],
     uploaded: Option<(Placement, [u32; 2])>,
+    staging: Option<Staging>,
+}
+
+/// Uploads at least this large go through `Staging`.
+const STAGED_LEAST: u64 = 1 << 20;
+
+/// A buffer large uploads are copied through, kept for the next one: the
+/// device takes small memory blocks, so each large upload would otherwise
+/// get fresh memory, which costs as much again as the copy (16MiB: 1.5ms).
+struct Staging {
+    buffer: wgpu::Buffer,
+    /// Mapped again after the last copy from it, so it can be written.
+    mapped: Arc<AtomicBool>,
 }
 
 impl DocumentView {
@@ -186,6 +202,7 @@ impl DocumentView {
             bind_group,
             workspace: workspace.map(|value| f32::from(value) / 255.0),
             uploaded: None,
+            staging: None,
         }
     }
 
@@ -257,12 +274,88 @@ impl DocumentView {
                 &self.sampler,
             );
             self.uploaded = None;
+            self.staging = None;
             rect = Some([0, 0, width, height]);
         }
         let Some([left, top, right, bottom]) = rect else {
             return;
         };
         let row = width * 4;
+        let staged_row = ((right - left) * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let staged = u64::from(staged_row) * u64::from(bottom - top);
+        if staged >= STAGED_LEAST {
+            // Takes the map callback of the last staged upload, if it is done.
+            let _ = device.poll(wgpu::PollType::Poll);
+            if self
+                .staging
+                .as_ref()
+                .is_some_and(|staging| staging.buffer.size() < staged)
+            {
+                self.staging = None;
+            }
+            let staging = self.staging.get_or_insert_with(|| Staging {
+                buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("document upload"),
+                    size: staged,
+                    usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: true,
+                }),
+                mapped: Arc::new(AtomicBool::new(true)),
+            });
+            // Still being copied from: the rare upload right after another
+            // takes fresh memory instead of waiting.
+            if staging.mapped.load(Ordering::Acquire)
+                && let Ok(mut view) = staging.buffer.slice(..staged).get_mapped_range_mut()
+            {
+                let pixels = document.data_as_u8_slice();
+                let width = ((right - left) * 4) as usize;
+                for (index, y) in (top..bottom).enumerate() {
+                    let source = (y * row + left * 4) as usize;
+                    let target = index * staged_row as usize;
+                    view.slice(target..target + width)
+                        .copy_from_slice(&pixels[source..source + width]);
+                }
+                drop(view);
+                staging.buffer.unmap();
+                staging.mapped.store(false, Ordering::Release);
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &staging.buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(staged_row),
+                            rows_per_image: None,
+                        },
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &self.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: left,
+                            y: top,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: right - left,
+                        height: bottom - top,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                queue.submit([encoder.finish()]);
+                let mapped = staging.mapped.clone();
+                staging
+                    .buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Write, move |result| {
+                        mapped.store(result.is_ok(), Ordering::Release);
+                    });
+                return;
+            }
+        }
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
@@ -475,6 +568,49 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn large_uploads_one_after_another_show_the_pixels_given() {
+        let size = [1100u32, 700];
+        let mut document = Pixmap::new(size[0] as u16, size[1] as u16);
+        let paint = |document: &mut Pixmap, salt: usize| {
+            for (index, pixel) in document.data_as_u8_slice_mut().chunks_mut(4).enumerate() {
+                let value = index * 31 + salt;
+                pixel.copy_from_slice(&[(value % 251) as u8, (value % 241) as u8, salt as u8, 255]);
+            }
+        };
+        paint(&mut document, 0);
+        let mut changed = document.clone();
+        paint(&mut changed, 7);
+        let rect = [37, 21, 1000, 400];
+        let mut expected = document.clone();
+        let row = size[0] as usize * 4;
+        for y in rect[1] as usize..rect[3] as usize {
+            let span = y * row + rect[0] as usize * 4..y * row + rect[2] as usize * 4;
+            expected.data_as_u8_slice_mut()[span.clone()]
+                .copy_from_slice(&changed.data_as_u8_slice()[span]);
+        }
+        let placement = Placement {
+            offset: [0.0, 0.0],
+            scale: 1.0,
+        };
+        let shown = render_with(size, |device, queue, format| {
+            let mut view = DocumentView::new(device, format, WORKSPACE);
+            // The whole, then a part twice in a row: the second finds the
+            // staging buffer still being copied from or mapped again.
+            view.update(device, queue, &document, None);
+            view.update(device, queue, &changed, Some(rect));
+            view.update(device, queue, &changed, Some(rect));
+            move |queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>| {
+                view.draw(queue, pass, [0, 0, size[0], size[1]], placement, size);
+            }
+        });
+        let Some(shown) = shown else {
+            eprintln!("skipped: no DX12 adapter");
+            return;
+        };
+        assert!(shown == expected.data_as_u8_slice());
     }
 
     #[test]

@@ -594,8 +594,20 @@ impl Canvas {
                 .request_frames(version, &missing, &snapshot, preview);
         }
         if shown {
-            tracing::debug!(frame = cycle, "playback frame shown");
-            let next = self.playback.as_ref().expect("playing").next;
+            let playback = self.playback.as_ref().expect("playing");
+            let held: usize = playback
+                .frames
+                .values()
+                .map(|pixels| pixels.data().len() * 4)
+                .sum();
+            tracing::debug!(
+                frame = cycle,
+                ahead,
+                held_mib = held >> 20,
+                surfaces_mib = self.cache.surface_bytes() >> 20,
+                "playback frame shown"
+            );
+            let next = playback.next;
             self.session.set_frame(next - 1);
             self.upload_all();
         }

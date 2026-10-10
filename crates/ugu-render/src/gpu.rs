@@ -66,9 +66,14 @@ impl Gpu {
     fn with_adapter(adapter: wgpu::Adapter) -> Result<Self, String> {
         let summary = adapter_summary(&adapter.get_info());
         tracing::info!(adapter = %summary, "selected GPU adapter");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|error| format!("cannot open the DX12 device: {error}"))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            // Small memory blocks: the few large resources get their own
+            // memory instead of sitting in mostly empty 128 and 64MiB
+            // blocks. Large uploads keep a buffer of their own.
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..wgpu::DeviceDescriptor::default()
+        }))
+        .map_err(|error| format!("cannot open the DX12 device: {error}"))?;
         tracing::debug!("GPU device opened");
 
         let lost = Arc::new(AtomicBool::new(false));

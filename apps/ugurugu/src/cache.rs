@@ -24,6 +24,7 @@ use ugu_core::history::LayerRevisions;
 use ugu_render::compose::Split;
 use ugu_render::document::{DocumentRenderer, FULL_DETAIL, Purpose, scaled_size};
 use ugu_render::plan::RenderPlan;
+use ugu_render::stream::Held;
 use vello_cpu::Pixmap;
 
 use crate::budget::Budget;
@@ -369,9 +370,19 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
                 tracing::debug!(ms = ms(), "canvas split stopped");
                 return None;
             };
+            let held: usize = split
+                .sources
+                .iter()
+                .map(|source| match source {
+                    Held::Tiles(surface) => surface.bytes(),
+                    Held::Whole(pixmap) => pixmap.data().len() * 4,
+                })
+                .sum();
             tracing::debug!(
                 ms = ms(),
                 revision = key.version.revision,
+                held_mib = held >> 20,
+                surfaces_mib = renderer.surface_bytes() >> 20,
                 "canvas split rendered"
             );
             done(Rendered::Split {
