@@ -47,7 +47,7 @@ jobs:
             while IFS= read -r path; do
               case "$path" in
                 docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md) ;;
-                apps/*|crates/*|tools/latency-probe/*|tools/render-bench/*|tools/ugu-doc/*|tools/ime_probe.py|tools/baseline_probe.py|tools/display_scale.py|tools/uia_probe.ps1|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml)
+                apps/*|crates/*|tools/latency-probe/*|tools/render-bench/*|tools/ugu-doc/*|tools/ime_probe.py|tools/baseline_probe.py|tools/display_scale.py|tools/uia_probe.ps1|tools/native_deps.py|tools/package_*.ps1|tools/third_party_notices.py|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml|about.toml|.cargo/*)
                   rust=true ;;
                 web/*|tools/check_itchio_package.mjs|tools/wasm_*)
                   web=true ;;
@@ -569,7 +569,7 @@ jobs:
 
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a
         with:
-          tool: cargo-deny@0.18.9
+          tool: cargo-deny@0.18.9,cargo-about@0.9.2
 
       - name: Format
         run: cargo fmt --all --check
@@ -585,6 +585,22 @@ jobs:
 
       - name: Release build
         run: cargo build --workspace --release --locked
+
+      - name: Native dependencies
+        run: python tools/native_deps.py
+
+      # The same package and checks as release-3.yml, so a release does not
+      # find a packaging problem first.
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Package
+        shell: pwsh
+        run: ./tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory "$env:RUNNER_TEMP/package"
+
+      - name: Install, run and uninstall
+        shell: pwsh
+        run: ./tools/package_smoke.ps1 -Setup "$env:RUNNER_TEMP/package/Ugurugu-Windows-x64-Setup.exe" -WorkDirectory "$env:RUNNER_TEMP/smoke"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

@@ -29,7 +29,7 @@
 | 플랫폼 | 지원 환경 | 다운로드 |
 | --- | --- | --- |
 | Windows | Windows 10 이상, 64비트 | [Setup.exe](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
-| macOS | macOS 14 이상, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
+| macOS | macOS 14 이상, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
 - **Windows**: Setup 파일을 실행하세요. 출처 확인 경고가 나오면
   **추가 정보 → 실행**을 누르면 됩니다.

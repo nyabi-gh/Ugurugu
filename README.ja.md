@@ -29,7 +29,7 @@ WiggleWiggleToolで作った`.wawa`の絵も引き続き編集できます。
 | プラットフォーム | 対応環境 | ダウンロード |
 | --- | --- | --- |
 | Windows | Windows 10以降、64ビット | [Setup.exe](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
-| macOS | macOS 14以降、Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
+| macOS | macOS 14以降、Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
 - **Windows**: Setupファイルを実行してください。確認の警告が出た場合は
   **詳細情報 → 実行**を選びます。

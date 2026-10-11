@@ -1,0 +1,5 @@
+# The C runtime is linked into the executable, so a clean Windows needs no
+# Visual C++ redistributable and the per-user install never asks for
+# administrator rights (2.2.13 installed vcredist through Velopack).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

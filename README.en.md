@@ -29,7 +29,7 @@ background, and continue `.wawa` drawings made with WiggleWiggleTool.
 | Platform | Requirements | Download |
 | --- | --- | --- |
 | Windows | Windows 10 or later, 64-bit | [Setup.exe](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-Windows-x64-Setup.exe) |
-| macOS | macOS 14 or later, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/latest/download/Ugurugu-macOS-arm64.dmg) |
+| macOS | macOS 14 or later, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
 - **Windows**: Run the Setup file. If Windows shows an unrecognized-app
   warning, choose **More info → Run anyway**.

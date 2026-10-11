@@ -232,7 +232,9 @@ impl Display {
     }
 
     fn with_gpu(gpu: Gpu, surface: wgpu::Surface<'static>, size: [u32; 2]) -> Result<Self, String> {
-        crate::logs::set_gpu(ugu_render::gpu::adapter_summary(&gpu.adapter.get_info()));
+        let summary = ugu_render::gpu::adapter_summary(&gpu.adapter.get_info());
+        tracing::info!(adapter = %summary, "showing on this GPU");
+        crate::logs::set_gpu(summary);
         let presenter = Presenter::new(surface, &gpu.adapter, &gpu.device, size)?;
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu.device,
