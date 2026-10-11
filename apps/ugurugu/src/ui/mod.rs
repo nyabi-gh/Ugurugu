@@ -615,19 +615,16 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
     let Some([left, top, right, bottom]) = canvas.text_box() else {
         return;
     };
-    let pad = 6.0;
-    let rect = egui::Rect::from_min_max(
-        to_screen(ui, canvas, [left, top]) - egui::vec2(pad, pad),
-        to_screen(ui, canvas, [right, bottom]) + egui::vec2(pad, pad),
+    // 6 points outside the text, on the turned document.
+    let pad = 6.0 * f64::from(ui.ctx().pixels_per_point()) / canvas.scale();
+    let [a, b, c, d] = corners_on_screen(
+        ui,
+        canvas,
+        [left - pad, top - pad, right + pad, bottom + pad],
     );
     let painter = ui.painter();
-    let corners = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ];
+    let corners = [a, b, c, d, a];
+    let rect = egui::Rect::from_points(&corners);
     for side in corners.windows(2) {
         painter.extend(egui::Shape::dashed_line(
             side,
@@ -650,14 +647,67 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
     );
 }
 
-/// Document pixels to points.
-fn to_screen(ui: &egui::Ui, canvas: &Canvas, [x, y]: [f64; 2]) -> egui::Pos2 {
-    let ppp = ui.ctx().pixels_per_point();
-    let placement = canvas.placement();
-    egui::pos2(
-        (placement.offset[0] + x as f32 * placement.scale) / ppp,
-        (placement.offset[1] + y as f32 * placement.scale) / ppp,
+/// As 2.2.13's status bar: turn left, the angle, turn right, reset and
+/// mirror, laid out right to left.
+fn view_turn(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
+    let named = |action: Action| {
+        let name = tr(action.label());
+        (name, widgets::with_key(name, &keys.text(action)))
+    };
+    let (name, tip) = named(Action::Mirror);
+    if widgets::icon_toggle(
+        ui,
+        Glyph::MirrorHorizontal,
+        16.0,
+        name,
+        &tip,
+        canvas.is_mirrored(),
     )
+    .clicked()
+    {
+        canvas.set_mirrored(!canvas.is_mirrored());
+    }
+    let (name, tip) = named(Action::ResetTurn);
+    if widgets::icon_button_tip(ui, Glyph::Rotate, 16.0, name, &tip, true).clicked() {
+        canvas.turn_to(0.0);
+    }
+    let (name, tip) = named(Action::TurnRight);
+    if widgets::icon_button_tip(ui, Glyph::Redo, 16.0, name, &tip, true).clicked() {
+        canvas.turn_by(crate::canvas::TURN_STEP);
+    }
+    let mut degrees = canvas.angle() as f32;
+    let field = widgets::number(
+        ui,
+        &mut degrees,
+        -180.0..=180.0,
+        "°",
+        1,
+        64.0,
+        tr("canvas-rotation"),
+    )
+    .on_hover_text(tr("canvas-rotation"));
+    if field.changed() {
+        canvas.turn_to(f64::from(degrees));
+    }
+    let (name, tip) = named(Action::TurnLeft);
+    if widgets::icon_button_tip(ui, Glyph::Undo, 16.0, name, &tip, true).clicked() {
+        canvas.turn_by(-crate::canvas::TURN_STEP);
+    }
+}
+
+/// Document pixels to points.
+fn to_screen(ui: &egui::Ui, canvas: &Canvas, point: [f64; 2]) -> egui::Pos2 {
+    let ppp = ui.ctx().pixels_per_point();
+    let [x, y] = canvas.placement().to_target(point);
+    egui::pos2(x as f32 / ppp, y as f32 / ppp)
+}
+
+/// The corners of document rectangle `[left, top, right, bottom]` on
+/// screen, clockwise from the top left as the document is turned.
+fn corners_on_screen(ui: &egui::Ui, canvas: &Canvas, rect: [f64; 4]) -> [egui::Pos2; 4] {
+    let [left, top, right, bottom] = rect;
+    [[left, top], [right, top], [right, bottom], [left, bottom]]
+        .map(|corner| to_screen(ui, canvas, corner))
 }
 
 /// The box's sides and handles, and the pointer shape for what a drag from
@@ -724,8 +774,10 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
         return;
     };
     let area = ui.max_rect();
-    let low = to_screen(ui, canvas, [left, bottom]);
-    let high = to_screen(ui, canvas, [right, top]);
+    // Below the selection as it shows on screen, or above it.
+    let bounds =
+        egui::Rect::from_points(&corners_on_screen(ui, canvas, [left, top, right, bottom]));
+    let (low, high) = (bounds.left_bottom(), bounds.right_top());
     let id = egui::Id::new("selection actions");
     let size = ui
         .ctx()
@@ -1392,6 +1444,7 @@ pub fn status_bar(
     message: Option<(&str, bool)>,
     export: Option<&str>,
     pointer: Option<[f64; 2]>,
+    keys: &Keymap,
 ) -> bool {
     let mut cancel = false;
     ui.horizontal(|ui| {
@@ -1412,6 +1465,7 @@ pub fn status_bar(
             if fit.clicked() {
                 canvas.fit();
             }
+            view_turn(ui, canvas, keys);
             let scale = canvas.scale();
             let mut percent = (scale * 100.0) as f32;
             let (low, high) = (

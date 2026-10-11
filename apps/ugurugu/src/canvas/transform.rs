@@ -133,15 +133,6 @@ impl Canvas {
         )
     }
 
-    /// Document pixels to client physical pixels.
-    fn to_client(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
-        [
-            f64::from(origin[0]) + self.offset[0] + x * self.scale,
-            f64::from(origin[1]) + self.offset[1] + y * self.scale,
-        ]
-    }
-
     pub(super) fn begin_transform_drag(&mut self, position: [f64; 2]) {
         let (Some(grip), Some(pending)) = (self.grip_at(position), self.session.pending()) else {
             return;
@@ -308,11 +299,8 @@ impl Canvas {
         if (right - left) * (bottom - top) < GLANCE_LEAST {
             return None;
         }
-        let area = self.area?;
         let size = self.session.document().canvas;
-        let [left, top] = self.to_document([f64::from(area[0]), f64::from(area[1])]);
-        let [right, bottom] = self.to_document([f64::from(area[2]), f64::from(area[3])]);
-        let rect = ugu_render::compose::clamp([left, top, right, bottom], size)?;
+        let rect = ugu_render::compose::clamp(self.in_view()?, size)?;
         let shrink = preview_shrink(self.scale);
         let rect = [
             rect[0] / shrink * shrink,

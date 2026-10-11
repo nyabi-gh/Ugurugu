@@ -109,6 +109,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
                 message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
                 export.as_deref(),
                 pointer,
+                &panels.keys,
             );
             if cancel {
                 files.cancel_export();

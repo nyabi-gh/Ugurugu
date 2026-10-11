@@ -253,18 +253,18 @@ impl Ants {
             return;
         }
         let [a, b, c, d, e, f] = self.moved.0;
-        let (scale, [x, y]) = (f64::from(placement.scale), placement.offset.map(f64::from));
+        let [pa, pb, pc, pd, pe, pf] = placement.affine();
         // Lengths along the outline scale by the transform's mean stretch;
         // exact unless it stretches one way more than the other.
-        let stretch = scale * (a * e - b * d).abs().sqrt();
+        let stretch = f64::from(placement.scale) * (a * e - b * d).abs().sqrt();
         let values = [
-            scale * a,
-            scale * b,
-            scale * c + x,
+            pa * a + pb * d,
+            pa * b + pb * e,
+            pa * c + pb * f + pc,
             0.0,
-            scale * d,
-            scale * e,
-            scale * f + y,
+            pd * a + pe * d,
+            pd * b + pe * e,
+            pd * c + pe * f + pf,
             0.0,
             f64::from(target_size[0]),
             f64::from(target_size[1]),
@@ -332,10 +332,7 @@ mod tests {
         let selection = Arc::new(
             Selection::of_shape(&Shape::Rectangle([2.0, 2.0], [8.0, 6.0]), [10, 8]).unwrap(),
         );
-        let placement = Placement {
-            offset: [3.5, 1.5],
-            scale: 4.0,
-        };
+        let placement = Placement::new([3.5, 1.5], 4.0);
         let target = [48, 36];
         let shot = |phase: f32, moved: Affine| {
             crate::view::tests::render_with(target, |device, queue, format| {

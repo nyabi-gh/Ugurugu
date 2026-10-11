@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The document on screen: drawing, panning and zooming.
+//! The document on screen: drawing, panning, zooming and turning the view.
 //!
 //! The image shown is the cached split put together. A stroke being drawn is
 //! composited over it within the pixels it changes, and at pen-up the
@@ -39,8 +39,10 @@ mod clipboard;
 mod picking;
 mod text;
 mod transform;
+mod view;
 
 pub use transform::{Grip, HANDLES};
+pub use view::TURN_STEP;
 
 /// Shown around the document, opaque straight RGBA.
 pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
@@ -103,6 +105,19 @@ enum Interaction {
     },
     /// Picking up colours with the eyedropper.
     Picking,
+    /// Turning the view by dragging sideways from client x `start`, where
+    /// it was at `angle`.
+    Turning {
+        start: f64,
+        angle: f64,
+    },
+    /// Zooming by dragging sideways from `start`, where the view was at
+    /// `scale` and showed document point `anchor`.
+    Zooming {
+        start: [f64; 2],
+        scale: f64,
+        anchor: [f64; 2],
+    },
 }
 
 pub struct Canvas {
@@ -139,6 +154,9 @@ pub struct Canvas {
     pixels_per_point: f32,
     /// The document's top-left corner from the area's, in physical pixels.
     offset: [f64; 2],
+    /// The view's turn, clockwise in degrees, and whether it is mirrored.
+    angle: f64,
+    mirrored: bool,
     placed: bool,
     sample_count: usize,
     notice: Option<String>,
@@ -199,6 +217,8 @@ impl Canvas {
             scale: 1.0,
             pixels_per_point: 1.0,
             offset: [0.0, 0.0],
+            angle: 0.0,
+            mirrored: false,
             placed: false,
             sample_count: 0,
             notice: None,
@@ -334,13 +354,6 @@ impl Canvas {
         self.area.is_some_and(|[left, top, right, bottom]| {
             (f64::from(left)..f64::from(right)).contains(&position[0])
                 && (f64::from(top)..f64::from(bottom)).contains(&position[1])
-        })
-    }
-
-    fn to_document(&self, position: [f64; 2]) -> [f64; 2] {
-        let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
-        std::array::from_fn(|axis| {
-            (position[axis] - f64::from(origin[axis]) - self.offset[axis]) / self.scale
         })
     }
 
@@ -649,6 +662,8 @@ impl Canvas {
                     last: sample.position,
                 };
             }
+            CanvasInput::Begin(Gesture::Turn, _, sample) => self.begin_turn_drag(sample.position),
+            CanvasInput::Begin(Gesture::Zoom, _, sample) => self.begin_zoom_drag(sample.position),
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.picks() => {
                 self.sample_count += 1;
                 self.begin_pick(sample.position);
@@ -695,6 +710,9 @@ impl Canvas {
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Picking => self.pick(sample.position),
+                    Interaction::Turning { .. } | Interaction::Zooming { .. } => {
+                        self.drag_view(sample.position);
+                    }
                     Interaction::Idle => {}
                 }
             }
@@ -717,6 +735,11 @@ impl Canvas {
                         self.interaction = Interaction::Idle;
                     }
                     Interaction::Picking => self.pick(sample.position),
+                    view @ (Interaction::Turning { .. } | Interaction::Zooming { .. }) => {
+                        self.interaction = view;
+                        self.drag_view(sample.position);
+                        self.interaction = Interaction::Idle;
+                    }
                     Interaction::Panning { .. } | Interaction::Idle => {}
                 }
             }
@@ -724,6 +747,7 @@ impl Canvas {
                 self.cancel_gesture();
             }
             CanvasInput::Zoom { position, notches } => self.zoom(position, notches),
+            CanvasInput::Turn { notches } => self.turn_by(TURN_STEP * f64::from(notches)),
         }
     }
 
@@ -752,7 +776,10 @@ impl Canvas {
                 }
                 self.refresh_text_preview();
             }
-            Interaction::Panning { .. } | Interaction::Picking => {}
+            Interaction::Panning { .. }
+            | Interaction::Picking
+            | Interaction::Turning { .. }
+            | Interaction::Zooming { .. } => {}
             Interaction::Idle => return false,
         }
         true
@@ -999,12 +1026,11 @@ impl Canvas {
         let anchor = self.to_document(position);
         let scale = (self.scale * ZOOM_STEP.powf(f64::from(notches)))
             .clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
-        let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
         self.scale = scale;
         // Keep the document point under the pointer where it is.
-        self.offset = std::array::from_fn(|axis| {
-            (position[axis] - f64::from(origin[axis]) - anchor[axis] * scale).round()
-        });
+        self.offset = [0.0, 0.0];
+        let at = self.to_client(anchor);
+        self.offset = std::array::from_fn(|axis| (position[axis] - at[axis]).round());
     }
 
     /// Takes the rest of `ui` and returns the canvas area in client physical
@@ -1041,20 +1067,26 @@ impl Canvas {
     }
 
     /// 100% if the document fits, otherwise small enough to fit, centred.
+    /// A turned view fits the turned document's bounds, as in 2.2.13.
     fn place(&mut self, area: [i32; 4]) {
         let size = self.session.document().canvas.map(f64::from);
         let room = [f64::from(area[2] - area[0]), f64::from(area[3] - area[1])];
         if room[0] <= 0.0 || room[1] <= 0.0 {
             return;
         }
-        let fits = (room[0] / size[0]).min(room[1] / size[1]);
+        let [cos, sin] = self.turn().map(f64::abs);
+        let bounds = [size[0] * cos + size[1] * sin, size[0] * sin + size[1] * cos];
+        let fits = (room[0] / bounds[0]).min(room[1] / bounds[1]);
         self.scale = if fits >= 2.0 && size[0].max(size[1]) <= SMALL_EDGE {
             fits.floor().min(*ZOOM_RANGE.end())
         } else {
             fits.min(1.0)
         };
+        self.offset = [0.0, 0.0];
+        let middle = self.to_client(self.middle());
+        let origin = [f64::from(area[0]), f64::from(area[1])];
         self.offset =
-            std::array::from_fn(|axis| ((room[axis] - size[axis] * self.scale) / 2.0).round());
+            std::array::from_fn(|axis| (origin[axis] + room[axis] / 2.0 - middle[axis]).round());
         self.placed = true;
     }
 
@@ -1100,28 +1132,20 @@ impl Canvas {
         }
     }
 
-    /// Where the document is drawn, in client physical pixels.
-    pub fn placement(&self) -> Placement {
-        let origin = self.area.map_or([0, 0], |area| [area[0], area[1]]);
-        Placement {
-            offset: [
-                (f64::from(origin[0]) + self.offset[0]) as f32,
-                (f64::from(origin[1]) + self.offset[1]) as f32,
-            ],
-            scale: self.scale as f32,
-        }
-    }
-
     /// Where the pixels shown are drawn: pixels drawn smaller spread over
     /// more screen pixels, and a part of the canvas starts where it is.
     pub fn shown_placement(&self) -> Placement {
         let (_, shrink, origin) = self.shown();
         let document = self.placement();
+        let [a, b, _, d, e, _] = document.affine().map(|value| value as f32);
+        let [x, y] = origin.map(|value| value as f32);
         Placement {
-            offset: std::array::from_fn(|axis| {
-                document.offset[axis] + origin[axis] as f32 * document.scale
-            }),
+            offset: [
+                document.offset[0] + (x * a + y * b),
+                document.offset[1] + (x * d + y * e),
+            ],
             scale: document.scale * shrink as f32,
+            ..document
         }
     }
 }

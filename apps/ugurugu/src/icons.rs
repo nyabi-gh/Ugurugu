@@ -35,6 +35,7 @@ pub enum Glyph {
     Wobble = 21,
     Panels = 22,
     Scale = 25,
+    Rotate = 26,
     MirrorVertical = 27,
     Delete = 28,
     Deselect = 29,
@@ -252,6 +253,17 @@ fn shapes(glyph: Glyph) -> Shapes {
             shapes
                 .lines
                 .push(vec![[15.0, 19.8], [19.8, 19.8], [19.8, 15.0]]);
+        }
+        Glyph::Rotate => {
+            let arc: Points = (0..=24)
+                .map(|step| {
+                    let radians = (35.0 + (330.0 - 35.0) * f64::from(step) / 24.0).to_radians();
+                    [12.0 + 7.2 * radians.cos(), 12.0 + 7.2 * radians.sin()]
+                })
+                .collect();
+            let tip = arc[arc.len() - 1];
+            lines.push(arc);
+            arrow_head(&mut shapes, tip, -60.0, 4.0);
         }
         Glyph::MirrorVertical => {
             lines.push(vec![[3.8, 12.0], [20.2, 12.0]]);

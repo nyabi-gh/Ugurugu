@@ -300,6 +300,12 @@ actions! {
     ZoomOut "zoomOut" "view-zoom-out" [ctrl(Key::Minus)] [];
     ActualPixels "actualSize" "view-actual-pixels" [ctrl(Key::Num1)] [];
     Fit "fit" "view-fit" [ctrl(Key::Num0)] [];
+    // 2.2.13's `^` is a Japanese key, which egui knows only by where it is:
+    // the US `=` key.
+    TurnLeft "rotateCanvasLeft" "view-turn-left" [plain(Key::Minus)] [];
+    TurnRight "rotateCanvasRight" "view-turn-right" [plain(Key::Equals)] [];
+    ResetTurn "resetCanvasRotation" "view-turn-reset" [] [];
+    Mirror "mirrorCanvas" "view-mirror" [plain(Key::M)] [];
     Animate "play" "view-animate" [plain(Key::P)] [];
     Brush "brush" "tool-brush" [plain(Key::B)] [];
     Eraser "eraser" "tool-eraser" [plain(Key::E)] [];

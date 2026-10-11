@@ -68,6 +68,15 @@ view-zoom-in | ugurugu::MainWindow | Zoom &in
 view-zoom-out | ugurugu::MainWindow | Zoom &out
 view-actual-pixels | ugurugu::MainWindow | Actual &pixels
 view-fit | ugurugu::MainWindow | &Fit canvas
+view-turn-left | ugurugu::MainWindow | Rotate canvas &left
+view-turn-left-tip | ugurugu::MainWindow | Rotate the canvas view 5° counterclockwise
+view-turn-right | ugurugu::MainWindow | Rotate canvas &right
+view-turn-right-tip | ugurugu::MainWindow | Rotate the canvas view 5° clockwise
+view-turn-reset | ugurugu::MainWindow | Rese&t canvas rotation
+view-turn-reset-tip | ugurugu::MainWindow | Reset the canvas view to 0° without changing zoom or mirroring
+view-mirror | ugurugu::MainWindow | Flip canvas horizontally
+view-mirror-tip | ugurugu::MainWindow | Temporarily flip the canvas horizontally
+canvas-rotation | ugurugu::MainWindow | Canvas rotation angle
 view-animate | ugurugu::MainWindow | &Animate preview
 window-animation-bar | ugurugu::MainWindow | Show &animation bar
 window-reset-layout | ugurugu::MainWindow | Reset panel layout

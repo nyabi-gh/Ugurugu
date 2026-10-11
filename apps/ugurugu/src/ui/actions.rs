@@ -5,7 +5,7 @@
 
 use ugu_session::{Session, Tool};
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, TURN_STEP};
 use crate::clipboard::Clipboard;
 use crate::export::Animation;
 use crate::files::{self, Files};
@@ -70,6 +70,11 @@ pub const VIEW: &[Entry] = &[
     Do(A::ZoomOut),
     Do(A::ActualPixels),
     Do(A::Fit),
+    Gap,
+    Do(A::TurnLeft),
+    Do(A::TurnRight),
+    Do(A::ResetTurn),
+    Do(A::Mirror),
     Gap,
     Do(A::Animate),
 ];
@@ -180,7 +185,11 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     if let Some(panel) = panel(action) {
         return Some(is_open(layout, panel));
     }
-    (action == A::Animate).then(|| canvas.is_playing())
+    match action {
+        A::Animate => Some(canvas.is_playing()),
+        A::Mirror => Some(canvas.is_mirrored()),
+        _ => None,
+    }
 }
 
 pub fn label(action: Action, canvas: &Canvas) -> &'static str {
@@ -197,6 +206,10 @@ fn tip(action: Action) -> Option<&'static str> {
         A::Paste => "edit-paste-tip",
         A::FillSelection => "edit-fill-selection-tip",
         A::Restyle => "restyle-selected-tip",
+        A::TurnLeft => "view-turn-left-tip",
+        A::TurnRight => "view-turn-right-tip",
+        A::ResetTurn => "view-turn-reset-tip",
+        A::Mirror => "view-mirror-tip",
         _ => return None,
     }))
 }
@@ -306,6 +319,10 @@ pub fn run(
         A::ZoomOut => canvas.zoom_in_place(-1.0),
         A::ActualPixels => canvas.zoom_to(1.0),
         A::Fit => canvas.fit(),
+        A::TurnLeft => canvas.turn_by(-TURN_STEP),
+        A::TurnRight => canvas.turn_by(TURN_STEP),
+        A::ResetTurn => canvas.turn_to(0.0),
+        A::Mirror => canvas.set_mirrored(!canvas.is_mirrored()),
         A::Animate => canvas.toggle_playback(),
         A::ResetLayout => panels.set_layout(Layout::default()),
         A::Brush

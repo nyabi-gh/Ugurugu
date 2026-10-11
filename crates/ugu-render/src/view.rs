@@ -3,8 +3,9 @@
 
 //! Shows the document on the GPU: changed document pixels are uploaded as
 //! they are, and the shader maps each screen pixel to a document pixel by
-//! the view's scale and offset. At 100% and above a screen pixel shows one
-//! document pixel exactly; below, neighbouring pixels are blended. From
+//! the view's scale, offset, rotation and mirroring. At 100% and above a
+//! screen pixel shows one document pixel; below, neighbouring pixels are
+//! blended. From
 //! `GRID_SCALE` up, a grid can mark the document pixels (m5-plan M5-17).
 
 use std::sync::Arc;
@@ -26,6 +27,8 @@ struct View {
     grid: f32,
     _pad: f32,
     workspace: vec4<f32>,
+    // Cosine and sine of the rotation, and -1 when mirrored.
+    turn: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -41,7 +44,11 @@ fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let at = (position.xy - view.offset) / view.scale;
+    let v = (position.xy - view.offset) / view.scale;
+    let at = vec2<f32>(
+        view.turn.z * (view.turn.x * v.x + view.turn.y * v.y),
+        view.turn.x * v.y - view.turn.y * v.x,
+    );
     if (any(at < vec2<f32>(0.0)) || any(at >= view.size)) {
         return view.workspace;
     }
@@ -65,12 +72,67 @@ fn fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 ";
 
 /// Where the document sits on screen.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Placement {
     /// Target pixels of the document's top-left corner.
     pub offset: [f32; 2],
     /// Target pixels per document pixel.
     pub scale: f32,
+    /// Clockwise on screen, in degrees.
+    pub angle: f32,
+    /// Flipped left to right before it is turned.
+    pub mirrored: bool,
+}
+
+impl Placement {
+    /// Upright and unmirrored.
+    pub fn new(offset: [f32; 2], scale: f32) -> Self {
+        Self {
+            offset,
+            scale,
+            ..Self::default()
+        }
+    }
+
+    /// The cosine and sine of `angle`, exactly 1 and 0 when upright.
+    fn turn(self) -> [f64; 2] {
+        if self.angle == 0.0 {
+            return [1.0, 0.0];
+        }
+        let radians = f64::from(self.angle).to_radians();
+        [radians.cos(), radians.sin()]
+    }
+
+    /// From document pixels to target pixels by rows, `[a, b, c, d, e, f]`
+    /// for `x' = a x + b y + c` and `y' = d x + e y + f`.
+    pub fn affine(self) -> [f64; 6] {
+        let [cos, sin] = self.turn();
+        let scale = f64::from(self.scale);
+        let flip = if self.mirrored { -1.0 } else { 1.0 };
+        [
+            scale * flip * cos,
+            -scale * sin,
+            f64::from(self.offset[0]),
+            scale * flip * sin,
+            scale * cos,
+            f64::from(self.offset[1]),
+        ]
+    }
+
+    /// The target pixel of document point `point`.
+    pub fn to_target(self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [a, b, c, d, e, f] = self.affine();
+        [a * x + b * y + c, d * x + e * y + f]
+    }
+
+    /// The document point at target pixel `point`.
+    pub fn to_document(self, point: [f64; 2]) -> [f64; 2] {
+        let [cos, sin] = self.turn();
+        let scale = f64::from(self.scale);
+        let [vx, vy] = [0, 1].map(|axis| (point[axis] - f64::from(self.offset[axis])) / scale);
+        let flip = if self.mirrored { -1.0 } else { 1.0 };
+        [flip * (cos * vx + sin * vy), cos * vy - sin * vx]
+    }
 }
 
 /// Screen pixels per document pixel from which the pixel grid shows.
@@ -81,7 +143,8 @@ fn uniform_bytes(
     size: [u32; 2],
     grid: bool,
     workspace: [f32; 4],
-) -> [u8; 48] {
+) -> [u8; 64] {
+    let turn = placement.turn().map(|value| value as f32);
     let values = [
         placement.offset[0],
         placement.offset[1],
@@ -99,8 +162,12 @@ fn uniform_bytes(
         workspace[1],
         workspace[2],
         workspace[3],
+        turn[0],
+        turn[1],
+        if placement.mirrored { -1.0 } else { 1.0 },
+        0.0,
     ];
-    let mut bytes = [0; 48];
+    let mut bytes = [0; 64];
     for (chunk, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(values) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
@@ -202,7 +269,7 @@ impl DocumentView {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("document view"),
-            size: 48,
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -570,10 +637,7 @@ pub(crate) mod tests {
     fn at_whole_scales_each_screen_pixel_shows_one_document_pixel() {
         let document = document();
         for scale in [1.0, 3.0] {
-            let placement = Placement {
-                offset: [5.0, 3.0],
-                scale,
-            };
+            let placement = Placement::new([5.0, 3.0], scale);
             let target = [80, 48];
             let Some(shown) = render(&document, placement, target) else {
                 eprintln!("skipped: no DX12 adapter");
@@ -604,6 +668,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn turned_and_mirrored_placements_map_both_ways() {
+        for (angle, mirrored) in [(0.0, false), (35.0, false), (-90.0, true), (180.0, true)] {
+            let placement = Placement {
+                offset: [40.0, -12.5],
+                scale: 2.5,
+                angle,
+                mirrored,
+            };
+            for point in [[0.0, 0.0], [3.25, -7.0], [120.0, 64.5]] {
+                let back = placement.to_document(placement.to_target(point));
+                assert!(
+                    (back[0] - point[0]).abs() < 1e-9 && (back[1] - point[1]).abs() < 1e-9,
+                    "{angle} {mirrored}: {point:?} -> {back:?}"
+                );
+            }
+        }
+        // Clockwise on screen: the document's x axis points down at 90.
+        let quarter = Placement {
+            angle: 90.0,
+            ..Placement::new([0.0, 0.0], 1.0)
+        };
+        let [x, y] = quarter.to_target([1.0, 0.0]);
+        assert!(x.abs() < 1e-12 && (y - 1.0).abs() < 1e-12);
+        // Mirrored: the document's x axis points left.
+        let mirrored = Placement {
+            mirrored: true,
+            ..Placement::new([0.0, 0.0], 1.0)
+        };
+        assert_eq!(mirrored.to_target([1.0, 0.0]), [-1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_turned_mirrored_view_shows_the_document_pixel_under_each_screen_pixel() {
+        let document = document();
+        let placement = Placement {
+            offset: [30.0, 4.0],
+            scale: 2.0,
+            angle: 90.0,
+            mirrored: true,
+        };
+        let target = [40, 48];
+        let Some(shown) = render(&document, placement, target) else {
+            eprintln!("skipped: no DX12 adapter");
+            return;
+        };
+        let source = document.data_as_u8_slice();
+        let mut inside_count = 0;
+        for y in 0..target[1] {
+            for x in 0..target[0] {
+                let at = ((y * target[0] + x) * 4) as usize;
+                let [dx, dy] = placement
+                    .to_document([f64::from(x) + 0.5, f64::from(y) + 0.5])
+                    .map(f64::floor);
+                let inside = (0.0..20.0).contains(&dx) && (0.0..12.0).contains(&dy);
+                let expected: [u8; 4] = if inside {
+                    inside_count += 1;
+                    let from = ((dy as usize) * 20 + dx as usize) * 4;
+                    source[from..from + 4].try_into().unwrap()
+                } else {
+                    WORKSPACE
+                };
+                assert_eq!(&shown[at..at + 4], &expected, "screen pixel {x},{y}");
+            }
+        }
+        assert!(inside_count > 0);
+    }
+
+    #[test]
     fn large_uploads_one_after_another_show_the_pixels_given() {
         let size = [1100u32, 700];
         let mut document = Pixmap::new(size[0] as u16, size[1] as u16);
@@ -624,10 +756,7 @@ pub(crate) mod tests {
             expected.data_as_u8_slice_mut()[span.clone()]
                 .copy_from_slice(&changed.data_as_u8_slice()[span]);
         }
-        let placement = Placement {
-            offset: [0.0, 0.0],
-            scale: 1.0,
-        };
+        let placement = Placement::new([0.0, 0.0], 1.0);
         let shown = render_with(size, |device, queue, format| {
             let mut view = DocumentView::new(device, format, WORKSPACE);
             // The whole, then a part twice in a row: the second finds the
@@ -660,10 +789,7 @@ pub(crate) mod tests {
             let white = (index % 4 + index / 4) % 2 == 0;
             pixel.copy_from_slice(&if white { [255; 4] } else { [0, 0, 0, 255] });
         }
-        let placement = Placement {
-            offset: [0.0, 0.0],
-            scale: 0.5,
-        };
+        let placement = Placement::new([0.0, 0.0], 0.5);
         let Some(shown) = render(&document, placement, [2, 2]) else {
             eprintln!("skipped: no DX12 adapter");
             return;
@@ -678,10 +804,7 @@ pub(crate) mod tests {
         let mut document = Pixmap::new(2, 2);
         document.data_as_u8_slice_mut().fill(255);
         let at = |shown: &[u8], x: usize, y: usize| shown[(y * 20 + x) * 4];
-        let enlarged = |scale| Placement {
-            offset: [0.0, 0.0],
-            scale,
-        };
+        let enlarged = |scale| Placement::new([0.0, 0.0], scale);
         let Some(shown) = render_grid(&document, enlarged(10.0), true, [20, 20]) else {
             eprintln!("skipped: no DX12 adapter");
             return;

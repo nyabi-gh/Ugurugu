@@ -23,6 +23,10 @@ const EGUI_BUTTONS: [(Buttons, egui::PointerButton); 5] = [
 pub enum Gesture {
     Draw,
     Pan,
+    /// Turns the view: Shift+Space and drag.
+    Turn,
+    /// Zooms the view: Ctrl+Space and drag.
+    Zoom,
 }
 
 /// What the canvas receives, in client physical pixels.
@@ -35,6 +39,10 @@ pub enum CanvasInput {
     /// Wheel notches over the canvas; positive zooms in.
     Zoom {
         position: [f64; 2],
+        notches: f32,
+    },
+    /// Wheel notches with Shift over the canvas; positive turns clockwise.
+    Turn {
         notches: f32,
     },
 }
@@ -55,7 +63,8 @@ pub struct Routed {
 impl InputRouter {
     /// `starts_on_canvas` decides, for a press at a physical position,
     /// whether the canvas owns the gesture instead of the UI. A primary
-    /// press draws, or pans while `pan_held`; a middle press pans.
+    /// press draws, or while `pan_held` pans, turns with Shift or zooms with
+    /// Ctrl, as in 2.2.13; a middle press pans. Shift turns the wheel too.
     pub fn route(
         &mut self,
         events: Vec<PointerEvent>,
@@ -103,10 +112,11 @@ impl InputRouter {
                         let gesture = if pressed.contains(Buttons::PRIMARY) {
                             Some((
                                 Buttons::PRIMARY,
-                                if pan_held {
-                                    Gesture::Pan
-                                } else {
-                                    Gesture::Draw
+                                match (pan_held, modifiers.command, modifiers.shift) {
+                                    (false, ..) => Gesture::Draw,
+                                    (true, true, _) => Gesture::Zoom,
+                                    (true, false, true) => Gesture::Turn,
+                                    (true, false, false) => Gesture::Pan,
                                 },
                             ))
                         } else if pressed.contains(Buttons::MIDDLE) {
@@ -159,9 +169,13 @@ impl InputRouter {
                 } => {
                     self.oldest_unpresented.get_or_insert(time);
                     if !horizontal && starts_on_canvas(position) {
-                        routed.canvas.push(CanvasInput::Zoom {
-                            position,
-                            notches: delta,
+                        routed.canvas.push(if modifiers.shift {
+                            CanvasInput::Turn { notches: delta }
+                        } else {
+                            CanvasInput::Zoom {
+                                position,
+                                notches: delta,
+                            }
                         });
                         continue;
                     }
@@ -263,6 +277,43 @@ mod tests {
         ));
         assert!(matches!(routed.canvas[1], CanvasInput::Extend(..)));
         assert!(matches!(routed.canvas[2], CanvasInput::End(..)));
+    }
+
+    #[test]
+    fn space_with_shift_turns_and_with_ctrl_zooms_and_shift_turns_the_wheel() {
+        let press = |modifiers: egui::Modifiers, pan_held: bool| {
+            let mut router = InputRouter::default();
+            let routed = router.route(
+                vec![samples(1, vec![sample(150.0, Buttons::PRIMARY, 1)])],
+                1.0,
+                modifiers,
+                pan_held,
+                |_| true,
+            );
+            match routed.canvas[0] {
+                CanvasInput::Begin(gesture, ..) => gesture,
+                _ => panic!("no gesture"),
+            }
+        };
+        assert_eq!(press(egui::Modifiers::NONE, true), Gesture::Pan);
+        assert_eq!(press(egui::Modifiers::SHIFT, true), Gesture::Turn);
+        assert_eq!(press(egui::Modifiers::COMMAND, true), Gesture::Zoom);
+        assert_eq!(press(egui::Modifiers::SHIFT, false), Gesture::Draw);
+
+        let mut router = InputRouter::default();
+        let routed = router.route(
+            vec![PointerEvent::Wheel {
+                position: [150.0, 0.0],
+                delta: -2.0,
+                horizontal: false,
+                time: Ticks(1),
+            }],
+            1.0,
+            egui::Modifiers::SHIFT,
+            false,
+            |_| true,
+        );
+        assert_eq!(routed.canvas, [CanvasInput::Turn { notches: -2.0 }]);
     }
 
     #[test]
