@@ -88,7 +88,8 @@ if ($command -ne "`"$app`" `"%1`"") {
 
 Write-Host 'Running'
 $settings = Join-Path $WorkDirectory 'settings.json'
-Set-Content -Path $settings -Value '{"checkForUpdates": false}' -Encoding utf8
+Set-Content -Path $settings -Encoding utf8 `
+    -Value '{"format": "ugurugu.settings", "version": 1, "checkForUpdates": false}'
 $env:UGURUGU_SETTINGS_PATH = $settings
 $env:UGURUGU_RECOVERY_PATH = Join-Path $WorkDirectory 'recovery'
 $env:UGURUGU_LOG_PATH = $logs
@@ -102,7 +103,7 @@ while (-not $shown -and (Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 500
     $process.Refresh()
     $log = Get-ChildItem $logs -Filter 'ugurugu-*.log' -ErrorAction SilentlyContinue |
-        Select-String -SimpleMatch 'showing on this GPU' -List
+        Select-String -SimpleMatch 'selected GPU adapter' -List
     $shown = $log -and $process.MainWindowHandle -ne 0
 }
 if (-not $shown) {
