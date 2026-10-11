@@ -100,7 +100,7 @@ pub const WINDOW: &[Entry] = &[
     Do(A::ResetLayout),
 ];
 
-pub const HELP: &[Entry] = &[Do(A::CheckUpdates), Gap, Do(A::About)];
+pub const HELP: &[Entry] = &[Do(A::Help), Gap, Do(A::CheckUpdates), Gap, Do(A::About)];
 
 /// Each menu's title, the letter that opens it with Alt (2.2.13's "&File"
 /// and "파일(&F)"), and its entries.
@@ -299,6 +299,7 @@ pub fn run(
         A::CancelTransform => canvas.cancel_transform(),
         A::Escape => canvas.escape(),
         A::Settings => panels.settings = Some(settings::Dialog::default()),
+        A::Help => panels.help = true,
         A::CheckUpdates => files.check_for_updates(),
         A::About => panels.settings = Some(settings::Dialog::about()),
         A::ZoomIn => canvas.zoom_in_place(1.0),

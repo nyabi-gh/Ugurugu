@@ -318,6 +318,7 @@ actions! {
     Layers "layers" "layers" [] [];
     ResetLayout "resetPanelLayout" "window-reset-layout" [] [];
     CheckUpdates "checkForUpdates" "help-check-updates" [] [];
+    Help "help" "help-contents" [plain(Key::F1)] [];
     About "about" "help-about" [] [];
 }
 
