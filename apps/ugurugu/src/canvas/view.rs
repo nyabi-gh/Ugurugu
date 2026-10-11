@@ -161,6 +161,46 @@ impl Canvas {
         }
     }
 
+    /// Follows two fingers as 2.2.13 does (`continueTouchGesture`): the
+    /// zoom follows how far apart they are, the angle how they turn, and
+    /// the document point under their middle follows the middle. `fresh`
+    /// starts from where they are.
+    pub(super) fn pinch(&mut self, [a, b]: [[f64; 2]; 2], fresh: bool) {
+        let apart = (b[0] - a[0]).hypot(b[1] - a[1]);
+        if !apart.is_finite() || apart <= 0.01 {
+            if matches!(self.interaction, Interaction::Pinching { .. }) {
+                self.interaction = Interaction::Idle;
+            }
+            return;
+        }
+        let middle = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+        let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+        if let Interaction::Pinching {
+            middle: last_middle,
+            apart: last_apart,
+            angle: last_angle,
+        } = self.interaction
+            && !fresh
+        {
+            let anchor = self.to_document(last_middle);
+            let turned = angle - last_angle;
+            self.scale =
+                (self.scale * apart / last_apart).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
+            self.angle = normalized(self.angle + turned - 360.0 * (turned / 360.0).round());
+            self.pin(anchor, middle);
+        } else if !matches!(
+            self.interaction,
+            Interaction::Idle | Interaction::Pinching { .. }
+        ) {
+            return;
+        }
+        self.interaction = Interaction::Pinching {
+            middle,
+            apart,
+            angle,
+        };
+    }
+
     /// The document pixels in view, as the bounds of the canvas area's
     /// corners: left, top, right, bottom.
     pub(super) fn in_view(&self) -> Option<[f64; 4]> {
@@ -318,6 +358,28 @@ mod tests {
         canvas.apply(CanvasInput::Cancel);
         canvas.apply(CanvasInput::Turn { notches: -1.0 });
         assert!((canvas.angle() - (angle + 5.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn two_fingers_zoom_turn_and_carry_the_point_between_them() {
+        let mut canvas = canvas();
+        let scale = canvas.scale;
+        let pinch = |canvas: &mut Canvas, fingers, fresh| {
+            canvas.apply(CanvasInput::Pinch { fingers, fresh });
+        };
+        pinch(&mut canvas, [[100.0, 150.0], [200.0, 150.0]], true);
+        let under = canvas.to_document([150.0, 150.0]);
+        // Twice as far apart, turned a quarter clockwise, moved by (40, 30).
+        pinch(&mut canvas, [[190.0, 80.0], [190.0, 280.0]], false);
+        assert!((canvas.scale - scale * 2.0).abs() < 1e-9);
+        assert!((canvas.angle() - 90.0).abs() < 1e-9);
+        assert!(close(canvas.to_client(under), [190.0, 180.0]));
+        // Across the half turn the angle takes the short way round.
+        pinch(&mut canvas, [[190.0, 80.0], [190.0, 280.0]], true);
+        pinch(&mut canvas, [[290.0, 180.0], [90.0, 181.0]], false);
+        assert!((canvas.angle() - 180.0).abs() < 1.0);
+        canvas.apply(CanvasInput::PinchEnd);
+        assert!(matches!(canvas.interaction, Interaction::Idle));
     }
 
     #[test]

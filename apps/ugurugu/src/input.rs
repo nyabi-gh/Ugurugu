@@ -6,7 +6,7 @@
 //! Every pointer message reaches the app only through `ugu_win::pointer`, so
 //! egui and the canvas see the same samples and no synthesised mouse events.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::{Buttons, PointerEvent, PointerId, PointerKind, PointerSample};
@@ -45,6 +45,14 @@ pub enum CanvasInput {
     Turn {
         notches: f32,
     },
+    /// Exactly two fingers on the canvas, by pointer id; `fresh` when they
+    /// are not the two of the last `Pinch`.
+    Pinch {
+        fingers: [[f64; 2]; 2],
+        fresh: bool,
+    },
+    /// No longer two fingers.
+    PinchEnd,
 }
 
 #[derive(Default)]
@@ -53,6 +61,14 @@ pub struct InputRouter {
     /// The pointer the canvas owns and the button that started its gesture.
     canvas_pointer: Option<(PointerId, Buttons)>,
     oldest_unpresented: Option<Ticks>,
+    /// Fingers on the canvas, by pointer id, since the first of them went
+    /// down there. They never draw: two pan, zoom and turn the view.
+    touches: BTreeMap<u32, [f64; 2]>,
+    /// The fingers do nothing until all are lifted: they came down while
+    /// the canvas was busy, or a pen came down since.
+    touch_ignored: bool,
+    /// The two fingers of the last `Pinch`.
+    pinching: Option<[u32; 2]>,
 }
 
 pub struct Routed {
@@ -65,6 +81,8 @@ impl InputRouter {
     /// whether the canvas owns the gesture instead of the UI. A primary
     /// press draws, or while `pan_held` pans, turns with Shift or zooms with
     /// Ctrl, as in 2.2.13; a middle press pans. Shift turns the wheel too.
+    /// Fingers on the canvas follow 2.2.13's touch rules: two pan, zoom and
+    /// turn, a pen press takes over from them, and a mouse press waits.
     pub fn route(
         &mut self,
         events: Vec<PointerEvent>,
@@ -97,6 +115,34 @@ impl InputRouter {
                         self.buttons.insert(pointer, sample.buttons);
                         let pressed = sample.buttons.difference(before);
                         let released = before.difference(sample.buttons);
+
+                        if matches!(kind, PointerKind::Touch | PointerKind::Touchpad)
+                            && (self.touches.contains_key(&pointer.0)
+                                || pressed.contains(Buttons::PRIMARY)
+                                    && starts_on_canvas(sample.position))
+                        {
+                            if self.touches.is_empty() {
+                                self.touch_ignored = self.canvas_pointer.is_some();
+                            }
+                            if sample.buttons.contains(Buttons::PRIMARY) {
+                                self.touches.insert(pointer.0, sample.position);
+                            } else {
+                                self.touches.remove(&pointer.0);
+                            }
+                            self.touches_changed(&mut routed.canvas);
+                            continue;
+                        }
+                        let fingers_down = !self.touches.is_empty() && !self.touch_ignored;
+                        if fingers_down && pressed.contains(Buttons::PRIMARY) {
+                            match kind {
+                                PointerKind::Pen => {
+                                    self.touch_ignored = true;
+                                    self.touches_changed(&mut routed.canvas);
+                                }
+                                _ if starts_on_canvas(sample.position) => continue,
+                                _ => {}
+                            }
+                        }
 
                         if let Some((owner, button)) = self.canvas_pointer
                             && owner == pointer
@@ -149,6 +195,13 @@ impl InputRouter {
                         }
                     }
                 }
+                PointerEvent::Leave { pointer } | PointerEvent::CaptureLost { pointer }
+                    if self.touches.contains_key(&pointer.0) =>
+                {
+                    self.buttons.remove(&pointer);
+                    self.touches.remove(&pointer.0);
+                    self.touches_changed(&mut routed.canvas);
+                }
                 PointerEvent::Leave { pointer } => {
                     if self.canvas_pointer.map(|(owner, _)| owner) != Some(pointer) {
                         routed.egui.push(egui::Event::PointerGone);
@@ -194,6 +247,34 @@ impl InputRouter {
             }
         }
         routed
+    }
+
+    /// Pinches with exactly two fingers, and ends the pinch otherwise.
+    fn touches_changed(&mut self, canvas: &mut Vec<CanvasInput>) {
+        if self.touches.is_empty() {
+            self.touch_ignored = false;
+        }
+        let two = (!self.touch_ignored && self.touches.len() == 2).then(|| {
+            let mut fingers = self.touches.iter();
+            let (Some((&first, &a)), Some((&second, &b))) = (fingers.next(), fingers.next()) else {
+                unreachable!("two fingers");
+            };
+            ([first, second], [a, b])
+        });
+        match two {
+            Some((ids, fingers)) => {
+                canvas.push(CanvasInput::Pinch {
+                    fingers,
+                    fresh: self.pinching != Some(ids),
+                });
+                self.pinching = Some(ids);
+            }
+            None => {
+                if self.pinching.take().is_some() {
+                    canvas.push(CanvasInput::PinchEnd);
+                }
+            }
+        }
     }
 
     /// The oldest input time not yet shown, cleared once a frame presents it.
@@ -314,6 +395,140 @@ mod tests {
             |_| true,
         );
         assert_eq!(routed.canvas, [CanvasInput::Turn { notches: -2.0 }]);
+    }
+
+    fn finger(pointer: u32, x: f64, down: bool) -> PointerEvent {
+        let buttons = if down {
+            Buttons::PRIMARY
+        } else {
+            Buttons::empty()
+        };
+        PointerEvent::Samples {
+            pointer: PointerId(pointer),
+            kind: PointerKind::Touch,
+            samples: vec![sample(x, buttons, 1)],
+        }
+    }
+
+    fn pen(x: f64, down: bool) -> PointerEvent {
+        PointerEvent::Samples {
+            pointer: PointerId(9),
+            kind: PointerKind::Pen,
+            samples: vec![sample(
+                x,
+                if down {
+                    Buttons::PRIMARY
+                } else {
+                    Buttons::empty()
+                },
+                1,
+            )],
+        }
+    }
+
+    fn pinch(input: &CanvasInput) -> Option<bool> {
+        match input {
+            CanvasInput::Pinch { fresh, .. } => Some(*fresh),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn fingers_never_draw_and_exactly_two_pinch() {
+        let mut router = InputRouter::default();
+        let routed = route(
+            &mut router,
+            vec![finger(1, 150.0, true), finger(1, 160.0, true)],
+        );
+        assert!(routed.canvas.is_empty() && routed.egui.is_empty());
+        let routed = route(
+            &mut router,
+            vec![finger(2, 300.0, true), finger(2, 310.0, true)],
+        );
+        assert_eq!(
+            routed.canvas.iter().map(pinch).collect::<Vec<_>>(),
+            [Some(true), Some(false)]
+        );
+        let CanvasInput::Pinch { fingers, .. } = routed.canvas[1] else {
+            unreachable!()
+        };
+        assert_eq!(fingers, [[160.0, 0.0], [310.0, 0.0]], "by pointer id");
+        // A third finger ends the pinch; lifting it pinches the two again.
+        let routed = route(
+            &mut router,
+            vec![finger(3, 200.0, true), finger(3, 200.0, false)],
+        );
+        assert_eq!(routed.canvas[0], CanvasInput::PinchEnd);
+        assert_eq!(pinch(&routed.canvas[1]), Some(true));
+        let routed = route(
+            &mut router,
+            vec![finger(1, 160.0, false), finger(2, 310.0, false)],
+        );
+        assert_eq!(routed.canvas, [CanvasInput::PinchEnd]);
+        // Off the canvas a finger works the interface.
+        let routed = route(&mut router, vec![finger(4, 50.0, true)]);
+        assert!(routed.canvas.is_empty() && !routed.egui.is_empty());
+    }
+
+    #[test]
+    fn a_pen_takes_over_from_fingers_and_a_mouse_waits_for_them() {
+        let mut router = InputRouter::default();
+        route(
+            &mut router,
+            vec![finger(1, 150.0, true), finger(2, 300.0, true)],
+        );
+        let routed = route(
+            &mut router,
+            vec![samples(5, vec![sample(200.0, Buttons::PRIMARY, 2)])],
+        );
+        assert!(
+            routed.canvas.is_empty(),
+            "a mouse press waits: {:?}",
+            routed.canvas
+        );
+        let routed = route(
+            &mut router,
+            vec![samples(5, vec![sample(200.0, Buttons::empty(), 3)])],
+        );
+        assert!(routed.canvas.is_empty());
+        let routed = route(&mut router, vec![pen(200.0, true), finger(2, 320.0, true)]);
+        assert_eq!(routed.canvas[0], CanvasInput::PinchEnd);
+        assert!(matches!(
+            routed.canvas[1],
+            CanvasInput::Begin(Gesture::Draw, PointerKind::Pen, _)
+        ));
+        assert_eq!(routed.canvas.len(), 2, "the fingers do nothing now");
+        // Until every finger is up, then two pinch again.
+        route(&mut router, vec![pen(200.0, false)]);
+        route(
+            &mut router,
+            vec![finger(1, 150.0, false), finger(2, 320.0, false)],
+        );
+        let routed = route(
+            &mut router,
+            vec![finger(1, 150.0, true), finger(2, 300.0, true)],
+        );
+        assert_eq!(pinch(&routed.canvas[0]), Some(true));
+    }
+
+    #[test]
+    fn fingers_that_come_down_while_the_canvas_is_busy_do_nothing() {
+        let mut router = InputRouter::default();
+        route(
+            &mut router,
+            vec![samples(5, vec![sample(200.0, Buttons::PRIMARY, 1)])],
+        );
+        let routed = route(
+            &mut router,
+            vec![finger(1, 150.0, true), finger(2, 300.0, true)],
+        );
+        assert!(routed.canvas.is_empty());
+        route(
+            &mut router,
+            vec![samples(5, vec![sample(200.0, Buttons::empty(), 2)])],
+        );
+        let routed = route(&mut router, vec![finger(2, 310.0, true)]);
+        assert!(routed.canvas.is_empty(), "not until they are all lifted");
     }
 
     #[test]

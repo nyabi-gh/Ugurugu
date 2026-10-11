@@ -118,6 +118,13 @@ enum Interaction {
         scale: f64,
         anchor: [f64; 2],
     },
+    /// Two fingers, last `apart` physical pixels apart about `middle`, at
+    /// `angle` degrees.
+    Pinching {
+        middle: [f64; 2],
+        apart: f64,
+        angle: f64,
+    },
 }
 
 pub struct Canvas {
@@ -713,7 +720,7 @@ impl Canvas {
                     Interaction::Turning { .. } | Interaction::Zooming { .. } => {
                         self.drag_view(sample.position);
                     }
-                    Interaction::Idle => {}
+                    Interaction::Pinching { .. } | Interaction::Idle => {}
                 }
             }
             CanvasInput::End(sample) => {
@@ -740,7 +747,9 @@ impl Canvas {
                         self.drag_view(sample.position);
                         self.interaction = Interaction::Idle;
                     }
-                    Interaction::Panning { .. } | Interaction::Idle => {}
+                    Interaction::Panning { .. }
+                    | Interaction::Pinching { .. }
+                    | Interaction::Idle => {}
                 }
             }
             CanvasInput::Cancel => {
@@ -748,6 +757,12 @@ impl Canvas {
             }
             CanvasInput::Zoom { position, notches } => self.zoom(position, notches),
             CanvasInput::Turn { notches } => self.turn_by(TURN_STEP * f64::from(notches)),
+            CanvasInput::Pinch { fingers, fresh } => self.pinch(fingers, fresh),
+            CanvasInput::PinchEnd => {
+                if matches!(self.interaction, Interaction::Pinching { .. }) {
+                    self.interaction = Interaction::Idle;
+                }
+            }
         }
     }
 
@@ -779,7 +794,8 @@ impl Canvas {
             Interaction::Panning { .. }
             | Interaction::Picking
             | Interaction::Turning { .. }
-            | Interaction::Zooming { .. } => {}
+            | Interaction::Zooming { .. }
+            | Interaction::Pinching { .. } => {}
             Interaction::Idle => return false,
         }
         true
