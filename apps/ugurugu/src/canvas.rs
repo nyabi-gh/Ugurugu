@@ -36,11 +36,13 @@ use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
 mod clipboard;
+mod cursor;
 mod picking;
 mod text;
 mod transform;
 mod view;
 
+pub use cursor::BrushCursor;
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
@@ -164,6 +166,10 @@ pub struct Canvas {
     /// The view's turn, clockwise in degrees, and whether it is mirrored.
     angle: f64,
     mirrored: bool,
+    /// Whether the pen over the canvas shows its eraser end.
+    hover_eraser: bool,
+    /// Where the canvas's own pointer last was, in client physical pixels.
+    drawn_at: Option<[f64; 2]>,
     placed: bool,
     sample_count: usize,
     notice: Option<String>,
@@ -226,6 +232,8 @@ impl Canvas {
             offset: [0.0, 0.0],
             angle: 0.0,
             mirrored: false,
+            hover_eraser: false,
+            drawn_at: None,
             placed: false,
             sample_count: 0,
             notice: None,
@@ -663,6 +671,12 @@ impl Canvas {
     }
 
     pub fn apply(&mut self, input: CanvasInput) {
+        if let CanvasInput::Begin(_, _, sample)
+        | CanvasInput::Extend(sample)
+        | CanvasInput::End(sample) = &input
+        {
+            self.drawn_at = Some(sample.position);
+        }
         match input {
             CanvasInput::Begin(Gesture::Pan, _, sample) => {
                 self.interaction = Interaction::Panning {

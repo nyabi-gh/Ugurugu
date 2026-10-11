@@ -26,6 +26,35 @@ pub fn side(width: f32) -> i32 {
     (width.round() as i32).max(1)
 }
 
+/// The outline of the pixels a tip of `width` covers around the pixel
+/// whose top-left corner is the origin: a closed polygon of pixel corners,
+/// down the right side and up the left, for the brush cursor.
+pub fn tip_outline(width: f32, tip: TipShape) -> Vec<[i32; 2]> {
+    let block = Block::new(side(width), tip);
+    let rows: Vec<(i32, i32, i32)> = block
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, (from, to))| from < to)
+        .map(|(row, &(from, to))| {
+            (
+                row as i32 - block.centre,
+                from - block.centre,
+                to - block.centre,
+            )
+        })
+        .collect();
+    let mut outline = Vec::with_capacity(rows.len() * 4);
+    for &(y, _, to) in &rows {
+        outline.extend([[to, y], [to, y + 1]]);
+    }
+    for &(y, from, _) in rows.iter().rev() {
+        outline.extend([[from, y + 1], [from, y]]);
+    }
+    outline.dedup();
+    outline
+}
+
 /// Covered pixels as runs within rows, sorted by row then start, apart and
 /// not touching.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -522,6 +551,61 @@ mod tests {
         assert!(frames.windows(2).any(|pair| pair[0] != pair[1]));
         for frame in &frames {
             assert_thin_line(frame);
+        }
+    }
+
+    #[test]
+    fn the_tip_outline_goes_round_the_pixels_a_click_covers() {
+        assert_eq!(
+            tip_outline(1.0, TipShape::Round),
+            [[1, 0], [1, 1], [0, 1], [0, 0]]
+        );
+        assert_eq!(
+            tip_outline(3.0, TipShape::Square),
+            [
+                [2, -1],
+                [2, 0],
+                [2, 1],
+                [2, 2],
+                [-1, 2],
+                [-1, 1],
+                [-1, 0],
+                [-1, -1]
+            ]
+        );
+        // Every pixel a click covers is inside the outline, and no other.
+        for (width, tip) in [
+            (5.0, TipShape::Round),
+            (4.0, TipShape::Square),
+            (7.0, TipShape::Round),
+        ] {
+            let outline = tip_outline(width, tip);
+            let inside = |x: i32, y: i32| {
+                let (px, py) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+                let mut crossings = 0;
+                for (index, a) in outline.iter().enumerate() {
+                    let b = outline[(index + 1) % outline.len()];
+                    let (ay, by) = (f64::from(a[1]), f64::from(b[1]));
+                    if (ay > py) != (by > py)
+                        && px < f64::from(a[0]) + (py - ay) / (by - ay) * f64::from(b[0] - a[0])
+                    {
+                        crossings += 1;
+                    }
+                }
+                crossings % 2 == 1
+            };
+            let mut click = stroke(&[[0.5, 0.5]], width);
+            click.brush.tip = tip;
+            let covered = pixels(&click, 0.0, 0);
+            for y in -6..7 {
+                for x in -6..7 {
+                    assert_eq!(
+                        inside(x, y),
+                        covered.contains(&[x, y]),
+                        "{width} {tip:?} {x},{y}"
+                    );
+                }
+            }
         }
     }
 

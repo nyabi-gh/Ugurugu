@@ -597,6 +597,9 @@ impl RenderThread {
                     self.alt_tap.cancel();
                 }
                 self.egui_state.egui_input_mut().events.extend(routed.egui);
+                if let Some(eraser) = routed.eraser_end {
+                    self.canvas.set_hover_eraser(eraser);
+                }
                 for input in routed.canvas {
                     // egui never sees canvas presses, so it would keep a
                     // text field focused and take the canvas's keys.

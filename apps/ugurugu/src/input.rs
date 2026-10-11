@@ -74,6 +74,8 @@ pub struct InputRouter {
 pub struct Routed {
     pub egui: Vec<egui::Event>,
     pub canvas: Vec<CanvasInput>,
+    /// Whether the last pen or mouse sample was a pen's eraser end.
+    pub eraser_end: Option<bool>,
 }
 
 impl InputRouter {
@@ -94,6 +96,7 @@ impl InputRouter {
         let mut routed = Routed {
             egui: Vec::new(),
             canvas: Vec::new(),
+            eraser_end: None,
         };
         let to_points = |position: [f64; 2]| {
             egui::pos2(
@@ -111,6 +114,11 @@ impl InputRouter {
                 } => {
                     for sample in samples {
                         self.oldest_unpresented.get_or_insert(sample.time);
+                        match kind {
+                            PointerKind::Pen => routed.eraser_end = Some(sample.inverted),
+                            PointerKind::Mouse => routed.eraser_end = Some(false),
+                            PointerKind::Touch | PointerKind::Touchpad => {}
+                        }
                         let before = self.buttons.get(&pointer).copied().unwrap_or_default();
                         self.buttons.insert(pointer, sample.buttons);
                         let pressed = sample.buttons.difference(before);
@@ -431,6 +439,25 @@ mod tests {
             CanvasInput::Pinch { fresh, .. } => Some(*fresh),
             _ => None,
         }
+    }
+
+    #[test]
+    fn the_last_pen_or_mouse_sample_says_whether_the_eraser_end_shows() {
+        let mut router = InputRouter::default();
+        let mut eraser = sample(150.0, Buttons::empty(), 1);
+        eraser.inverted = true;
+        let pen_hover = PointerEvent::Samples {
+            pointer: PointerId(9),
+            kind: PointerKind::Pen,
+            samples: vec![eraser],
+        };
+        assert_eq!(route(&mut router, vec![pen_hover]).eraser_end, Some(true));
+        let mouse = samples(1, vec![sample(150.0, Buttons::empty(), 2)]);
+        assert_eq!(route(&mut router, vec![mouse]).eraser_end, Some(false));
+        assert_eq!(
+            route(&mut router, vec![finger(3, 150.0, true)]).eraser_end,
+            None
+        );
     }
 
     #[test]

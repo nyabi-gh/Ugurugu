@@ -32,7 +32,7 @@ use ugu_core::ops::{Affine, MotionStyle, Sampling, Wobble};
 use ugu_core::selection::{Combine, Selection};
 use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
-use crate::canvas::{Canvas, Grip, HANDLES, ZOOM_RANGE};
+use crate::canvas::{BrushCursor, Canvas, Grip, HANDLES, ZOOM_RANGE};
 use crate::clipboard::Clipboard;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
@@ -606,6 +606,74 @@ pub fn pick_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
     });
     if over && canvas.picks_with(alt) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+}
+
+/// 2.2.13's brush ring in place of the pointer while a press would draw:
+/// a dark line under a light one, dashed for erasing.
+pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
+    let (pointer, space) =
+        ui.input(|input| (input.pointer.hover_pos(), input.key_down(egui::Key::Space)));
+    let over = pointer.filter(|pointer| {
+        ui.max_rect().contains(*pointer)
+            && ui
+                .ctx()
+                .layer_id_at(*pointer)
+                .is_none_or(|layer| layer.order == egui::Order::Background)
+    });
+    let (Some(pointer), false) = (over, space) else {
+        return;
+    };
+    let ppp = ui.ctx().pixels_per_point();
+    let Some(cursor) =
+        canvas.brush_cursor([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)])
+    else {
+        return;
+    };
+    let to_points = |[x, y]: [f64; 2]| egui::pos2(x as f32 / ppp, y as f32 / ppp);
+    let (points, eraser) = match cursor {
+        BrushCursor::Circle {
+            centre,
+            radius,
+            eraser,
+        } => {
+            let centre = to_points(centre);
+            let radius = radius as f32 / ppp;
+            let steps = (radius * 1.5).clamp(16.0, 256.0) as usize;
+            let points = (0..steps)
+                .map(|step| {
+                    let angle = step as f32 / steps as f32 * std::f32::consts::TAU;
+                    centre + radius * egui::vec2(angle.cos(), angle.sin())
+                })
+                .collect::<Vec<_>>();
+            (points, eraser)
+        }
+        BrushCursor::Pixels { outline, eraser } => {
+            (outline.into_iter().map(to_points).collect(), eraser)
+        }
+    };
+    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+    let painter = ui.painter();
+    let dark = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
+    let light = egui::Color32::from_rgba_unmultiplied(250, 250, 250, 235);
+    painter.add(egui::Shape::closed_line(
+        points.clone(),
+        egui::Stroke::new(3.0, dark),
+    ));
+    if eraser {
+        let mut closed = points;
+        closed.push(closed[0]);
+        painter.extend(egui::Shape::dashed_line(
+            &closed,
+            egui::Stroke::new(1.0, light),
+            4.0,
+            3.0,
+        ));
+    } else {
+        painter.add(egui::Shape::closed_line(
+            points,
+            egui::Stroke::new(1.0, light),
+        ));
     }
 }
 
