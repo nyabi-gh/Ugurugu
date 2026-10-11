@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Review probes, appended to a module by run-probes.py; no product source changes.
+
 
 #[cfg(test)]
 mod review_audit {
