@@ -391,6 +391,10 @@ settings-system-folder = Use system default
 settings-choose-folder = Choose default save folder
 settings-about = About
 settings-version = Version { $version }
+settings-build = Build { $commit }
+settings-gpu = GPU: { $gpu }
+settings-open-logs = Open log folder
+settings-copy-diagnostics = Copy diagnostic info
 settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = Restore defaults
@@ -402,3 +406,9 @@ settings-shortcut-taken = This shortcut is already assigned to { $action }.
 settings-shortcut-press = Press a key… (Esc cancels)
 settings-shortcut-none = None
 settings-shortcut-clear = Clear shortcut
+
+# Crash records
+crash-title = Ugurugu closed unexpectedly
+crash-text = Ugurugu stopped unexpectedly last time. What happened is recorded in the log folder; attach those files when you report the problem.
+crash-open-logs = Open log folder
+crash-close = Close

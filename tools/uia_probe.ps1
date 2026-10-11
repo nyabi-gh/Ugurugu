@@ -21,6 +21,7 @@ $env:UGURUGU_LOG = 'info'
 $env:UGURUGU_LANGUAGE = 'en'
 # Its own settings and recovery, which the dock step changes.
 $env:UGURUGU_SETTINGS_PATH = Join-Path $Out 'settings.json'
+$env:UGURUGU_LOG_PATH = Join-Path $Out 'logs'
 $env:UGURUGU_RECOVERY_PATH = Join-Path $Out 'recovery'
 Remove-Item -ErrorAction SilentlyContinue $env:UGURUGU_SETTINGS_PATH
 $app = Start-Process -FilePath $Exe -PassThru -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Out 'stderr.log')

@@ -16,6 +16,7 @@ mod ime_probe;
 mod input;
 mod latency;
 mod layout;
+mod logs;
 mod recovery;
 mod render;
 mod settings;
@@ -24,23 +25,12 @@ mod theme;
 mod ui;
 mod widgets;
 
-use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use tracing_subscriber::EnvFilter;
 use winit::event_loop::EventLoop;
 
 fn main() -> ExitCode {
-    // Logging must never block the render thread on a slow or full output.
-    let (log_writer, _log_flush) = tracing_appender::non_blocking(std::io::stdout());
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_env("UGURUGU_LOG")
-                .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn")),
-        )
-        .with_ansi(std::io::stdout().is_terminal())
-        .with_writer(log_writer)
-        .init();
+    let _logging = logs::start();
     tracing::debug!("starting");
 
     match run() {

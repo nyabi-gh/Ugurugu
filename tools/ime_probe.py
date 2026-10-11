@@ -293,6 +293,7 @@ if os.path.exists(SETTINGS):
 RECOVERY = os.path.join(OUT, "recovery")
 shutil.rmtree(RECOVERY, ignore_errors=True)
 env = dict(os.environ, UGURUGU_DIAGNOSTICS="1", UGURUGU_SETTINGS_PATH=SETTINGS, UGURUGU_RECOVERY_PATH=RECOVERY,
+           UGURUGU_LOG_PATH=os.path.join(OUT, "logs"),
            UGURUGU_LOG="info,ugurugu::ime_probe=debug,ugurugu::ui=debug,ugurugu::ui::text=trace")
 log_file = open(LOG, "w", encoding="utf-8")
 app = subprocess.Popen([EXE], env=env, stdout=log_file, stderr=subprocess.STDOUT)

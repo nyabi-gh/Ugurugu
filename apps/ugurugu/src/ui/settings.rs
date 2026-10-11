@@ -440,8 +440,25 @@ fn about(ui: &mut egui::Ui) {
         "settings-version",
         &args([("version", env!("CARGO_PKG_VERSION").to_owned())]),
     ));
+    ui.label(tr_with(
+        "settings-build",
+        &args([("commit", crate::logs::COMMIT.to_owned())]),
+    ));
     ui.label(tr("settings-credit-development"));
     ui.label(tr("settings-credit-icon"));
+    ui.add_space(8.0);
+    ui.label(tr_with(
+        "settings-gpu",
+        &args([("gpu", crate::logs::gpu())]),
+    ));
+    ui.horizontal(|ui| {
+        if ui.button(tr("settings-open-logs")).clicked() {
+            crate::logs::show_folder();
+        }
+        if ui.button(tr("settings-copy-diagnostics")).clicked() {
+            ui.ctx().copy_text(crate::logs::summary());
+        }
+    });
 }
 
 #[cfg(test)]

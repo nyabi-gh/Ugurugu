@@ -391,6 +391,10 @@ settings-system-folder = システムのデフォルトを使用
 settings-choose-folder = デフォルトの保存フォルダーを選択
 settings-about = 情報
 settings-version = バージョン { $version }
+settings-build = ビルド { $commit }
+settings-gpu = GPU: { $gpu }
+settings-open-logs = ログフォルダーを開く
+settings-copy-diagnostics = 診断情報をコピー
 settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = デフォルトに戻す
@@ -402,3 +406,9 @@ settings-shortcut-taken = このショートカットはすでに { $action } �
 settings-shortcut-press = キーを押してください…(Esc: 取り消し)
 settings-shortcut-none = なし
 settings-shortcut-clear = ショートカットを消去
+
+# Crash records
+crash-title = Ugurugu が予期せず終了しました
+crash-text = 前回 Ugurugu が予期せず終了しました。内容はログフォルダーに記録されています。問題を報告するときはそのファイルを添付してください。
+crash-open-logs = ログフォルダーを開く
+crash-close = 閉じる

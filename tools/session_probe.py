@@ -234,6 +234,7 @@ def main():
     out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
     os.environ["UGURUGU_SETTINGS_PATH"] = os.path.join(out, "settings.json")
+    os.environ["UGURUGU_LOG_PATH"] = os.path.join(out, "logs")
     random.seed(11)
     app = probe.App.__new__(probe.App)
     try:

@@ -173,7 +173,7 @@ fn request_adapter(
     .map_err(|error| format!("no DX12 adapter can show the window: {error}"))
 }
 
-fn adapter_summary(info: &wgpu::AdapterInfo) -> String {
+pub fn adapter_summary(info: &wgpu::AdapterInfo) -> String {
     let mut summary = format!("{} ({:?}, {:?}", info.name, info.device_type, info.backend);
     if !info.driver_info.is_empty() {
         summary += &format!(", driver {}", info.driver_info);

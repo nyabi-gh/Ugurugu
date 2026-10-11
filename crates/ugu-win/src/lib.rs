@@ -5,6 +5,7 @@
 
 pub mod clipboard;
 pub mod clock;
+pub mod crash;
 pub mod dialog;
 pub mod file;
 pub mod folder;

@@ -391,6 +391,10 @@ settings-system-folder = 시스템 기본값 사용
 settings-choose-folder = 기본 저장 폴더 선택
 settings-about = 정보
 settings-version = 버전 { $version }
+settings-build = 빌드 { $commit }
+settings-gpu = GPU: { $gpu }
+settings-open-logs = 로그 폴더 열기
+settings-copy-diagnostics = 진단 정보 복사
 settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = 기본값 복원
@@ -402,3 +406,9 @@ settings-shortcut-taken = 이 단축키는 이미 { $action }에 할당되어 �
 settings-shortcut-press = 키를 누르세요… (Esc: 취소)
 settings-shortcut-none = 없음
 settings-shortcut-clear = 단축키 지우기
+
+# Crash records
+crash-title = Ugurugu가 예기치 않게 종료됨
+crash-text = 지난번에 Ugurugu가 예기치 않게 종료되었습니다. 무슨 일이 있었는지 로그 폴더에 기록되어 있으니, 문제를 알릴 때 그 파일을 첨부해 주세요.
+crash-open-logs = 로그 폴더 열기
+crash-close = 닫기

@@ -39,6 +39,21 @@ fn frequency() -> u64 {
     })
 }
 
+/// Local date and time as `YYYYMMDD-HHMMSS`, for file names that sort by
+/// time.
+pub fn local_stamp() -> Option<String> {
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    let mut now = windows_sys::Win32::Foundation::SYSTEMTIME::default();
+    // SAFETY: the pointer is to a live SYSTEMTIME.
+    unsafe { GetLocalTime(&mut now) };
+    (now.wYear != 0).then(|| {
+        format!(
+            "{:04}{:02}{:02}-{:02}{:02}{:02}",
+            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond
+        )
+    })
+}
+
 /// `since_unix_epoch` as the user's locale writes a short date and a time
 /// without seconds, in local time.
 pub fn local_text(since_unix_epoch: std::time::Duration) -> Option<String> {

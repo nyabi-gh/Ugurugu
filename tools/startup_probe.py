@@ -65,6 +65,7 @@ def main():
         env["UGURUGU_INSTANCE_LOCK_PATH"] = os.path.join(folder, "instance.lock")
         env["UGURUGU_RECOVERY_PATH"] = os.path.join(folder, "recovery.ugu")
         env["UGURUGU_SETTINGS_PATH"] = os.path.join(folder, "settings.json")
+        env["UGURUGU_LOG_PATH"] = os.path.join(folder, "logs")
         env.setdefault("UGURUGU_LOG", "info,ugurugu=debug,ugu_render=debug,wgpu_core=warn,wgpu_hal=warn")
         env["PATH"] = os.pathsep.join([os.environ.get("UGURUGU_QT_BIN", r"C:\Qt\6.11.2\msvc2022_64\bin"),
                                        os.path.join(os.environ["LOCALAPPDATA"], "Ugurugu", "current"), env["PATH"]])

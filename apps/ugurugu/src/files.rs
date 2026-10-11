@@ -1208,6 +1208,16 @@ impl Files {
         }
     }
 
+    /// Whether a question or a file dialog is open, or one is about to be.
+    pub fn asking(&self) -> bool {
+        self.confirm.is_some()
+            || self.reading_found
+            || self.busy_dialog
+            || !self.found.is_empty()
+            || self.new_document.is_some()
+            || self.animation_dialog.is_some()
+    }
+
     /// The question about work left by a window no longer running, while
     /// there is some and nothing else is asked.
     pub fn ask_recovery(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {

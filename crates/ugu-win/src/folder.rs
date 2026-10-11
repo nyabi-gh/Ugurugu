@@ -37,6 +37,33 @@ pub fn documents() -> Option<PathBuf> {
     known(&FOLDERID_Documents)
 }
 
+/// Opens `folder` in File Explorer.
+pub fn show(folder: &std::path::Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide: Vec<u16> = folder.as_os_str().encode_wide().chain([0]).collect();
+    let open: Vec<u16> = "open".encode_utf16().chain([0]).collect();
+    // SAFETY: both strings are null-terminated and live through the call.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            open.as_ptr(),
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW returns a value above 32 when it succeeds.
+    if result as usize > 32 {
+        Ok(())
+    } else {
+        Err(format!("cannot open {}", folder.display()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

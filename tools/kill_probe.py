@@ -43,6 +43,7 @@ class Window:
         env = dict(os.environ)
         env["UGURUGU_RECOVERY_PATH"] = os.path.join(root, "recovery")
         env["UGURUGU_SETTINGS_PATH"] = os.path.join(root, "settings.json")
+        env["UGURUGU_LOG_PATH"] = os.path.join(root, "logs")
         env["UGURUGU_LANGUAGE"] = "en"
         env["UGURUGU_LOG"] = "info"
         self.log = open(os.path.join(root, f"app-{time.time():.3f}.log"), "w", encoding="utf-8")

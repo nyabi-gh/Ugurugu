@@ -282,6 +282,7 @@ class App:
         env["UGURUGU_INSTANCE_LOCK_PATH"] = os.path.join(out, "instance.lock")
         env["UGURUGU_RECOVERY_PATH"] = os.path.join(out, "recovery.ugu")
         env["UGURUGU_SETTINGS_PATH"] = os.path.join(out, "settings.json")
+        env["UGURUGU_LOG_PATH"] = os.path.join(out, "logs")
         extra = [os.environ.get("UGURUGU_QT_BIN", r"C:\Qt\6.11.2\msvc2022_64\bin"),
                  os.path.join(os.environ["LOCALAPPDATA"], "Ugurugu", "current")]
         env["PATH"] = os.pathsep.join(extra + [env["PATH"]])

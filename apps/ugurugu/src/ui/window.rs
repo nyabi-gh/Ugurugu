@@ -63,6 +63,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     super::shortcuts(ui.ctx(), canvas, files, clipboard, panels, typed);
     files.confirm(ui.ctx(), canvas);
     files.ask_recovery(ui.ctx(), canvas);
+    crate::logs::tell_about_crashes(ui.ctx(), files.asking());
     files.ask_animation(ui.ctx(), canvas);
     files.ask_new_document(ui.ctx(), canvas);
     super::dialogs(ui.ctx(), canvas, files, settings, panels, typed);

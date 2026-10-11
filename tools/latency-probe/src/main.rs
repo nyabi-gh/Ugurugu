@@ -375,8 +375,18 @@ fn run(options: &Options) -> Result<(), String> {
         ),
         None => Stdio::null(),
     };
+    // The app's settings, recovery and logs stay next to the results, away
+    // from the user's.
+    let own = options
+        .csv
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("latency-app");
     let mut app = Command::new(&options.exe)
         .args(&options.document)
+        .env("UGURUGU_SETTINGS_PATH", own.join("settings.json"))
+        .env("UGURUGU_RECOVERY_PATH", own.join("recovery"))
+        .env("UGURUGU_LOG_PATH", own.join("logs"))
         .stdout(output)
         .stderr(Stdio::null())
         .spawn()

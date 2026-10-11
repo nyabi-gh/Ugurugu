@@ -389,6 +389,10 @@ settings-system-folder | ugurugu::SettingsDialog | Use system default
 settings-choose-folder | ugurugu::SettingsDialog | Choose default save folder
 settings-about | ugurugu::SettingsDialog | About
 settings-version | ugurugu::SettingsDialog | Version %1 | args=version
+settings-build | - | Build %1 | 빌드 %1 | ビルド %1 | args=commit
+settings-gpu | - | GPU: %1 | GPU: %1 | GPU: %1 | args=gpu
+settings-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
+settings-copy-diagnostics | - | Copy diagnostic info | 진단 정보 복사 | 診断情報をコピー
 settings-credit-development | ugurugu::SettingsDialog | Development support by seuppi
 settings-credit-icon | ugurugu::SettingsDialog | App icon artwork by seuppi
 settings-restore-defaults | - | Restore defaults | 기본값 복원 | デフォルトに戻す
@@ -400,3 +404,9 @@ settings-shortcut-taken | ugurugu::SettingsDialog | This shortcut is already ass
 settings-shortcut-press | - | Press a key… (Esc cancels) | 키를 누르세요… (Esc: 취소) | キーを押してください…(Esc: 取り消し)
 settings-shortcut-none | - | None | 없음 | なし
 settings-shortcut-clear | - | Clear shortcut | 단축키 지우기 | ショートカットを消去
+
+# Crash records
+crash-title | - | Ugurugu closed unexpectedly | Ugurugu가 예기치 않게 종료됨 | Ugurugu が予期せず終了しました
+crash-text | - | Ugurugu stopped unexpectedly last time. What happened is recorded in the log folder; attach those files when you report the problem. | 지난번에 Ugurugu가 예기치 않게 종료되었습니다. 무슨 일이 있었는지 로그 폴더에 기록되어 있으니, 문제를 알릴 때 그 파일을 첨부해 주세요. | 前回 Ugurugu が予期せず終了しました。内容はログフォルダーに記録されています。問題を報告するときはそのファイルを添付してください。
+crash-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
+crash-close | - | Close | 닫기 | 閉じる
