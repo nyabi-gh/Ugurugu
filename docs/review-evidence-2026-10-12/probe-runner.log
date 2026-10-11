@@ -1,0 +1,7 @@
+warning: in the working copy of 'apps/ugurugu/src/files.rs', LF will be replaced by CRLF the next time Git touches it
+probe exit code: 0
+restored apps\ugurugu\src\files.rs sha256=fa9a9c7e52121fd59440e2707fa2ab99816b6c238ea2371a656b18c291eab141
+restored crates\ugu-session\src\lib.rs sha256=d376493c49cff3a1e055a3ef323db15ad86f6d775d86bf9be9988b69928a80e5
+restored apps\ugurugu\src\update.rs sha256=fbbc405c6b6e3b2fd0f2bceecc5422f2dc3f21e68747c090ef931712bad550ab
+restored apps\ugurugu\src\ui\window.rs sha256=3241d0791cb84d903a20c04443f2f117cf6019f07762cdc45fb943d027bf85c3
+restored apps\ugurugu\src\settings.rs sha256=7f26b4a32bcd6367ab72c6f1678d6a2b5ba61974143b3cc1de560a0e4259e136

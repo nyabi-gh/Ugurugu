@@ -1,0 +1,146 @@
+{
+  "date_kst": "2026-10-12",
+  "commit": "03ef8a824db38632346c9c4b3310b7ade1119f1c",
+  "branch": "rust/m6",
+  "rust_files": 124,
+  "rust_lines_including_tests_comments_blank_lines": 58991,
+  "by_package": {
+    "crates/ugu-render": {
+      "files": 21,
+      "lines": 13836
+    },
+    "apps/ugurugu": {
+      "files": 48,
+      "lines": 22146
+    },
+    "tools/ugu-doc": {
+      "files": 1,
+      "lines": 1755
+    },
+    "crates/ugu-session": {
+      "files": 10,
+      "lines": 3670
+    },
+    "crates/ugu-core": {
+      "files": 14,
+      "lines": 7917
+    },
+    "crates/ugu-io": {
+      "files": 13,
+      "lines": 5548
+    },
+    "crates/ugu-win": {
+      "files": 11,
+      "lines": 1978
+    },
+    "tools/latency-probe": {
+      "files": 1,
+      "lines": 573
+    },
+    "tools/render-bench": {
+      "files": 4,
+      "lines": 1316
+    },
+    "crates/ugu-text": {
+      "files": 1,
+      "lines": 252
+    }
+  },
+  "largest_files": [
+    {
+      "path": "crates/ugu-render/src/document.rs",
+      "lines": 3871,
+      "test_attributes": 40
+    },
+    {
+      "path": "apps/ugurugu/src/files.rs",
+      "lines": 2053,
+      "test_attributes": 12
+    },
+    {
+      "path": "apps/ugurugu/src/canvas.rs",
+      "lines": 1963,
+      "test_attributes": 14
+    },
+    {
+      "path": "tools/ugu-doc/src/main.rs",
+      "lines": 1755,
+      "test_attributes": 0
+    },
+    {
+      "path": "crates/ugu-session/src/tests.rs",
+      "lines": 1736,
+      "test_attributes": 52
+    },
+    {
+      "path": "apps/ugurugu/src/ui/mod.rs",
+      "lines": 1576,
+      "test_attributes": 0
+    },
+    {
+      "path": "crates/ugu-render/src/stroke.rs",
+      "lines": 1374,
+      "test_attributes": 10
+    },
+    {
+      "path": "crates/ugu-render/src/compose.rs",
+      "lines": 1365,
+      "test_attributes": 7
+    },
+    {
+      "path": "crates/ugu-core/src/selection.rs",
+      "lines": 1164,
+      "test_attributes": 15
+    },
+    {
+      "path": "crates/ugu-io/src/legacy.rs",
+      "lines": 1092,
+      "test_attributes": 0
+    },
+    {
+      "path": "apps/ugurugu/src/render.rs",
+      "lines": 1041,
+      "test_attributes": 0
+    },
+    {
+      "path": "apps/ugurugu/src/ui/layers.rs",
+      "lines": 995,
+      "test_attributes": 0
+    },
+    {
+      "path": "crates/ugu-core/src/motion.rs",
+      "lines": 954,
+      "test_attributes": 15
+    },
+    {
+      "path": "apps/ugurugu/src/export.rs",
+      "lines": 946,
+      "test_attributes": 9
+    },
+    {
+      "path": "apps/ugurugu/src/ui/dock.rs",
+      "lines": 858,
+      "test_attributes": 3
+    },
+    {
+      "path": "crates/ugu-render/src/view.rs",
+      "lines": 824,
+      "test_attributes": 6
+    },
+    {
+      "path": "crates/ugu-core/src/restyle.rs",
+      "lines": 819,
+      "test_attributes": 8
+    },
+    {
+      "path": "crates/ugu-core/src/history.rs",
+      "lines": 814,
+      "test_attributes": 15
+    }
+  ],
+  "test_counts": {
+    "passed": 485,
+    "failed": 0,
+    "ignored": 3
+  }
+}

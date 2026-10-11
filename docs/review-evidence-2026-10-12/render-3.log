@@ -1,0 +1,13 @@
+  outlines  n=60 p50=16.3 p95=17.8 max=19.5 ms
+  encode    n=60 p50=41.6 p95=44.2 max=44.6 ms
+  rasterize n=60 p50=8.8 p95=10.0 max=11.0 ms
+  composite n=60 p50=3.5 p95=3.7 max=3.8 ms
+layer surfaces: 64 MiB in the last frame
+layer surface estimate (MiB): 1/1 64, 1/2 16, 1/4 4, 1/8 1
+first split: 43.1 ms
+split after a stroke: n=4 p50=12.3 p95=17.0 max=17.0 ms
+pen-up (stamp and composite): n=4 p50=0.8 p95=0.8 max=0.8 ms
+peak working set: 397 MiB after whole frames, 652 MiB in the end
+displacement only: 5.4 ms
+geometry on 1 thread: resample 6.7 ms (276380 samples), outlines 27.8 ms (1375814 path elements)
+8 threads: first frame 47.8 ms, then per frame n=60 p50=21.8 p95=22.9 max=23.6 ms

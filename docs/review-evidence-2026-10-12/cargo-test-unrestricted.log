@@ -1,0 +1,591 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.47s
+     Running unittests src\main.rs (target\release\deps\latency_probe-52fd14ea5bd7e1db.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\release\deps\render_bench-5fe923ddf4c3351b.exe)
+
+running 3 tests
+test scene::tests::the_document_has_the_requested_size ... ok
+test scene::tests::frame_zero_is_unmoved_and_later_frames_move ... ok
+test scene::tests::circles_and_quads_wind_the_same_way ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_core-fc025edf89bab7ea.exe)
+
+running 98 tests
+test command::tests::a_failing_edit_leaves_the_document_as_it_was ... ok
+test command::tests::a_group_made_around_a_layer_takes_its_place_and_ungroups_back ... ok
+test command::tests::a_layer_with_a_clipped_layer_on_it_is_not_merged_down ... ok
+test command::tests::a_drawn_stroke_undoes_to_the_same_document ... ok
+test clip::tests::a_pasted_copy_keeps_its_strokes_moving_and_clears_outside_the_selection ... ok
+test document::tests::layer_ids_are_unique_across_the_tree ... ok
+test document::tests::layer_count_and_names_are_limited ... ok
+test command::tests::cropping_reaches_paint_layers_inside_groups ... ok
+test command::tests::an_edit_that_changes_nothing_is_not_committed ... ok
+test document::tests::sections_are_limited_in_depth_and_keep_the_canvas ... ok
+test document::tests::paint_layers_must_end_on_the_document_canvas ... ok
+test command::tests::data_still_in_use_cannot_be_removed ... ok
+test command::tests::merging_down_commits_and_undoes ... ok
+test document::tests::a_new_document_is_valid ... ok
+test history::tests::a_group_is_one_undo_step ... ok
+test document::tests::groups_nest_at_most_nine_deep ... ok
+test clip::tests::an_image_is_placed_whole_in_the_middle ... ok
+test brush::tests::every_preset_is_in_range_and_named_once ... ok
+test document::tests::operations_must_refer_to_stored_data ... ok
+test clip::tests::a_copy_pastes_into_another_document_with_its_data_and_canvas ... ok
+test history::tests::a_failing_group_undoes_its_earlier_steps ... ok
+test command::tests::layers_move_to_the_top_of_a_group_and_out_above_their_top_ancestor ... ok
+test document::tests::document_settings_must_be_within_limits ... ok
+test command::tests::moving_a_layer_too_deep_is_refused ... ok
+test document::tests::operations_are_counted_inside_sections ... ok
+test history::tests::a_group_changes_the_selection_with_the_document_in_one_step ... ok
+test history::tests::a_new_edit_clears_redo ... ok
+test history::tests::commit_cost_at_the_limit ... ignored, timing, not a check
+test history::tests::a_save_snapshot_keeps_later_edits_dirty ... ok
+test history::tests::each_selection_change_is_an_undo_step_that_leaves_the_document_clean ... ok
+test history::tests::a_stroke_step_leaves_the_selection_alone_and_a_new_selection_drops_redo ... ok
+test history::tests::an_edit_that_changes_nothing_leaves_no_undo_step ... ok
+test history::tests::returning_to_the_saved_state_is_clean ... ok
+test history::tests::the_revision_only_goes_up ... ok
+test history::tests::layer_revisions_follow_what_each_layers_pixels_are_made_from ... ok
+test history::tests::undo_and_redo_walk_the_states ... ok
+test motion::tests::classic_displacement_matches_the_cpp_values ... ok
+test motion::tests::classic_width_matches_the_cpp_values ... ok
+test motion::tests::a_displacer_moves_samples_as_one_at_a_time ... ok
+test motion::tests::frames_wrap_around_the_cycle ... ok
+test motion::tests::poses_are_at_most_the_frames ... ok
+test motion::tests::posed_width_matches_the_cpp_values ... ok
+test motion::tests::signed_noise_matches_the_cpp_values ... ok
+test motion::tests::smooth_and_stepped_poses_match_the_cpp_values ... ok
+test motion::tests::posed_displacement_matches_the_cpp_values ... ok
+test motion::tests::smooth_noise_matches_the_cpp_values ... ok
+test motion::tests::smooth_joins_the_last_pose_to_the_first_and_stepped_holds ... ok
+test motion::tests::visibility_poses_match_the_cpp_values ... ok
+test restyle::tests::a_stroke_another_layer_draws_stays_stored ... ok
+test motion::tests::visible_segments_match_the_cpp_values ... ok
+test restyle::tests::a_clip_and_a_fill_coverage_limit_what_is_touched ... ok
+test restyle::tests::a_stroke_touches_where_its_width_reaches ... ok
+test history::tests::steps_holding_large_selections_are_dropped_past_the_byte_limit ... ok
+test restyle::tests::a_width_out_of_range_is_refused ... ok
+test restyle::tests::restyling_renames_changed_strokes_and_undoes_in_one_commit ... ok
+test restyle::tests::strokes_in_a_merged_section_are_found_and_changed ... ok
+test selection::tests::a_colour_flood_compares_every_straight_channel_with_the_tolerance ... ok
+test restyle::tests::a_dot_and_a_steep_line_are_found ... ok
+test selection::tests::a_flood_fills_the_area_its_seed_is_in_up_to_the_lines ... ok
+test restyle::tests::strokes_before_a_crop_or_resample_are_found_where_they_ended_up ... ok
+test selection::tests::a_freehand_loop_fills_even_odd_and_closes_itself ... ok
+test selection::tests::a_rectangle_takes_the_pixels_whose_centres_are_inside ... ok
+test selection::tests::a_transformed_selection_holds_every_pixel_the_moved_squares_reach ... ok
+test selection::tests::all_and_invert_follow_the_canvas ... ok
+test selection::tests::affine_helpers_compose_invert_and_turn_about_a_centre ... ok
+test selection::tests::an_ellipse_fits_the_rectangle ... ok
+test selection::tests::contours_fill_by_the_non_zero_rule ... ok
+test selection::tests::crops_and_resamples_move_the_selection_with_the_content ... ok
+test selection::tests::shapes_add_and_subtract ... ok
+test semantics::a_fill_keeps_its_coverage_while_lines_move ... ok
+test semantics::a_group_is_drawn_on_its_own_surface ... ok
+test semantics::a_selection_transform_moves_each_frames_own_result ... ok
+test selection::tests::the_outline_follows_pixel_edges_with_the_selection_on_the_right ... ok
+test selection::tests::crops_and_resamples_match_moving_each_pixel ... ok
+test semantics::a_clipped_layer_shows_only_where_its_base_is ... ok
+test semantics::a_crop_moves_the_canvas_and_a_resample_scales_what_came_before ... ok
+test semantics::a_hidden_or_empty_base_hides_what_is_clipped_to_it ... ok
+test semantics::a_fill_replaces_what_it_covers_and_goes_behind_its_edge ... ok
+test semantics::an_eraser_reaches_only_what_came_before_it ... ok
+test semantics::an_eraser_added_after_a_merge_reaches_both_layers ... ok
+test selection::tests::unpremultiplying_rounds_as_qt_does ... ok
+test selection::tests::the_outline_takes_every_boundary_edge_once_in_closed_loops ... ok
+test semantics::an_image_goes_over_what_came_before_and_under_what_follows ... ok
+test semantics::blend_modes_follow_the_w3c_formulas ... ok
+test semantics::clipped_layers_in_a_row_share_one_base ... ok
+test semantics::merging_keeps_every_frame_and_each_eraser_in_its_own_layer ... ok
+test semantics::merging_refuses_what_it_cannot_keep ... ok
+test store::tests::copying_a_store_shares_its_arrays ... ok
+test store::tests::assets_are_limited_in_pixels ... ok
+test store::tests::mask_bits_follow_the_bounds ... ok
+test store::tests::points_must_be_finite_and_in_range ... ok
+test text::tests::degenerate_contours_are_left_out ... ok
+test text::tests::each_contour_is_a_closed_stroke_running_on_past_its_start ... ok
+test text::tests::the_fill_covers_the_letters_but_not_their_holes ... ok
+test history::tests::only_the_newest_steps_are_kept ... ok
+test store::tests::points_are_limited_per_stroke_and_in_total ... ok
+test motion::tests::no_point_moves_beyond_the_maximum ... ok
+test motion::tests::no_posed_point_moves_beyond_the_maximum ... ok
+
+test result: ok. 97 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src\main.rs (target\release\deps\ugu_doc-219286897a1c8ab1.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_io-dda51a5e5316fc8d.exe)
+
+running 48 tests
+test image::tests::the_jpeg_decodes_close_to_the_image_over_white ... ok
+test image::tests::the_format_follows_the_extension ... ok
+test image::tests::straight_alpha_round_trips_within_a_level ... ok
+test image::tests::transparency_goes_over_white ... ok
+test image::tests::the_png_decodes_to_the_same_image ... ok
+test import::tests::what_is_not_an_image_or_too_large_is_refused ... ok
+test legacy::tests::base64_is_decoded_strictly ... ok
+test legacy::tests::colours_are_read_as_2_2_13_writes_them ... ok
+test import::tests::a_larger_image_shrinks_to_fit_keeping_its_shape ... ok
+test import::tests::each_format_decodes_to_the_same_pixels ... ok
+test legacy::tests::groups_open_as_deep_as_2_2_13_makes_them ... ok
+test import::tests::an_exif_orientation_turns_the_image_upright ... ok
+test legacy::tests::fills_and_clipped_strokes_keep_their_masks ... ok
+test legacy::tests::what_3_0_cannot_show_alike_is_refused ... ok
+test tests::a_written_document_reads_back_the_same ... ok
+test animation::tests::delays_add_up_to_whole_frames ... ok
+test tests::files_of_earlier_versions_are_recognised ... ok
+test image::tests::shrinking_averages_the_area_each_pixel_covers ... ok
+test legacy::tests::every_motion_style_and_layer_wobble_comes_across ... ok
+test tests::stroke_points_have_an_explicit_little_endian_layout ... ok
+test legacy::tests::merged_layers_become_sections_and_edits_keep_their_order ... ok
+test save::tests::a_full_disk_keeps_the_old_file_and_no_temporary ... ok
+test webp::tests::refuses_bad_timings_and_sizes ... ok
+test webp::tests::short_animations_are_one_run ... ok
+test tests::an_entry_that_inflates_past_its_limit_is_refused ... ok
+test tests::the_same_document_writes_the_same_bytes ... ok
+test save::tests::temporaries_of_other_processes_are_found_by_their_name ... ok
+test tests::entries_come_in_a_fixed_order_with_only_used_data ... ok
+test gif::tests::up_to_256_colours_are_kept_exactly ... ok
+test save::tests::a_failed_replace_keeps_the_old_file_and_no_temporary ... ok
+test gif::tests::the_file_decodes_to_the_frames_within_the_palette ... ok
+test save::tests::a_saved_document_reads_back ... ok
+test tests::files_that_are_not_documents_are_refused ... ok
+test gif::tests::cancelling_stops_between_frames ... ok
+test tests::unexpected_json_is_refused ... ok
+test tests::files_from_a_newer_version_are_refused_as_newer ... ok
+test tests::broken_binary_entries_are_refused ... ok
+test tests::missing_extra_and_unknown_entries_are_refused ... ok
+test image::tests::shrinking_in_bands_is_shrinking_the_whole ... ok
+test legacy::tests::other_versions_and_damage_are_told_apart ... ok
+test webp::tests::loops_endlessly ... ok
+test tests::damaged_files_are_refused_or_valid ... ok
+test webp::tests::image_reads_the_frames_and_delays ... ok
+test webp::tests::stops_inside_a_frame_once_cancelled ... ok
+test gif::tests::the_file_is_2_2_13_s_byte_for_byte ... ok
+test webp::tests::the_file_is_2_2_13_s_byte_for_byte ... ok
+test webp::tests::decodes_to_the_frames_and_delays ... ok
+test webp::tests::runs_join_into_the_same_frames ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+ZipWriter::drop: failed to finalize archive: Io(Kind(StorageFull))     Running unittests src\lib.rs (target\release\deps\ugu_render-b3ca990d9d6bfeb9.exe)
+
+running 105 tests
+test dab::tests::particles_land_within_the_scatter ... ok
+test dab::tests::aliased_dabs_paint_the_pixels_whose_centres_they_cover ... ok
+test ants::tests::runs_go_round_each_loop_counting_length_from_its_first_corner ... ok
+test dab::tests::overlapping_dabs_add_up_like_source_over ... ok
+test composite::tests::a_base_is_kept_only_while_clipped_siblings_follow ... ok
+test dab::tests::airbrush_dabs_follow_2_2_13 ... ok
+test dab::tests::spray_particles_stay_put_unless_animated ... ok
+test dab::tests::a_soft_dab_keeps_its_alpha_to_the_hardness_then_fades ... ok
+test document::tests::a_clipped_layer_shows_only_where_its_base_is ... ok
+test dab::tests::antialiased_dabs_cover_about_their_area ... ok
+test document::tests::a_group_keeps_its_blend_modes_inside ... ok
+test composite::tests::blend_modes_are_within_one_level_of_the_formulas ... ok
+test document::tests::a_marker_has_square_ends ... ok
+test document::tests::a_pen_without_antialiasing_draws_whole_pixels ... ok
+test document::tests::a_fill_replaces_what_it_covers_and_goes_behind_its_edge ... ok
+test document::tests::a_merged_section_that_moves_a_selection_draws_as_its_own_layer_would ... ok
+test document::tests::a_crop_carries_the_pixels_so_far_and_later_strokes_use_the_new_canvas ... ok
+test document::tests::a_moved_selection_moves_each_frames_own_result ... ok
+test document::tests::a_selection_moved_right_after_a_crop_moves_the_cropped_pixels ... ok
+test document::tests::a_resample_scales_the_pixels_so_far_as_2_2_13_does ... ok
+test document::tests::a_thumbnail_fits_and_shows_the_layer_alone ... ok
+test document::tests::a_soft_airbrush_fades_from_the_middle ... ok
+test document::tests::an_eraser_reaches_only_what_came_before_it ... ok
+test document::tests::an_image_is_placed_over_what_came_before ... ok
+test document::tests::an_eraser_added_after_a_merge_reaches_both_layers ... ok
+test document::tests::drawing_again_from_the_pixels_so_far_changes_nothing ... ok
+test document::tests::clipped_strokes_erasers_and_clears_change_only_the_masked_pixels ... ok
+test document::tests::hidden_and_reference_layers ... ok
+test compose::tests::the_split_puts_back_the_full_frame ... ok
+test document::tests::layers_drawn_with_fewer_samples_are_not_reused_at_full_detail ... ok
+test document::tests::merging_keeps_every_frame_and_each_eraser_in_its_own_layer ... ok
+test document::tests::only_changed_layers_are_drawn_again ... ok
+test document::tests::still_layers_are_drawn_once_for_every_frame ... ok
+test document::tests::strokes_move_from_frame_to_frame_and_frames_wrap ... ok
+test document::tests::dab_strokes_past_the_budget_draw_the_same_in_runs ... ok
+test document::tests::a_stopped_render_keeps_nothing_half_drawn ... ok
+test compose::tests::a_fill_stamped_on_any_layer_is_within_a_level_of_a_full_render ... ok
+test image::tests::an_asset_decodes_premultiplied_at_its_recorded_size ... ok
+test live::tests::a_stroke_in_a_selection_changes_only_pixels_inside_it ... ok
+test compose::tests::a_reference_put_together_from_the_split_is_the_reference_drawn ... ok
+test document::tests::without_wobble_only_an_animated_spray_moves ... ok
+test live::tests::a_stroke_on_a_used_coverage_covers_what_it_does_on_a_new_one ... ok
+test live::tests::a_translucent_live_stroke_does_not_darken_where_it_overlaps ... ok
+test live::tests::drawn_point_by_point_it_covers_what_the_whole_stroke_covers ... ok
+test live::tests::dabs_drawn_point_by_point_are_the_whole_stroke_painted ... ok
+test document::tests::every_thread_count_draws_the_same_pixels ... ok
+test mask::tests::intersections_and_fringes_are_pixel_exact ... ok
+test live::tests::the_tail_is_replaced_not_added_to ... ok
+test pixel::tests::a_broken_line_leaves_gaps_on_some_frames ... ok
+test pixel::tests::a_curve_drawn_slowly_has_no_doubled_corners ... ok
+test live::tests::a_pixel_stroke_drawn_point_by_point_is_its_whole_pixels ... ok
+test pixel::tests::differences_are_exact ... ok
+test pixel::tests::the_tip_outline_goes_round_the_pixels_a_click_covers ... ok
+test pixel::tests::the_wobble_moves_pixels_by_whole_pixels_and_keeps_the_line_thin ... ok
+test pixel::tests::a_click_is_exactly_the_tip ... ok
+test pixel::tests::straight_lines_take_one_pixel_a_step ... ok
+test plan::tests::a_hidden_clipped_layer_keeps_the_base ... ok
+test plan::tests::clipped_layers_in_a_row_share_the_base_below_them ... ok
+test pixel::tests::wobbling_curves_stay_thin_and_joined ... ok
+test mask::tests::runs_hold_the_mask_bits ... ok
+test document::tests::fewer_samples_keep_a_smaller_frame_within_the_same_limits ... ok
+test plan::tests::groups_are_bases_and_can_be_clipped ... ok
+test present::tests::present_counts_wrap ... ok
+test plan::tests::layers_without_motion_are_marked_still ... ok
+test plan::tests::reference_layers_are_left_out_of_exports ... ok
+test raster::tests::every_simd_level_draws_the_same_pixels ... ok
+test present::tests::replaced_presents_are_dropped_without_a_time ... ok
+test present::tests::the_shown_present_gets_the_display_time ... ok
+test document::tests::many_layers_draw_the_same_on_any_thread_count ... ok
+test plan::tests::clipped_layers_without_a_shown_base_are_left_out ... ok
+test present::tests::presents_not_shown_yet_stay_pending ... ok
+test stroke::tests::a_long_stroke_is_sampled_more_sparsely ... ok
+test stroke::tests::a_single_point_is_a_dot_of_its_pressure_width ... ok
+test stroke::tests::sampling_while_drawing_matches_sampling_afterwards ... ok
+test stroke::tests::samples_are_evenly_spaced_and_end_at_the_last_point ... ok
+test document::tests::moved_selections_and_images_draw_alike_everywhere ... ok
+test stroke::tests::the_pieces_wind_the_same_way ... ok
+test stroke::tests::every_frame_stays_inside_the_bounds ... ok
+test tile::tests::ensuring_tiles_grows_the_pixels_and_keeps_them ... ok
+test tile::tests::rows_come_from_the_reached_tiles ... ok
+test stroke::tests::a_translucent_pressure_stroke_does_not_darken_where_it_overlaps ... ok
+test stroke::tests::the_union_has_the_shape_of_a_round_stroke ... ok
+test stroke::tests::a_broken_line_draws_only_its_shown_segments ... ok
+test view::tests::turned_and_mirrored_placements_map_both_ways ... ok
+test document::tests::a_fill_stays_while_strokes_move_and_draws_alike_everywhere ... ok
+test document::tests::a_smaller_render_is_the_full_render_made_smaller ... ok
+test document::tests::a_move_that_cuts_away_everything_draws_as_one_that_does_not ... ok
+test document::tests::layers_drawn_alone_draw_the_same_as_beside_the_others ... ok
+test document::tests::crops_and_resamples_draw_alike_everywhere ... ok
+test document::tests::tiles_keep_the_pixels_within_a_level ... ok
+test document::tests::stepped_poses_hold_smooth_ones_blend_and_both_break_alike_everywhere ... ok
+test document::tests::a_pixel_stroke_draws_its_pixels_and_nothing_partial_on_every_frame ... ok
+test compose::tests::over_the_budget_the_split_keeps_every_layer_editable ... ok
+test compose::tests::a_pending_transform_shown_on_any_layer_is_within_a_level_of_a_full_render ... ok
+test compose::tests::a_committed_stroke_stamped_on_any_layer_is_within_a_level_of_a_full_render ... ok
+test document::tests::a_frame_over_the_budget_is_the_same_frame ... ok
+test compose::tests::a_dragged_transform_glanced_at_matches_the_shown_one ... ok
+test document::tests::every_built_in_brush_and_eraser_draws_alike_everywhere ... ok
+test view::tests::a_turned_mirrored_view_shows_the_document_pixel_under_each_screen_pixel ... ok
+test view::tests::below_100_percent_neighbouring_pixels_blend ... ok
+test view::tests::large_uploads_one_after_another_show_the_pixels_given ... ok
+test view::tests::at_whole_scales_each_screen_pixel_shows_one_document_pixel ... ok
+test stroke::tests::the_outline_fills_what_the_circles_and_bands_fill ... ok
+test view::tests::the_grid_marks_each_pixel_s_top_and_left_edges_when_enlarged_enough ... ok
+test ants::tests::the_ants_lie_on_the_selection_edge_and_move_with_the_phase ... ok
+
+test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.86s
+
+     Running tests\regression.rs (target\release\deps\regression-7ca8cf62c1908d2c.exe)
+
+running 1 test
+test fixtures_draw_as_pinned_and_keep_their_meaning ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_session-ce5dec60045ac435.exe)
+
+running 55 tests
+test stabilizer::tests::strength_zero_passes_input_through ... ok
+test tests::a_cancelled_stroke_leaves_nothing ... ok
+test tests::a_canvas_change_ends_a_lasso_being_drawn ... ok
+test tests::a_paste_is_one_step_adding_a_selected_layer_ready_to_move ... ok
+test tests::a_stroke_begun_while_a_transform_is_pending_is_cut_to_the_moved_selection ... ok
+test stabilizer::tests::stronger_smoothing_removes_more_jitter ... ok
+test tests::each_preset_keeps_its_width_and_stabilizer_and_draws_with_its_brush ... ok
+test tests::a_hidden_or_missing_layer_refuses_to_draw ... ok
+test tests::filling_the_selection_or_a_painted_shape_is_one_fill_cut_to_the_selection ... ok
+test tests::a_pending_transform_is_applied_as_one_step_moving_the_selection_along ... ok
+test tests::a_placed_image_is_a_new_layer_selected_and_ready_to_move ... ok
+test tests::a_stroke_is_one_undo_step ... ok
+test tests::an_unchanged_property_is_no_edit ... ok
+test tests::escape_cancels_a_pending_transform_before_deselecting_and_changing_tool_applies_it ... ok
+test tests::a_freehand_loop_takes_points_a_pixel_apart_and_stays_on_the_canvas ... ok
+test tests::escape_drops_the_shape_being_dragged_before_the_selection ... ok
+test tests::deleting_clears_the_selected_part_after_a_pending_transform ... ok
+test tests::a_canvas_change_applies_a_pending_transform_first_and_moves_its_selection ... ok
+test tests::a_click_deselects_when_replacing_and_does_nothing_otherwise ... ok
+test tests::a_pixel_stroke_is_whole_pixels_wide_and_never_antialiased ... ok
+test tests::an_unchanged_canvas_is_no_step_and_a_refused_one_changes_nothing ... ok
+test tests::flipping_turns_the_selected_part_over_in_place_along_its_own_sides ... ok
+test stabilizer::tests::a_stalled_clock_uses_the_default_interval ... ok
+test tests::a_layer_in_a_hidden_group_refuses_to_draw ... ok
+test tests::group_commands_are_one_undo_step_each ... ok
+test tests::filled_text_fills_under_its_outlines_and_keeps_inside_the_selection ... ok
+test tests::layer_commands_keep_a_valid_current_layer ... ok
+test tests::layers_in_a_group_merge_and_move_among_their_siblings ... ok
+test tests::pen_up_cost_on_a_large_document ... ignored, measurement
+test tests::merging_down_makes_the_lower_layer_current ... ok
+test tests::placed_text_is_applied_as_one_step_in_the_pen_colour ... ok
+test tests::picking_leaves_a_pending_transform_and_placed_text_pending ... ok
+test tests::placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits ... ok
+test tests::pen_pressure_is_kept_and_carried_to_the_lift ... ok
+test tests::restyling_changes_what_the_selection_touches_in_one_step ... ok
+test tests::restyling_refuses_a_hidden_layer ... ok
+test tests::restyling_waits_for_a_pending_transform_or_placed_text ... ok
+test tests::saving_marks_the_state_not_whatever_came_after ... ok
+test tests::select_all_and_invert_cover_the_canvas ... ok
+test tests::shapes_replace_add_and_subtract_one_undo_step_each ... ok
+test tests::smoothing_lags_behind_but_the_stroke_still_ends_at_the_lift ... ok
+test tests::strokes_fills_and_text_record_their_colour_and_erasing_does_not ... ok
+test tests::strokes_get_different_seeds ... ok
+test tests::strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask ... ok
+test tests::the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection ... ok
+test tests::the_colour_history_keeps_each_colour_once_newest_first_up_to_256 ... ok
+test tests::the_eraser_commits_an_erase_operation ... ok
+test tests::the_last_paint_layer_is_not_removed_even_with_its_group ... ok
+test tests::tools_carry_over_to_another_document ... ok
+test tests::the_selection_stays_across_layers_and_follows_canvas_changes ... ok
+test tests::undo_and_escape_cancel_a_pending_transform_and_other_edits_apply_it_first ... ok
+test tests::the_eyedropper_sets_the_pen_colour_without_an_edit ... ok
+test tests::without_smoothing_the_stroke_keeps_the_input_and_ends_where_the_pen_lifted ... ok
+test tests::the_settled_document_is_what_applying_gives_and_the_session_stays ... ok
+test tests::the_wand_selects_the_area_clicked_and_combines_like_a_shape ... ok
+
+test result: ok. 54 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_text-f68365476ae2ea99.exe)
+
+running 4 tests
+test tests::each_line_starts_lower_and_empty_lines_count ... ok
+test tests::characters_a_font_lacks_come_from_the_fallback ... ok
+test tests::a_counter_runs_the_other_way_round ... ok
+test tests::letters_become_closed_contours_below_and_right_of_the_origin ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_win-5e167ec2d0723ab2.exe)
+
+running 25 tests
+test clipboard::tests::an_image_round_trips_with_its_transparency ... ignored
+test crash::tests::child_that_crashes ... ok
+test clock::tests::a_time_is_written_with_its_year ... ok
+test pointer::tests::a_frame_without_a_new_move_skipped_nothing ... ok
+test pointer::tests::duplicate_frames_collapse ... ok
+test dialog::tests::a_name_gets_the_chosen_type_s_extension_unless_it_has_one ... ok
+test memory::tests::memory_is_reported ... ok
+test locale::version_tests::the_version_names_a_build ... ok
+test pointer::tests::equal_times_keep_frame_order ... ok
+test pointer::tests::frames_already_delivered_are_dropped ... ok
+test pointer::tests::history_is_returned_oldest_first ... ok
+test pointer::tests::skipped_moves_stop_at_the_last_delivered_move ... ok
+test crash::tests::hex_has_the_digits_asked_for ... ok
+test pointer::tests::skipped_moves_survive_the_millisecond_clock_wrapping ... ok
+test pointer::tests::display_points_left_of_the_primary_monitor_are_negative ... ok
+test file::tests::a_read_only_target_is_left_as_it_was ... ok
+test pointer::tests::skipped_moves_stop_at_older_times_when_the_last_entry_is_gone ... ok
+test pointer::tests::skipped_moves_keep_moves_in_the_same_millisecond_before_the_last_entry ... ok
+test pointer::tests::skipped_moves_without_the_last_entry_take_only_newer_times ... ok
+test file::tests::a_target_open_without_sharing_is_left_as_it_was ... ok
+test folder::tests::the_folders_exist ... ok
+test file::tests::an_existing_file_is_replaced_and_a_new_one_created ... ok
+test association::tests::registering_and_unregistering_leave_nothing_behind ... ok
+test file::tests::this_process_runs_and_an_ended_one_does_not ... ok
+test crash::tests::a_crash_leaves_a_note ... ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.38s
+
+     Running unittests src\main.rs (target\release\deps\ugurugu-5e9687f1fae2d52a.exe)
+
+running 149 tests
+test app::tests::a_document_argument_is_made_absolute_in_windows_form ... ok
+test budget::tests::half_of_what_is_free_counting_what_the_caches_hold ... ok
+test cache::tests::a_split_goes_before_frames_frames_before_exports_and_exports_before_thumbnails ... ok
+test cache::tests::a_new_split_stops_the_render_under_way ... ok
+test budget::tests::a_floor_when_almost_nothing_is_free_and_a_default_when_unknown ... ok
+test budget::tests::a_quarter_of_installed_memory_when_enough_is_free ... ok
+test canvas::tests::playback_samples_are_as_far_apart_on_screen_as_at_100_percent ... ok
+test canvas::transform::tests::a_handle_scales_from_the_opposite_side ... ok
+test canvas::tests::playback_frames_keep_a_pixel_for_every_screen_pixel ... ok
+test canvas::view::tests::angles_wrap_into_a_half_open_turn ... ok
+test canvas::cursor::tests::the_cursor_is_as_wide_as_the_stroke_and_dashed_for_erasing ... ok
+test canvas::view::tests::a_quarter_turn_shows_the_document_s_x_axis_going_down ... ok
+test canvas::view::tests::steps_and_mirroring_keep_the_document_middle_in_place ... ok
+test canvas::cursor::tests::a_pixel_brush_outlines_the_pixels_a_press_covers_and_follows_the_stroke ... ok
+test canvas::view::tests::two_fingers_zoom_turn_and_carry_the_point_between_them ... ok
+test canvas::tests::a_resized_area_keeps_the_document_point_at_its_centre ... ok
+test canvas::view::tests::fitting_a_turned_view_fits_the_turned_bounds_in_the_middle ... ok
+test canvas::tests::the_wobble_animation_setting_stops_and_blocks_playback ... ok
+test export::tests::an_enlargement_makes_each_pixel_a_block ... ok
+test export::tests::the_estimate_counts_what_the_encoders_keep_and_what_is_on_its_way ... ok
+test export::tests::the_sizes_offered_are_the_document_s_and_smaller_long_edges ... ok
+test canvas::view::tests::turned_and_mirrored_views_map_both_ways_as_the_display_does ... ok
+test canvas::view::tests::zooming_and_dragging_keep_the_point_under_the_pointer ... ok
+test canvas::tests::a_playback_frame_drawn_smaller_is_uploaded_whole_and_no_more ... ok
+test export::tests::a_cancelled_export_leaves_the_target_as_it_was ... ok
+test canvas::tests::pasted_strokes_keep_moving_inside_the_selection_on_any_canvas ... ok
+test files::recovering::a_write_queued_before_the_work_was_dropped_does_not_bring_it_back ... ok
+test canvas::tests::the_eyedropper_picks_what_is_shown_and_alt_picks_only_with_painting_tools ... ok
+test export::tests::a_cancelled_animation_leaves_the_target_as_it_was ... ok
+test canvas::tests::a_dragged_transform_shows_at_once_and_applying_keeps_it_while_cancelling_puts_back ... ok
+test export::tests::a_failed_export_says_why ... ok
+test files::tests::a_new_id_is_a_version_4_uuid_and_differs_each_time ... ok
+test files::recovering::work_still_changing_is_written_within_the_longest_wait ... ok
+test canvas::tests::playback_follows_a_canvas_change ... ok
+test files::recovering::a_pending_transform_is_written_in_and_stays_pending ... ok
+test files::tests::a_2_2_13_project_opens_as_a_new_document_or_says_why_not ... ok
+test files::recovering::work_left_by_a_crash_is_recovered_under_a_new_name ... ok
+test canvas::tests::placed_text_shows_as_applying_it_draws_and_cancelling_puts_back ... ok
+test files::recovering::unsaved_work_is_written_once_editing_pauses_and_removed_once_saved ... ok
+test i18n::tests::every_language_has_every_message_and_no_other ... ok
+test files::tests::a_failed_save_keeps_the_changes_unsaved_and_says_why ... ok
+test i18n::tests::the_first_preferred_language_with_a_catalogue_wins ... ok
+test input::tests::a_pen_takes_over_from_fingers_and_a_mouse_waits_for_them ... ok
+test i18n::tests::missing_messages_fall_back_to_english ... ok
+test input::tests::canvas_keeps_the_gesture_outside_its_area ... ok
+test input::tests::capture_loss_cancels_the_stroke ... ok
+test input::tests::fingers_never_draw_and_exactly_two_pinch ... ok
+test files::recovering::work_that_does_not_read_is_set_aside_and_said ... ok
+test input::tests::fingers_that_come_down_while_the_canvas_is_busy_do_nothing ... ok
+test files::tests::a_new_document_closes_without_asking_until_edited ... ok
+test input::tests::oldest_input_time_survives_until_taken ... ok
+test input::tests::press_on_the_ui_goes_to_egui ... ok
+test input::tests::space_with_shift_turns_and_with_ctrl_zooms_and_shift_turns_the_wheel ... ok
+test input::tests::the_last_pen_or_mouse_sample_says_whether_the_eraser_end_shows ... ok
+test input::tests::the_middle_button_pans_until_it_is_released ... ok
+test files::tests::a_pending_transform_is_applied_before_saving_and_asked_about_before_replacing ... ok
+test input::tests::the_wheel_zooms_over_the_canvas_and_scrolls_elsewhere ... ok
+test files::tests::opening_replaces_the_document_or_says_what_cannot_be_shown ... ok
+test layout::tests::a_broken_layout_is_the_default ... ok
+test files::tests::an_inserted_image_becomes_a_layer_ready_to_move_or_says_why_not ... ok
+test layout::tests::a_floating_panel_moved_again_keeps_its_size ... ok
+test files::tests::a_tool_preset_carries_the_tools_and_wobble_to_another_window ... ok
+test layout::tests::closed_panels_keep_their_place_and_open_in_front ... ok
+test layout::tests::a_layout_comes_back_from_the_settings_as_it_was ... ok
+test files::end_to_end::a_render_of_the_document_before_an_open_is_not_taken ... ok
+test layout::tests::panels_move_between_sides_tabs_and_floating ... ok
+test layout::tests::values_out_of_range_are_brought_into_it ... ok
+test files::tests::placed_text_is_applied_before_saving ... ok
+test recovery::tests::descriptions_read_back_and_odd_ones_are_refused ... ok
+test files::tests::an_exported_png_is_the_rendered_frame_without_reference_layers ... ok
+test logs::tests::a_full_log_keeps_one_old_part ... ok
+test files::tests::a_save_writes_the_document_as_it_was_when_it_started ... ok
+test settings::preset::tests::a_preset_is_read_back_as_written ... ok
+test settings::preset::tests::other_files_are_not_presets ... ok
+test settings::preset::tests::what_is_unknown_is_ignored_and_out_of_range_brought_in ... ok
+test logs::tests::records_are_told_about_once ... ok
+test settings::preset::tests::the_colour_history_is_not_in_a_preset ... ok
+test settings::tests::a_bad_value_falls_back_alone ... ok
+test canvas::tests::a_bucket_fill_shows_at_once_as_a_full_render_and_the_wand_reads_alike_without_a_split ... ok
+test logs::tests::only_the_newest_runs_are_kept_and_unseen_records_stay ... ok
+test settings::tests::a_missing_or_broken_file_gives_the_defaults ... ok
+test settings::tests::a_failed_write_leaves_the_old_file ... ok
+test settings::tests::defaults_leave_optional_keys_out ... ok
+test export::tests::a_frame_is_written_as_its_extension_says ... ok
+test settings::tests::unknown_keys_are_written_back ... ok
+test settings::tools::tests::the_history_keeps_order_drops_repeats_and_bad_names ... ok
+test settings::tests::a_missing_save_folder_falls_back_to_documents ... ok
+test recovery::tests::running_windows_keep_their_folders ... ok
+test canvas::tests::fitting_enlarges_only_small_documents_by_whole_times ... ok
+test settings::tools::tests::tools_are_read_back_as_written ... ok
+test settings::preset::tests::a_file_larger_than_a_preset_is_not_read ... ok
+test settings::tools::tests::out_of_range_values_are_brought_in_and_unknown_ones_left_alone ... ok
+test shortcuts::tests::a_key_another_action_answers_to_is_refused ... ok
+test settings::tools::tests::what_is_missing_stays_as_it_was ... ok
+test shortcuts::tests::an_action_s_key_wins_over_another_s_alias ... ok
+test shortcuts::tests::clipboard_chords_are_found_as_egui_winit_finds_them ... ok
+test shortcuts::tests::every_action_has_its_own_name_and_default_key ... ok
+test shortcuts::tests::a_key_given_twice_by_hand_stays_with_the_first_action ... ok
+test shortcuts::tests::alt_alone_goes_to_the_menus_and_anything_between_cancels_it ... ok
+test shortcuts::tests::keys_are_written_as_2_2_13_writes_them_and_read_back ... ok
+test shortcuts::tests::modifiers_must_match_exactly ... ok
+test shortcuts::tests::only_changed_keys_are_kept_and_read_back ... ok
+test shortcuts::tests::unreadable_keys_fall_back_alone_and_unknown_actions_stay ... ok
+test theme::tests::the_default_accent_gives_2_2_13s_colours ... ok
+test recovery::tests::forgetting_removes_the_generations_and_keeps_the_lock ... ok
+test settings::tests::closing_writes_at_once ... ok
+test shortcuts::tests::space_and_tab_cannot_be_given ... ok
+test ui::actions::tests::the_menus_hold_every_action_but_escape_once ... ok
+test ui::color::tests::a_colour_changed_elsewhere_makes_the_last_one_previous ... ok
+test ui::color::tests::hsv_round_trips_through_rgb ... ok
+test ui::color::tests::a_typed_colour_reads_as_2_2_13_names_it ... ok
+test settings::tests::settings_written_are_read_back ... ok
+test ui::help::tests::every_heading_and_paragraph_has_a_text ... ok
+test files::end_to_end::playback_shows_every_frame_in_order_as_soon_as_it_is_ready ... ok
+test ui::brushes::tests::every_preview_is_a_valid_document_that_shows_its_preset ... ok
+test ui::actions::tests::the_key_of_an_action_that_cannot_run_is_left ... ok
+test ui::dock::tests::a_tab_dragged_out_of_its_group_leaves_the_rest ... ok
+test recovery::tests::the_newest_generation_that_reads_is_used ... ok
+test ui::dock::tests::the_handle_menu_moves_from_the_keyboard_and_folding_hides_an_area ... ok
+test ui::actions::tests::a_text_field_keeps_the_keys ... ok
+test ui::resize::tests::extreme_aspect_ratios_cannot_be_kept ... ok
+test files::tests::exports_run_one_at_a_time_and_a_cancelled_one_is_answered_at_once ... ok
+test ui::resize::tests::canvas_sizes_and_offsets_stay_within_the_limits ... ok
+test ui::resize::tests::the_reference_point_and_typed_offsets_follow_each_other ... ok
+test ui::resize::tests::the_image_size_keeps_the_aspect_ratio_unless_told_not_to ... ok
+test ui::dock::tests::dragging_handles_tabs_floats_and_docks_panels ... ok
+test update::tests::a_check_asked_for_during_an_automatic_one_shows_its_result ... ok
+test update::tests::a_check_is_due_after_six_hours_or_a_clock_set_back ... ok
+test ui::settings::tests::a_waiting_shortcut_takes_the_first_key ... ok
+test update::tests::turning_the_automatic_check_off_cancels_the_one_due ... ok
+test update::tests::only_a_finished_check_waits_out_the_interval ... ok
+test update::tests::outside_an_installation_the_check_says_so_only_when_asked ... ok
+test ui::keyboard::unsaved_changes_are_answered_from_the_keyboard ... ok
+test ui::keyboard::a_dialog_from_a_menu_closes_on_escape_and_gives_the_focus_back ... ok
+test files::end_to_end::strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas ... ok
+test ui::keyboard::a_new_document_s_size_is_chosen_from_the_keyboard ... ok
+test canvas::tests::a_canvas_change_during_a_shown_transform_applies_it_and_shows_the_new_canvas ... ok
+test export::tests::enlarged_eight_times_each_pixel_is_an_eight_by_eight_block ... ok
+test ui::keyboard::the_menus_open_from_the_keyboard ... ok
+test files::end_to_end::draw_move_save_reopen_and_export ... ok
+test canvas::tests::drawing_or_filling_stops_playback_on_the_frame_shown ... ok
+test export::tests::an_animation_is_every_frame_at_the_size_chosen ... ok
+test ui::keyboard::a_list_chosen_from_the_keyboard_closes_and_keeps_the_focus ... ok
+test ui::keyboard::enter_chooses_a_layer_row ... ok
+test logs::tests::a_panic_leaves_a_record ... ok
+test ui::keyboard::arrows_widen_a_dock_area_from_its_edge ... ok
+test ui::keyboard::tab_goes_round_every_control_and_each_has_a_name ... ok
+test ui::keyboard::a_colour_can_be_typed ... ok
+test settings::tests::changes_are_written_together_after_a_quiet_spell_off_this_thread ... ok
+
+test result: ok. 149 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.10s
+
+   Doc-tests ugu_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ugu_io
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ugu_render
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ugu_session
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ugu_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ugu_win
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

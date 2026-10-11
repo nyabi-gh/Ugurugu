@@ -1,0 +1,194 @@
+warn: could not canonicalize path C:\Users\Nyabi\Documents\Code\Ugurugu
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.81s
+     Running unittests src\main.rs (target\release\deps\latency_probe-52fd14ea5bd7e1db.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\release\deps\render_bench-5fe923ddf4c3351b.exe)
+
+running 3 tests
+test scene::tests::frame_zero_is_unmoved_and_later_frames_move ... ok
+test scene::tests::circles_and_quads_wind_the_same_way ... ok
+test scene::tests::the_document_has_the_requested_size ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_core-fc025edf89bab7ea.exe)
+
+running 98 tests
+test command::tests::a_drawn_stroke_undoes_to_the_same_document ... ok
+test command::tests::cropping_reaches_paint_layers_inside_groups ... ok
+test command::tests::a_group_made_around_a_layer_takes_its_place_and_ungroups_back ... ok
+test clip::tests::a_pasted_copy_keeps_its_strokes_moving_and_clears_outside_the_selection ... ok
+test clip::tests::a_copy_pastes_into_another_document_with_its_data_and_canvas ... ok
+test command::tests::a_layer_with_a_clipped_layer_on_it_is_not_merged_down ... ok
+test document::tests::document_settings_must_be_within_limits ... ok
+test command::tests::an_edit_that_changes_nothing_is_not_committed ... ok
+test document::tests::operations_must_refer_to_stored_data ... ok
+test history::tests::a_failing_group_undoes_its_earlier_steps ... ok
+test document::tests::a_new_document_is_valid ... ok
+test brush::tests::every_preset_is_in_range_and_named_once ... ok
+test command::tests::layers_move_to_the_top_of_a_group_and_out_above_their_top_ancestor ... ok
+test history::tests::a_group_changes_the_selection_with_the_document_in_one_step ... ok
+test clip::tests::an_image_is_placed_whole_in_the_middle ... ok
+test document::tests::layer_count_and_names_are_limited ... ok
+test document::tests::layer_ids_are_unique_across_the_tree ... ok
+test history::tests::a_new_edit_clears_redo ... ok
+test history::tests::commit_cost_at_the_limit ... ignored, timing, not a check
+test document::tests::paint_layers_must_end_on_the_document_canvas ... ok
+test history::tests::a_stroke_step_leaves_the_selection_alone_and_a_new_selection_drops_redo ... ok
+test command::tests::a_failing_edit_leaves_the_document_as_it_was ... ok
+test command::tests::data_still_in_use_cannot_be_removed ... ok
+test history::tests::a_group_is_one_undo_step ... ok
+test history::tests::a_save_snapshot_keeps_later_edits_dirty ... ok
+test document::tests::sections_are_limited_in_depth_and_keep_the_canvas ... ok
+test history::tests::each_selection_change_is_an_undo_step_that_leaves_the_document_clean ... ok
+test command::tests::moving_a_layer_too_deep_is_refused ... ok
+test history::tests::layer_revisions_follow_what_each_layers_pixels_are_made_from ... ok
+test history::tests::an_edit_that_changes_nothing_leaves_no_undo_step ... ok
+test document::tests::groups_nest_at_most_nine_deep ... ok
+test command::tests::merging_down_commits_and_undoes ... ok
+test history::tests::returning_to_the_saved_state_is_clean ... ok
+test history::tests::the_revision_only_goes_up ... ok
+test document::tests::operations_are_counted_inside_sections ... ok
+test history::tests::undo_and_redo_walk_the_states ... ok
+test motion::tests::classic_displacement_matches_the_cpp_values ... ok
+test motion::tests::classic_width_matches_the_cpp_values ... ok
+test motion::tests::frames_wrap_around_the_cycle ... ok
+test motion::tests::a_displacer_moves_samples_as_one_at_a_time ... ok
+test motion::tests::poses_are_at_most_the_frames ... ok
+test motion::tests::posed_width_matches_the_cpp_values ... ok
+test motion::tests::signed_noise_matches_the_cpp_values ... ok
+test motion::tests::smooth_joins_the_last_pose_to_the_first_and_stepped_holds ... ok
+test motion::tests::posed_displacement_matches_the_cpp_values ... ok
+test motion::tests::smooth_and_stepped_poses_match_the_cpp_values ... ok
+test restyle::tests::a_clip_and_a_fill_coverage_limit_what_is_touched ... ok
+test motion::tests::visible_segments_match_the_cpp_values ... ok
+test motion::tests::smooth_noise_matches_the_cpp_values ... ok
+test restyle::tests::a_stroke_another_layer_draws_stays_stored ... ok
+test motion::tests::visibility_poses_match_the_cpp_values ... ok
+test restyle::tests::a_dot_and_a_steep_line_are_found ... ok
+test history::tests::steps_holding_large_selections_are_dropped_past_the_byte_limit ... ok
+test restyle::tests::a_stroke_touches_where_its_width_reaches ... ok
+test restyle::tests::a_width_out_of_range_is_refused ... ok
+test restyle::tests::strokes_before_a_crop_or_resample_are_found_where_they_ended_up ... ok
+test restyle::tests::restyling_renames_changed_strokes_and_undoes_in_one_commit ... ok
+test restyle::tests::strokes_in_a_merged_section_are_found_and_changed ... ok
+test selection::tests::a_colour_flood_compares_every_straight_channel_with_the_tolerance ... ok
+test selection::tests::a_flood_fills_the_area_its_seed_is_in_up_to_the_lines ... ok
+test selection::tests::a_freehand_loop_fills_even_odd_and_closes_itself ... ok
+test selection::tests::a_rectangle_takes_the_pixels_whose_centres_are_inside ... ok
+test selection::tests::affine_helpers_compose_invert_and_turn_about_a_centre ... ok
+test selection::tests::all_and_invert_follow_the_canvas ... ok
+test selection::tests::an_ellipse_fits_the_rectangle ... ok
+test selection::tests::contours_fill_by_the_non_zero_rule ... ok
+test selection::tests::a_transformed_selection_holds_every_pixel_the_moved_squares_reach ... ok
+test selection::tests::crops_and_resamples_move_the_selection_with_the_content ... ok
+test selection::tests::the_outline_follows_pixel_edges_with_the_selection_on_the_right ... ok
+test selection::tests::shapes_add_and_subtract ... ok
+test selection::tests::unpremultiplying_rounds_as_qt_does ... ok
+test semantics::a_clipped_layer_shows_only_where_its_base_is ... ok
+test semantics::a_crop_moves_the_canvas_and_a_resample_scales_what_came_before ... ok
+test selection::tests::crops_and_resamples_match_moving_each_pixel ... ok
+test semantics::a_fill_keeps_its_coverage_while_lines_move ... ok
+test semantics::a_fill_replaces_what_it_covers_and_goes_behind_its_edge ... ok
+test selection::tests::the_outline_takes_every_boundary_edge_once_in_closed_loops ... ok
+test semantics::a_group_is_drawn_on_its_own_surface ... ok
+test semantics::a_hidden_or_empty_base_hides_what_is_clipped_to_it ... ok
+test semantics::a_selection_transform_moves_each_frames_own_result ... ok
+test semantics::an_eraser_added_after_a_merge_reaches_both_layers ... ok
+test semantics::an_eraser_reaches_only_what_came_before_it ... ok
+test semantics::an_image_goes_over_what_came_before_and_under_what_follows ... ok
+test semantics::blend_modes_follow_the_w3c_formulas ... ok
+test semantics::clipped_layers_in_a_row_share_one_base ... ok
+test semantics::merging_keeps_every_frame_and_each_eraser_in_its_own_layer ... ok
+test semantics::merging_refuses_what_it_cannot_keep ... ok
+test store::tests::assets_are_limited_in_pixels ... ok
+test store::tests::copying_a_store_shares_its_arrays ... ok
+test store::tests::mask_bits_follow_the_bounds ... ok
+test store::tests::points_must_be_finite_and_in_range ... ok
+test text::tests::degenerate_contours_are_left_out ... ok
+test text::tests::each_contour_is_a_closed_stroke_running_on_past_its_start ... ok
+test text::tests::the_fill_covers_the_letters_but_not_their_holes ... ok
+test history::tests::only_the_newest_steps_are_kept ... ok
+test store::tests::points_are_limited_per_stroke_and_in_total ... ok
+test motion::tests::no_point_moves_beyond_the_maximum ... ok
+test motion::tests::no_posed_point_moves_beyond_the_maximum ... ok
+
+test result: ok. 97 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src\main.rs (target\release\deps\ugu_doc-219286897a1c8ab1.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\release\deps\ugu_io-dda51a5e5316fc8d.exe)
+
+running 48 tests
+test image::tests::straight_alpha_round_trips_within_a_level ... ok
+test legacy::tests::colours_are_read_as_2_2_13_writes_them ... ok
+test image::tests::the_format_follows_the_extension ... ok
+test image::tests::the_png_decodes_to_the_same_image ... ok
+test animation::tests::delays_add_up_to_whole_frames ... ok
+test import::tests::what_is_not_an_image_or_too_large_is_refused ... ok
+test image::tests::the_jpeg_decodes_close_to_the_image_over_white ... ok
+test import::tests::an_exif_orientation_turns_the_image_upright ... ok
+test image::tests::transparency_goes_over_white ... ok
+test import::tests::a_larger_image_shrinks_to_fit_keeping_its_shape ... ok
+test legacy::tests::every_motion_style_and_layer_wobble_comes_across ... ok
+test legacy::tests::groups_open_as_deep_as_2_2_13_makes_them ... ok
+test legacy::tests::fills_and_clipped_strokes_keep_their_masks ... ok
+test legacy::tests::base64_is_decoded_strictly ... ok
+test image::tests::shrinking_averages_the_area_each_pixel_covers ... ok
+test tests::stroke_points_have_an_explicit_little_endian_layout ... ok
+test tests::entries_come_in_a_fixed_order_with_only_used_data ... ok
+test tests::files_of_earlier_versions_are_recognised ... ok
+test save::tests::a_full_disk_keeps_the_old_file_and_no_temporary ... ok
+test tests::the_same_document_writes_the_same_bytes ... ok
+test gif::tests::up_to_256_colours_are_kept_exactly ... ok
+test webp::tests::refuses_bad_timings_and_sizes ... ok
+test save::tests::temporaries_of_other_processes_are_found_by_their_name ... ok
+test tests::a_written_document_reads_back_the_same ... ok
+test legacy::tests::what_3_0_cannot_show_alike_is_refused ... ok
+test webp::tests::short_animations_are_one_run ... ok
+test import::tests::each_format_decodes_to_the_same_pixels ... ok
+test legacy::tests::merged_layers_become_sections_and_edits_keep_their_order ... ok
+test tests::files_that_are_not_documents_are_refused ... ok
+test save::tests::a_saved_document_reads_back ... FAILED
+test tests::an_entry_that_inflates_past_its_limit_is_refused ... ok
+test save::tests::a_failed_replace_keeps_the_old_file_and_no_temporary ... ok
+test tests::unexpected_json_is_refused ... ok
+test tests::broken_binary_entries_are_refused ... ok
+test gif::tests::the_file_decodes_to_the_frames_within_the_palette ... ok
+test tests::files_from_a_newer_version_are_refused_as_newer ... ok
+test gif::tests::cancelling_stops_between_frames ... ok
+test tests::missing_extra_and_unknown_entries_are_refused ... ok
+test image::tests::shrinking_in_bands_is_shrinking_the_whole ... ok
+test legacy::tests::other_versions_and_damage_are_told_apart ... ok
+test webp::tests::loops_endlessly ... ok
+test tests::damaged_files_are_refused_or_valid ... ok
+test webp::tests::image_reads_the_frames_and_delays ... ok
+test webp::tests::stops_inside_a_frame_once_cancelled ... ok
+test gif::tests::the_file_is_2_2_13_s_byte_for_byte ... ok
+test webp::tests::the_file_is_2_2_13_s_byte_for_byte ... ok
+test webp::tests::decodes_to_the_frames_and_delays ... ok
+test webp::tests::runs_join_into_the_same_frames ... ok
+
+failures:
+
+---- save::tests::a_saved_document_reads_back stdout ----
+
+thread 'save::tests::a_saved_document_reads_back' (54492) panicked at crates\ugu-io\src\save.rs:234:52:
+called `Result::unwrap()` on an `Err` value: Replace(Os { code: 5, kind: PermissionDenied, message: "액세스가 거부되었습니다." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    save::tests::a_saved_document_reads_back
+
+test result: FAILED. 47 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+ZipWriter::drop: failed to finalize archive: Io(Kind(StorageFull))error: test failed, to rerun pass `-p ugu-io --lib`

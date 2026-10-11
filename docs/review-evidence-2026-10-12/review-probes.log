@@ -1,0 +1,94 @@
+   Compiling ugu-session v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\crates\ugu-session)
+   Compiling ugurugu v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\apps\ugurugu)
+    Finished `release` profile [optimized + debuginfo] target(s) in 12.47s
+     Running unittests src\lib.rs (target\release\deps\ugu_session-ce5dec60045ac435.exe)
+
+running 1 test
+test review_audit::rejected_transform_is_dropped_when_changing_tools ... R05 apply=Err(Document(TooManyOperations(20001))) pending=false dirty=false
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\release\deps\ugurugu-7d15d7d98d63d34b.exe)
+
+running 7 tests
+test files::review_audit::first_of_two_save_replies_unblocks_document_replacement ... R04 new_canvas=[5, 5] old_path_attached=true dirty=true
+ok
+test files::review_audit::open_completion_silently_replaces_new_edits ... R02 canvas=[9, 9] layers=1 dirty=false confirm=None
+ok
+test files::review_audit::recovered_original_is_deleted_even_if_handoff_write_fails ... R03 source_exists=false destination_document_exists=false dirty=true
+ok
+test files::review_audit::save_then_close_drops_edits_made_while_saving ... R01 disk_layers=2 live_layers=3 dirty=true close=true
+ok
+test settings::review_audit::another_window_overwrites_an_unrelated_setting ... R12 check_updates=true pixel_grid=false
+ok
+test ui::window::review_audit::default_layout_at_common_logical_window_sizes ... UI 1600x900 canvas=[308, 71, 1300, 821] canvas_width=992 canvas_height=750
+UI 1280x720 canvas=[308, 71, 980, 641] canvas_width=672 canvas_height=570
+UI outside role=Label label=None value=Some("100%") bounds=Rect { x0: 1241.0, y0: 768.0, x1: 1272.0, y1: 782.0 }
+UI outside role=TextInput label=None value=Some("#FF000000") bounds=Rect { x0: 130.0, y0: 773.5, x1: 214.0, y1: 791.8125 }
+UI outside role=Slider label=Some("불투명도") value=None bounds=Rect { x0: 1033.03125, y0: 766.0, x1: 1235.0, y1: 784.0 }
+UI outside role=Button label=Some("색상 기록 패널 이동 손잡이") value=None bounds=Rect { x0: 56.0, y0: 834.5, x1: 72.0, y1: 852.5 }
+UI outside role=Button label=Some("현재 색상 #FF000000, 이전 색상 #FFFFFFFF") value=None bounds=Rect { x0: 80.0, y0: 776.5, x1: 120.0, y1: 810.5 }
+UI outside role=Label label=None value=Some("현재 색상") bounds=Rect { x0: 130.0, y0: 754.5, x1: 170.71875, y1: 767.5 }
+UI outside role=CheckBox label=Some("참조 레이어") value=None bounds=Rect { x0: 989.0, y0: 736.0, x1: 1065.78125, y1: 756.0 }
+UI outside role=TextRun label=None value=Some("#FF000000") bounds=Rect { x0: 134.0, y0: 775.5, x1: 199.125, y1: 789.5 }
+UI outside role=Button label=Some("패널 닫기") value=None bounds=Rect { x0: 279.0625, y0: 833.5, x1: 299.0625, y1: 853.5 }
+UI outside role=Button label=Some("기록 지우기") value=None bounds=Rect { x0: 232.84375, y0: 862.5, x1: 299.0625, y1: 888.5 }
+UI outside role=Label label=None value=Some("불투명도") bounds=Rect { x0: 989.0, y0: 768.5, x1: 1027.03125, y1: 781.5 }
+UI outside role=Label label=None value=Some("색상 기록") bounds=Rect { x0: 78.0, y0: 837.0, x1: 118.71875, y1: 850.0 }
+UI 960x540 canvas=[308, 71, 660, 461] canvas_width=352 canvas_height=390
+UI outside role=CheckBox label=Some("아래 레이어에 클리핑") value=None bounds=Rect { x0: 669.0, y0: 710.0, x1: 790.1875, y1: 730.0 }
+UI outside role=Button label=Some("레이어 추가") value=None bounds=Rect { x0: 673.0, y0: 611.0, x1: 697.0, y1: 635.0 }
+UI outside role=Button label=Some("레이어 아래로 이동") value=None bounds=Rect { x0: 853.0, y0: 611.0, x1: 877.0, y1: 635.0 }
+UI outside role=Button label=Some("아래 레이어와 병합") value=None bounds=Rect { x0: 775.0, y0: 611.0, x1: 799.0, y1: 635.0 }
+UI outside role=Label label=None value=Some("100%") bounds=Rect { x0: 921.0, y0: 768.0, x1: 952.0, y1: 782.0 }
+UI outside role=ComboBox label=Some("레이어 합성 모드") value=Some("일반") bounds=Rect { x0: 717.71875, y0: 646.0, x1: 952.0, y1: 672.0 }
+UI outside role=TextInput label=None value=Some("#FF000000") bounds=Rect { x0: 130.0, y0: 773.5, x1: 214.0, y1: 791.8125 }
+UI outside role=Label label=None value=Some("합성 모드") bounds=Rect { x0: 669.0, y0: 652.5, x1: 709.71875, y1: 665.5 }
+UI outside role=Slider label=Some("불투명도") value=None bounds=Rect { x0: 713.03125, y0: 766.0, x1: 915.0, y1: 784.0 }
+UI outside role=ComboBox label=Some("상위 레이어 그룹") value=Some("그룹 없음") bounds=Rect { x0: 717.71875, y0: 678.0, x1: 952.0, y1: 704.0 }
+UI outside role=Button label=Some("색상 기록 패널 이동 손잡이") value=None bounds=Rect { x0: 56.0, y0: 834.5, x1: 72.0, y1: 852.5 }
+UI outside role=Label label=None value=Some("그룹") bounds=Rect { x0: 669.0, y0: 684.5, x1: 688.0, y1: 697.5 }
+UI outside role=Button label=Some("현재 색상 #FF000000, 이전 색상 #FFFFFFFF") value=None bounds=Rect { x0: 80.0, y0: 776.5, x1: 120.0, y1: 810.5 }
+UI outside role=Label label=None value=Some("현재 색상") bounds=Rect { x0: 130.0, y0: 754.5, x1: 170.71875, y1: 767.5 }
+UI outside role=CheckBox label=Some("참조 레이어") value=None bounds=Rect { x0: 669.0, y0: 736.0, x1: 745.78125, y1: 756.0 }
+UI outside role=Button label=Some("선택한 레이어를 포함하는 그룹 추가") value=None bounds=Rect { x0: 699.0, y0: 611.0, x1: 735.0, y1: 635.0 }
+UI outside role=TextRun label=None value=Some("#FF000000") bounds=Rect { x0: 134.0, y0: 775.5, x1: 199.125, y1: 789.5 }
+UI outside role=Button label=Some("패널 닫기") value=None bounds=Rect { x0: 279.0625, y0: 833.5, x1: 299.0625, y1: 853.5 }
+UI outside role=Button label=Some("레이어 위로 이동") value=None bounds=Rect { x0: 827.0, y0: 611.0, x1: 851.0, y1: 635.0 }
+UI outside role=Button label=Some("기록 지우기") value=None bounds=Rect { x0: 232.84375, y0: 862.5, x1: 299.0625, y1: 888.5 }
+UI outside role=Label label=None value=Some("불투명도") bounds=Rect { x0: 669.0, y0: 768.5, x1: 707.03125, y1: 781.5 }
+UI outside role=Button label=Some("선택한 그룹 해제") value=None bounds=Rect { x0: 737.0, y0: 611.0, x1: 773.0, y1: 635.0 }
+UI outside role=Label label=None value=Some("색상 기록") bounds=Rect { x0: 78.0, y0: 837.0, x1: 118.71875, y1: 850.0 }
+UI outside role=Button label=Some("레이어 삭제") value=None bounds=Rect { x0: 801.0, y0: 611.0, x1: 825.0, y1: 635.0 }
+UI 800x600 canvas=[308, 71, 500, 521] canvas_width=192 canvas_height=450
+UI outside role=CheckBox label=Some("아래 레이어에 클리핑") value=None bounds=Rect { x0: 509.0, y0: 710.0, x1: 630.1875, y1: 730.0 }
+UI outside role=Button label=Some("레이어 추가") value=None bounds=Rect { x0: 513.0, y0: 611.0, x1: 537.0, y1: 635.0 }
+UI outside role=Button label=Some("레이어 아래로 이동") value=None bounds=Rect { x0: 693.0, y0: 611.0, x1: 717.0, y1: 635.0 }
+UI outside role=Button label=Some("아래 레이어와 병합") value=None bounds=Rect { x0: 615.0, y0: 611.0, x1: 639.0, y1: 635.0 }
+UI outside role=Label label=None value=Some("100%") bounds=Rect { x0: 761.0, y0: 768.0, x1: 792.0, y1: 782.0 }
+UI outside role=ComboBox label=Some("레이어 합성 모드") value=Some("일반") bounds=Rect { x0: 557.71875, y0: 646.0, x1: 792.0, y1: 672.0 }
+UI outside role=TextInput label=None value=Some("#FF000000") bounds=Rect { x0: 130.0, y0: 773.5, x1: 214.0, y1: 791.8125 }
+UI outside role=Label label=None value=Some("합성 모드") bounds=Rect { x0: 509.0, y0: 652.5, x1: 549.71875, y1: 665.5 }
+UI outside role=Slider label=Some("불투명도") value=None bounds=Rect { x0: 553.03125, y0: 766.0, x1: 755.0, y1: 784.0 }
+UI outside role=ComboBox label=Some("상위 레이어 그룹") value=Some("그룹 없음") bounds=Rect { x0: 557.71875, y0: 678.0, x1: 792.0, y1: 704.0 }
+UI outside role=Button label=Some("색상 기록 패널 이동 손잡이") value=None bounds=Rect { x0: 56.0, y0: 834.5, x1: 72.0, y1: 852.5 }
+UI outside role=Label label=None value=Some("그룹") bounds=Rect { x0: 509.0, y0: 684.5, x1: 528.0, y1: 697.5 }
+UI outside role=Button label=Some("현재 색상 #FF000000, 이전 색상 #FFFFFFFF") value=None bounds=Rect { x0: 80.0, y0: 776.5, x1: 120.0, y1: 810.5 }
+UI outside role=Label label=None value=Some("현재 색상") bounds=Rect { x0: 130.0, y0: 754.5, x1: 170.71875, y1: 767.5 }
+UI outside role=CheckBox label=Some("참조 레이어") value=None bounds=Rect { x0: 509.0, y0: 736.0, x1: 585.78125, y1: 756.0 }
+UI outside role=Button label=Some("선택한 레이어를 포함하는 그룹 추가") value=None bounds=Rect { x0: 539.0, y0: 611.0, x1: 575.0, y1: 635.0 }
+UI outside role=TextRun label=None value=Some("#FF000000") bounds=Rect { x0: 134.0, y0: 775.5, x1: 199.125, y1: 789.5 }
+UI outside role=Button label=Some("패널 닫기") value=None bounds=Rect { x0: 279.0625, y0: 833.5, x1: 299.0625, y1: 853.5 }
+UI outside role=Button label=Some("레이어 위로 이동") value=None bounds=Rect { x0: 667.0, y0: 611.0, x1: 691.0, y1: 635.0 }
+UI outside role=Button label=Some("기록 지우기") value=None bounds=Rect { x0: 232.84375, y0: 862.5, x1: 299.0625, y1: 888.5 }
+UI outside role=Label label=None value=Some("불투명도") bounds=Rect { x0: 509.0, y0: 768.5, x1: 547.03125, y1: 781.5 }
+UI outside role=Button label=Some("선택한 그룹 해제") value=None bounds=Rect { x0: 577.0, y0: 611.0, x1: 613.0, y1: 635.0 }
+UI outside role=Label label=None value=Some("색상 기록") bounds=Rect { x0: 78.0, y0: 837.0, x1: 118.71875, y1: 850.0 }
+UI outside role=Button label=Some("레이어 삭제") value=None bounds=Rect { x0: 641.0, y0: 611.0, x1: 665.0, y1: 635.0 }
+ok
+test update::review_audit::downloaded_update_has_no_retry_after_install_was_deferred ... R06 ready=true checking=false offer=false notice=false busy=false
+ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.09s
+
