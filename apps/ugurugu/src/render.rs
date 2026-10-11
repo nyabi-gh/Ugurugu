@@ -151,6 +151,8 @@ pub struct RenderThread {
     clipboard_chords: Vec<Chord>,
     alt_tap: shortcuts::AltTap,
     title: String,
+    /// The pointer shape last set on the window.
+    cursor: Option<egui::CursorIcon>,
     present_latency: LatencyLog,
     display_latency: LatencyLog,
     needs_frame: bool,
@@ -347,6 +349,7 @@ impl RenderThread {
             },
             settings,
             title: String::new(),
+            cursor: None,
             ime: ImeProbe::default(),
             panels: Panels::default(),
             present_latency: LatencyLog::default(),
@@ -751,6 +754,20 @@ impl RenderThread {
         if let Some(ime) = platform_output.ime.as_mut() {
             ime.rect = ime.cursor_rect;
         }
+        // egui-winit sets the pointer shape only while winit has seen the
+        // pointer in the window, and pointer messages never reach winit
+        // (`ugu_win::pointer`), so it never did: the brush ring left the
+        // arrow showing ahead of the stroke, and no other shape showed.
+        if self.cursor != Some(platform_output.cursor_icon) {
+            self.cursor = Some(platform_output.cursor_icon);
+            match winit_cursor(platform_output.cursor_icon) {
+                Some(icon) => {
+                    self.window.set_cursor(icon);
+                    self.window.set_cursor_visible(true);
+                }
+                None => self.window.set_cursor_visible(false),
+            }
+        }
         self.egui_state
             .handle_platform_output(&self.window, platform_output);
         if remove_device {
@@ -978,4 +995,47 @@ fn draw(
     commands.push(encoder.finish());
     queue.submit(commands);
     Some(frame)
+}
+
+/// egui-winit's own mapping (`translate_cursor`, not public).
+fn winit_cursor(icon: egui::CursorIcon) -> Option<winit::window::CursorIcon> {
+    use egui::CursorIcon as E;
+    use winit::window::CursorIcon as W;
+    Some(match icon {
+        E::None => return None,
+        E::Default => W::Default,
+        E::ContextMenu => W::ContextMenu,
+        E::Help => W::Help,
+        E::PointingHand => W::Pointer,
+        E::Progress => W::Progress,
+        E::Wait => W::Wait,
+        E::Cell => W::Cell,
+        E::Crosshair => W::Crosshair,
+        E::Text => W::Text,
+        E::VerticalText => W::VerticalText,
+        E::Alias => W::Alias,
+        E::Copy => W::Copy,
+        E::Move => W::Move,
+        E::NoDrop => W::NoDrop,
+        E::NotAllowed => W::NotAllowed,
+        E::Grab => W::Grab,
+        E::Grabbing => W::Grabbing,
+        E::AllScroll => W::AllScroll,
+        E::ResizeHorizontal => W::EwResize,
+        E::ResizeNeSw => W::NeswResize,
+        E::ResizeNwSe => W::NwseResize,
+        E::ResizeVertical => W::NsResize,
+        E::ResizeEast => W::EResize,
+        E::ResizeSouthEast => W::SeResize,
+        E::ResizeSouth => W::SResize,
+        E::ResizeSouthWest => W::SwResize,
+        E::ResizeWest => W::WResize,
+        E::ResizeNorthWest => W::NwResize,
+        E::ResizeNorth => W::NResize,
+        E::ResizeNorthEast => W::NeResize,
+        E::ResizeColumn => W::ColResize,
+        E::ResizeRow => W::RowResize,
+        E::ZoomIn => W::ZoomIn,
+        E::ZoomOut => W::ZoomOut,
+    })
 }
