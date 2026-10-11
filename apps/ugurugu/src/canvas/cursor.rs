@@ -105,7 +105,7 @@ mod tests {
             Some(BrushCursor::Circle { eraser: true, .. })
         ));
         canvas.set_hover_eraser(false);
-        canvas.edit(|session| session.set_tool(Tool::Fill));
+        canvas.edit(|session| session.set_tool(Tool::Fill)).unwrap();
         assert!(canvas.brush_cursor([100.0, 80.0]).is_none());
     }
 

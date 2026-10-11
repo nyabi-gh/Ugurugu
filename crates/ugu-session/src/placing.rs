@@ -81,7 +81,7 @@ impl Session {
             return Ok(());
         }
         self.paintable()?;
-        self.settle();
+        self.settle()?;
         self.live = None;
         self.lasso = None;
         self.strokes_started += 1;
@@ -133,20 +133,22 @@ impl Session {
     }
 
     /// Puts the placed text in the document as one step. Text that draws
-    /// nothing changes nothing.
+    /// nothing changes nothing; text the document cannot take stays placed.
     pub fn apply_text(&mut self) -> Result<Outcome, EditError> {
         let Some(drawing) = self.text_drawing() else {
             return Ok(Outcome::NoChange);
         };
-        self.placed = None;
-        self.ended = Some(Ended::Dropped);
         if drawing.strokes.is_empty() && drawing.fill.is_none() {
+            self.placed = None;
+            self.ended = Some(Ended::Dropped);
             return Ok(Outcome::NoChange);
         }
         let color = self.pen.color;
         let outcome = self
             .history
             .group("Add text", |group| text_into(group, drawing, color))?;
+        self.placed = None;
+        self.ended = Some(Ended::Dropped);
         if let Outcome::Committed(_) = outcome {
             self.ended = Some(Ended::Applied {
                 revision: self.history.revision(),

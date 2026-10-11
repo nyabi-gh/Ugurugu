@@ -633,7 +633,7 @@ impl LayerDock {
         let toggles_hit = eye_response.hovered() || ui.ctx().is_being_dragged(eye_response.id);
         if response.clicked() && !toggles_hit {
             let id = row.id;
-            canvas.edit(|session| session.select_layer(id));
+            canvas.edit_settled(|session| session.select_layer(id));
             // egui focuses only text fields on click; F2 and Space need the row.
             response.request_focus();
         }

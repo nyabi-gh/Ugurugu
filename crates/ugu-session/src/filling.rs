@@ -113,13 +113,13 @@ impl Session {
         self.lasso = None;
         let Some(seed) = self.pixel(position) else {
             // Off the canvas, as a click with the selection tool.
-            return Ok(combine == Combine::Replace && self.history_mut().select("Deselect", None));
+            return Ok(combine == Combine::Replace && self.history_mut()?.select("Deselect", None));
         };
         let area = match self.area(seed, reference) {
             Ok(area) => area,
             Err(error) => {
                 if combine == Combine::Replace {
-                    self.history_mut().select("Deselect", None);
+                    self.history_mut()?.select("Deselect", None);
                 }
                 return Err(error);
             }
@@ -130,7 +130,7 @@ impl Session {
             Combine::Subtract => "Subtract from selection",
         };
         let next = Selection::combine(self.selection().map(Arc::as_ref), Some(area), combine);
-        Ok(self.history_mut().select(label, next))
+        Ok(self.history_mut()?.select(label, next))
     }
 
     /// Fills the area clicked at `position` on the current layer with the
@@ -180,6 +180,7 @@ impl Session {
         self.can_paint().map_err(|refused| match refused {
             crate::StrokeRefused::NoLayer => FillError::NoLayer,
             crate::StrokeRefused::HiddenLayer => FillError::HiddenLayer,
+            crate::StrokeRefused::Pending => FillError::Pending,
         })
     }
 
@@ -189,7 +190,7 @@ impl Session {
         clip: Option<Arc<Selection>>,
     ) -> Result<Outcome, FillError> {
         let (layer, color, antialias) = (self.layer, self.pen.color, self.fill.antialias);
-        let outcome = self.history_mut().group("Fill", |group| {
+        let outcome = self.history_mut()?.group("Fill", |group| {
             let coverage = selecting::stored_mask(group, coverage)?;
             let clip = match &clip {
                 Some(selection) => Some(selecting::stored_mask(group, selection)?),

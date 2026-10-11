@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use ugu_core::edit::EditError;
 use ugu_core::ops::{Rgba8, Sampling};
 
 use crate::{FillSettings, Session, ShapeKind, TextSettings, Tool, ToolSettings};
@@ -101,8 +102,8 @@ impl Session {
 
     /// Takes `tools` over, as from the document before or the settings. A
     /// pending transform or placed text is applied first, as a tool change.
-    pub fn set_tools(&mut self, tools: Tools) {
-        self.settle();
+    pub fn set_tools(&mut self, tools: Tools) -> Result<(), EditError> {
+        self.settle()?;
         let Tools {
             tool,
             pen,
@@ -125,5 +126,6 @@ impl Session {
         self.transform_sampling = transform_sampling;
         self.text = text;
         self.colors = colors;
+        Ok(())
     }
 }

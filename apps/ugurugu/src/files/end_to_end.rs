@@ -103,12 +103,14 @@ fn draw_move_save_reopen_and_export() {
 
     // Draw, erase across it, then draw translucent ink on a second layer.
     stroke(&mut canvas, &renders, 80.0, 0.0);
-    canvas.edit(|session| session.set_tool(Tool::Eraser));
+    canvas
+        .edit(|session| session.set_tool(Tool::Eraser))
+        .unwrap();
     canvas.edit(|session| session.eraser.width = 14.0);
     stroke(&mut canvas, &renders, 90.0, 2.0);
     canvas.edit(Session::add_layer).unwrap();
     canvas.edit(|session| {
-        session.set_tool(Tool::Pen);
+        session.set_tool(Tool::Pen).unwrap();
         session.pen.color = Rgba8([30, 90, 200, 140]);
         session.pen.antialias = true;
     });
@@ -126,7 +128,7 @@ fn draw_move_save_reopen_and_export() {
     );
 
     // Another frame moves the strokes and is shown from a fresh split.
-    canvas.edit(|session| session.set_frame(7));
+    canvas.edit(|session| session.set_frame(7)).unwrap();
     settle(&mut canvas, &renders);
     let moved = render(&document, 7, RenderPurpose::Display);
     assert!(largest_difference(moved.data_as_u8_slice(), full.data_as_u8_slice()) > 0);
@@ -146,7 +148,7 @@ fn draw_move_save_reopen_and_export() {
     assert!(!canvas.session().is_dirty());
 
     let mut reopened = Canvas::new(Document::new([16, 16]), |_| {});
-    files.open_path(folder.join("drawing.ugurugu"));
+    files.open_path(folder.join("drawing.ugurugu"), &reopened);
     files.handle(file_event(), &mut reopened);
     assert!(reopened.session().document() == &document);
 
@@ -246,7 +248,7 @@ fn playback_shows_every_frame_in_order_as_soon_as_it_is_ready() {
         let _ = to_test.send(rendered);
     });
     stroke(&mut canvas, &renders, 80.0, 0.0);
-    canvas.edit(|session| session.set_frame(28));
+    canvas.edit(|session| session.set_frame(28)).unwrap();
     canvas.toggle_playback();
     // A clock that runs far ahead of rendering: the frames still come one
     // after another, none skipped, each as soon as it is there.

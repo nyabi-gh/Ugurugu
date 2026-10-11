@@ -40,10 +40,13 @@ fn folder(files: &Files) -> PathBuf {
 /// The sequences of the generations on disk, waiting first for the jobs
 /// already sent: a missing file opens only after them.
 fn written(files: &mut Files, canvas: &mut Canvas, events: &Receiver<FileEvent>) -> Vec<u64> {
-    files.open_path(PathBuf::from("missing.ugurugu"));
+    files.open_path(PathBuf::from("missing.ugurugu"), canvas);
     loop {
         match next(events) {
-            FileEvent::Opened(..) => break,
+            event @ FileEvent::Opened(..) => {
+                files.handle(event, canvas);
+                break;
+            }
             event => files.handle(event, canvas),
         }
     }
@@ -84,7 +87,12 @@ fn unsaved_work_is_written_once_editing_pauses_and_removed_once_saved() {
     files.path = Some(root.0.join("no such folder").join("drawing.ugurugu"));
     files.save(&mut canvas);
     files.handle(next(&events), &mut canvas);
-    assert!(files.message().unwrap().starts_with("Not saved"));
+    assert!(
+        files
+            .message()
+            .unwrap()
+            .starts_with(&super::tests::not_saved())
+    );
     files.keep_recovery(&mut canvas, start + recovery::LONGEST * 4);
     assert_eq!(written(&mut files, &mut canvas, &events), [1, 2]);
     // One that succeeds removes it.
@@ -136,7 +144,7 @@ fn a_write_queued_before_the_work_was_dropped_does_not_bring_it_back() {
 fn a_pending_transform_is_written_in_and_stays_pending() {
     let root = Root::new("files-pending");
     let (mut files, mut canvas, events) = setup(&root);
-    canvas.edit(Session::select_all);
+    canvas.edit(Session::select_all).unwrap();
     canvas.begin_transform();
     canvas.edit(|session| session.set_transform(Affine::translation(10.0, 0.0)));
     let start = Instant::now();
@@ -184,8 +192,9 @@ fn work_left_by_a_crash_is_recovered_under_a_new_name() {
     assert!(canvas.session().is_dirty());
     assert_eq!(files.title(&canvas), "Cat-recovered* - Ugurugu");
     assert_eq!(files.id, [3; 16]);
-    // Kept in this window's folder, and the crashed one is gone.
+    // Kept in this window's folder, and then the crashed one is gone.
     assert_eq!(written(&mut files, &mut canvas, &events), [1]);
+    written(&mut files, &mut canvas, &events);
     assert!(!crashed.exists());
     // Saving offers the new name, never the old file.
     assert_eq!(files.display_name(), "Cat-recovered");
@@ -221,5 +230,62 @@ fn work_that_does_not_read_is_set_aside_and_said() {
         })
         .count();
     assert_eq!(aside, 1);
+    files.end();
+}
+
+#[test]
+fn recovered_work_stays_where_it_was_until_it_is_written_here() {
+    let root = Root::new("files-handoff");
+    let crashed = root.0.join("crashed");
+    let (lock, _) = recovery::begin(&root.0, &crashed).unwrap();
+    let mut session = Session::new(Files::new_canvas(), true);
+    session.add_layer().unwrap();
+    let meta = Meta::new(1, "Cat".to_owned(), None, [1024, 768]);
+    recovery::write(&crashed, session.document(), [3; 16], &meta).unwrap();
+    drop(lock);
+
+    let (mut files, mut canvas, events) = setup(&root);
+    let own = folder(&files);
+    // The first write here fails.
+    std::fs::create_dir(own.join("1.json")).unwrap();
+    files.request(Action::Recover, &mut canvas);
+    files.handle(next(&events), &mut canvas);
+    assert_eq!(written(&mut files, &mut canvas, &events), [0u64; 0]);
+    written(&mut files, &mut canvas, &events);
+    assert!(crashed.exists());
+    // The next one, unchanged work tried again, succeeds.
+    std::fs::remove_dir(own.join("1.json")).unwrap();
+    let start = Instant::now();
+    files.keep_recovery(&mut canvas, start);
+    files.keep_recovery(&mut canvas, start + recovery::QUIET);
+    assert_eq!(written(&mut files, &mut canvas, &events), [2]);
+    written(&mut files, &mut canvas, &events);
+    assert!(!crashed.exists());
+    files.end();
+}
+
+#[test]
+fn recovered_work_saved_before_it_is_written_here_goes() {
+    let root = Root::new("files-handoff-saved");
+    let crashed = root.0.join("crashed");
+    let (lock, _) = recovery::begin(&root.0, &crashed).unwrap();
+    let mut session = Session::new(Files::new_canvas(), true);
+    session.add_layer().unwrap();
+    let meta = Meta::new(1, "Cat".to_owned(), None, [1024, 768]);
+    recovery::write(&crashed, session.document(), [3; 16], &meta).unwrap();
+    drop(lock);
+
+    let (mut files, mut canvas, events) = setup(&root);
+    std::fs::create_dir(folder(&files).join("1.json")).unwrap();
+    files.request(Action::Recover, &mut canvas);
+    files.handle(next(&events), &mut canvas);
+    written(&mut files, &mut canvas, &events);
+    assert!(crashed.exists());
+    files.path = Some(root.0.join("cat.ugurugu"));
+    files.save(&mut canvas);
+    files.handle(next(&events), &mut canvas);
+    files.keep_recovery(&mut canvas, Instant::now());
+    written(&mut files, &mut canvas, &events);
+    assert!(!crashed.exists());
     files.end();
 }

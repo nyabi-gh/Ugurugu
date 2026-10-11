@@ -258,7 +258,7 @@ pub fn run(
     panels: &mut Panels,
 ) {
     if let Some(tool) = tool(action) {
-        canvas.edit(|session| session.set_tool(tool));
+        canvas.edit_settled(|session| session.set_tool(tool));
         return;
     }
     if let Some(panel) = panel(action) {
@@ -294,13 +294,13 @@ pub fn run(
             panels.resize = Some(resize::Dialog::Canvas(resize::CanvasSize::new(canvas_size)));
         }
         A::SelectAll => {
-            canvas.edit(Session::select_all);
+            canvas.edit_settled(Session::select_all);
         }
         A::InvertSelection => {
-            canvas.edit(Session::invert_selection);
+            canvas.edit_settled(Session::invert_selection);
         }
         A::Deselect => {
-            canvas.edit(Session::deselect);
+            canvas.edit_settled(Session::deselect);
         }
         A::FillSelection => canvas.fill_selection(),
         A::Restyle => restyle::open(canvas, panels),
@@ -308,7 +308,9 @@ pub fn run(
         A::Transform => canvas.begin_transform(),
         A::FlipHorizontal => canvas.flip(true),
         A::FlipVertical => canvas.flip(false),
-        A::ApplyTransform => canvas.apply_pending(),
+        A::ApplyTransform => {
+            canvas.apply_pending();
+        }
         A::CancelTransform => canvas.cancel_transform(),
         A::Escape => canvas.escape(),
         A::Settings => panels.settings = Some(settings::Dialog::default()),
@@ -495,7 +497,7 @@ mod tests {
     /// can all run.
     fn transforming() -> Canvas {
         let mut canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
-        canvas.edit(Session::select_all);
+        canvas.edit(Session::select_all).unwrap();
         canvas.begin_transform();
         canvas
     }

@@ -297,7 +297,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     ] {
         let shortcut = keys.text(action);
         if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
-            canvas.edit(|session| session.set_tool(each));
+            canvas.edit_settled(|session| session.set_tool(each));
         }
     }
 }
@@ -984,7 +984,7 @@ fn action_buttons(
         "edit-deselect",
         Action::Deselect,
     ) {
-        canvas.edit(Session::deselect);
+        canvas.edit_settled(Session::deselect);
     }
     if restyle {
         restyle::open(canvas, panels);
@@ -1365,7 +1365,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             if canvas.is_playing() {
                 canvas.toggle_playback();
             }
-            canvas.edit(|session| session.set_frame(frame as i64 - 1));
+            canvas.edit_settled(|session| session.set_frame(frame as i64 - 1));
         }
         ui.label(egui::RichText::new("/").color(theme::MUTED));
         let (mut count, mut speed) = panels.animation.unwrap_or((frames as f32, fps));
@@ -1381,7 +1381,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             if canvas.is_playing() {
                 canvas.toggle_playback();
             }
-            canvas.edit(|session| session.set_frame(i64::from(chosen)));
+            canvas.edit_settled(|session| session.set_frame(i64::from(chosen)));
         }
 
         ui.label(
@@ -1510,12 +1510,17 @@ pub fn status_bar(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
     message: Option<(&str, bool)>,
+    lasting: Option<&str>,
     export: Option<&str>,
     pointer: Option<[f64; 2]>,
     keys: &Keymap,
 ) -> bool {
     let mut cancel = false;
     ui.horizontal(|ui| {
+        if let Some(lasting) = lasting {
+            ui.colored_label(theme::accent(), lasting);
+            ui.separator();
+        }
         if let Some(export) = export {
             // No spinner: it asks for a frame every frame, which kept the
             // render thread drawing throughout an export.

@@ -58,7 +58,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -103,6 +103,7 @@ fn main() -> ExitCode {
             compare(Path::new(file), Path::new(frames), Some(Path::new(diffs)))
         }
         ["import", file, out] => import_legacy(Path::new(file), Path::new(out)),
+        ["insert", file] => insert(Path::new(file)),
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["fills", from, to] => fills(Path::new(from), Path::new(to)),
@@ -793,6 +794,28 @@ fn export_stage() -> Stage {
         Ok("shrink") => Stage::Shrink,
         _ => Stage::Code,
     }
+}
+
+/// Reads an image to insert as the app does, into its 2.2.13 new document
+/// size, and says how long that took and the memory it peaked at.
+fn insert(path: &Path) -> Result<(), String> {
+    let before = peak_working_set_mib();
+    let started = Instant::now();
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    let decoded = ugu_io::import::decode(
+        std::io::BufReader::with_capacity(1 << 20, file),
+        [1024, 768],
+    );
+    let ms = started.elapsed().as_secs_f64() * 1000.0;
+    let size = decoded.as_ref().map(|(_, asset)| asset.size);
+    println!(
+        "insert {}: file {:.1} MiB, {ms:.1} ms, asset {size:?}, peak working set {:.0} MiB (before {before:.0} MiB)",
+        path.display(),
+        length as f64 / (1024.0 * 1024.0),
+        peak_working_set_mib(),
+    );
+    Ok(())
 }
 
 fn peak_working_set_mib() -> f64 {

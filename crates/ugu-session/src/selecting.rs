@@ -122,7 +122,7 @@ impl Session {
             (Combine::Subtract, Some(_)) => "Subtract from selection",
         };
         let next = Selection::combine(self.selection().map(Arc::as_ref), shape, lasso.combine);
-        Ok(self.history_mut().select(label, next))
+        Ok(self.history_mut()?.select(label, next))
     }
 
     /// Drops the shape being dragged, leaving the selection as it was.
@@ -130,30 +130,34 @@ impl Session {
         self.lasso.take().is_some()
     }
 
-    pub fn select_all(&mut self) -> bool {
+    pub fn select_all(&mut self) -> Result<bool, EditError> {
         self.lasso = None;
         let all = Selection::all(self.document().canvas);
-        self.history_mut().select("Select all", all)
+        Ok(self.history_mut()?.select("Select all", all))
     }
 
     /// Selects what is not selected; nothing without a selection.
-    pub fn invert_selection(&mut self) -> bool {
+    pub fn invert_selection(&mut self) -> Result<bool, EditError> {
         self.lasso = None;
         let Some(inverted) = self.selection().map(|selection| selection.invert()) else {
-            return false;
+            return Ok(false);
         };
-        self.history_mut().select("Invert selection", inverted)
+        Ok(self.history_mut()?.select("Invert selection", inverted))
     }
 
-    pub fn deselect(&mut self) -> bool {
+    pub fn deselect(&mut self) -> Result<bool, EditError> {
         self.lasso = None;
-        self.history_mut().select("Deselect", None)
+        Ok(self.history_mut()?.select("Deselect", None))
     }
 
     /// Esc: drops a shape being dragged, else a pending transform or placed
     /// text, else the selection.
     pub fn escape(&mut self) -> bool {
-        self.cancel_selection() || self.cancel_transform() || self.cancel_text() || self.deselect()
+        // Nothing is pending by the time it deselects, so that cannot fail.
+        self.cancel_selection()
+            || self.cancel_transform()
+            || self.cancel_text()
+            || self.deselect() == Ok(true)
     }
 
     /// The selection a stroke begun now is cut to; `None` when it cuts

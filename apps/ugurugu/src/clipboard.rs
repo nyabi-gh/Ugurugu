@@ -24,14 +24,14 @@ pub enum ClipboardEvent {
     /// The copy's image is on the system clipboard as of this sequence
     /// number.
     Written(Result<u32, String>),
-    /// The image another app put on the clipboard, as an asset; `None` when
-    /// there is none.
-    Read(Result<Option<(AssetId, Asset)>, String>),
+    /// The image another app put on the clipboard, as an asset for document
+    /// `.0`; `None` when there is none.
+    Read(u64, Result<Option<(AssetId, Asset)>, String>),
 }
 
 enum Job {
     Write(Image),
-    Read { fit: [u32; 2] },
+    Read { fit: [u32; 2], generation: u64 },
 }
 
 pub struct Clipboard {
@@ -91,7 +91,8 @@ impl Clipboard {
             Some(clip) if holds_ours => canvas.paste(clip),
             _ => {
                 let fit = canvas.session().document().canvas;
-                let _ = self.to_worker.send(Job::Read { fit });
+                let generation = canvas.generation();
+                let _ = self.to_worker.send(Job::Read { fit, generation });
             }
         }
     }
@@ -109,9 +110,13 @@ impl Clipboard {
                     self.ours = Some(sequence);
                 }
             }
-            ClipboardEvent::Read(Ok(Some((id, asset)))) => canvas.place_image(id, asset),
-            ClipboardEvent::Read(Ok(None)) => canvas.set_notice(tr("paste-nothing").to_owned()),
-            ClipboardEvent::Read(Err(error)) => {
+            // Read for a document no longer shown.
+            ClipboardEvent::Read(generation, _) if generation != canvas.generation() => {}
+            ClipboardEvent::Read(_, Ok(Some((id, asset)))) => canvas.place_image(id, asset),
+            ClipboardEvent::Read(_, Ok(None)) => {
+                canvas.set_notice(tr("paste-nothing").to_owned());
+            }
+            ClipboardEvent::Read(_, Err(error)) => {
                 tracing::warn!(%error, "the clipboard could not be read");
                 canvas.set_notice(tr("paste-failed").to_owned());
             }
@@ -132,7 +137,7 @@ fn run(job: Job) -> ClipboardEvent {
             );
             ClipboardEvent::Written(result)
         }
-        Job::Read { fit } => {
+        Job::Read { fit, generation } => {
             let result = ugu_win::clipboard::read_image().and_then(|image| {
                 image
                     .map(|image| {
@@ -145,7 +150,7 @@ fn run(job: Job) -> ClipboardEvent {
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 "clipboard image read"
             );
-            ClipboardEvent::Read(result)
+            ClipboardEvent::Read(generation, result)
         }
     }
 }

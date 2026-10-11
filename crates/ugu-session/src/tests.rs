@@ -134,7 +134,7 @@ fn a_hidden_or_missing_layer_refuses_to_draw() {
         session.begin_stroke(at(1.0, 1.0, 0.0)),
         Err(StrokeRefused::HiddenLayer)
     );
-    session.select_layer(LayerId(99));
+    session.select_layer(LayerId(99)).unwrap();
     assert_eq!(session.current_layer(), layer);
 }
 
@@ -171,7 +171,7 @@ fn a_layer_in_a_hidden_group_refuses_to_draw() {
 fn the_eraser_commits_an_erase_operation() {
     let mut session = session();
     draw(&mut session, 10.0, 60.0);
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     draw(&mut session, 20.0, 30.0);
     let layer = session.current_layer();
     assert!(matches!(ops(&session, layer)[1], Op::Erase { .. }));
@@ -211,7 +211,7 @@ fn each_preset_keeps_its_width_and_stabilizer_and_draws_with_its_brush() {
         (find("soft-airbrush").size, 0.4)
     );
     // An eraser takes its preset's.
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     session.choose_preset(Tool::Eraser, find("kneaded-eraser"));
     draw(&mut session, 20.0, 30.0);
     assert_eq!(brush(&session), find("kneaded-eraser").brush);
@@ -255,7 +255,7 @@ fn layer_commands_keep_a_valid_current_layer() {
     assert_eq!(session.current_layer(), first);
 
     session.redo().unwrap();
-    session.select_layer(second);
+    session.select_layer(second).unwrap();
     session.remove_layer().unwrap();
     assert_eq!(session.current_layer(), first);
     assert_eq!(session.remove_layer().unwrap(), Outcome::NoChange);
@@ -391,7 +391,7 @@ fn group_commands_are_one_undo_step_each() {
     session.add_layer().unwrap();
     let top = session.current_layer();
 
-    session.select_layer(middle);
+    session.select_layer(middle).unwrap();
     let before = session.document().clone();
     session.add_group().unwrap();
     assert_eq!(session.undo_label(), Some("Add layer group"));
@@ -403,7 +403,7 @@ fn group_commands_are_one_undo_step_each() {
     // Alone in its group, it has nowhere to move.
     assert_eq!(session.move_layer(1).unwrap(), Outcome::NoChange);
 
-    session.select_layer(top);
+    session.select_layer(top).unwrap();
     let before = session.document().clone();
     session.move_to_group(Some(group)).unwrap();
     one_step(&mut session, &before);
@@ -417,7 +417,7 @@ fn group_commands_are_one_undo_step_each() {
     one_step(&mut session, &before);
     assert_eq!(session.document().position(top), Some((None, 2)));
 
-    session.select_layer(group);
+    session.select_layer(group).unwrap();
     assert_eq!(
         session.begin_stroke(at(10.0, 10.0, 0.0)),
         Err(StrokeRefused::NoLayer)
@@ -464,14 +464,14 @@ fn the_last_paint_layer_is_not_removed_even_with_its_group() {
     let only = session.current_layer();
     session.add_group().unwrap();
     let group = session.document().layers[0].id;
-    session.select_layer(group);
+    session.select_layer(group).unwrap();
     assert_eq!(session.remove_layer().unwrap(), Outcome::NoChange);
-    session.select_layer(only);
+    session.select_layer(only).unwrap();
     assert_eq!(session.remove_layer().unwrap(), Outcome::NoChange);
     // Added beside the group, not in it.
-    session.select_layer(group);
+    session.select_layer(group).unwrap();
     session.add_layer().unwrap();
-    session.select_layer(group);
+    session.select_layer(group).unwrap();
     session.remove_layer().unwrap();
     assert_eq!(session.document().layers.len(), 1);
     assert!(matches!(
@@ -625,10 +625,10 @@ fn escape_drops_the_shape_being_dragged_before_the_selection() {
 #[test]
 fn select_all_and_invert_cover_the_canvas() {
     let mut session = session();
-    assert!(!session.invert_selection());
-    assert!(session.select_all());
+    assert!(!session.invert_selection().unwrap());
+    assert!(session.select_all().unwrap());
     assert_eq!(selected(&session), Some([0, 0, 200, 100]));
-    assert!(session.invert_selection());
+    assert!(session.invert_selection().unwrap());
     assert_eq!(selected(&session), None);
     assert_eq!(session.undo_label(), Some("Invert selection"));
     session.undo().unwrap();
@@ -639,7 +639,7 @@ fn select_all_and_invert_cover_the_canvas() {
         [100.0, 100.0],
         Combine::Replace,
     );
-    session.invert_selection();
+    session.invert_selection().unwrap();
     assert_eq!(selected(&session), Some([100, 0, 100, 100]));
 }
 
@@ -656,7 +656,7 @@ fn strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask() {
         Combine::Replace,
     );
     draw(&mut session, 10.0, 60.0);
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     draw(&mut session, 10.0, 60.0);
     let clips: Vec<_> = ops(&session, layer)
         .iter()
@@ -674,8 +674,8 @@ fn strokes_in_a_selection_are_cut_to_it_sharing_one_stored_mask() {
     session.undo().unwrap();
     assert!(session.document().store.masks.is_empty());
     // A selection of everything cuts nothing.
-    session.select_all();
-    session.set_tool(Tool::Pen);
+    session.select_all().unwrap();
+    session.set_tool(Tool::Pen).unwrap();
     draw(&mut session, 10.0, 60.0);
     assert!(matches!(
         ops(&session, layer).last(),
@@ -835,7 +835,7 @@ fn the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection() {
         session.bucket([41.0, 50.0], read),
         Err(FillError::OutsideSelection)
     );
-    session.deselect();
+    session.deselect().unwrap();
     assert_eq!(
         session.bucket([41.0, 50.0], read),
         Err(FillError::NothingThere)
@@ -869,7 +869,7 @@ fn filling_the_selection_or_a_painted_shape_is_one_fill_cut_to_the_selection() {
     // The selection is stored once, for both.
     assert_eq!(coverage, clip);
     assert_eq!(session.document().store.masks.len(), 1);
-    session.select_all();
+    session.select_all().unwrap();
     session.fill_selection().unwrap();
     assert!(matches!(fills(&session, layer)[1], (_, _, _, None)));
     // Painting fills the shape and leaves the selection as it was.
@@ -1025,7 +1025,7 @@ fn undo_and_escape_cancel_a_pending_transform_and_other_edits_apply_it_first() {
     // Changing layer or frame applies it too.
     session.begin_transform().unwrap();
     session.set_transform(Affine::translation(0.0, 10.0));
-    session.set_frame(3);
+    session.set_frame(3).unwrap();
     assert_eq!(session.pending(), None);
     assert_eq!(transforms(&session, layer).len(), 2);
     session.begin_transform().unwrap();
@@ -1084,9 +1084,9 @@ fn escape_cancels_a_pending_transform_before_deselecting_and_changing_tool_appli
 
     session.begin_transform().unwrap();
     session.set_transform(Affine::translation(5.0, 0.0));
-    session.set_tool(session.tool());
+    session.set_tool(session.tool()).unwrap();
     assert!(session.pending().is_some(), "the same tool keeps it");
-    session.set_tool(Tool::Fill);
+    session.set_tool(Tool::Fill).unwrap();
     assert_eq!(
         session.take_ended(),
         Some(Ended::Applied {
@@ -1320,7 +1320,7 @@ fn boxed_text() -> Arc<ugu_core::text::Outline> {
 fn placed_text_is_applied_as_one_step_in_the_pen_colour() {
     let mut session = session();
     let layer = session.current_layer();
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 40.0], boxed_text()).unwrap();
     assert!(session.is_dirty());
     assert!(ops(&session, layer).is_empty());
@@ -1404,7 +1404,7 @@ fn placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits() {
     let mut session = session();
     let layer = session.current_layer();
     draw(&mut session, 10.0, 60.0);
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 20.0], boxed_text()).unwrap();
     let label = session.undo_label().map(str::to_owned);
     assert!(session.undo().unwrap());
@@ -1417,9 +1417,9 @@ fn placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits() {
 
     // Changing tools or layers applies it.
     session.place_text([30.0, 20.0], boxed_text()).unwrap();
-    session.set_tool(Tool::Pen);
+    session.set_tool(Tool::Pen).unwrap();
     assert_eq!(ops(&session, layer).len(), 3);
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 20.0], boxed_text()).unwrap();
     session.add_layer().unwrap();
     assert_eq!(ops(&session, layer).len(), 5);
@@ -1439,7 +1439,7 @@ fn placed_text_is_dropped_by_undo_and_escape_and_applied_by_other_edits() {
 #[test]
 fn the_eyedropper_sets_the_pen_colour_without_an_edit() {
     let mut session = Session::new(Document::new([200, 100]), true);
-    session.set_tool(Tool::Eyedropper);
+    session.set_tool(Tool::Eyedropper).unwrap();
     let (revision, label) = (session.revision(), session.undo_label().map(str::to_owned));
     // Half-transparent red, premultiplied.
     assert!(session.pick_color([128, 0, 0, 128]));
@@ -1469,7 +1469,7 @@ fn picking_leaves_a_pending_transform_and_placed_text_pending() {
     session.pick_color([0, 0, 255, 255]);
     assert!(session.pending().is_some());
     session.cancel_transform();
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 40.0], boxed_text()).unwrap();
     session.pick_color([0, 255, 0, 255]);
     assert!(session.placed_text().is_some());
@@ -1554,7 +1554,7 @@ fn restyling_waits_for_a_pending_transform_or_placed_text() {
     assert!(session.pending().is_some(), "not applied");
     assert_eq!(session.revision(), revision);
     session.apply_transform().unwrap();
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 10.0], boxed_text()).unwrap();
     assert_eq!(session.restyle_selected(style), Err(FillError::Pending));
     assert!(session.cancel_text());
@@ -1569,7 +1569,7 @@ fn restyling_refuses_a_hidden_layer() {
     let mut session = session();
     let layer = session.current_layer();
     draw(&mut session, 10.0, 60.0);
-    session.select_all();
+    session.select_all().unwrap();
     session
         .update_layer(layer, "Hide", |layer| layer.visible = false)
         .unwrap();
@@ -1643,23 +1643,23 @@ fn strokes_fills_and_text_record_their_colour_and_erasing_does_not() {
     session.pen.color = red;
     draw(&mut session, 10.0, 60.0);
     assert_eq!(session.colors.colors(), [red]);
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     draw(&mut session, 10.0, 30.0);
     assert_eq!(session.colors.colors(), [red]);
-    session.set_tool(Tool::Fill);
+    session.set_tool(Tool::Fill).unwrap();
     session.pen.color = blue;
     assert!(matches!(
         session.bucket([60.0, 50.0], Some(boxed().as_slice())),
         Ok(Outcome::Committed(_))
     ));
     assert_eq!(session.colors.colors(), [blue, red]);
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.pen.color = green;
     session.place_text([30.0, 40.0], boxed_text()).unwrap();
     session.apply_text().unwrap();
     assert_eq!(session.colors.colors(), [green, blue, red]);
     // Drawing red again moves it to the front; undo keeps the history.
-    session.set_tool(Tool::Pen);
+    session.set_tool(Tool::Pen).unwrap();
     session.pen.color = red;
     draw(&mut session, 10.0, 60.0);
     session.undo().unwrap();
@@ -1669,7 +1669,7 @@ fn strokes_fills_and_text_record_their_colour_and_erasing_does_not() {
 #[test]
 fn tools_carry_over_to_another_document() {
     let mut session = session();
-    session.set_tool(Tool::Wand);
+    session.set_tool(Tool::Wand).unwrap();
     session.pen.color = Rgba8([1, 2, 3, 255]);
     session.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[3]);
     session.pen.width = 17.0;
@@ -1680,7 +1680,7 @@ fn tools_carry_over_to_another_document() {
     let tools = session.tools();
     let mut next = Session::new(Document::new([50, 50]), true);
     assert_eq!(next.tools(), Tools::default());
-    next.set_tools(tools.clone());
+    next.set_tools(tools.clone()).unwrap();
     assert_eq!(next.tools(), tools);
     next.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[3]);
     assert_eq!(next.pen.width, 17.0);
@@ -1690,7 +1690,7 @@ fn tools_carry_over_to_another_document() {
 #[test]
 fn the_settled_document_is_what_applying_gives_and_the_session_stays() {
     let mut session = session();
-    assert_eq!(session.settled_document(), None);
+    assert_eq!(session.settled_document(), Ok(None));
     drag(
         &mut session,
         ShapeKind::Rectangle,
@@ -1701,15 +1701,15 @@ fn the_settled_document_is_what_applying_gives_and_the_session_stays() {
     session.begin_transform().unwrap();
     assert!(session.set_transform(Affine::translation(15.0, 5.0)));
     let revision = session.revision();
-    let settled = session.settled_document().unwrap();
+    let settled = session.settled_document().unwrap().unwrap();
     assert!(session.pending().is_some());
     assert_eq!(session.revision(), revision);
     session.apply_transform().unwrap();
     assert_eq!(&settled, session.document());
     // Text clipped to the moved selection.
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.place_text([30.0, 10.0], boxed_text()).unwrap();
-    let settled = session.settled_document().unwrap();
+    let settled = session.settled_document().unwrap().unwrap();
     assert!(session.placed_text().is_some());
     assert_ne!(&settled, session.document());
     session.apply_text().unwrap();
@@ -1733,4 +1733,57 @@ fn a_pixel_stroke_is_whole_pixels_wide_and_never_antialiased() {
     assert_eq!(stroke.brush.engine, BrushEngine::Pixel);
     assert_eq!(stroke.width, 3.0);
     assert!(!stroke.brush.antialias);
+}
+
+/// A document at the operation limit, so no further edit fits.
+fn full_session() -> (Session, Document) {
+    let mut document = Document::new([8, 8]);
+    let LayerKind::Paint(paint) = &mut document.layers[0].kind else {
+        unreachable!()
+    };
+    paint.ops = vec![
+        Op::Crop {
+            offset: [0, 0],
+            size: [8, 8]
+        };
+        limits::OPERATIONS
+    ];
+    document.validate().unwrap();
+    (Session::new(document.clone(), true), document)
+}
+
+#[test]
+fn a_transform_the_document_cannot_take_stays_pending_and_unsaved() {
+    let (mut session, document) = full_session();
+    session.select_all().unwrap();
+    session.begin_transform().unwrap();
+    assert!(session.set_transform(Affine::translation(1.0, 0.0)));
+    assert!(session.settled_document().is_err());
+    assert!(session.apply_transform().is_err());
+    assert!(session.pending().is_some());
+    assert!(session.is_dirty());
+    // What would apply it first is refused instead.
+    assert!(session.set_tool(Tool::Eraser).is_err());
+    assert_eq!(session.tool(), Tool::Pen);
+    assert!(session.set_frame(3).is_err());
+    assert_eq!(session.frame(), 0);
+    assert!(session.pending().is_some());
+    assert_eq!(session.document(), &document);
+    // Undo still drops it.
+    assert_eq!(session.undo(), Ok(true));
+    assert!(session.pending().is_none());
+    assert!(!session.is_dirty());
+}
+
+#[test]
+fn text_the_document_cannot_take_stays_placed_and_unsaved() {
+    let (mut session, document) = full_session();
+    session.set_tool(Tool::Text).unwrap();
+    session.place_text([1.0, 1.0], boxed_text()).unwrap();
+    assert!(session.apply_text().is_err());
+    assert!(session.placed_text().is_some());
+    assert!(session.is_dirty());
+    assert!(session.set_tool(Tool::Pen).is_err());
+    assert!(session.placed_text().is_some());
+    assert_eq!(session.document(), &document);
 }

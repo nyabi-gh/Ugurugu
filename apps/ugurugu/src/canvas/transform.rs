@@ -5,10 +5,13 @@
 //! dragging its handles on the canvas and shown on the edited layer as it
 //! would be applied.
 
+use ugu_core::edit::EditError;
 use ugu_core::ops::{Affine, Sampling};
 use ugu_render::moving::{Glance, Moving};
 use ugu_render::raster::PixelRect;
-use ugu_session::{Ended, FillError};
+use ugu_session::{Ended, FillError, Session};
+
+use crate::i18n::tr;
 
 use super::{Canvas, Interaction, Key, preview_shrink, union};
 
@@ -191,17 +194,30 @@ impl Canvas {
         self.refresh_preview();
     }
 
-    pub fn apply_transform(&mut self) {
+    /// Whether no transform is left pending.
+    pub fn apply_transform(&mut self) -> bool {
         if let Err(error) = self.edit(|session| session.apply_transform()) {
             self.notice = Some(format!("The transform was not applied: {error}"));
         }
+        self.session.pending().is_none()
     }
 
     /// Applies a pending transform or placed text, as what comes next
-    /// would leave it out or end it.
-    pub fn apply_pending(&mut self) {
-        self.apply_transform();
-        self.apply_text();
+    /// would leave it out or end it; whether nothing is left pending.
+    pub fn apply_pending(&mut self) -> bool {
+        self.apply_transform() && self.apply_text()
+    }
+
+    /// Makes `change`, which applies a pending transform or placed text
+    /// first; when they cannot be, says so and leaves them pending.
+    pub fn edit_settled<R: Default>(
+        &mut self,
+        change: impl FnOnce(&mut Session) -> Result<R, EditError>,
+    ) -> R {
+        self.edit(change).unwrap_or_else(|_| {
+            self.notice = Some(tr("restyle-pending").to_owned());
+            R::default()
+        })
     }
 
     pub fn cancel_transform(&mut self) {

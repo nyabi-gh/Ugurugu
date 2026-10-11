@@ -53,7 +53,7 @@ impl Session {
         }
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
-        self.settle();
+        self.settle()?;
         self.live = None;
         self.lasso = None;
         self.pending = Some(Pending {
@@ -97,19 +97,27 @@ impl Session {
     }
 
     /// Puts the pending transform in the document; the selection follows
-    /// it. An unmoved selection changes nothing.
+    /// it. An unmoved selection changes nothing. One the document cannot
+    /// take stays pending.
     pub fn apply_transform(&mut self) -> Result<Outcome, EditError> {
         let Some(pending) = self.pending.take() else {
             return Ok(Outcome::NoChange);
         };
-        self.ended = Some(Ended::Dropped);
         if pending.transform == Affine::IDENTITY {
+            self.ended = Some(Ended::Dropped);
             return Ok(Outcome::NoChange);
         }
         let sampling = self.transform_sampling;
-        let outcome = self.history.group("Transform selection", |group| {
+        let outcome = match self.history.group("Transform selection", |group| {
             transform_into(group, &pending, sampling)
-        })?;
+        }) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.pending = Some(pending);
+                return Err(error);
+            }
+        };
+        self.ended = Some(Ended::Dropped);
         if let Outcome::Committed(_) = outcome {
             self.ended = Some(Ended::Applied {
                 revision: self.history.revision(),
@@ -153,7 +161,7 @@ impl Session {
     /// Clears the selected part of the current layer, after the pending
     /// transform if there is one.
     pub fn delete_selected(&mut self) -> Result<Outcome, FillError> {
-        self.settle();
+        self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
         let layer = self.layer;
@@ -164,33 +172,31 @@ impl Session {
     }
 
     /// Applies the pending transform or placed text before another edit.
-    /// A transform cannot fail, as it was checked as it was set; text over
-    /// the document's limits is dropped.
-    pub(crate) fn settle(&mut self) {
-        let _ = self.apply_transform();
-        let _ = self.apply_text();
+    /// What the document cannot take stays pending, and the edit is refused.
+    pub(crate) fn settle(&mut self) -> Result<(), EditError> {
+        self.apply_transform()?;
+        self.apply_text()?;
+        Ok(())
     }
 
     /// The document as saving after `settle` would write it, leaving the
     /// session as it is; `None` when nothing is pending or placed.
-    pub fn settled_document(&self) -> Option<Document> {
+    pub fn settled_document(&self) -> Result<Option<Document>, EditError> {
         if self.pending.is_none() && self.placed.is_none() {
-            return None;
+            return Ok(None);
         }
         let mut scratch = History::new(self.document().clone(), true);
-        // A transform cannot fail, and text over the limits is dropped, as
-        // in `settle`.
         if let Some(pending) = &self.pending
             && pending.transform != Affine::IDENTITY
         {
             let sampling = self.transform_sampling;
-            let _ = scratch.group("", |group| transform_into(group, pending, sampling));
+            scratch.group("", |group| transform_into(group, pending, sampling))?;
         }
         if let Some(drawing) = self.text_drawing() {
             let color = self.pen.color;
-            let _ = scratch.group("", |group| crate::placing::text_into(group, drawing, color));
+            scratch.group("", |group| crate::placing::text_into(group, drawing, color))?;
         }
-        Some(scratch.into_document())
+        Ok(Some(scratch.into_document()))
     }
 }
 

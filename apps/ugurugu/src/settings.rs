@@ -8,6 +8,10 @@
 //! version does not know are written back as they were, so a newer version's
 //! settings survive this one. Changes are written by a thread of their own once
 //! they have stopped for `QUIET`, and once more when the store is dropped.
+//!
+//! Each window writes only the settings it changed over the file as it is
+//! then, as 2.2.13's registry keys were written one by one, so one window
+//! does not put back what another changed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -216,7 +220,12 @@ impl Settings {
         settings
     }
 
+    #[cfg(test)]
     fn to_json(&self) -> String {
+        to_text(self.to_object())
+    }
+
+    fn to_object(&self) -> Map<String, Value> {
         let mut object = self.unknown.clone();
         object.insert("format".to_owned(), FORMAT.into());
         object.insert("version".to_owned(), VERSION.into());
@@ -259,11 +268,15 @@ impl Settings {
         if self.layout != Layout::default() {
             object.insert("panels".to_owned(), self.layout.to_json());
         }
-        let mut text =
-            serde_json::to_string_pretty(&Value::Object(object)).expect("settings are plain JSON");
-        text.push('\n');
-        text
+        object
     }
+}
+
+fn to_text(object: Map<String, Value>) -> String {
+    let mut text =
+        serde_json::to_string_pretty(&Value::Object(object)).expect("settings are plain JSON");
+    text.push('\n');
+    text
 }
 
 /// Removes `key` from `object` and reads it with `read`, logging a value of
@@ -329,9 +342,74 @@ fn load(path: &Path) -> Settings {
     }
 }
 
-/// Writes `settings` beside `path` and then puts it in place, so a reader or
-/// a crash sees the old file or the new one, never part of one.
-fn write(path: &Path, settings: &Settings) -> std::io::Result<()> {
+/// Writes what changed from `base` to `settings` over the file at `path` as
+/// it is now, leaving the rest as another window may have left it.
+fn write_changes_over(
+    path: &Path,
+    base: &Map<String, Value>,
+    settings: &Settings,
+) -> std::io::Result<()> {
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let _lock = lock(path)?;
+    let current = settings.to_object();
+    let on_disk = match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
+            Ok(Value::Object(object)) => Some(object),
+            _ => None,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    // One that cannot be read is replaced, as at start.
+    let Some(mut merged) = on_disk else {
+        return write_text(path, &to_text(current));
+    };
+    for key in base.keys().chain(current.keys()) {
+        if base.get(key) != current.get(key) {
+            match current.get(key) {
+                Some(value) => merged.insert(key.clone(), value.clone()),
+                None => merged.remove(key),
+            };
+        }
+    }
+    write_text(path, &to_text(merged))
+}
+
+/// Held while the file is read and written, so windows take turns; removed
+/// as it closes.
+fn lock(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x0400_0000;
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(".lock");
+    let lock = path.with_file_name(name);
+    let started = std::time::Instant::now();
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+            .open(&lock)
+        {
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+                    && started.elapsed() < Duration::from_secs(2) =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            opened => return opened,
+        }
+    }
+}
+
+/// Writes `text` beside `path` and then puts it in place, so a reader or a
+/// crash sees the old file or the new one, never part of one.
+fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
 
     if let Some(folder) = path.parent() {
@@ -343,7 +421,7 @@ fn write(path: &Path, settings: &Settings) -> std::io::Result<()> {
     let temporary = path.with_file_name(name);
     let written = (|| {
         let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(settings.to_json().as_bytes())?;
+        file.write_all(text.as_bytes())?;
         file.sync_all()?;
         drop(file);
         ugu_win::file::replace_file(&temporary, path)
@@ -382,9 +460,10 @@ impl Store {
     pub fn open(path: Option<PathBuf>) -> Self {
         let settings = path.as_deref().map(load).unwrap_or_default();
         tracing::debug!(?path, ?settings, "settings read");
+        let base = settings.to_object();
         Self {
             settings,
-            writer: path.map(Writer::spawn),
+            writer: path.map(|path| Writer::spawn(path, base)),
         }
     }
 
@@ -425,13 +504,14 @@ impl Drop for Store {
 }
 
 impl Writer {
-    fn spawn(path: PathBuf) -> Self {
+    /// `base` is the settings as read, which this window's changes are of.
+    fn spawn(path: PathBuf, base: Map<String, Value>) -> Self {
         let (to_thread, messages) = mpsc::channel();
         let writes = Arc::new(AtomicUsize::new(0));
         let counted = writes.clone();
         let thread = std::thread::Builder::new()
             .name("settings".to_owned())
-            .spawn(move || write_changes(&path, &messages, &counted))
+            .spawn(move || write_changes(&path, base, &messages, &counted))
             .map_err(|error| tracing::error!(%error, "cannot start the settings thread"))
             .ok();
         Self {
@@ -444,12 +524,21 @@ impl Writer {
 
 /// Writes each change once `QUIET` passes without another, until the
 /// channel closes.
-fn write_changes(path: &Path, messages: &Receiver<Settings>, writes: &AtomicUsize) {
+fn write_changes(
+    path: &Path,
+    mut base: Map<String, Value>,
+    messages: &Receiver<Settings>,
+    writes: &AtomicUsize,
+) {
     let mut waiting: Option<Settings> = None;
-    let save = |settings: &Settings| {
+    let mut save = |settings: &Settings| {
         let started = std::time::Instant::now();
-        match write(path, settings) {
-            Ok(()) => tracing::debug!(elapsed = ?started.elapsed(), "settings written"),
+        match write_changes_over(path, &base, settings) {
+            Ok(()) => {
+                base = settings.to_object();
+                tracing::debug!(elapsed = ?started.elapsed(), "settings written");
+            }
+            // Written with the next change, still a change from `base`.
             Err(error) => tracing::warn!(%error, ?path, "the settings were not written"),
         }
         writes.fetch_add(1, Ordering::Relaxed);
@@ -688,7 +777,7 @@ mod tests {
                 .open(&path)
                 .unwrap()
         };
-        assert!(write(&path, &Settings::default()).is_err());
+        assert!(write_text(&path, &Settings::default().to_json()).is_err());
         drop(held);
         assert_eq!(
             Settings::parse(&std::fs::read_to_string(&path).unwrap()),
@@ -696,6 +785,34 @@ mod tests {
         );
         let leftovers = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
         assert_eq!(leftovers, 1, "the temporary file is removed");
+    }
+
+    #[test]
+    fn windows_keep_what_the_other_changed() {
+        let folder = Folder::new("windows");
+        let path = folder.settings();
+        let mut first = Store::open(Some(path.clone()));
+        let mut second = Store::open(Some(path.clone()));
+        first.change(|settings| settings.check_updates = false);
+        drop(first);
+        second.change(|settings| settings.pixel_grid = false);
+        drop(second);
+        let read = Store::open(Some(path.clone()));
+        assert!(!read.get().check_updates);
+        assert!(!read.get().pixel_grid);
+        // The same setting changed in both is the one changed last.
+        let mut first = Store::open(Some(path.clone()));
+        let mut second = Store::open(Some(path.clone()));
+        first.change(|settings| settings.export_edge = Some(256));
+        drop(first);
+        second.change(|settings| settings.export_edge = Some(512));
+        drop(second);
+        let read = Store::open(Some(path.clone()));
+        assert_eq!(read.get().export_edge, Some(512));
+        assert!(!read.get().check_updates);
+        assert!(!read.get().pixel_grid);
+        let files = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
+        assert_eq!(files, 1, "the lock is removed");
     }
 
     #[test]

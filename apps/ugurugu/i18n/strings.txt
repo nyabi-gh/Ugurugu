@@ -180,6 +180,11 @@ canvas-zoom-percent | ugurugu::MainWindow | Canvas zoom percentage
 fit | ugurugu::MainWindow | Fit
 fit-tip | ugurugu::MainWindow | Fit the whole canvas in the window
 untitled | ugurugu::MainWindow | Untitled
+file-saving | ugurugu::MainWindow | Saving %1… | args=name
+file-saved | ugurugu::MainWindow | Saved %1 | args=name
+file-not-saved | - | Not saved: %1 | 저장하지 못했습니다: %1 | 保存できませんでした: %1 | args=error
+file-opening | - | Opening %1… | %1 여는 중… | %1 を開いています… | args=name
+gpu-software | - | No usable GPU: drawing with the slow software display | 쓸 수 있는 GPU가 없어 느린 소프트웨어 표시로 그립니다 | 使える GPU がないため、低速なソフトウェア表示で描画しています
 unsaved-title | ugurugu::MainWindow | Unsaved changes
 unsaved-text | ugurugu::MainWindow | The document has unsaved changes.
 unsaved-save | ugurugu::MainWindow | Save (S)

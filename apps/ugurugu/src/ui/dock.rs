@@ -189,55 +189,62 @@ fn area(
                 .inner_margin(Margin::same(8)),
         )
         .show(ui, |ui| {
-            let groups: Vec<(Group, Panel)> = area
-                .groups
-                .iter()
-                .filter_map(|group| Some((group.clone(), panels.layout.front(group)?)))
-                .collect();
-            let total = ui.available_height();
-            let below_extra = extra.is_some();
-            for (index, (group, front)) in groups.iter().enumerate() {
-                let top = ui.cursor().min.y;
-                if index > 0 {
-                    ui.separator();
-                }
-                let holder = Holder::Area {
-                    side,
-                    first: index == 0,
-                };
-                let origin = ui.cursor().min;
-                let last = index + 1 == groups.len() && !below_extra;
-                if *front == Panel::Layers && !last {
-                    // The layer list takes the height left, so above other
-                    // groups it gets what they took last frame.
-                    let others: f32 = groups
+            // A window too low for the panels scrolls them, so none is out
+            // of reach; until then they are laid out as without it.
+            egui::ScrollArea::vertical()
+                .id_salt("dock scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let groups: Vec<(Group, Panel)> = area
+                        .groups
                         .iter()
-                        .map(|(_, other)| Some(*other))
-                        .chain(below_extra.then_some(None))
-                        .filter(|other| *other != Some(*front))
-                        .filter_map(|other| panels.docks.heights.get(&other))
-                        .sum();
-                    let height = (total - others - (origin.y - top)).max(LAYERS_LEAST);
-                    ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
-                        group_ui(ui, holder, origin, group, *front, canvas, panels);
-                    });
-                } else {
-                    group_ui(ui, holder, origin, group, *front, canvas, panels);
-                }
-                reached(ui, &mut panels.docks.heights, Some(*front), top);
-            }
-            if let Some(extra) = extra {
-                let top = ui.cursor().min.y;
-                ui.separator();
-                extra(ui);
-                reached(ui, &mut panels.docks.heights, None, top);
-            }
-            let rest = ui.available_rect_before_wrap();
-            if rest.height() > 8.0 {
-                let mut end = Target::end(rest, side);
-                end.hint = false;
-                panels.docks.targets.push(end);
-            }
+                        .filter_map(|group| Some((group.clone(), panels.layout.front(group)?)))
+                        .collect();
+                    let total = ui.available_height();
+                    let below_extra = extra.is_some();
+                    for (index, (group, front)) in groups.iter().enumerate() {
+                        let top = ui.cursor().min.y;
+                        if index > 0 {
+                            ui.separator();
+                        }
+                        let holder = Holder::Area {
+                            side,
+                            first: index == 0,
+                        };
+                        let origin = ui.cursor().min;
+                        let last = index + 1 == groups.len() && !below_extra;
+                        if *front == Panel::Layers && !last {
+                            // The layer list takes the height left, so above other
+                            // groups it gets what they took last frame.
+                            let others: f32 = groups
+                                .iter()
+                                .map(|(_, other)| Some(*other))
+                                .chain(below_extra.then_some(None))
+                                .filter(|other| *other != Some(*front))
+                                .filter_map(|other| panels.docks.heights.get(&other))
+                                .sum();
+                            let height = (total - others - (origin.y - top)).max(LAYERS_LEAST);
+                            ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
+                                group_ui(ui, holder, origin, group, *front, canvas, panels);
+                            });
+                        } else {
+                            group_ui(ui, holder, origin, group, *front, canvas, panels);
+                        }
+                        reached(ui, &mut panels.docks.heights, Some(*front), top);
+                    }
+                    if let Some(extra) = extra {
+                        let top = ui.cursor().min.y;
+                        ui.separator();
+                        extra(ui);
+                        reached(ui, &mut panels.docks.heights, None, top);
+                    }
+                    let rest = ui.available_rect_before_wrap();
+                    if rest.height() > 8.0 {
+                        let mut end = Target::end(rest, side);
+                        end.hint = false;
+                        panels.docks.targets.push(end);
+                    }
+                });
         });
     // Only a width the user dragged to: a window too narrow for the area
     // squeezes it without changing what it goes back to.

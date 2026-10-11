@@ -22,7 +22,7 @@ impl Session {
     /// Copies the selected part of the current layer, as shown: a pending
     /// transform is applied first.
     pub fn copy(&mut self) -> Result<Arc<Clip>, FillError> {
-        self.settle();
+        self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         clip::copy(self.document(), self.layer, selection)
             .map(Arc::new)
@@ -55,7 +55,7 @@ impl Session {
             String,
         ) -> (LayerId, Vec<Change>, Option<Selection>),
     ) -> Result<Outcome, EditError> {
-        self.settle();
+        self.settle()?;
         self.live = None;
         self.lasso = None;
         let (parent, index) = self

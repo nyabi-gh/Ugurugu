@@ -98,7 +98,10 @@ pub enum FileEvent {
     /// A dialog closed: the chosen path, or `None` when cancelled.
     Picked(Purpose, Option<PathBuf>),
     Opened(PathBuf, Result<Opened, String>),
+    /// How save `number` of document `document` ended.
     Saved {
+        number: u64,
+        document: u64,
         path: PathBuf,
         state: StateId,
         result: Result<(), String>,
@@ -109,15 +112,16 @@ pub enum FileEvent {
         path: PathBuf,
         outcome: Outcome,
     },
-    /// An image read to insert, as an asset.
-    Inserted(PathBuf, Result<(AssetId, Asset), String>),
+    /// An image read to insert into document `.1`, as an asset.
+    Inserted(PathBuf, u64, Result<(AssetId, Asset), String>),
     /// A tool preset file read.
     ToolsRead(PathBuf, Result<Vec<u8>, PresetError>),
     ToolsWritten(PathBuf, Result<(), String>),
     /// This window's recovery folder is locked, and the folders of windows
     /// no longer running were found.
     RecoveryBegun(Result<(File, Vec<Found>), String>),
-    RecoveryWritten(Result<(), String>),
+    /// How the recovery write numbered `.0` ended.
+    RecoveryWritten(u64, Result<(), String>),
     /// Work read back from a folder found at start.
     Recovered(Result<Box<Recovered>, String>),
     Update(crate::update::Event),
@@ -177,20 +181,26 @@ pub enum Action {
     Recover,
     /// Installs the downloaded update, which closes the window.
     Update,
+    /// Shows the document read while the one shown was edited.
+    Replace,
 }
 
 enum Job {
     Save {
+        number: u64,
+        /// Which document of the window's it is.
+        generation: u64,
         document: Arc<Document>,
         id: [u8; 16],
         path: PathBuf,
         state: StateId,
     },
     Open(PathBuf),
-    /// Reads an image no larger than `fit`.
+    /// Reads an image no larger than `fit`, for document `generation`.
     Insert {
         path: PathBuf,
         fit: [u32; 2],
+        generation: u64,
     },
     ReadTools(PathBuf),
     WriteTools {
@@ -265,6 +275,9 @@ struct Recovering {
     writing: bool,
     /// Whether the last write failed, so the failure is said once.
     failing: bool,
+    /// Work recovered from another folder, removed once write `.0` or a
+    /// later one is on disk here, or the work is saved or dropped.
+    handoff: Option<(u64, Found)>,
 }
 
 impl Recovering {
@@ -284,9 +297,16 @@ pub struct Files {
     id: [u8; 16],
     /// Asking whether to save before this action.
     confirm: Option<Action>,
-    /// Runs once the save under way succeeds.
-    after_save: Option<Action>,
-    saving: bool,
+    /// Runs once save `.0` succeeds; `None` until that save starts.
+    after_save: Option<(Option<u64>, Action)>,
+    /// Saves started, and how many of them have not ended.
+    saves_started: u64,
+    saving: u32,
+    /// The document being read to open, and how the work shown was then.
+    opening: Option<(u64, Mark)>,
+    /// A document read while the one shown was edited, waiting for the
+    /// question about unsaved changes.
+    opened: Option<(PathBuf, Opened)>,
     busy_dialog: bool,
     /// The default save folder from the settings, `None` for Documents.
     default_save_folder: Option<PathBuf>,
@@ -298,6 +318,8 @@ pub struct Files {
     chosen_export_edge: Option<u32>,
     /// What the status bar says.
     message: Option<String>,
+    /// Whether it says what failed, which goes before progress and notes.
+    failing: bool,
     /// What it says instead from then on, unless something else is said first.
     upcoming: Option<(String, Instant)>,
     close: bool,
@@ -369,13 +391,17 @@ impl Files {
             id: new_id(),
             confirm: None,
             after_save: None,
-            saving: false,
+            saves_started: 0,
+            saving: 0,
+            opening: None,
+            opened: None,
             busy_dialog: false,
             default_save_folder: None,
             chosen_save_folder: None,
             export_edge: None,
             chosen_export_edge: None,
             message: None,
+            failing: false,
             upcoming: None,
             close: false,
             recovery: None,
@@ -415,6 +441,7 @@ impl Files {
             unwritten: None,
             writing: false,
             failing: false,
+            handoff: None,
         });
     }
 
@@ -432,6 +459,10 @@ impl Files {
                 let _ = self
                     .to_worker
                     .send(Job::ForgetRecovery(recovering.folder.clone()));
+            }
+            // Saved, or dropped after asking.
+            if let Some((_, found)) = recovering.handoff.take() {
+                let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
             }
             return;
         }
@@ -469,8 +500,14 @@ impl Files {
         };
         let mark = Mark::of(canvas.session());
         let document = match canvas.session().settled_document() {
-            Some(document) => Arc::new(document),
-            None => canvas.snapshot_now(),
+            Ok(Some(document)) => Arc::new(document),
+            Ok(None) => canvas.snapshot_now(),
+            // Kept in the window until applied or cancelled; the document
+            // cannot hold it.
+            Err(error) => {
+                tracing::warn!(%error, "work pending is not written for recovery");
+                canvas.snapshot_now()
+            }
         };
         recovering.sequence += 1;
         let meta = Meta::new(recovering.sequence, name, path, document.canvas);
@@ -525,6 +562,9 @@ impl Files {
     }
 
     pub fn message(&self) -> Option<&str> {
+        if self.failing {
+            return self.message.as_deref();
+        }
         if self.updates.busy() {
             return Some(tr("update-downloading"));
         }
@@ -542,19 +582,33 @@ impl Files {
             .filter(|from| *from > Instant::now())
     }
 
+    /// Whether the message says what failed.
+    pub fn failing(&self) -> bool {
+        self.failing
+    }
+
     fn say(&mut self, text: String) {
         self.message = Some(text);
+        self.failing = false;
         self.upcoming = None;
+    }
+
+    /// Says what failed, kept until something else is said.
+    fn fail(&mut self, text: String) {
+        self.say(text);
+        self.failing = true;
     }
 
     fn clear_message(&mut self) {
         self.message = None;
+        self.failing = false;
         self.upcoming = None;
     }
 
     /// Says what is under way only if it is still under way after a moment,
     /// so a quick save does not flash its progress.
     fn say_if_slow(&mut self, text: String) {
+        self.failing = false;
         self.upcoming = Some((text, Instant::now() + PROGRESS_DELAY));
     }
 
@@ -571,19 +625,39 @@ impl Files {
             None => self
                 .unsaved_name
                 .clone()
-                .unwrap_or_else(|| "Untitled".to_owned()),
+                .unwrap_or_else(|| tr("untitled").to_owned()),
         }
     }
 
     /// Starts `action`, first asking about unsaved changes.
     pub fn request(&mut self, action: Action, canvas: &mut Canvas) {
-        if self.saving || self.busy_dialog {
+        if self.busy() {
             return;
         }
         if canvas.session().is_dirty() {
             self.confirm = Some(action);
         } else {
             self.proceed(action, canvas);
+        }
+    }
+
+    /// Whether a save, a file dialog or opening a document is under way,
+    /// which what replaces or closes the document waits for.
+    fn busy(&self) -> bool {
+        self.saving > 0 || self.busy_dialog || self.opening.is_some()
+    }
+
+    /// Drops what was to run after the save asked for.
+    fn forget_after_save(&mut self) {
+        if let Some((_, action)) = self.after_save.take() {
+            self.forget(action);
+        }
+    }
+
+    /// Drops what `action` was to show once it is not taken.
+    fn forget(&mut self, action: Action) {
+        if action == Action::Replace {
+            self.opened = None;
         }
     }
 
@@ -606,6 +680,43 @@ impl Files {
                 Ok(()) => self.close = true,
                 Err(error) => tracing::warn!(error, "the update cannot be installed"),
             },
+            Action::Replace => {
+                if let Some((path, opened)) = self.opened.take() {
+                    self.show_opened(path, opened, canvas);
+                }
+            }
+        }
+    }
+
+    /// Shows a document read.
+    fn show_opened(&mut self, path: PathBuf, opened: Opened, canvas: &mut Canvas) {
+        match opened {
+            Opened::Document(document, id) => {
+                canvas.replace(*document, true);
+                self.path = Some(path);
+                self.unsaved_name = None;
+                self.unsaved_from = None;
+                self.id = id;
+                self.clear_message();
+            }
+            // Like 2.2.13's .wawa import: a new document not yet saved,
+            // named after the file, saved as .ugurugu next to it.
+            Opened::Imported(imported) => {
+                let ugu_io::legacy::Imported { document, active } = *imported;
+                canvas.replace(document, false);
+                if let Some(active) = active {
+                    canvas
+                        .edit(|session| session.select_layer(active))
+                        .expect("nothing is pending in a new document");
+                }
+                self.path = None;
+                self.unsaved_name = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned());
+                self.id = new_id();
+                self.say(tr_with("legacy-imported", &args_name(file_name(&path))));
+                self.unsaved_from = Some(path);
+            }
         }
     }
 
@@ -635,14 +746,21 @@ impl Files {
         self.updates.tick(now);
     }
 
-    /// The update question or notice, once nothing else is asked.
-    pub fn ask_update(&mut self, ctx: &egui::Context, asking: bool) {
+    /// The update question or notice, once nothing else is asked, and
+    /// installing the downloaded update once nothing is under way.
+    pub fn ask_update(&mut self, ctx: &egui::Context, asking: bool, canvas: &mut Canvas) {
         let asking = asking || self.asking();
+        if !asking && !self.busy() && self.updates.take_install() {
+            self.request(Action::Update, canvas);
+        }
         self.updates.ask(ctx, asking);
     }
 
-    /// Opens `path` without a dialog, as for a file given at start.
-    pub fn open_path(&mut self, path: PathBuf) {
+    /// Opens `path` without a dialog, as for a file given at start. Edits
+    /// made while it is read are asked about before it is shown.
+    pub fn open_path(&mut self, path: PathBuf, canvas: &Canvas) {
+        self.opening = Some((canvas.generation(), Mark::of(canvas.session())));
+        self.say_if_slow(tr_with("file-opening", &args_name(file_name(&path))));
         let _ = self.to_worker.send(Job::Open(path));
     }
 
@@ -993,7 +1111,10 @@ impl Files {
         if self.exporting.is_some() {
             return;
         }
-        canvas.apply_pending();
+        // What is shown could not be what is exported.
+        if !canvas.apply_pending() {
+            return;
+        }
         self.cancelled.retain(|export| !export.is_finished());
         self.exports += 1;
         let number = self.exports;
@@ -1042,10 +1163,21 @@ impl Files {
     /// Saves with a pending transform or placed text applied, so what is
     /// saved is what is shown and the saved state is the one after it.
     fn start_save(&mut self, path: PathBuf, canvas: &mut Canvas) {
-        canvas.apply_pending();
-        self.saving = true;
-        self.say_if_slow(format!("Saving {}...", path.display()));
+        // Saving without it would leave out what is shown.
+        if !canvas.apply_pending() {
+            self.forget_after_save();
+            return;
+        }
+        self.saves_started += 1;
+        let number = self.saves_started;
+        if let Some((waiting @ None, _)) = self.after_save.as_mut() {
+            *waiting = Some(number);
+        }
+        self.saving += 1;
+        self.say_if_slow(tr_with("file-saving", &args_name(file_name(&path))));
         let _ = self.to_worker.send(Job::Save {
+            number,
+            generation: canvas.generation(),
             document: canvas.snapshot_now(),
             id: self.id,
             path,
@@ -1059,12 +1191,12 @@ impl Files {
             FileEvent::Picked(purpose, path) => {
                 self.busy_dialog = false;
                 let Some(path) = path else {
-                    self.after_save = None;
+                    self.forget_after_save();
                     self.animation_job = None;
                     return;
                 };
                 match purpose {
-                    Purpose::Open => self.open_path(path),
+                    Purpose::Open => self.open_path(path, canvas),
                     Purpose::SaveAs => self.start_save(path, canvas),
                     Purpose::ExportImage => {
                         let frame = canvas.session().frame();
@@ -1077,7 +1209,11 @@ impl Files {
                     }
                     Purpose::InsertImage => {
                         let fit = canvas.session().document().canvas;
-                        let _ = self.to_worker.send(Job::Insert { path, fit });
+                        let _ = self.to_worker.send(Job::Insert {
+                            path,
+                            fit,
+                            generation: canvas.generation(),
+                        });
                     }
                     Purpose::ImportTools => {
                         let _ = self.to_worker.send(Job::ReadTools(path));
@@ -1099,59 +1235,52 @@ impl Files {
                 match taken {
                     Ok((tools, wobble)) => {
                         let applied = canvas.edit(|session| {
-                            session.set_tools(tools);
+                            session.set_tools(tools)?;
                             let document = session.document();
                             let (frames, speed) = (document.frames, document.frames_per_second);
                             session.set_animation(frames, speed, wobble)
                         });
-                        self.say(match applied {
-                            Ok(_) => tr_with("preset-imported", &args_name(file_name(&path))),
-                            Err(error) => failed(&format!("{error:?}")),
-                        });
+                        match applied {
+                            Ok(_) => {
+                                self.say(tr_with("preset-imported", &args_name(file_name(&path))));
+                            }
+                            Err(error) => self.fail(failed(&format!("{error:?}"))),
+                        }
                     }
-                    Err(PresetError::Unreadable(error)) => self.say(failed(&error)),
-                    Err(PresetError::TooLarge) => self.say(failed(tr("preset-too-large"))),
-                    Err(PresetError::NotPreset) => self.say(failed(tr("preset-not-preset"))),
+                    Err(PresetError::Unreadable(error)) => self.fail(failed(&error)),
+                    Err(PresetError::TooLarge) => self.fail(failed(tr("preset-too-large"))),
+                    Err(PresetError::NotPreset) => self.fail(failed(tr("preset-not-preset"))),
                 }
             }
-            FileEvent::ToolsWritten(path, result) => self.say(match result {
-                Ok(()) => tr_with("preset-exported", &args_name(file_name(&path))),
-                Err(error) => format!("{}: {error}", tr("preset-export-failed")),
-            }),
-            FileEvent::Opened(path, result) => match result {
-                Ok(Opened::Document(document, id)) => {
-                    canvas.replace(*document, true);
-                    self.path = Some(path);
-                    self.unsaved_name = None;
-                    self.unsaved_from = None;
-                    self.id = id;
-                    self.clear_message();
-                }
-                // Like 2.2.13's .wawa import: a new document not yet saved,
-                // named after the file, saved as .ugurugu next to it.
-                Ok(Opened::Imported(imported)) => {
-                    let ugu_io::legacy::Imported { document, active } = *imported;
-                    canvas.replace(document, false);
-                    if let Some(active) = active {
-                        canvas.edit(|session| session.select_layer(active));
-                    }
-                    self.path = None;
-                    self.unsaved_name = path
-                        .file_stem()
-                        .map(|stem| stem.to_string_lossy().into_owned());
-                    self.id = new_id();
-                    self.say(tr_with("legacy-imported", &args_name(file_name(&path))));
-                    self.unsaved_from = Some(path);
-                }
-                Err(error) => self.say(format!("{}: {error}", path.display())),
+            FileEvent::ToolsWritten(path, result) => match result {
+                Ok(()) => self.say(tr_with("preset-exported", &args_name(file_name(&path)))),
+                Err(error) => self.fail(format!("{}: {error}", tr("preset-export-failed"))),
             },
-            FileEvent::Inserted(path, result) => match result {
+            FileEvent::Opened(path, result) => {
+                let edited = self.opening.take().is_some_and(|(generation, mark)| {
+                    generation != canvas.generation() || mark != Mark::of(canvas.session())
+                }) && canvas.session().is_dirty();
+                match result {
+                    // Unsaved changes were asked about before it was read,
+                    // not about these.
+                    Ok(opened) if edited => {
+                        self.clear_message();
+                        self.opened = Some((path, opened));
+                        self.confirm = Some(Action::Replace);
+                    }
+                    Ok(opened) => self.show_opened(path, opened, canvas),
+                    Err(error) => self.fail(format!("{}: {error}", path.display())),
+                }
+            }
+            // An image read for a document no longer shown.
+            FileEvent::Inserted(_, generation, _) if generation != canvas.generation() => {}
+            FileEvent::Inserted(path, _, result) => match result {
                 Ok((id, asset)) => {
                     canvas.place_image(id, asset);
                     self.say(tr_with("image-inserted", &args_name(file_name(&path))));
                 }
                 Err(error) => {
-                    self.say(format!("{}: {error}", tr("insert-image-failed")));
+                    self.fail(format!("{}: {error}", tr("insert-image-failed")));
                 }
             },
             FileEvent::Exported {
@@ -1168,30 +1297,57 @@ impl Files {
                     return;
                 }
                 self.exporting = None;
-                self.say(match outcome {
-                    Outcome::Done => tr_with("export-done", &args_path(&path)),
-                    Outcome::Cancelled => tr("export-canceled").to_owned(),
-                    Outcome::Failed(error) => format!("{}: {error}", tr("export-failed")),
-                });
+                match outcome {
+                    Outcome::Done => self.say(tr_with("export-done", &args_path(&path))),
+                    Outcome::Cancelled => self.say(tr("export-canceled").to_owned()),
+                    Outcome::Failed(error) => {
+                        self.fail(format!("{}: {error}", tr("export-failed")));
+                    }
+                }
             }
             FileEvent::Saved {
+                number,
+                document,
                 path,
                 state,
                 result,
             } => {
-                self.saving = false;
+                self.saving = self.saving.saturating_sub(1);
+                let after = match self.after_save {
+                    Some((Some(waiting), action)) if waiting == number => {
+                        self.after_save = None;
+                        Some(action)
+                    }
+                    _ => None,
+                };
+                let shown = document == canvas.generation();
                 match result {
                     Ok(()) => {
-                        canvas.mark_saved(state);
-                        self.say(format!("Saved {}", path.display()));
-                        self.path = Some(path);
-                        if let Some(action) = self.after_save.take() {
-                            self.proceed(action, canvas);
+                        self.say(tr_with("file-saved", &args_name(file_name(&path))));
+                        // A document no longer shown keeps neither the path
+                        // nor the saved state.
+                        if shown {
+                            canvas.mark_saved(state);
+                            self.path = Some(path);
+                        }
+                        match after {
+                            // What was edited while it saved is not saved.
+                            Some(action) if shown && canvas.session().is_dirty() => {
+                                self.confirm = Some(action);
+                            }
+                            Some(action) if shown => self.proceed(action, canvas),
+                            Some(action) => self.forget(action),
+                            None => {}
                         }
                     }
                     Err(error) => {
-                        self.after_save = None;
-                        self.say(format!("Not saved: {error}"));
+                        if let Some(action) = after {
+                            self.forget(action);
+                        }
+                        self.fail(tr_with(
+                            "file-not-saved",
+                            &crate::i18n::args([("error", error)]),
+                        ));
                     }
                 }
             }
@@ -1205,31 +1361,38 @@ impl Files {
                 Err(error) => {
                     tracing::error!(%error, "cannot start automatic recovery");
                     self.recovery = None;
-                    self.say(tr("recovery-not-saving").to_owned());
+                    self.fail(tr("recovery-not-saving").to_owned());
                 }
             },
-            FileEvent::RecoveryWritten(result) => {
+            FileEvent::RecoveryWritten(sequence, result) => {
                 let Some(recovering) = self.recovery.as_mut() else {
                     return;
                 };
                 recovering.writing = false;
                 match result {
-                    Ok(()) => recovering.failing = false,
+                    Ok(()) => {
+                        recovering.failing = false;
+                        if recovering
+                            .handoff
+                            .as_ref()
+                            .is_some_and(|(written, _)| *written <= sequence)
+                            && let Some((_, found)) = recovering.handoff.take()
+                        {
+                            let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
+                        }
+                    }
                     Err(error) => {
                         tracing::error!(%error, "cannot write the work for recovery");
                         // Tried again once the work changes.
                         recovering.written = None;
                         if !std::mem::replace(&mut recovering.failing, true) {
-                            self.say(tr("recovery-not-saving").to_owned());
+                            self.fail(tr("recovery-not-saving").to_owned());
                         }
                     }
                 }
             }
-            FileEvent::Update(event) => {
-                if self.updates.handle(event) == crate::update::Next::Install {
-                    self.request(Action::Update, canvas);
-                }
-            }
+            // Installed from `ask_update` once nothing is under way.
+            FileEvent::Update(event) => self.updates.handle(event),
             FileEvent::Recovered(result) => {
                 self.reading_found = false;
                 match result {
@@ -1250,11 +1413,19 @@ impl Files {
                         });
                         self.unsaved_from = meta.path;
                         self.say(tr("recovery-done").to_owned());
-                        // In this window's folder before the other one goes.
+                        // In this window's folder before the other one goes,
+                        // which stays until it is.
                         self.write_recovery(canvas);
-                        let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
+                        if let Some(recovering) = self.recovery.as_mut() {
+                            let earlier = recovering.handoff.replace((recovering.sequence, found));
+                            // Replaced after asking about unsaved changes.
+                            if let Some((_, earlier)) = earlier {
+                                let _ =
+                                    self.to_worker.send(Job::DiscardRecovery(Box::new(earlier)));
+                            }
+                        }
                     }
-                    Err(error) => self.say(format!("{}: {error}", tr("recovery-failed"))),
+                    Err(error) => self.fail(format!("{}: {error}", tr("recovery-failed"))),
                 }
             }
         }
@@ -1273,7 +1444,7 @@ impl Files {
     /// The question about work left by a window no longer running, while
     /// there is some and nothing else is asked.
     pub fn ask_recovery(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {
-        if self.confirm.is_some() || self.reading_found || self.busy_dialog || self.saving {
+        if self.confirm.is_some() || self.reading_found || self.busy() {
             return;
         }
         let Some(found) = self.found.front() else {
@@ -1359,11 +1530,12 @@ impl Files {
         });
         if cancel || modal.should_close() {
             self.confirm = None;
+            self.forget(action);
         }
         match choice {
             Some(true) => {
                 self.confirm = None;
-                self.after_save = Some(action);
+                self.after_save = Some((None, action));
                 self.save(canvas);
             }
             Some(false) => {
@@ -1378,6 +1550,8 @@ impl Files {
 fn run(job: Job) -> Option<FileEvent> {
     Some(match job {
         Job::Save {
+            number,
+            generation,
             document,
             id,
             path,
@@ -1393,6 +1567,8 @@ fn run(job: Job) -> Option<FileEvent> {
                 "document saved"
             );
             FileEvent::Saved {
+                number,
+                document: generation,
                 path,
                 state,
                 result,
@@ -1411,19 +1587,24 @@ fn run(job: Job) -> Option<FileEvent> {
                 .map_err(|error| error.to_string());
             FileEvent::ToolsWritten(path, result)
         }
-        Job::Insert { path, fit } => {
+        Job::Insert {
+            path,
+            fit,
+            generation,
+        } => {
             let started = std::time::Instant::now();
-            let result = std::fs::read(&path)
+            let result = File::open(&path)
                 .map_err(|error| error.to_string())
-                .and_then(|bytes| {
-                    ugu_io::import::decode(&bytes, fit).map_err(|error| error.to_string())
+                .and_then(|file| {
+                    ugu_io::import::decode(std::io::BufReader::with_capacity(1 << 20, file), fit)
+                        .map_err(|error| error.to_string())
                 });
             tracing::info!(
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 ok = result.is_ok(),
                 "image read to insert"
             );
-            FileEvent::Inserted(path, result)
+            FileEvent::Inserted(path, generation, result)
         }
         Job::Open(path) => {
             let started = std::time::Instant::now();
@@ -1452,7 +1633,7 @@ fn run(job: Job) -> Option<FileEvent> {
                 sequence = meta.sequence,
                 "work written for recovery"
             );
-            FileEvent::RecoveryWritten(result)
+            FileEvent::RecoveryWritten(meta.sequence, result)
         }
         Job::ForgetRecovery(folder) => {
             if let Err(error) = recovery::forget(&folder) {
@@ -1511,7 +1692,10 @@ mod tests {
     #[test]
     fn a_new_document_closes_without_asking_until_edited() {
         let (mut files, mut canvas, _events) = setup();
-        assert_eq!(files.title(&canvas), "Untitled - Ugurugu");
+        assert_eq!(
+            files.title(&canvas),
+            format!("{} - Ugurugu", tr("untitled"))
+        );
         files.request(Action::Close, &mut canvas);
         assert!(files.should_close());
         files.close = false;
@@ -1531,6 +1715,14 @@ mod tests {
         events
             .recv_timeout(Duration::from_secs(10))
             .expect("the file thread answers")
+    }
+
+    /// What a failed save says before the reason.
+    pub(super) fn not_saved() -> String {
+        tr_with(
+            "file-not-saved",
+            &crate::i18n::args([("error", String::new())]),
+        )
     }
 
     fn folder(name: &str) -> PathBuf {
@@ -1563,7 +1755,10 @@ mod tests {
         // An edit while the file thread writes.
         canvas.edit(Session::add_layer).unwrap();
         files.handle(next(&events), &mut canvas);
-        assert!(files.message().unwrap().starts_with("Saved"));
+        assert_eq!(
+            files.message(),
+            Some(tr_with("file-saved", &args_name("drawing.ugurugu".to_owned())).as_str())
+        );
         assert_eq!(layers_in(&path), 2);
         assert_eq!(canvas.session().document().layers.len(), 3);
         assert!(canvas.session().is_dirty());
@@ -1576,7 +1771,7 @@ mod tests {
     fn a_pending_transform_is_applied_before_saving_and_asked_about_before_replacing() {
         let (mut files, mut canvas, events) = setup();
         let path = folder("pending").join("drawing.ugurugu");
-        canvas.edit(Session::select_all);
+        canvas.edit(Session::select_all).unwrap();
         canvas.begin_transform();
         canvas.edit(|session| session.set_transform(ugu_core::ops::Affine::translation(10.0, 0.0)));
         assert!(canvas.session().is_dirty());
@@ -1605,7 +1800,7 @@ mod tests {
         let (mut files, mut canvas, events) = setup();
         let path = folder("placed-text").join("drawing.ugurugu");
         canvas.edit(|session| {
-            session.set_tool(ugu_session::Tool::Text);
+            session.set_tool(ugu_session::Tool::Text).unwrap();
             session.text_content = "Ug".to_owned();
         });
         canvas.edit(|session| {
@@ -1645,7 +1840,7 @@ mod tests {
             let mut tools = session.tools();
             tools.tool = Tool::Fill;
             tools.fill.tolerance = 40;
-            session.set_tools(tools);
+            session.set_tools(tools).unwrap();
             let document = session.document();
             let (frames, speed) = (document.frames, document.frames_per_second);
             session.set_animation(frames, speed, wobble).unwrap();
@@ -1751,11 +1946,11 @@ mod tests {
                 .join("no such folder")
                 .join("drawing.ugurugu"),
         );
-        files.after_save = Some(Action::New);
+        files.after_save = Some((None, Action::New));
         files.save(&mut canvas);
         files.handle(next(&events), &mut canvas);
         assert!(canvas.session().is_dirty());
-        assert!(files.message().unwrap().starts_with("Not saved"));
+        assert!(files.message().unwrap().starts_with(&not_saved()));
         // The new document that waited for the save did not replace this one.
         assert_eq!(canvas.session().document().layers.len(), 2);
     }
@@ -1800,12 +1995,12 @@ mod tests {
         )
         .unwrap();
 
-        files.open_path(airbrush_file);
+        files.open_path(airbrush_file, &canvas);
         files.handle(next(&events), &mut canvas);
         assert!(files.message().is_none());
         assert_eq!(canvas.session().document().store.strokes.len(), 1);
 
-        files.open_path(good.clone());
+        files.open_path(good.clone(), &canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.session().document().frames, 12);
         assert!(!canvas.session().is_dirty());
@@ -1820,7 +2015,7 @@ mod tests {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ugu13");
         let project = folder.join("edit.ugu");
         std::fs::copy(fixtures.join("edit.ugu"), &project).unwrap();
-        files.open_path(project.clone());
+        files.open_path(project.clone(), &canvas);
         files.handle(next(&events), &mut canvas);
         let session = canvas.session();
         assert_eq!(session.document().canvas, [300, 225]);
@@ -1839,7 +2034,7 @@ mod tests {
 
         let refused = folder.join("procedural.ugu");
         std::fs::copy(fixtures.join("procedural.ugu"), &refused).unwrap();
-        files.open_path(refused);
+        files.open_path(refused, &canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.session().document().canvas, [300, 225]);
         assert!(
@@ -2000,6 +2195,9 @@ mod end_to_end;
 
 #[cfg(test)]
 mod recovering;
+
+#[cfg(test)]
+mod late;
 
 /// Removes what a window killed while writing `path` left beside it.
 pub fn remove_stale_temporaries(path: &Path) {

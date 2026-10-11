@@ -36,14 +36,6 @@ pub enum Found {
     NotInstalled,
 }
 
-/// What the window does after an event or a dialog.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Next {
-    Nothing,
-    /// The update is downloaded: deal with unsaved changes, then `apply`.
-    Install,
-}
-
 pub struct Updates {
     automatic: bool,
     /// Seconds since 1970 of the last check that finished.
@@ -54,6 +46,9 @@ pub struct Updates {
     downloading: bool,
     offer: Option<Box<UpdateInfo>>,
     ready: Option<Box<UpdateInfo>>,
+    /// The downloaded update waits for the window to deal with unsaved
+    /// changes, then `apply`.
+    install: bool,
     /// A title and a text to show until dismissed.
     notice: Option<(String, String)>,
     events: Arc<dyn Fn(Event) + Send + Sync>,
@@ -105,6 +100,7 @@ impl Updates {
             downloading: false,
             offer: None,
             ready: None,
+            install: false,
             notice: None,
             events: Arc::new(events),
         }
@@ -147,9 +143,14 @@ impl Updates {
         self.downloading
     }
 
-    /// Checks now; `interactive` shows the result whatever it is.
+    /// Checks now; `interactive` shows the result whatever it is. With an
+    /// update downloaded and not installed, asks to install it again.
     pub fn check(&mut self, interactive: bool) {
-        if self.downloading || self.offer.is_some() || self.ready.is_some() {
+        if self.ready.is_some() {
+            self.install |= interactive;
+            return;
+        }
+        if self.downloading || self.offer.is_some() {
             return;
         }
         if let Some(shows) = self.checking.as_mut() {
@@ -167,7 +168,12 @@ impl Updates {
         }
     }
 
-    pub fn handle(&mut self, event: Event) -> Next {
+    /// Whether the downloaded update is to be installed now, once.
+    pub fn take_install(&mut self) -> bool {
+        std::mem::take(&mut self.install)
+    }
+
+    pub fn handle(&mut self, event: Event) {
         match event {
             Event::Checked(result) => {
                 let interactive = self.checking.take().unwrap_or(false);
@@ -208,14 +214,13 @@ impl Updates {
                         }
                     }
                 }
-                Next::Nothing
             }
             Event::Downloaded(result) => {
                 self.downloading = false;
                 match result {
                     Ok(update) => {
                         self.ready = Some(update);
-                        Next::Install
+                        self.install = true;
                     }
                     Err(error) => {
                         tracing::warn!(error, "update download failed");
@@ -223,7 +228,6 @@ impl Updates {
                             tr("update-failed").to_owned(),
                             format!("{}\n\n{error}", tr("update-download-failed")),
                         ));
-                        Next::Nothing
                     }
                 }
             }
@@ -250,15 +254,17 @@ impl Updates {
 
     /// Hands the downloaded update to Velopack's updater, which installs it
     /// once this process has ended and starts the new version. The window
-    /// must close at once after: the updater waits a minute at most.
+    /// must close at once after: the updater waits a minute at most. One
+    /// that fails stays downloaded, to try again.
     pub fn apply(&mut self) -> Result<(), String> {
-        let Some(update) = self.ready.take() else {
+        let Some(update) = self.ready.as_deref() else {
             return Err("no update is downloaded".to_owned());
         };
         manager()
             .and_then(|manager| {
-                manager.wait_exit_then_apply_updates(&*update, false, true, Vec::<String>::new())
+                manager.wait_exit_then_apply_updates(update, false, true, Vec::<String>::new())
             })
+            .map(|()| self.ready = None)
             .map_err(|error| {
                 let error = error.to_string();
                 self.notice = Some((
@@ -341,8 +347,7 @@ mod tests {
         updates.checking = Some(false);
         updates.check(true);
         assert_eq!(updates.checking, Some(true));
-        let next = updates.handle(Event::Checked(Ok(Found::Latest("3.0.0".to_owned()))));
-        assert_eq!(next, Next::Nothing);
+        updates.handle(Event::Checked(Ok(Found::Latest("3.0.0".to_owned()))));
         assert!(updates.notice.is_some());
         assert!(updates.checked.is_some());
     }
@@ -367,6 +372,21 @@ mod tests {
         assert!(updates.due.is_none());
         updates.follow(true, Some(now_seconds()));
         assert!(updates.due.is_none());
+    }
+
+    #[test]
+    fn a_downloaded_update_not_installed_is_asked_about_again() {
+        let mut updates = Updates::new(|_| panic!("nothing runs in the background"));
+        updates.handle(Event::Downloaded(Ok(Box::default())));
+        assert!(updates.take_install());
+        // Not installed then: the window was busy, or the user cancelled.
+        assert!(!updates.take_install());
+        updates.check(false);
+        assert!(!updates.take_install());
+        updates.check(true);
+        assert!(updates.take_install());
+        assert!(updates.ready.is_some());
+        assert!(updates.checking.is_none());
     }
 
     #[test]

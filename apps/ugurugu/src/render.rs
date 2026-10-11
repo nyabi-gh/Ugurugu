@@ -342,9 +342,6 @@ impl RenderThread {
                     let _ = to_self.send(ToRender::File(Box::new(event)));
                 });
                 files.start_recovery(crate::recovery::default_root());
-                if let Some(path) = open_at_start {
-                    files.open_path(path);
-                }
                 files
             },
             settings,
@@ -366,6 +363,9 @@ impl RenderThread {
             &mut render.files,
             &mut render.panels,
         );
+        if let Some(path) = open_at_start {
+            render.files.open_path(path, &render.canvas);
+        }
         Ok(render)
     }
 
@@ -693,7 +693,7 @@ impl RenderThread {
         let warning = display
             .gpu
             .is_software()
-            .then_some("No usable GPU: drawing with the slow software display");
+            .then(|| crate::i18n::tr("gpu-software"));
         let sample_count = canvas.sample_count();
         let mut remove_device = false;
         let mut shown = None;

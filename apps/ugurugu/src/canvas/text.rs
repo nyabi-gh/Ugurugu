@@ -180,16 +180,17 @@ impl Canvas {
         let _ = self.session.place_text(at, outline);
     }
 
-    pub fn apply_text(&mut self) {
+    /// Whether no text is left placed.
+    pub fn apply_text(&mut self) -> bool {
         if self.session.placed_text().is_none() {
-            return;
+            return true;
         }
         let started = Instant::now();
         self.notice = match self.edit(Session::apply_text) {
             Ok(Outcome::Committed(_)) => {
                 tracing::info!(
                     ms = started.elapsed().as_secs_f64() * 1000.0,
-                    text = ?self.session.text_content,
+                    chars = self.session.text_content.chars().count(),
                     "text applied"
                 );
                 None
@@ -197,6 +198,7 @@ impl Canvas {
             Ok(Outcome::NoChange) => Some(tr("text-empty").to_owned()),
             Err(error) => Some(format!("The text was not added: {error}")),
         };
+        self.session.placed_text().is_none()
     }
 
     pub fn cancel_text(&mut self) {

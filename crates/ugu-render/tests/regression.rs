@@ -190,10 +190,10 @@ fn merge() -> (Document, Document) {
     for y in [30.0, 60.0, 90.0] {
         line(&mut session, [10.0, y], [150.0, y]);
     }
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     session.eraser.width = 14.0;
     line(&mut session, [40.0, 10.0], [40.0, 110.0]);
-    session.set_tool(Tool::Pen);
+    session.set_tool(Tool::Pen).unwrap();
     session.add_layer().expect("valid");
     let upper = session.current_layer();
     session
@@ -208,7 +208,7 @@ fn merge() -> (Document, Document) {
     for x in [60.0, 100.0, 130.0] {
         line(&mut session, [x, 10.0], [x, 110.0]);
     }
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     line(&mut session, [10.0, 60.0], [150.0, 60.0]);
     let separate = session.document().clone();
     session.merge_down().expect("mergeable");
@@ -236,10 +236,10 @@ fn erase() -> Document {
     session.pen.width = 10.0;
     line(&mut session, [10.0, 40.0], [150.0, 40.0]);
     line(&mut session, [10.0, 80.0], [150.0, 80.0]);
-    session.set_tool(Tool::Eraser);
+    session.set_tool(Tool::Eraser).unwrap();
     session.eraser.width = 20.0;
     line(&mut session, [80.0, 15.0], [80.0, 105.0]);
-    session.set_tool(Tool::Pen);
+    session.set_tool(Tool::Pen).unwrap();
     session.pen.color = BLUE;
     session.pen.width = 12.0;
     line(&mut session, [10.0, 60.0], [150.0, 60.0]);
@@ -281,7 +281,7 @@ fn pending() -> Document {
     session.set_keep_source(true);
     session.pen.color = BLUE;
     line(&mut session, [10.0, 60.0], [150.0, 75.0]);
-    session.set_tool(Tool::Text);
+    session.set_tool(Tool::Text).unwrap();
     session.text.filled = true;
     let outline = Outline {
         contours: vec![
@@ -293,7 +293,7 @@ fn pending() -> Document {
     session
         .place_text([80.0, 30.0], Arc::new(outline))
         .expect("paintable");
-    session.set_tool(Tool::Pen);
+    session.set_tool(Tool::Pen).unwrap();
     session.document().clone()
 }
 
@@ -346,7 +346,7 @@ fn canvas() -> Document {
     );
     session.pen.color = Rgba8([0, 160, 60, 255]);
     session.fill_selection().expect("a selection");
-    session.deselect();
+    session.deselect().unwrap();
     session.crop_canvas([-10, -5], [150, 110]).expect("valid");
     session.pen.color = BLUE;
     line(&mut session, [5.0, 100.0], [145.0, 10.0]);

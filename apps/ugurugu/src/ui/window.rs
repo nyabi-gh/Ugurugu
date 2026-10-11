@@ -28,7 +28,7 @@ pub struct Parts<'a> {
     pub panels: &'a mut Panels,
     /// Chords egui turns into clipboard events (see `shortcuts`).
     pub typed: &'a [Chord],
-    /// Shown in the status bar in place of messages.
+    /// Shown in the status bar beside messages, as it lasts.
     pub warning: Option<&'a str>,
     /// A diagnostics row under the status bar.
     pub diagnostics: Option<&'a mut dyn FnMut(&mut egui::Ui)>,
@@ -64,7 +64,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     files.confirm(ui.ctx(), canvas);
     files.ask_recovery(ui.ctx(), canvas);
     let telling = crate::logs::tell_about_crashes(ui.ctx(), files.asking());
-    files.ask_update(ui.ctx(), telling);
+    files.ask_update(ui.ctx(), telling, canvas);
     files.ask_animation(ui.ctx(), canvas);
     files.ask_new_document(ui.ctx(), canvas);
     super::dialogs(ui.ctx(), canvas, files, settings, panels, typed);
@@ -88,7 +88,11 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .frame(bar(theme::STATUS, 8, 2))
         .show_separator_line(false)
         .show(ui, |ui| {
-            let message = warning
+            // What failed first, then what was refused; the slow display is
+            // said beside them, as it lasts.
+            let message = files
+                .message()
+                .filter(|_| files.failing())
                 .or(canvas.notice())
                 .map(|text| (text, true))
                 .or(files.message().map(|text| (text, false)));
@@ -107,6 +111,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
                 ui,
                 canvas,
                 message.as_ref().map(|(text, warn)| (text.as_str(), *warn)),
+                warning,
                 export.as_deref(),
                 pointer,
                 &panels.keys,
@@ -160,4 +165,123 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     super::dock_floating(ui, canvas, panels);
     super::actions::end_frame(ui.ctx());
     Shown { canvas_area, ants }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use egui::accesskit::{NodeId, Rect, Role};
+
+    use super::*;
+
+    /// The controls in the frame, and where they are.
+    fn controls(output: &egui::FullOutput) -> HashMap<NodeId, Rect> {
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the frame describes itself");
+        tree.nodes
+            .iter()
+            .filter(|(_, node)| {
+                matches!(
+                    node.role(),
+                    Role::Button
+                        | Role::CheckBox
+                        | Role::ComboBox
+                        | Role::Slider
+                        | Role::TextInput
+                        | Role::SpinButton
+                )
+            })
+            .filter_map(|(id, node)| Some((*id, node.bounds()?)))
+            .collect()
+    }
+
+    #[test]
+    fn every_control_of_the_default_panels_can_be_scrolled_to_in_a_low_window() {
+        for [width, height] in [
+            [1600.0, 900.0],
+            [1280.0, 720.0],
+            [960.0, 540.0],
+            [800.0, 600.0],
+        ] {
+            let ctx = egui::Context::default();
+            theme::apply(&ctx);
+            ctx.enable_accesskit();
+            let mut canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
+            let mut files = Files::new(0, |_| {});
+            let mut clipboard = Clipboard::new(|_| {});
+            let mut settings = Store::open(None);
+            let mut panels = Panels::default();
+            let mut frame = |events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, height),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                };
+                let mut area = [0; 4];
+                let output = ctx.run_ui(input, |ui| {
+                    area = window(
+                        ui,
+                        Parts {
+                            canvas: &mut canvas,
+                            files: &mut files,
+                            clipboard: &mut clipboard,
+                            settings: &mut settings,
+                            panels: &mut panels,
+                            typed: &[],
+                            warning: None,
+                            diagnostics: None,
+                            probe: None,
+                        },
+                    )
+                    .canvas_area;
+                });
+                (output, area)
+            };
+            let (mut output, mut area) = frame(Vec::new());
+            for _ in 0..2 {
+                (output, area) = frame(Vec::new());
+            }
+            let below: Vec<NodeId> = controls(&output)
+                .into_iter()
+                .filter(|(_, bounds)| bounds.y1 > f64::from(height))
+                .map(|(id, _)| id)
+                .collect();
+            // The wheel over the foot of each area.
+            let y = area[3] as f32 - 20.0;
+            for x in [(48 + area[0]) as f32 / 2.0, (area[2] as f32 + width) / 2.0] {
+                for _ in 0..6 {
+                    (output, _) = frame(vec![
+                        egui::Event::PointerMoved(egui::pos2(x, y)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -400.0),
+                            phase: egui::TouchPhase::Move,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]);
+                }
+            }
+            for _ in 0..2 {
+                (output, _) = frame(Vec::new());
+            }
+            let now = controls(&output);
+            for id in below {
+                let bounds = now[&id];
+                assert!(
+                    bounds.y0 >= 0.0 && bounds.y1 <= f64::from(height),
+                    "{width}×{height}: a control stays out of reach at {bounds:?}"
+                );
+            }
+            drop(frame);
+            files.end();
+        }
+    }
 }

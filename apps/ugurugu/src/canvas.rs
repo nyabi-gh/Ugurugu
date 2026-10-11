@@ -257,7 +257,9 @@ impl Canvas {
         // The tools stay as they were, as in 2.2.13.
         let tools = self.session.tools();
         self.session = Session::new(document, saved);
-        self.session.set_tools(tools);
+        self.session
+            .set_tools(tools)
+            .expect("nothing is pending in a new session");
         self.generation += 1;
         self.split = None;
         self.preview = None;
@@ -339,6 +341,11 @@ impl Canvas {
 
     pub fn sample_count(&self) -> usize {
         self.sample_count
+    }
+
+    /// Which document is shown, counting each one that replaced another.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn notice(&self) -> Option<&str> {
@@ -555,7 +562,9 @@ impl Canvas {
         }
         // Playing moves through frames, which applies a pending transform or
         // placed text.
-        self.apply_pending();
+        if !self.apply_pending() {
+            return;
+        }
         // Stopping asks for a split of the frame it stops on. Until then the
         // old one's layer surfaces would only keep the renderer from reusing
         // them for playback.
@@ -651,7 +660,11 @@ impl Canvas {
                 "playback frame shown"
             );
             let next = playback.next;
-            self.session.set_frame(next - 1);
+            if self.session.set_frame(next - 1).is_err() {
+                self.notice = Some(tr("restyle-pending").to_owned());
+                self.stop_playback();
+                return None;
+            }
             self.upload_all();
         }
         Some(wake)
@@ -956,13 +969,24 @@ impl Canvas {
         self.stop_playback();
         // The eraser end of a pen erases whatever tool is chosen.
         let tool = self.session.tool();
-        if kind == PointerKind::Pen && sample.inverted {
-            self.session.set_tool(Tool::Eraser);
-        }
-        let begun = self.session.begin_stroke(self.input_point(sample));
-        self.session.set_tool(tool);
+        let point = self.input_point(sample);
+        let begun = if kind == PointerKind::Pen && sample.inverted {
+            self.session
+                .set_tool(Tool::Eraser)
+                .map_err(|_| StrokeRefused::Pending)
+                .and_then(|()| self.session.begin_stroke(point))
+        } else {
+            self.session.begin_stroke(point)
+        };
+        // Nothing is pending once a stroke begins, nor was the tool changed
+        // if something was, so changing it back cannot fail.
+        let _ = self.session.set_tool(tool);
         match begun {
             Ok(()) => {}
+            Err(StrokeRefused::Pending) => {
+                self.notice = Some(tr("restyle-pending").to_owned());
+                return;
+            }
             Err(StrokeRefused::HiddenLayer) => {
                 self.notice = Some("The current layer is hidden".to_owned());
                 return;
@@ -1386,7 +1410,7 @@ mod tests {
                 let _ = to_test.send(rendered);
             });
             canvas.scale = 0.5;
-            canvas.edit(|session| session.set_tool(tool));
+            canvas.edit(|session| session.set_tool(tool)).unwrap();
             canvas.toggle_playback();
             let mut now = Instant::now();
             while canvas.display().width() != 160 {
@@ -1499,21 +1523,21 @@ mod tests {
         });
         settle(&mut canvas, &renders);
 
-        canvas.session.set_tool(Tool::Wand);
+        canvas.session.set_tool(Tool::Wand).unwrap();
         canvas.click_area([160.0, 100.0]);
         let from_split = canvas
             .session()
             .selection()
             .cloned()
             .expect("the box's inside");
-        canvas.edit(Session::deselect);
+        canvas.edit(Session::deselect).unwrap();
         canvas.split = None;
         canvas.click_area([160.0, 100.0]);
         assert_eq!(canvas.session().selection(), Some(&from_split));
-        canvas.edit(Session::deselect);
+        canvas.edit(Session::deselect).unwrap();
         settle(&mut canvas, &renders);
 
-        canvas.session.set_tool(Tool::Fill);
+        canvas.session.set_tool(Tool::Fill).unwrap();
         canvas.session.pen.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
         canvas.click_area([160.0, 100.0]);
         assert_eq!(canvas.notice(), None);
@@ -1717,7 +1741,7 @@ mod tests {
             };
             session.begin_stroke(point([20.0, 150.0], 0.0)).unwrap();
             session.end_stroke(point([300.0, 60.0], 100.0)).unwrap();
-            session.set_tool(Tool::Text);
+            session.set_tool(Tool::Text).unwrap();
             session.pen.width = 3.0;
         });
         canvas.set_text(|text, settings| {
@@ -1939,7 +1963,9 @@ mod tests {
         assert_eq!(pen(&canvas), white);
 
         // Alt with the selection tool takes away instead.
-        canvas.edit(|session| session.set_tool(Tool::Select));
+        canvas
+            .edit(|session| session.set_tool(Tool::Select))
+            .unwrap();
         canvas.apply(draw(press(150.0, 100.0)));
         assert!(matches!(canvas.interaction, Interaction::Selecting));
         canvas.apply(CanvasInput::Cancel);
@@ -1948,7 +1974,9 @@ mod tests {
         // The eyedropper needs no Alt, and reads the frame shown during
         // playback, drawn smaller.
         canvas.set_modifiers(false, false);
-        canvas.edit(|session| session.set_tool(Tool::Eyedropper));
+        canvas
+            .edit(|session| session.set_tool(Tool::Eyedropper))
+            .unwrap();
         canvas.apply(draw(press(150.0, 100.0)));
         canvas.apply(CanvasInput::End(press(150.0, 100.0)));
         assert_eq!(pen(&canvas), red);
