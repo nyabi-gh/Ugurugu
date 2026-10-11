@@ -579,7 +579,7 @@ impl DocumentRenderer {
         work.sort_by_key(|each| !draws_in_runs(&each.paint.ops));
         let alone = work.partition_point(|each| draws_in_runs(&each.paint.ops));
         let together = work.len() - alone;
-        if together >= self.threads && self.threads > 1 {
+        if together >= 2 && self.threads > 1 {
             self.draw_one_by_one(document, &mut work[..alone], frame, shrink);
             if !self.stopped() {
                 self.draw_at_once(document, &mut work[alone..], frame, shrink);
@@ -669,8 +669,12 @@ impl DocumentRenderer {
         }
     }
 
-    /// Draws each layer on one thread, as many layers at once as there are
-    /// threads.
+    /// Draws each layer on one thread, as many at once as there are threads.
+    /// With fewer layers than threads, draws up to `AT_ONCE` at a time and
+    /// shares the threads among them: Vello encodes a layer's paths on one
+    /// thread, so a layer alone on every thread waits on that, and a layer
+    /// on a single thread leaves the others waiting for the slowest
+    /// (docs/rust/m6-plan.md M6-14).
     fn draw_at_once(
         &mut self,
         document: &Document,
@@ -678,8 +682,24 @@ impl DocumentRenderer {
         frame: u32,
         shrink: u32,
     ) {
-        while self.singles.len() < self.threads {
-            self.singles.push(Raster::new(self.level, 0));
+        let groups = if work.len() >= self.threads {
+            self.threads
+        } else {
+            AT_ONCE.min(work.len())
+        };
+        let shares: Vec<usize> = (0..groups)
+            .map(|index| self.threads / groups + usize::from(index < self.threads % groups))
+            .collect();
+        if !self
+            .singles
+            .iter()
+            .map(|raster| raster.threads)
+            .eq(shares.iter().copied())
+        {
+            self.singles = shares
+                .iter()
+                .map(|&share| Raster::new(self.level, if share == 1 { 0 } else { share as u16 }))
+                .collect();
         }
         let next = std::sync::atomic::AtomicUsize::new(0);
         let slots: Vec<std::sync::Mutex<&mut Work<'_>>> =
@@ -1819,6 +1839,10 @@ impl DrawCache {
             .retain(|_, decoded| decoded.used + 1 >= render);
     }
 }
+
+/// How many layers fewer than the threads are drawn at a time: best or
+/// within a few percent of it on 4 to 23 threads for fixtures 2, 3 and 5.
+const AT_ONCE: usize = 4;
 
 /// Whether drawing `ops` stops and starts again over what it drew before.
 fn draws_in_runs(ops: &[Op]) -> bool {
