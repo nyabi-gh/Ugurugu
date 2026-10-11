@@ -506,11 +506,20 @@ impl Canvas {
         }
     }
 
+    /// Stops on the frame shown, which stays until the split of it arrives;
+    /// false when not playing.
+    fn stop_playback(&mut self) -> bool {
+        let Some(playback) = self.playback.take() else {
+            return false;
+        };
+        self.held = Some(playback.shown);
+        self.upload_all();
+        true
+    }
+
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
-        if let Some(playback) = self.playback.take() {
-            self.held = Some(playback.shown);
-            self.upload_all();
+        if self.stop_playback() {
             return;
         }
         if !self.animation_allowed {
@@ -774,9 +783,7 @@ impl Canvas {
     fn click_area(&mut self, point: [f64; 2]) {
         let started = Instant::now();
         self.notice = None;
-        if self.playback.take().is_some() {
-            self.upload_all();
-        }
+        self.stop_playback();
         let read = self.read_reference();
         let reference = self
             .reference
@@ -889,9 +896,7 @@ impl Canvas {
 
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
         self.notice = None;
-        if self.playback.take().is_some() {
-            self.upload_all();
-        }
+        self.stop_playback();
         // The eraser end of a pen erases whatever tool is chosen.
         let tool = self.session.tool();
         if kind == PointerKind::Pen && sample.inverted {
@@ -1317,6 +1322,35 @@ mod tests {
         }
         assert_eq!(canvas.display().width(), 320);
         assert_eq!(canvas.shown_placement().scale, 0.5);
+    }
+
+    #[test]
+    fn drawing_or_filling_stops_playback_on_the_frame_shown() {
+        for tool in [Tool::Pen, Tool::Fill, Tool::Wand] {
+            let (to_test, renders) = std::sync::mpsc::channel();
+            let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+                let _ = to_test.send(rendered);
+            });
+            canvas.scale = 0.5;
+            canvas.edit(|session| session.set_tool(tool));
+            canvas.toggle_playback();
+            let mut now = Instant::now();
+            while canvas.display().width() != 160 {
+                canvas.tick(now);
+                now += Duration::from_millis(500);
+                if let Ok(rendered) = renders.recv_timeout(Duration::from_secs(10)) {
+                    canvas.adopt(rendered);
+                }
+            }
+            canvas.apply(CanvasInput::Begin(
+                Gesture::Draw,
+                PointerKind::Mouse,
+                press(60.0, 40.0),
+            ));
+            assert!(!canvas.is_playing());
+            assert_eq!(canvas.display().width(), 160, "{tool:?}");
+            assert_eq!(canvas.shown_placement().scale, 1.0, "{tool:?}");
+        }
     }
 
     #[test]
