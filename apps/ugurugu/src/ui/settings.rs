@@ -78,6 +78,16 @@ pub fn restore_tools(settings: &Settings, canvas: &mut Canvas) {
 
 /// Puts `settings` into effect everywhere but the interface language, which
 /// waits for the next start.
+impl Dialog {
+    /// Open on the about tab, for Help > About.
+    pub fn about() -> Self {
+        Self {
+            tab: Tab::About,
+            ..Self::default()
+        }
+    }
+}
+
 pub fn apply(
     ctx: &egui::Context,
     settings: &Settings,
@@ -89,6 +99,7 @@ pub fn apply(
     canvas.allow_animation(settings.wobble_animation);
     files.set_default_save_folder(settings.default_save_folder.clone());
     files.set_export_edge(settings.export_edge);
+    files.follow_updates(settings.check_updates, settings.update_checked);
     *keys = Keymap::new(&settings.shortcuts);
 }
 
@@ -239,6 +250,12 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
     }
     ui.add_space(6.0);
     ui.label(egui::RichText::new(tr("settings-restart")).color(theme::MUTED));
+    ui.add_space(10.0);
+    widgets::checkbox(
+        ui,
+        &mut settings.check_updates,
+        tr("settings-check-updates"),
+    );
 }
 
 fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {

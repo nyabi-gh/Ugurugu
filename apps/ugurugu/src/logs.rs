@@ -282,11 +282,12 @@ impl Write for Rotating {
     }
 }
 
-/// Says that an earlier run crashed, once nothing else is asked.
-pub fn tell_about_crashes(ctx: &egui::Context, asking: bool) {
+/// Says that an earlier run crashed, once nothing else is asked; whether
+/// it does.
+pub fn tell_about_crashes(ctx: &egui::Context, asking: bool) -> bool {
     let mut earlier = EARLIER.lock().expect("no panic while holding it");
     if earlier.is_empty() || asking {
-        return;
+        return false;
     }
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("crashed before")).show(ctx, |ui| {
@@ -308,6 +309,7 @@ pub fn tell_about_crashes(ctx: &egui::Context, asking: bool) {
         mark_seen(&earlier);
         earlier.clear();
     }
+    true
 }
 
 /// Opens the log folder in File Explorer.

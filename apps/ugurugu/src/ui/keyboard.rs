@@ -194,10 +194,10 @@ fn the_menus_open_from_the_keyboard() {
     assert!(window.popup(), "Right opens the next menu");
     window.key(NONE, Key::ArrowLeft);
     window.key(NONE, Key::ArrowLeft);
-    assert_eq!(window.label(), tr("menu-window"), "Left goes round");
+    assert_eq!(window.label(), tr("menu-help"), "Left goes round");
     window.key(NONE, Key::Escape);
     assert!(!window.popup());
-    assert_eq!(window.label(), tr("menu-window"), "the focus comes back");
+    assert_eq!(window.label(), tr("menu-help"), "the focus comes back");
 
     window.key(Modifiers::ALT, Key::V);
     assert_eq!(window.label(), tr("menu-view"));

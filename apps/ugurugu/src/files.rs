@@ -120,6 +120,7 @@ pub enum FileEvent {
     RecoveryWritten(Result<(), String>),
     /// Work read back from a folder found at start.
     Recovered(Result<Box<Recovered>, String>),
+    Update(crate::update::Event),
 }
 
 pub enum Opened {
@@ -174,6 +175,8 @@ pub enum Action {
     Close,
     /// Recovers the work first in `Files::found`.
     Recover,
+    /// Installs the downloaded update, which closes the window.
+    Update,
 }
 
 enum Job {
@@ -317,6 +320,7 @@ pub struct Files {
     /// Cancelled exports whose threads may still be finishing.
     cancelled: Vec<Exporting>,
     exports: u64,
+    updates: crate::update::Updates,
 }
 
 /// A fresh document id, from the same entropy as hash seeds.
@@ -338,6 +342,9 @@ impl Files {
     /// `owner` is the window the dialogs belong to.
     pub fn new(owner: isize, events: impl Fn(FileEvent) + Send + Sync + 'static) -> Self {
         let events: Arc<dyn Fn(FileEvent) + Send + Sync> = Arc::new(events);
+        let update_events = events.clone();
+        let updates =
+            crate::update::Updates::new(move |event| update_events(FileEvent::Update(event)));
         let (to_worker, jobs) = channel::<Job>();
         let worker_events = events.clone();
         let worker = std::thread::Builder::new()
@@ -382,6 +389,7 @@ impl Files {
             animation_job: None,
             cancelled: Vec::new(),
             exports: 0,
+            updates,
         }
     }
 
@@ -517,6 +525,9 @@ impl Files {
     }
 
     pub fn message(&self) -> Option<&str> {
+        if self.updates.busy() {
+            return Some(tr("update-downloading"));
+        }
         match &self.upcoming {
             Some((text, from)) if *from <= Instant::now() => Some(text),
             _ => self.message.as_deref(),
@@ -591,7 +602,43 @@ impl Files {
                     let _ = self.to_worker.send(Job::ReadRecovery(Box::new(found)));
                 }
             }
+            Action::Update => match self.updates.apply() {
+                Ok(()) => self.close = true,
+                Err(error) => tracing::warn!(error, "the update cannot be installed"),
+            },
         }
+    }
+
+    /// Checks for an update now and says what it found.
+    pub fn check_for_updates(&mut self) {
+        self.updates.check(true);
+    }
+
+    /// Whether to check for updates by itself, and when the last check
+    /// finished.
+    pub fn follow_updates(&mut self, automatic: bool, checked: Option<u64>) {
+        self.updates.follow(automatic, checked);
+    }
+
+    /// When the last update check finished, for the settings.
+    pub fn updates_checked(&self) -> Option<u64> {
+        self.updates.checked()
+    }
+
+    /// When the automatic update check is due.
+    pub fn update_due(&self) -> Option<Instant> {
+        self.updates.due()
+    }
+
+    /// Starts the automatic update check once it is due.
+    pub fn keep_updates(&mut self, now: Instant) {
+        self.updates.tick(now);
+    }
+
+    /// The update question or notice, once nothing else is asked.
+    pub fn ask_update(&mut self, ctx: &egui::Context, asking: bool) {
+        let asking = asking || self.asking();
+        self.updates.ask(ctx, asking);
     }
 
     /// Opens `path` without a dialog, as for a file given at start.
@@ -1176,6 +1223,11 @@ impl Files {
                             self.say(tr("recovery-not-saving").to_owned());
                         }
                     }
+                }
+            }
+            FileEvent::Update(event) => {
+                if self.updates.handle(event) == crate::update::Next::Install {
+                    self.request(Action::Update, canvas);
                 }
             }
             FileEvent::Recovered(result) => {

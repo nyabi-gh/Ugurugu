@@ -100,14 +100,17 @@ pub const WINDOW: &[Entry] = &[
     Do(A::ResetLayout),
 ];
 
+pub const HELP: &[Entry] = &[Do(A::CheckUpdates), Gap, Do(A::About)];
+
 /// Each menu's title, the letter that opens it with Alt (2.2.13's "&File"
 /// and "파일(&F)"), and its entries.
-pub const MENUS: [(&str, egui::Key, &[Entry]); 5] = [
+pub const MENUS: [(&str, egui::Key, &[Entry]); 6] = [
     ("menu-file", egui::Key::F, FILE),
     ("menu-edit", egui::Key::E, EDIT),
     ("menu-view", egui::Key::V, VIEW),
     ("menu-tools", egui::Key::T, TOOLS),
     ("menu-window", egui::Key::W, WINDOW),
+    ("menu-help", egui::Key::H, HELP),
 ];
 
 pub fn tool(action: Action) -> Option<Tool> {
@@ -296,6 +299,8 @@ pub fn run(
         A::CancelTransform => canvas.cancel_transform(),
         A::Escape => canvas.escape(),
         A::Settings => panels.settings = Some(settings::Dialog::default()),
+        A::CheckUpdates => files.check_for_updates(),
+        A::About => panels.settings = Some(settings::Dialog::about()),
         A::ZoomIn => canvas.zoom_in_place(1.0),
         A::ZoomOut => canvas.zoom_in_place(-1.0),
         A::ActualPixels => canvas.zoom_to(1.0),

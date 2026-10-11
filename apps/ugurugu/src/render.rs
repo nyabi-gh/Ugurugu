@@ -489,6 +489,7 @@ impl RenderThread {
             }
             self.collect_display_times();
             self.files.keep_recovery(&mut self.canvas, Instant::now());
+            self.files.keep_updates(Instant::now());
             if self.files.should_close() {
                 // Only a normal close drops the work kept for recovery.
                 self.files.end();
@@ -506,9 +507,13 @@ impl RenderThread {
 
     fn wake_timeout(&self) -> Duration {
         let mut timeout = IDLE_WAKE;
-        for at in [self.repaint_at, self.files.recovery_due()]
-            .into_iter()
-            .flatten()
+        for at in [
+            self.repaint_at,
+            self.files.recovery_due(),
+            self.files.update_due(),
+        ]
+        .into_iter()
+        .flatten()
         {
             timeout = timeout.min(at.saturating_duration_since(Instant::now()));
         }
@@ -722,6 +727,11 @@ impl RenderThread {
         let tools = self.canvas.session().tools();
         if tools != self.settings.get().tools {
             self.settings.change(|settings| settings.tools = tools);
+        }
+        if self.files.updates_checked() != self.settings.get().update_checked {
+            let checked = self.files.updates_checked();
+            self.settings
+                .change(|settings| settings.update_checked = checked);
         }
         if self.panels.layout != self.settings.get().layout {
             let layout = self.panels.layout.clone();

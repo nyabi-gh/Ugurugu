@@ -104,8 +104,13 @@ impl Session {
         early_gpu: Option<EarlyGpu>,
         settings: Store,
     ) -> Result<Self, String> {
+        use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
+        // Resource 1, put in by build.rs.
+        let icon = winit::window::Icon::from_resource(1, None).ok();
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
+            .with_window_icon(icon.clone())
+            .with_taskbar_icon(icon)
             .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 1000.0))
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);

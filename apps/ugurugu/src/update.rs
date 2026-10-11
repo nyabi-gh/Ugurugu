@@ -1,0 +1,377 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nyabi (nyabi-gh)
+
+//! Checking for, downloading and applying updates through Velopack, as
+//! 2.2.13 did (`src/app/UpdateControllerWindows.cpp`): a check two seconds
+//! after start once six hours have passed since the last one that finished,
+//! "Check for Updates…" in the Help menu, Update or Cancel when one is
+//! found, and installing it once the window has closed. Unlike 2.2.13, a
+//! check asked for while an automatic one runs shows that check's result
+//! (D18), and the automatic check can be turned off.
+//!
+//! The checks and the download run on threads of their own, so the file
+//! thread's saves never wait for the network.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
+
+use velopack::{UpdateCheck, UpdateInfo, UpdateManager, sources::GithubSource};
+
+use crate::i18n::{args, tr, tr_with};
+
+const REPOSITORY: &str = "https://github.com/nyabi-gh/Ugurugu";
+const START_DELAY: Duration = Duration::from_secs(2);
+const INTERVAL_SECONDS: u64 = 6 * 60 * 60;
+
+pub enum Event {
+    Checked(Result<Found, String>),
+    Downloaded(Result<Box<UpdateInfo>, String>),
+}
+
+pub enum Found {
+    Update(Box<UpdateInfo>),
+    /// The version running is the newest.
+    Latest(String),
+    /// Not run from an installation, as when built from source.
+    NotInstalled,
+}
+
+/// What the window does after an event or a dialog.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    Nothing,
+    /// The update is downloaded: deal with unsaved changes, then `apply`.
+    Install,
+}
+
+pub struct Updates {
+    automatic: bool,
+    /// Seconds since 1970 of the last check that finished.
+    checked: Option<u64>,
+    due: Option<Instant>,
+    /// Whether the check under way shows its result, while one is.
+    checking: Option<bool>,
+    downloading: bool,
+    offer: Option<Box<UpdateInfo>>,
+    ready: Option<Box<UpdateInfo>>,
+    /// A title and a text to show until dismissed.
+    notice: Option<(String, String)>,
+    events: Arc<dyn Fn(Event) + Send + Sync>,
+}
+
+/// Whether an automatic check is due `now`, both in seconds since 1970.
+/// A clock set back makes it due, as in 2.2.13.
+fn check_due(checked: Option<u64>, now: u64) -> bool {
+    match checked {
+        Some(checked) if checked <= now => now - checked >= INTERVAL_SECONDS,
+        _ => true,
+    }
+}
+
+fn now_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+fn manager() -> Result<UpdateManager, velopack::Error> {
+    UpdateManager::new(GithubSource::new(REPOSITORY, None, false), None, None)
+}
+
+fn check() -> Result<Found, String> {
+    let manager = match manager() {
+        Ok(manager) => manager,
+        Err(velopack::Error::NotInstalled(_)) => return Ok(Found::NotInstalled),
+        Err(error) => return Err(error.to_string()),
+    };
+    match manager
+        .check_for_updates()
+        .map_err(|error| error.to_string())?
+    {
+        UpdateCheck::UpdateAvailable(update) => Ok(Found::Update(update)),
+        UpdateCheck::NoUpdateAvailable | UpdateCheck::RemoteIsEmpty => {
+            Ok(Found::Latest(manager.get_current_version_as_string()))
+        }
+    }
+}
+
+impl Updates {
+    pub fn new(events: impl Fn(Event) + Send + Sync + 'static) -> Self {
+        Self {
+            automatic: false,
+            checked: None,
+            due: None,
+            checking: None,
+            downloading: false,
+            offer: None,
+            ready: None,
+            notice: None,
+            events: Arc::new(events),
+        }
+    }
+
+    /// Follows the settings: whether to check by itself, and when the last
+    /// check finished.
+    pub fn follow(&mut self, automatic: bool, checked: Option<u64>) {
+        self.checked = checked.max(self.checked);
+        self.automatic = automatic;
+        if !automatic {
+            self.due = None;
+        } else if self.due.is_none()
+            && self.checking.is_none()
+            && check_due(self.checked, now_seconds())
+        {
+            self.due = Some(Instant::now() + START_DELAY);
+        }
+    }
+
+    /// When the last check finished, for the settings.
+    pub fn checked(&self) -> Option<u64> {
+        self.checked
+    }
+
+    /// When to wake for the automatic check.
+    pub fn due(&self) -> Option<Instant> {
+        self.due
+    }
+
+    /// Starts the automatic check once it is due.
+    pub fn tick(&mut self, now: Instant) {
+        if self.due.is_some_and(|due| due <= now) {
+            self.due = None;
+            self.check(false);
+        }
+    }
+
+    pub fn busy(&self) -> bool {
+        self.downloading
+    }
+
+    /// Checks now; `interactive` shows the result whatever it is.
+    pub fn check(&mut self, interactive: bool) {
+        if self.downloading || self.offer.is_some() || self.ready.is_some() {
+            return;
+        }
+        if let Some(shows) = self.checking.as_mut() {
+            *shows |= interactive;
+            return;
+        }
+        self.checking = Some(interactive);
+        let events = self.events.clone();
+        let spawned = std::thread::Builder::new()
+            .name("update check".to_owned())
+            .spawn(move || events(Event::Checked(check())));
+        if let Err(error) = spawned {
+            self.checking = None;
+            tracing::warn!(%error, "cannot start the update check");
+        }
+    }
+
+    pub fn handle(&mut self, event: Event) -> Next {
+        match event {
+            Event::Checked(result) => {
+                let interactive = self.checking.take().unwrap_or(false);
+                match result {
+                    Ok(Found::Update(update)) => {
+                        self.checked = Some(now_seconds());
+                        tracing::info!(version = update.TargetFullRelease.Version, "update found");
+                        self.offer = Some(update);
+                    }
+                    Ok(Found::Latest(version)) => {
+                        self.checked = Some(now_seconds());
+                        tracing::info!(version, "no update");
+                        if interactive {
+                            self.notice = Some((
+                                tr("update-latest-title").to_owned(),
+                                tr_with("update-latest", &args([("version", version)])),
+                            ));
+                        }
+                    }
+                    Ok(Found::NotInstalled) => {
+                        tracing::debug!("not installed; no update check");
+                        if interactive {
+                            self.notice = Some((
+                                tr("update-failed").to_owned(),
+                                tr("update-not-installed").to_owned(),
+                            ));
+                        }
+                    }
+                    // Only a check that finished waits out the interval, so
+                    // starting offline costs nothing.
+                    Err(error) => {
+                        tracing::warn!(error, "update check failed");
+                        if interactive {
+                            self.notice = Some((
+                                tr("update-failed").to_owned(),
+                                format!("{}\n\n{error}", tr("update-check-failed")),
+                            ));
+                        }
+                    }
+                }
+                Next::Nothing
+            }
+            Event::Downloaded(result) => {
+                self.downloading = false;
+                match result {
+                    Ok(update) => {
+                        self.ready = Some(update);
+                        Next::Install
+                    }
+                    Err(error) => {
+                        tracing::warn!(error, "update download failed");
+                        self.notice = Some((
+                            tr("update-failed").to_owned(),
+                            format!("{}\n\n{error}", tr("update-download-failed")),
+                        ));
+                        Next::Nothing
+                    }
+                }
+            }
+        }
+    }
+
+    fn download(&mut self, update: Box<UpdateInfo>) {
+        self.downloading = true;
+        let events = self.events.clone();
+        let spawned = std::thread::Builder::new()
+            .name("update download".to_owned())
+            .spawn(move || {
+                let result = manager()
+                    .and_then(|manager| manager.download_updates(&update, None))
+                    .map(|()| update)
+                    .map_err(|error| error.to_string());
+                events(Event::Downloaded(result));
+            });
+        if let Err(error) = spawned {
+            self.downloading = false;
+            tracing::warn!(%error, "cannot start the update download");
+        }
+    }
+
+    /// Hands the downloaded update to Velopack's updater, which installs it
+    /// once this process has ended and starts the new version. The window
+    /// must close at once after: the updater waits a minute at most.
+    pub fn apply(&mut self) -> Result<(), String> {
+        let Some(update) = self.ready.take() else {
+            return Err("no update is downloaded".to_owned());
+        };
+        manager()
+            .and_then(|manager| {
+                manager.wait_exit_then_apply_updates(&*update, false, true, Vec::<String>::new())
+            })
+            .map_err(|error| {
+                let error = error.to_string();
+                self.notice = Some((
+                    tr("update-failed").to_owned(),
+                    format!("{}\n\n{error}", tr("update-install-failed")),
+                ));
+                error
+            })
+    }
+
+    /// The update question or a notice, while one is open and nothing else
+    /// is asked.
+    pub fn ask(&mut self, ctx: &egui::Context, asking: bool) {
+        if asking {
+            return;
+        }
+        if let Some(update) = &self.offer {
+            let version = update.TargetFullRelease.Version.clone();
+            let mut answer = None;
+            let modal = egui::Modal::new(egui::Id::new("update offer")).show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.heading(tr("update-available-title"));
+                ui.label(tr_with("update-available", &args([("version", version)])));
+                ui.label(tr("update-ask"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("update-install")).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(tr("unsaved-cancel")).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if modal.should_close() && answer.is_none() {
+                answer = Some(false);
+            }
+            match answer {
+                Some(true) => {
+                    let update = self.offer.take().expect("shown above");
+                    self.download(update);
+                }
+                Some(false) => self.offer = None,
+                None => {}
+            }
+            return;
+        }
+        if let Some((title, text)) = &self.notice {
+            let mut close = false;
+            let modal = egui::Modal::new(egui::Id::new("update notice")).show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.heading(title.as_str());
+                ui.label(text.as_str());
+                ui.add_space(6.0);
+                close = ui.button(tr("crash-close")).clicked();
+            });
+            if close || modal.should_close() {
+                self.notice = None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_check_is_due_after_six_hours_or_a_clock_set_back() {
+        let now = 1_000_000;
+        assert!(check_due(None, now));
+        assert!(!check_due(Some(now - INTERVAL_SECONDS + 1), now));
+        assert!(check_due(Some(now - INTERVAL_SECONDS), now));
+        assert!(check_due(Some(now + 10), now));
+    }
+
+    #[test]
+    fn a_check_asked_for_during_an_automatic_one_shows_its_result() {
+        let mut updates = Updates::new(|_| {});
+        updates.checking = Some(false);
+        updates.check(true);
+        assert_eq!(updates.checking, Some(true));
+        let next = updates.handle(Event::Checked(Ok(Found::Latest("3.0.0".to_owned()))));
+        assert_eq!(next, Next::Nothing);
+        assert!(updates.notice.is_some());
+        assert!(updates.checked.is_some());
+    }
+
+    #[test]
+    fn only_a_finished_check_waits_out_the_interval() {
+        let mut updates = Updates::new(|_| {});
+        updates.checking = Some(false);
+        updates.handle(Event::Checked(Err("offline".to_owned())));
+        assert_eq!(updates.checked, None);
+        assert!(updates.notice.is_none());
+        updates.follow(true, None);
+        assert!(updates.due.is_some());
+    }
+
+    #[test]
+    fn turning_the_automatic_check_off_cancels_the_one_due() {
+        let mut updates = Updates::new(|_| {});
+        updates.follow(true, None);
+        assert!(updates.due.is_some());
+        updates.follow(false, None);
+        assert!(updates.due.is_none());
+        updates.follow(true, Some(now_seconds()));
+        assert!(updates.due.is_none());
+    }
+
+    #[test]
+    fn outside_an_installation_the_check_says_so_only_when_asked() {
+        // A test binary is never installed.
+        assert!(matches!(check(), Ok(Found::NotInstalled)));
+    }
+}

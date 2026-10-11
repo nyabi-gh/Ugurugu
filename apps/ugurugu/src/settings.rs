@@ -81,6 +81,10 @@ pub struct Settings {
     pub tools: Tools,
     /// The shortcuts changed from their defaults.
     pub shortcuts: Shortcuts,
+    /// Whether to check for updates by itself.
+    pub check_updates: bool,
+    /// Seconds since 1970 of the last update check that finished.
+    pub update_checked: Option<u64>,
     /// Where the panels are.
     pub layout: Layout,
     /// Keys this version does not know, kept to be written back.
@@ -98,6 +102,8 @@ impl Default for Settings {
             export_edge: None,
             tools: Tools::default(),
             shortcuts: Shortcuts::default(),
+            check_updates: true,
+            update_checked: None,
             layout: Layout::default(),
             unknown: Map::new(),
         }
@@ -113,6 +119,7 @@ impl Settings {
             export_edge: self.export_edge,
             tools: self.tools.clone(),
             shortcuts: self.shortcuts.restored(),
+            update_checked: self.update_checked,
             layout: self.layout.clone(),
             unknown: self.unknown.clone(),
             ..Self::default()
@@ -183,6 +190,12 @@ impl Settings {
                 _ => tracing::warn!(edge, "the export size in the settings is out of range"),
             }
         }
+        if let Some(on) = take(&mut object, "checkForUpdates", Value::as_bool) {
+            settings.check_updates = on;
+        }
+        if let Some(seconds) = take(&mut object, "updateChecked", Value::as_u64) {
+            settings.update_checked = Some(seconds);
+        }
         if let Some(value) = object.remove("tools") {
             settings.tools = tools::parse(&value);
         }
@@ -226,6 +239,12 @@ impl Settings {
         }
         if let Some(edge) = self.export_edge {
             object.insert("exportSize".to_owned(), edge.into());
+        }
+        if !self.check_updates {
+            object.insert("checkForUpdates".to_owned(), false.into());
+        }
+        if let Some(seconds) = self.update_checked {
+            object.insert("updateChecked".to_owned(), seconds.into());
         }
         object.insert("tools".to_owned(), tools::to_json(&self.tools));
         if !self.tools.colors.colors().is_empty() {
@@ -507,6 +526,8 @@ mod tests {
                     .unwrap();
                 shortcuts
             },
+            check_updates: false,
+            update_checked: Some(1_790_000_000),
             layout: {
                 let mut layout = Layout::default();
                 layout.move_to(

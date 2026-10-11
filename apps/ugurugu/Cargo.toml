@@ -24,8 +24,12 @@ ugu-session.workspace = true
 ugu-text.workspace = true
 ugu-win.workspace = true
 vello_cpu.workspace = true
+velopack.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+
+[build-dependencies]
+embed-resource.workspace = true
 
 [dev-dependencies]
 image.workspace = true

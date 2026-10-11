@@ -7,6 +7,7 @@ menu-edit | ugurugu::MainWindow | &Edit | access
 menu-view | ugurugu::MainWindow | &View | access
 menu-tools | ugurugu::MainWindow | &Tools | access
 menu-window | ugurugu::MainWindow | &Window | access
+menu-help | ugurugu::MainWindow | &Help | access
 file-new | ugurugu::MainWindow | &New
 file-open | ugurugu::MainWindow | &Open…
 file-save | ugurugu::MainWindow | &Save
@@ -410,3 +411,20 @@ crash-title | - | Ugurugu closed unexpectedly | Ugurugu가 예기치 않게 종�
 crash-text | - | Ugurugu stopped unexpectedly last time. What happened is recorded in the log folder; attach those files when you report the problem. | 지난번에 Ugurugu가 예기치 않게 종료되었습니다. 무슨 일이 있었는지 로그 폴더에 기록되어 있으니, 문제를 알릴 때 그 파일을 첨부해 주세요. | 前回 Ugurugu が予期せず終了しました。内容はログフォルダーに記録されています。問題を報告するときはそのファイルを添付してください。
 crash-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
 crash-close | - | Close | 닫기 | 閉じる
+
+# Help menu and updates
+help-check-updates | ugurugu::MainWindow | Check for &Updates…
+help-about | ugurugu::MainWindow | &About Ugurugu
+update-available-title | ugurugu::UpdateController | Update available
+update-available | ugurugu::UpdateController | Ugurugu %1 is available. | args=version
+update-ask | ugurugu::UpdateController | Download and install it now?
+update-install | ugurugu::UpdateController | Update
+update-downloading | ugurugu::UpdateController | Downloading update…
+update-latest-title | ugurugu::UpdateController | You're up to date
+update-latest | ugurugu::UpdateController | Ugurugu %1 is the latest version. | args=version
+update-failed | ugurugu::UpdateController | Update failed
+update-check-failed | - | Could not check for updates. | 업데이트를 확인할 수 없습니다. | アップデートを確認できませんでした。
+update-download-failed | - | Could not download the update. | 업데이트를 다운로드할 수 없습니다. | アップデートをダウンロードできませんでした。
+update-install-failed | - | The update was downloaded but could not be installed. | 업데이트를 받았지만 설치할 수 없습니다. | アップデートをダウンロードしましたが、インストールできませんでした。
+update-not-installed | - | Updates are checked only in the installed app. | 업데이트는 설치한 앱에서만 확인할 수 있습니다. | アップデートはインストールしたアプリでのみ確認できます。
+settings-check-updates | - | Check for updates automatically | 자동으로 업데이트 확인 | アップデートを自動的に確認

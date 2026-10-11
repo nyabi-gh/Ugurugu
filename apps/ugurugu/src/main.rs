@@ -23,6 +23,7 @@ mod settings;
 mod shortcuts;
 mod theme;
 mod ui;
+mod update;
 mod widgets;
 
 use std::process::ExitCode;
@@ -30,6 +31,15 @@ use std::process::ExitCode;
 use winit::event_loop::EventLoop;
 
 fn main() -> ExitCode {
+    // Velopack's install, update and uninstall hooks start this program with
+    // arguments of their own and end it here; a normal start goes on.
+    velopack::VelopackApp::build()
+        .on_after_install_fast_callback(|_| associate())
+        .on_after_update_fast_callback(|_| associate())
+        .on_before_uninstall_fast_callback(|_| {
+            ugu_win::association::unregister(ugu_win::association::CLASSES)
+        })
+        .run();
     let _logging = logs::start();
     tracing::debug!("starting");
 
@@ -39,6 +49,14 @@ fn main() -> ExitCode {
             tracing::error!(error, "exiting after a fatal error");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Opens `.ugurugu` files with this executable.
+fn associate() {
+    if let Ok(app) = std::env::current_exe() {
+        let _ =
+            ugu_win::association::register(&app, "Ugurugu document", ugu_win::association::CLASSES);
     }
 }
 

@@ -4,6 +4,11 @@ all-features = false
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # Unmaintained, not a vulnerability: a derive macro Velopack uses at
+    # build time, with no code in the app.
+    { id = "RUSTSEC-2024-0388", reason = "build-time derive macro of velopack" },
+]
 
 [licenses]
 allow = [
@@ -22,6 +27,12 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.9
+# Mozilla's root certificates, which the update check's TLS (Velopack ->
+# ureq -> rustls) trusts. A permissive data licence; its text goes into the
+# third-party notices (docs/rust/m6-plan.md M6-5).
+exceptions = [
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+]
 
 [bans]
 multiple-versions = "warn"

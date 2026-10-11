@@ -317,6 +317,8 @@ actions! {
     ColorHistory "colorHistory" "color-history" [] [];
     Layers "layers" "layers" [] [];
     ResetLayout "resetPanelLayout" "window-reset-layout" [] [];
+    CheckUpdates "checkForUpdates" "help-check-updates" [] [];
+    About "about" "help-about" [] [];
 }
 
 impl Action {

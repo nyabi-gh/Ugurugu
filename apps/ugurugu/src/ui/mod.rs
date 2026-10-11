@@ -74,7 +74,7 @@ pub struct Panels {
     pub keys: Keymap,
     focus: focus::Return,
     /// The menu titles' ids, from the last frame.
-    menus: [Option<egui::Id>; 5],
+    menus: [Option<egui::Id>; actions::MENUS.len()],
 }
 
 impl Panels {
@@ -147,7 +147,10 @@ pub fn menu_bar(
 
 /// The menu the keys of this frame go to, if any, and whether to open it.
 /// Takes those keys.
-fn menu_keys(ctx: &egui::Context, menus: &[Option<egui::Id>; 5]) -> (Option<usize>, bool) {
+fn menu_keys(
+    ctx: &egui::Context,
+    menus: &[Option<egui::Id>; actions::MENUS.len()],
+) -> (Option<usize>, bool) {
     if ctx.text_edit_focused() || ctx.memory(|memory| memory.top_modal_layer().is_some()) {
         return (None, false);
     }
