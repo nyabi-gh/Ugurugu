@@ -135,6 +135,15 @@ impl Runs {
         bounds
     }
 
+    /// Whether the pixels fill their bounds, so their outline is one
+    /// rectangle.
+    pub fn is_rectangle(&self) -> bool {
+        let Some([left, top, right, bottom]) = self.bounds() else {
+            return false;
+        };
+        (top..bottom).all(|y| self.row(y) == [[left, right]])
+    }
+
     /// The outline of the pixels' squares, every loop with the pixels on its
     /// right, for the non-zero rule. Edges are only where pixels meet
     /// others, so a transformed path crosses as few tiles as its shape needs.

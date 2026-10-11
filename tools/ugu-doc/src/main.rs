@@ -23,8 +23,15 @@
 //!   the other, to measure what canvas changes cost to draw.
 //! - `ugu-doc sparse <in.ugurugu> <out.ugurugu>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
+//! - `ugu-doc moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy>`: adds to the
+//!   top paint layer, `count` times, three opaque strokes and then everything
+//!   selected and moved smoothly by (`dx`, `dy`), as M5-15's long session did
+//!   (docs/rust/m0-evidence.md section 23).
 //! - `ugu-doc fills <in.ugurugu> <out.ugurugu>`: adds a large clipped fill and a
 //!   clear to every layer, to measure what masks cost to draw.
+//! - `ugu-doc digest <file.ugurugu> <threads>`: draws every frame whole, at
+//!   full size and at 1/2 and 1/4, and prints one SHA-256 of all the pixels,
+//!   to tell that a change to drawing leaves them as they were.
 //! - `ugu-doc stop <file.ugurugu>`: times how long a frame render on 8 threads
 //!   takes to end once it is told to stop, at points spread over the render.
 //! - `ugu-doc layers <file.ugurugu> <threads>`: times each layer drawn alone on
@@ -51,7 +58,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -99,8 +106,16 @@ fn main() -> ExitCode {
         ["pen-only", from, to] => pen_only(Path::new(from), Path::new(to)),
         ["sparse", from, to] => sparse(Path::new(from), Path::new(to)),
         ["fills", from, to] => fills(Path::new(from), Path::new(to)),
+        ["moves", from, to, count, dx, dy] => match (count.parse(), dx.parse(), dy.parse()) {
+            (Ok(count), Ok(dx), Ok(dy)) => moves(Path::new(from), Path::new(to), count, dx, dy),
+            _ => Err(USAGE.to_owned()),
+        },
         ["reframe", from, to, which] => reframe(Path::new(from), Path::new(to), which),
         ["stop", file] => stop(Path::new(file)),
+        ["digest", file, threads] => threads
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|threads| digest(Path::new(file), threads)),
         ["layers", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -376,6 +391,78 @@ fn fills(from: &Path, to: &Path) -> Result<(), String> {
     document.validate().map_err(|error| error.to_string())?;
     save(&document, to)?;
     info(to)
+}
+
+fn moves(from: &Path, to: &Path, count: usize, dx: f64, dy: f64) -> Result<(), String> {
+    let mut document = open(from)?;
+    let canvas = document.canvas;
+    let [width, height] = canvas.map(|edge| edge as i32);
+    let all: Arc<[u8]> = Arc::from(vec![0xff; Mask::row_bytes(width) * height as usize]);
+    let mut next_stroke = document
+        .store
+        .strokes
+        .keys()
+        .map(|id| id.0 + 1)
+        .max()
+        .unwrap_or(0);
+    let first_mask = document
+        .store
+        .masks
+        .keys()
+        .map(|id| id.0 + 1)
+        .max()
+        .unwrap_or(0);
+    let mut ops = Vec::new();
+    for next_mask in (first_mask..).take(count) {
+        for _ in 0..3 {
+            let id = StrokeId(next_stroke);
+            next_stroke += 1;
+            let shape = Shape {
+                minimum_alpha: 255,
+                reach: 0.05,
+                ..Shape::plain(30)
+            };
+            document
+                .store
+                .strokes
+                .insert(id, make_stroke(u64::from(id.0), canvas, shape));
+            ops.push(Op::Paint {
+                stroke: id,
+                clip: None,
+            });
+        }
+        let mask = MaskId(next_mask);
+        document.store.masks.insert(
+            mask,
+            Mask {
+                bounds: [0, 0, width, height],
+                bits: Arc::clone(&all),
+            },
+        );
+        ops.push(Op::TransformSelection {
+            mask,
+            transform: Affine::translation(dx, dy),
+            sampling: Sampling::Smooth,
+            keep_source: false,
+        });
+    }
+    top_paint(&mut document.layers)
+        .ok_or("no paint layer")?
+        .ops
+        .extend(ops);
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)?;
+    info(to)
+}
+
+fn top_paint(layers: &mut [Layer]) -> Option<&mut PaintLayer> {
+    layers
+        .iter_mut()
+        .rev()
+        .find_map(|layer| match &mut layer.kind {
+            LayerKind::Paint(paint) => Some(paint),
+            LayerKind::Group(group) => top_paint(&mut group.children),
+        })
 }
 
 fn each_paint(layers: &mut [Layer], visit: &mut impl FnMut(&mut PaintLayer)) {
@@ -855,6 +942,32 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         "{threads} threads: first frame {first:.1} ms, then per frame {}",
         percentiles(&mut times)
     );
+    Ok(())
+}
+
+fn digest(path: &Path, threads: u16) -> Result<(), String> {
+    use ugu_render::document::{DocumentRenderer, Purpose, scaled_size};
+    use ugu_render::plan::RenderPlan;
+
+    let document = open(path)?;
+    let plan = RenderPlan::new(&document, Purpose::Display);
+    let mut renderer = DocumentRenderer::new(threads);
+    set_budget(&mut renderer);
+    let mut hash = Sha256::new();
+    for shrink in [1, 2, 4] {
+        let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+        let mut pixmap = vello_cpu::Pixmap::new(width, height);
+        for frame in 0..i64::from(document.frames) {
+            renderer.render_scaled(&document, &plan, frame, None, shrink, &mut pixmap);
+            hash.update(pixmap.data_as_u8_slice());
+        }
+    }
+    let digest: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    println!("{digest}  {}", path.display());
     Ok(())
 }
 

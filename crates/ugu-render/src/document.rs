@@ -573,26 +573,19 @@ impl DocumentRenderer {
         }
         self.drawn = work.len();
         self.timings = Timings::default();
-        if work.len() >= self.threads && self.threads > 1 {
-            self.draw_at_once(document, &mut work, frame, shrink);
-        } else {
-            for each in &mut work {
-                if self.stopped() {
-                    break;
-                }
-                self.timings += self.main.draw_layer(
-                    &Frame {
-                        document,
-                        frame,
-                        shrink,
-                        detail,
-                        masks: &self.masks,
-                    },
-                    each.paint,
-                    &mut each.surface,
-                );
-                each.drawn = true;
+        // A layer drawn in several runs (moved selections, resamples) can
+        // take many times longer than the others, so it gets every thread
+        // on its own instead of one beside them (docs/rust/m6-plan.md M6-2).
+        work.sort_by_key(|each| !draws_in_runs(&each.paint.ops));
+        let alone = work.partition_point(|each| draws_in_runs(&each.paint.ops));
+        let together = work.len() - alone;
+        if together >= self.threads && self.threads > 1 {
+            self.draw_one_by_one(document, &mut work[..alone], frame, shrink);
+            if !self.stopped() {
+                self.draw_at_once(document, &mut work[alone..], frame, shrink);
             }
+        } else {
+            self.draw_one_by_one(document, &mut work, frame, shrink);
         }
         let complete = work.iter().all(|each| each.drawn);
         for each in work.into_iter().filter(|each| each.drawn) {
@@ -646,6 +639,34 @@ impl DocumentRenderer {
         self.stop
             .as_ref()
             .is_some_and(|stop| stop.load(Ordering::Relaxed))
+    }
+
+    /// Draws the layers one after another, each on every thread.
+    fn draw_one_by_one(
+        &mut self,
+        document: &Document,
+        work: &mut [Work<'_>],
+        frame: u32,
+        shrink: u32,
+    ) {
+        let detail = self.detail;
+        for each in work {
+            if self.stopped() {
+                break;
+            }
+            self.timings += self.main.draw_layer(
+                &Frame {
+                    document,
+                    frame,
+                    shrink,
+                    detail,
+                    masks: &self.masks,
+                },
+                each.paint,
+                &mut each.surface,
+            );
+            each.drawn = true;
+        }
     }
 
     /// Draws each layer on one thread, as many layers at once as there are
@@ -859,6 +880,12 @@ impl Raster {
             // A selection moved right after a resample moves what was
             // carried, which needs a run of its own first.
             let fresh = carried.is_some();
+            let mut here = base * shift * cuts.shifts[part];
+            // A move that cuts away every pixel of the run leaves nothing of
+            // what was drawn before but what it moves.
+            let replaced = !fresh
+                && matches!(rest.first(), Some(Step::Move { ready, keep_source: false, .. })
+                    if covers(ready, here, area.size));
             if let Some(so_far) = &so_far {
                 match carried.take() {
                     Some(reframe) => {
@@ -867,6 +894,7 @@ impl Raster {
                             .set_transform(base * reframe.map * before.inverse());
                         self.put_image(so_far, reframe.quality);
                     }
+                    None if replaced => {}
                     None => {
                         self.context.set_transform(Affine::IDENTITY);
                         self.put_image(so_far, ImageQuality::Low);
@@ -874,7 +902,6 @@ impl Raster {
                 }
             }
             carried = None;
-            let mut here = base * shift * cuts.shifts[part];
             self.context.set_transform(here);
             let mut taken = 0;
             let mut depth = 0;
@@ -960,7 +987,7 @@ impl Raster {
                         let Some(source) = &so_far else {
                             continue;
                         };
-                        if !keep_source {
+                        if !keep_source && !(replaced && taken == 1) {
                             self.take_away(&ready.area);
                         }
                         let moved = here * *transform;
@@ -1274,6 +1301,21 @@ impl Raster {
         self.context.fill_path(area);
         self.context.pop_layer();
     }
+}
+
+/// Whether the mask in `ready`, drawn with `transform`, covers every pixel
+/// of an area of `size` whole.
+fn covers(ready: &Ready, transform: Affine, size: [u16; 2]) -> bool {
+    let Some([left, top, right, bottom]) = ready.bounds.filter(|_| ready.rectangle) else {
+        return false;
+    };
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    if b != 0.0 || c != 0.0 || a <= 0.0 || d <= 0.0 {
+        return false;
+    }
+    let from = transform * Point::new(f64::from(left), f64::from(top));
+    let to = transform * Point::new(f64::from(right), f64::from(bottom));
+    from.x <= 0.0 && from.y <= 0.0 && to.x >= f64::from(size[0]) && to.y >= f64::from(size[1])
 }
 
 /// The scaled pixels a run of steps draws into.
@@ -1615,6 +1657,8 @@ pub(crate) struct Ready {
     fringe: Option<BezPath>,
     /// Left, top, right, bottom of both; `None` when they hold no pixel.
     bounds: Option<[i32; 4]>,
+    /// Whether `area` is the rectangle of `bounds` alone.
+    rectangle: bool,
 }
 
 /// What a `Ready` was made from: the address and bounds of each mask's bits.
@@ -1692,6 +1736,7 @@ impl DrawCache {
                     area: runs.path(),
                     fringe: None,
                     bounds: runs.bounds(),
+                    rectangle: runs.is_rectangle(),
                 }
             },
         )
@@ -1716,6 +1761,7 @@ impl DrawCache {
                 area: area.path(),
                 fringe: fringe.map(|fringe| fringe.path()),
                 bounds,
+                rectangle: false,
             }
         })
     }
@@ -1772,6 +1818,15 @@ impl DrawCache {
             .expect("no panic while holding it")
             .retain(|_, decoded| decoded.used + 1 >= render);
     }
+}
+
+/// Whether drawing `ops` stops and starts again over what it drew before.
+fn draws_in_runs(ops: &[Op]) -> bool {
+    ops.iter().any(|op| match op {
+        Op::TransformSelection { .. } | Op::Resample { .. } => true,
+        Op::Isolated(section) => draws_in_runs(&section.ops),
+        _ => false,
+    })
 }
 
 /// Whether `ops` move a selection, inside sections too.
@@ -2421,6 +2476,87 @@ mod tests {
             assert!(
                 render(&document, 3, threads).data_as_u8_slice() == single.data_as_u8_slice(),
                 "{threads} threads differ"
+            );
+        }
+    }
+
+    #[test]
+    fn layers_drawn_alone_draw_the_same_as_beside_the_others() {
+        let mut document = many_layers();
+        let size = document.canvas.map(|edge| edge as i32);
+        let all = add_mask(&mut document, [0, 0, size[0], size[1]], |_, _| true);
+        let part = add_mask(&mut document, [10, 4, 50, 30], blob);
+        for (index, layer) in document.layers.iter_mut().take(4).enumerate() {
+            let LayerKind::Paint(paint) = &mut layer.kind else {
+                unreachable!()
+            };
+            let mask = if index % 2 == 0 { all } else { part };
+            let shift = 3.37 + index as f64;
+            paint.ops.push(moved(
+                mask,
+                [1.0, 0.0, shift, 0.0, 1.0, 2.71],
+                ugu_core::ops::Sampling::Smooth,
+                index == 1,
+            ));
+            paint.ops.push(Op::Paint {
+                stroke: StrokeId(0),
+                clip: None,
+            });
+        }
+        let single = render(&document, 3, 0);
+        for threads in [1, 2, 4, 8, 16] {
+            assert!(
+                render(&document, 3, threads).data_as_u8_slice() == single.data_as_u8_slice(),
+                "{threads} threads differ"
+            );
+        }
+    }
+
+    #[test]
+    fn a_move_that_cuts_away_everything_draws_as_one_that_does_not() {
+        let base = many_layers();
+        let [width, height] = base.canvas.map(|edge| edge as i32);
+        let with = |hole: bool| {
+            let mut document = base.clone();
+            let mask = add_mask(&mut document, [-6, -6, width + 12, height + 12], |x, y| {
+                !(hole && x == -3 && y == -3)
+            });
+            for layer in document.layers.iter_mut().take(3) {
+                let LayerKind::Paint(paint) = &mut layer.kind else {
+                    unreachable!()
+                };
+                paint.ops.push(moved(
+                    mask,
+                    [1.0, 0.0, 5.43, 0.0, 1.0, -2.17],
+                    ugu_core::ops::Sampling::Smooth,
+                    false,
+                ));
+                paint.ops.push(Op::Paint {
+                    stroke: StrokeId(0),
+                    clip: None,
+                });
+            }
+            document
+        };
+        let (cut, kept) = (with(false), with(true));
+        for shrink in [1, 2, 4] {
+            let draw = |document: &Document| {
+                let plan = RenderPlan::new(document, Purpose::Display);
+                let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
+                let mut pixmap = Pixmap::new(width, height);
+                DocumentRenderer::new(4).render_scaled(
+                    document,
+                    &plan,
+                    2,
+                    None,
+                    shrink,
+                    &mut pixmap,
+                );
+                pixmap
+            };
+            assert!(
+                draw(&cut).data_as_u8_slice() == draw(&kept).data_as_u8_slice(),
+                "1/{shrink} differs"
             );
         }
     }
