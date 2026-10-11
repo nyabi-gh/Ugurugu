@@ -21,24 +21,32 @@
 #include <QImage>
 #include <QString>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <algorithm>
-#include <cstdio>
 #include <windows.h>
 // psapi.h needs windows.h before it.
 #include <psapi.h>
+#endif
 
 namespace
 {
 
+// Not a number where the working set cannot be read.
 double peakWorkingSetMib()
 {
+#ifdef _WIN32
     PROCESS_MEMORY_COUNTERS counters{};
     counters.cb = sizeof(counters);
     GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters));
     return static_cast<double>(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+#else
+    return std::nan("");
+#endif
 }
 
 }
@@ -65,8 +73,14 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "open failed: %s\n", qPrintable(error));
         return 1;
     }
-    const ugurugu::Document document = *loaded;
-    const int percent = std::atoi(argv[3]);
+    const ugurugu::Document &document = *loaded;
+    bool percentValid = false;
+    const int percent = QString::fromLocal8Bit(argv[3]).toInt(&percentValid);
+    if (!percentValid || percent <= 0)
+    {
+        std::fprintf(stderr, "invalid percent %s\n", argv[3]);
+        return 2;
+    }
     const QSize outputSize =
         percent >= 100
             ? document.size
@@ -125,9 +139,10 @@ int main(int argc, char **argv)
     }
     std::printf(
         "  drawing %.2fs, total %.2fs, %.1fMB, peak working set %.0f MiB\n",
-        drawing / 1000.0,
-        timer.elapsed() / 1000.0,
-        QFile(QString::fromLocal8Bit(argv[2])).size() / 1e6,
+        static_cast<double>(drawing) / 1000.0,
+        static_cast<double>(timer.elapsed()) / 1000.0,
+        static_cast<double>(QFile(QString::fromLocal8Bit(argv[2])).size())
+            / 1e6,
         peakWorkingSetMib());
     return 0;
 }

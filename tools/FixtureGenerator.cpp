@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <vector>
 
@@ -981,7 +982,7 @@ Document depth()
         document.layers.append(std::move(layer));
     }
     // Children come before their group, so the deepest group goes first.
-    for (int level = groups.size() - 1; level >= 0; --level)
+    for (qsizetype level = groups.size() - 1; level >= 0; --level)
     {
         document.layers.append(groups[level]);
     }
@@ -1136,7 +1137,7 @@ int renderFrames(const QString &documentPath, const QString &directory)
         QElapsedTimer timer;
         timer.start();
         document = DocumentSerializer::load(documentPath, &error);
-        times.push_back(timer.nsecsElapsed() / 1e6);
+        times.push_back(static_cast<double>(timer.nsecsElapsed()) / 1e6);
     }
     std::sort(times.begin(), times.end());
     std::printf("opened in %.1f ms (median of 5, %.1f..%.1f)\n",
@@ -1220,7 +1221,7 @@ QJsonObject manifest(const QString &id, const Document &document, qint64 bytes)
 
 }
 
-int main(int argc, char **argv)
+int run(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
     if (argc == 4 && std::strcmp(argv[1], "frames") == 0)
@@ -1340,4 +1341,21 @@ int main(int argc, char **argv)
             description.value(QStringLiteral("rasterAssetBytes")).toInteger()),
         static_cast<long long>(bytes));
     return 0;
+}
+
+int main(int argc, char **argv)
+{
+    try
+    {
+        return run(argc, argv);
+    }
+    catch (const std::exception &exception)
+    {
+        std::fprintf(stderr, "error: %s\n", exception.what());
+    }
+    catch (...)
+    {
+        std::fprintf(stderr, "error: unknown exception\n");
+    }
+    return 1;
 }
