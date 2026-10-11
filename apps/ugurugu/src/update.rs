@@ -15,7 +15,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use velopack::{UpdateCheck, UpdateInfo, UpdateManager, sources::GithubSource};
+use velopack::sources::{FileSource, GithubSource};
+use velopack::{UpdateCheck, UpdateInfo, UpdateManager};
 
 use crate::i18n::{args, tr, tr_with};
 
@@ -69,8 +70,13 @@ fn now_seconds() -> u64 {
         .map_or(0, |since| since.as_secs())
 }
 
+/// The GitHub releases, or the folder of packages `UGURUGU_UPDATE_FEED`
+/// names, to try an update before it is published.
 fn manager() -> Result<UpdateManager, velopack::Error> {
-    UpdateManager::new(GithubSource::new(REPOSITORY, None, false), None, None)
+    match std::env::var_os("UGURUGU_UPDATE_FEED") {
+        Some(folder) => UpdateManager::new(FileSource::new(folder), None, None),
+        None => UpdateManager::new(GithubSource::new(REPOSITORY, None, false), None, None),
+    }
 }
 
 fn check() -> Result<Found, String> {

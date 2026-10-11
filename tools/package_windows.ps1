@@ -13,11 +13,19 @@ the expected ones, so nothing else reaches the installer unnoticed.
 
 .EXAMPLE
 tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory artifacts
+
+.EXAMPLE
+tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory feed -Version 3.0.1 -ReleaseNotes release-notes/3.0.0.en.md
+
+A later version of the same build, for trying an update from a local feed
+(tools/sandbox). Releases take the version and notes from the repository.
 #>
 param(
     [Parameter(Mandatory)] [string] $Executable,
     [Parameter(Mandatory)] [string] $OutputDirectory,
-    [string] $Vpk = 'vpk'
+    [string] $Vpk = 'vpk',
+    [string] $Version,
+    [string] $ReleaseNotes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,8 +35,8 @@ $manifest = Get-Content (Join-Path $root 'Cargo.toml') -Raw
 if ($manifest -notmatch '(?ms)^\[workspace\.package\][^\[]*?^version = "([^"]+)"') {
     throw 'Could not read the workspace version from Cargo.toml'
 }
-$version = $Matches[1]
-$notes = Join-Path $root "release-notes/$version.en.md"
+$version = if ($Version) { $Version } else { $Matches[1] }
+$notes = if ($ReleaseNotes) { $ReleaseNotes } else { Join-Path $root "release-notes/$version.en.md" }
 if (-not (Test-Path $notes)) {
     throw "Missing release notes: $notes"
 }

@@ -61,6 +61,13 @@ cargo install cargo-about --version 0.9.2 --locked --features cli
 `tools/package_smoke.ps1` installs the result, runs it and uninstalls it.
 It changes the current user's file association and shortcuts while it
 runs, so CI runs it on a fresh runner; on your own PC, use Windows Sandbox.
+`tools/sandbox/prepare.ps1 -Work <new folder>` packs the build as 3.0.0 and
+as 3.0.1 in a local update feed and writes a `.wsb` that runs
+`tools/sandbox/accept.ps1` in a Sandbox without network or GPU: install, a
+run on WARP, opening a document from a Korean path through the file
+association, updating with unsaved changes, checking offline and
+uninstalling. The results are in `<folder>\out\results.md`. The app looks for
+updates in the folder `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`; `v2.*` tags still use `release.yml`.
 
