@@ -7,13 +7,15 @@
 //! by Bresenham's line, and a pixel that only turns an L corner between its
 //! neighbours is left out, so a one-pixel line has no doubled corners. Each
 //! pixel then takes the tip's block of `width` pixels. The wobble moves the
-//! points as it moves a line of the same width, sampled at the same spacing,
-//! and each point's move is rounded to whole pixels, so the stroke moves a
-//! pixel at a time. Pressure changes neither width nor wobble.
+//! line as it moves a line of the same width, sampled at the same spacing,
+//! and each move is rounded to whole pixels, so the stroke moves a pixel at
+//! a time. Pressure changes neither width nor wobble.
 //!
 //! The points are not resampled: a stroke drawn pixel by pixel keeps every
-//! pixel it passed. The wobble's moves are taken at the line's samples and
-//! read at each point by its distance along the stroke.
+//! pixel it passed. The wobble moves each pixel of that still line by the
+//! move at its distance along the stroke, and the moved pixels are joined
+//! and their corners left out again. Moving the raw points instead let a
+//! point land behind the one before, which left clumps of three pixels.
 
 use ugu_core::store::{Point, TipShape};
 
@@ -116,22 +118,25 @@ pub fn cells(points: &[Point], pen: &Pen, frame: u32) -> Cells {
     }
     let moves = Moves::new(points, pen, frame);
     let mut arc = 0.0;
+    let mut arcs = Vec::with_capacity(points.len());
     let mut at = Vec::with_capacity(points.len());
-    let mut middles = Vec::with_capacity(points.len());
     for (index, point) in points.iter().enumerate() {
         if index > 0 {
             let before = &points[index - 1];
-            let length = f64::from(point.x - before.x).hypot(f64::from(point.y - before.y));
-            middles.push(arc + length * 0.5);
-            arc += length;
+            arc += f64::from(point.x - before.x).hypot(f64::from(point.y - before.y));
         }
-        let [dx, dy] = moves.at(arc);
+        arcs.push(arc);
         at.push([
-            f64::from(point.x).floor() as i32 + dx,
-            f64::from(point.y).floor() as i32 + dy,
+            f64::from(point.x).floor() as i32,
+            f64::from(point.y).floor() as i32,
         ]);
     }
+    let moved = |cell: [i32; 2], arc: f64| {
+        let [dx, dy] = moves.at(arc);
+        [cell[0] + dx, cell[1] + dy]
+    };
     let block = Block::new(side(pen.width), pen.brush.tip);
+    // Moves round to whole pixels and may take a row above the first.
     let top = at.iter().map(|cell| cell[1]).min().unwrap_or(0) - block.centre;
     let mut runs = Gather::new(top);
     let mut path: Vec<[i32; 2]> = Vec::new();
@@ -142,17 +147,24 @@ pub fn cells(points: &[Point], pen: &Pen, frame: u32) -> Cells {
         path.clear();
     };
     if points.len() == 1 {
-        path.push(at[0]);
+        path.push(moved(at[0], 0.0));
     }
-    for (index, &middle) in middles.iter().enumerate() {
-        if !moves.shows(middle) {
+    let mut still = Vec::new();
+    for index in 0..points.len().saturating_sub(1) {
+        let (from, to) = (arcs[index], arcs[index + 1]);
+        if !moves.shows((from + to) / 2.0) {
             stamp(&mut path);
             continue;
         }
         if path.is_empty() {
-            path.push(at[index]);
+            path.push(moved(at[index], from));
         }
-        line(at[index], at[index + 1], &mut path);
+        still.clear();
+        line(at[index], at[index + 1], &mut still);
+        for (step, &cell) in still.iter().enumerate() {
+            let along = from + (to - from) * (step + 1) as f64 / still.len() as f64;
+            join(&mut path, moved(cell, along), moves.wobbles());
+        }
     }
     stamp(&mut path);
     Cells::from_runs(runs.runs)
@@ -221,6 +233,31 @@ fn line(from: [i32; 2], to: [i32; 2], path: &mut Vec<[i32; 2]>) {
         }
         push_perfect(path, [x, y]);
     }
+}
+
+/// Adds `cell` to the end of `path`, joined by Bresenham's line where a
+/// move leaves a gap. When the line wobbles, a pixel whose neighbours on
+/// the path touch each other is left out too: a move that steps aside and
+/// back makes such a bump, which the L corner rule does not catch. A still
+/// line keeps them, as the hand drew them.
+fn join(path: &mut Vec<[i32; 2]>, cell: [i32; 2], wobbles: bool) {
+    match path.last() {
+        Some(&last) if last == cell => return,
+        Some(&last) if apart(last, cell) > 1 => line(last, cell, path),
+        _ => push_perfect(path, cell),
+    }
+    while wobbles
+        && let [.., a, _, c] = path[..]
+        && apart(a, c) == 1
+    {
+        let at = path.len() - 2;
+        path.remove(at);
+    }
+}
+
+/// Chebyshev distance.
+fn apart(a: [i32; 2], b: [i32; 2]) -> i32 {
+    (a[0] - b[0]).abs().max((a[1] - b[1]).abs())
 }
 
 fn push_perfect(path: &mut Vec<[i32; 2]>, cell: [i32; 2]) {
@@ -292,6 +329,11 @@ impl Moves {
             }
         };
         moved.map(|value| value.round() as i32)
+    }
+
+    /// Whether anything moves.
+    fn wobbles(&self) -> bool {
+        !self.moved.is_empty()
     }
 
     /// Whether the line shows at distance `arc`.
@@ -480,6 +522,27 @@ mod tests {
         assert!(frames.windows(2).any(|pair| pair[0] != pair[1]));
         for frame in &frames {
             assert_thin_line(frame);
+        }
+    }
+
+    #[test]
+    fn wobbling_curves_stay_thin_and_joined() {
+        // Half circles, which the old way of moving the raw points left with
+        // clumps of three pixels on some frames.
+        for radius in [6.0, 12.0, 25.0] {
+            let points: Vec<[f32; 2]> = (0..=80)
+                .map(|step| {
+                    let turn = step as f32 / 80.0 * std::f32::consts::PI;
+                    [40.3 + radius * turn.cos(), 40.7 + radius * turn.sin()]
+                })
+                .collect();
+            let line = stroke(&points, 1.0);
+            assert_thin_line(&pixels(&line, 0.0, 0));
+            for wobble in [1.0, 1.6, 3.0] {
+                for frame in 0..8 {
+                    assert_thin_line(&pixels(&line, wobble, frame));
+                }
+            }
         }
     }
 
