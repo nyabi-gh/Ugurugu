@@ -27,7 +27,7 @@ Report it privately instead, either way:
 
 - [Open a private security advisory](https://github.com/nyabi-gh/Ugurugu/security/advisories/new)
   on GitHub — preferred, because the discussion and the fix stay in one place.
-- Email <contact@nyabi.dev> with `Ugurugu security` in the subject if you would
+- Email <nyabi@tb.pro> with `Ugurugu security` in the subject if you would
   rather not use GitHub.
 
 Helpful things to include:
