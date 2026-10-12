@@ -10,7 +10,8 @@ acceptance (M6-7) or an install next to 2.2.13 (M6-8).
 Packs the executable twice, as 3.0.0 to install and as 3.0.1 in a local
 update feed, and writes a .wsb that maps them read-only into a Sandbox with
 the vGPU disabled and runs the scenario's script there at logon:
-accept.ps1 (no network; with a document to open) or alongside.ps1 (with the
+accept.ps1 (no network; with a document to open and a feed whose package is
+damaged) or alongside.ps1 (with the
 network, which the 2.2.13 Setup given by -Legacy needs for its Visual C++
 runtime). The results come back in <Work>\out\results.md. Nothing on this
 PC is installed or registered.
@@ -58,6 +59,13 @@ if ($Scenario -eq 'accept') {
     if ($LASTEXITCODE -ne 0) {
         throw "ugu-doc fixture failed with exit code $LASTEXITCODE"
     }
+    # The same feed with one byte of the package changed, which fails its checksum.
+    $broken = Join-Path $in 'feed-broken'
+    Copy-Item -Recurse (Join-Path $in 'feed') $broken
+    $nupkg = Get-ChildItem $broken -Filter '*.nupkg' | Select-Object -First 1
+    $bytes = [IO.File]::ReadAllBytes($nupkg.FullName)
+    $bytes[[int]($bytes.Length / 2)] = $bytes[[int]($bytes.Length / 2)] -bxor 0xFF
+    [IO.File]::WriteAllBytes($nupkg.FullName, $bytes)
     $networking = 'Disable'
 } else {
     New-Item -ItemType Directory -Path (Join-Path $in 'legacy') | Out-Null

@@ -1211,4 +1211,25 @@ Windows Sandbox(게스트 10.0.26100), 네트워크 켬(2.2.13 Setup이 `vcredis
 
 3.0 로그에 WARN·ERROR·panic 기록 없음.
 
-고친 빌드로 M6-7(28절)도 3회차를 돌려 7단계 모두 통과했다. 제거 뒤 남는 것: `AppData\Local\Ugurugu Data`(6 files), `AppData\Roaming\Ugurugu`(1 file).
+고친 빌드로 M6-7(28절)도 3회차를 돌려 7단계 모두 통과했다(4·5회차는 28절 끝). 제거 뒤 남는 것: `AppData\Local\Ugurugu Data`(6 files), `AppData\Roaming\Ugurugu`(1 file).
+
+### 28절 이어서: M6-7 4·5회차 (2026-10-12, `3ed2e11` 빌드)
+
+`accept.ps1`에 "Update that fails to download"를 더했다. `prepare.ps1`이 피드를 `feed-broken`으로 복사하고 nupkg(15,548,818바이트) 가운데 1바이트를 0xFF와 XOR한다. 실행 단계는 `WindowsPrincipal.IsInRole(Administrator)`와 `SystemInformation.TerminalServerSession`을 남긴다.
+
+**4회차:** 새 단계 pass. 다음 "Update to 3.0.1 with unsaved changes"는 FAIL("Timed out after 60 s waiting for 'Update'"): 앞 단계의 확인이 업데이트를 찾아 끝나 `updateChecked`가 기록됐고, 6시간 안의 다음 시작은 자동 확인을 하지 않는다(2.2.13 `UpdateControllerWindows.cpp` `recordAutomaticCheck`와 같은 규칙). 그 단계가 레이어를 추가한 채 강제 종료돼 복구본이 남았고, 다음 "Check for updates offline"은 FAIL(안내를 60초 안에 찾지 못함, 로그에는 `update check failed`가 있음; 시작 때 복구 질문이 먼저 뜬 것으로 본다, 가설). 고침: 실패 단계에 `UGURUGU_SETTINGS_PATH`로 따로 설정 파일.
+
+**5회차:** 8단계 모두 pass.
+
+| Step | Result | Detail |
+|---|---|---|
+| Install 3.0.0 | pass | 4회차까지와 같음 |
+| Run | pass | display adapters: NVIDIA GeForce RTX 5080, Intel(R) Graphics, Microsoft Remote Display Adapter; user `WDAGUtilityAccount`, elevated True, session '', remote True; RTX 5080 (Dx12) |
+| Run on WARP | pass | Microsoft Basic Render Driver (Cpu, Dx12) |
+| Open by association from a Korean path | pass | '새 그림 - Ugurugu', `document opened ms=1.30 ok=true` |
+| Update that fails to download | pass | notice 'Could not download the update. Checksum did not match for …\Ugurugu3-3.0.1-win-x64-full.partial (expected 0EE05B5D…198C, actual CAD50CA2…CBBA)'; title 'Untitled* - Ugurugu' kept; still 3.0.0 |
+| Update to 3.0.1 with unsaved changes | pass | 질문 → 취소 → 다시 질문 → 저장 안 함 → 3.0.1로 다시 시작 |
+| Check for updates offline | pass | 'Could not check for updates. Network error: … (os error 11001)' |
+| Uninstall | pass | 남음: `Local\Ugurugu Data`(7 files), `Roaming\Ugurugu`(1 file) |
+
+Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="false"`. `ugurugu.exe`에는 `requestedExecutionLevel`이 없다(기본 asInvoker).

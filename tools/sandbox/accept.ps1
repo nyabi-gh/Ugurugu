@@ -82,7 +82,11 @@ function Start-AndClose {
 # The Sandbox may still share the host GPU although the .wsb disables it.
 Step 'Run' {
     $controllers = @(Get-CimInstance Win32_VideoController | ForEach-Object Name)
-    "display adapters: $($controllers -join ', ')"
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $elevated = (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    Add-Type -AssemblyName System.Windows.Forms
+    $remote = [Windows.Forms.SystemInformation]::TerminalServerSession
+    "display adapters: $($controllers -join ', ')", "user $($identity.Name), elevated $elevated, session '$env:SESSIONNAME', remote $remote"
     Start-AndClose
 }
 
@@ -114,6 +118,43 @@ Step 'Open by association from a Korean path' {
         throw "Not opened: $opened"
     }
     "title '$title'", $opened
+}
+
+# Its own settings, so the check it finishes does not start the interval
+# that would keep the next step from checking at start.
+Step 'Update that fails to download' {
+    $env:UGURUGU_UPDATE_FEED = Join-Path $in 'feed-broken'
+    $env:UGURUGU_SETTINGS_PATH = Join-Path $env:TEMP 'broken-feed-settings.json'
+    try {
+        Start-Process -FilePath $app | Out-Null
+        $process = Wait-Window
+        Press $process 'Add layer'
+        Press $process 'Update' 60
+        $said = Find-Element $process { param($n) $n.StartsWith('Could not download the update') } 120 'the failure notice'
+        $text = $said.Current.Name -replace '\s+', ' '
+        Press $process 'Close'
+        Start-Sleep -Seconds 3
+        $process.Refresh()
+        if ($process.HasExited) {
+            throw 'The app closed after the failed download'
+        }
+        $caption = $process.MainWindowTitle
+        if (-not $caption.Contains('* - ')) {
+            throw "The unsaved changes are gone: '$caption'"
+        }
+        [void]$process.CloseMainWindow()
+        Press $process "Don't Save (N)" 30
+        if (-not $process.WaitForExit(30000)) {
+            throw 'The app did not close'
+        }
+    } finally {
+        Remove-Item Env:UGURUGU_UPDATE_FEED, Env:UGURUGU_SETTINGS_PATH
+    }
+    $version = Get-InstalledVersion
+    if ($version -ne '3.0.0') {
+        throw "Installed version after the failed update: $version"
+    }
+    "notice '$text'", "title '$caption' kept", "still $version"
 }
 
 Step 'Update to 3.0.1 with unsaved changes' {
