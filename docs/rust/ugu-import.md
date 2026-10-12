@@ -1,6 +1,6 @@
 # 2.x `.ugu` schema 13 가져오기 대응표 (M5-18, 2026-10-11)
 
-m5-plan 2절 15의 첫 단계다. 2.2.13 writer는 `src/io/serializer/DocumentJsonCodec.cpp`이고, reader는 `DocumentSerializer.cpp`와 `DocumentValidation.cpp`다. 3.0 쪽은 `crates/ugu-core`(document.rs, ops.rs, store.rs)다.
+decisions.md 파일·형식·가져오기의 `.ugu` 가져오기 첫 단계다. 2.2.13 writer는 `src/io/serializer/DocumentJsonCodec.cpp`이고, reader는 `DocumentSerializer.cpp`와 `DocumentValidation.cpp`다. 3.0 쪽은 `crates/ugu-core`(document.rs, ops.rs, store.rs)다.
 
 ## 1. 대응
 
@@ -38,15 +38,12 @@ m5-plan 2절 15의 첫 단계다. 2.2.13 writer는 `src/io/serializer/DocumentJs
 
 ## 3. fixture
 
-- `examples/kimcozo_service.ugu`는 실제 schema 13 파일이다(레이어 7, paint 185, erase 14, fill 52, 선택 이동 2).
-- `tools/FixtureGenerator.cpp`는 paint·airbrush·spray·erase·그룹·blend 4종·clipping·image·선택 이동만 쓴다.
-- 빠진 것: fill, 자르기·리사이즈, 병합 경계, 레이어 모션, smooth·stepped·broken, reference, clip 마스크, ClearSelection·keep_source, legacy fillMask, procedural fill.
-- 계획: `tests/DocumentSchemaTests.cpp`의 생성 코드를 FixtureGenerator로 옮겨 전 기능 fixture를 더하고, 2.2.13과 3.0으로 렌더해 모든 프레임을 비교한다. procedural fill 예는 `tests/fixtures/legacy-render/*.wagle`을 2.2.13에서 다시 저장해 얻는다(거절 시험용).
-- 연결 지점: `crates/ugu-io/src/read.rs`의 `legacy()`가 이미 JSON을 `Legacy::Json`으로 판별한다.
+- `tests/fixtures/ugu13`의 6개(`motion`·`fill`·`edit`·`depth`, 거절용 `procedural`·`reframe-in-section`, 각각 `.manifest.json` 포함)를 2.2.13 생성기(`tools/FixtureGenerator.cpp`, 실행 파일 `ugurugu_fixture_generator`)로 만들었다. 처음 생성기에 없던 fill, 자르기·리사이즈, 병합 경계, 레이어 모션, smooth·stepped·broken, reference, clip 마스크, ClearSelection·keep_source, legacy fillMask, procedural fill이 모두 들어 있다. procedural fill 예는 `.wagle`을 2.2.13에서 다시 저장하는 대신 생성기가 coverage 없는 fill을 직접 쓴다(2.2.13 serializer가 그대로 저장하고 연다).
+- `examples/kimcozo_service.ugu`(실제 schema 13 파일, 레이어 7, paint 185, erase 14, fill 52, 선택 이동 2)는 **저장소에 없다.** 이 PC에만 있고 `.git/info/exclude`로 빠져 있다. 자동 시험은 쓰지 않으며, evidence.md 25절의 수동 비교에만 썼다.
+- 프레임 비교: 생성기의 `frames` 명령이 2.2.13 정확 렌더로 모든 프레임을 PNG로 쓰고 `ugu-doc compare`가 3.0 가져오기 렌더와 비교한다. CI는 이 비교를 돌리지 않는다([backlog.md](backlog.md) B3-37). C++ 2.x는 더 유지하지 않으므로 fixture나 기준 프레임을 새로 만들려면 태그 `v2.2.13`의 소스로 생성기를 빌드한다.
 
 ## 4. 구현과 결과 (2026-10-11)
 
-- `crates/ugu-io/src/legacy.rs`. 시험은 `legacy/tests.rs`(fixture 6개로 대응·거절·손상), 앱은 `files.rs`의 `a_2_2_13_project_opens_as_a_new_document_or_says_why_not`.
-- 3절의 빠진 것은 모두 fixture에 들어갔다(`tests/fixtures/ugu13`, manifest 포함). procedural fill 예는 `.wagle`을 다시 저장하는 대신 생성기가 coverage 없는 fill을 직접 쓴다(2.2.13 serializer가 그대로 저장하고 연다).
-- 8절(smooth 샘플링, clipToLayerBelow, Overlay)은 렌더 비교로 같다고 확인했다(m0-evidence 22절). 7절 f64 → f32는 차이로 드러나지 않았다.
+- `crates/ugu-io/src/legacy.rs`. `read.rs`의 `legacy()`가 JSON을 `Legacy::Json`으로 판별해 넘긴다. 시험은 `legacy/tests.rs`(3절 fixture 6개로 대응·거절·손상), 앱은 `files.rs`의 `a_2_2_13_project_opens_as_a_new_document_or_says_why_not`.
+- 2절 표의 8번(smooth 샘플링, clipToLayerBelow, Overlay)은 렌더 비교로 같다고 확인했다(evidence.md 25절). 7번 f64 → f32는 차이로 드러나지 않았다.
 - 2.2.13과 다르게 정한 것: 가져온 문서는 저장되지 않은 상태(닫으면 묻는다)이고 이름은 파일 이름이다(2.2.13 .wawa 가져오기와 같음). base64는 엄격히 읽는다(2.2.13 Qt는 잘못된 문자를 건너뜀; writer는 늘 표준 base64). 마스크·자산의 내용 해시 id는 다시 매기므로 검사하지 않는다.

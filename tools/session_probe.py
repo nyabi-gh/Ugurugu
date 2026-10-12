@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-"""A long work session by automatic input, for M5-15 (docs/rust/m5-plan.md):
+"""A long work session by automatic input, for M5-15 (docs/rust/decisions.md):
 strokes, undo and redo, a selection moved and applied (3.0 only), saves,
 playback and GIF exports, repeated for `--minutes`. Each round records the
 work of the thread that handles input per stroke move and pen-up, and the

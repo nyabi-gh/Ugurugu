@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
 """Measures the M0 baselines that need no in-app instrumentation
-(docs/rust/m0-evidence.md section 5): UI thread work per input batch and at
+(docs/rust/evidence.md section 3): UI thread work per input batch and at
 pen-up, save, open, export cancel, and memory.
 
 Usage: python baseline_probe.py <stroke|save|open|cancel|memory|playback|export>

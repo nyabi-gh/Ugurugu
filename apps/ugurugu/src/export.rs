@@ -32,7 +32,7 @@ use crate::cache::Renders;
 const EDGES: [u32; 6] = [2048, 1024, 768, 512, 384, 256];
 /// The long edge offered until another is chosen.
 pub const FIRST_EDGE: u32 = 512;
-/// Whole enlargements offered, each pixel a block (m5-plan M5-17), while
+/// Whole enlargements offered, each pixel a block (decisions.md M5-17), while
 /// the long edge stays within `MOST_ENLARGED`.
 const ENLARGEMENTS: [u32; 3] = [8, 4, 2];
 const MOST_ENLARGED: u32 = 4096;

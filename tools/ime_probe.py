@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
 """Drives a real Windows IME in the Rust M0 app's IME probe with key input and
-records what the app reports (docs/rust/m0-evidence.md section 7).
+records what the app reports (docs/rust/evidence.md section 27).
 
 Usage: python ime_probe.py <ko|ja> <ugurugu.exe> <output-dir> [window-x,window-y]
 

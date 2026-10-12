@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Using the whole window from the keyboard alone (M5-14), driven as the
+//! Using the whole window from the keyboard alone (decisions.md M5-14), driven as the
 //! render thread drives it, without a GPU.
 
 use egui::accesskit::{Role, TreeUpdate};

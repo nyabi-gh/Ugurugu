@@ -8,7 +8,7 @@ Stages the 3.0 executable with its licenses and packs it with Velopack.
 .DESCRIPTION
 The package ID, channel and title differ from 2.x (Ugurugu, win, "Ugurugu"),
 so 3.0 installs beside 2.2.13 in its own folder, update feed and shortcuts
-(docs/rust/m6-plan.md section 2, row 4). The staged files must be exactly
+(docs/rust/decisions.md, m6 2절 4). The staged files must be exactly
 the expected ones, so nothing else reaches the installer unnoticed.
 
 .EXAMPLE

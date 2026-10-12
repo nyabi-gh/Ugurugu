@@ -3,7 +3,7 @@
 
 // Writes 2.2.13's GIFs and WebPs of fixed test frames, the golden files the
 // Rust writers are compared with (crates/ugu-io/src/gif.rs and webp.rs,
-// docs/rust/m5-plan.md M5-8 and M5-9). The frames come from integer formulas
+// docs/rust/decisions.md M5-8 and M5-9). The frames come from integer formulas
 // the Rust tests repeat. The output's extension picks the format; WebP
 // frames last ten times the GIF delays, in milliseconds.
 //

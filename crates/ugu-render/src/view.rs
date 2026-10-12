@@ -6,7 +6,7 @@
 //! the view's scale, offset, rotation and mirroring. At 100% and above a
 //! screen pixel shows one document pixel; below, neighbouring pixels are
 //! blended. From
-//! `GRID_SCALE` up, a grid can mark the document pixels (m5-plan M5-17).
+//! `GRID_SCALE` up, a grid can mark the document pixels (decisions.md M5-17).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

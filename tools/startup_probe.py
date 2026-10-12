@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-"""Start-up of 2.2.13 and 3.0 with a document (docs/rust/m0-evidence.md
-sections 13 and 14): from launching the process to its main window being
+"""Start-up of 2.2.13 and 3.0 with a document (docs/rust/evidence.md
+sections 29 and 7): from launching the process to its main window being
 visible, and to its first frame on screen (PresentMon, started before the
 app). For 3.0 the app's log also splits the time into the steps it logs.
 

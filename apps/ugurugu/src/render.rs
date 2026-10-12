@@ -96,8 +96,8 @@ pub struct EarlyInstance(Receiver<wgpu::Instance>);
 pub struct EarlyGpu(std::thread::JoinHandle<Result<Gpu, String>>);
 
 /// Starts opening the GPU on a thread of its own. Loading the drivers of
-/// every adapter wgpu looks at takes most of start-up (m0-evidence section
-/// 14) and needs no window.
+/// every adapter wgpu looks at takes most of start-up (evidence.md section
+/// 7) and needs no window.
 pub fn open_gpu_early() -> (EarlyInstance, EarlyGpu) {
     let (instance_out, instance_in) = std::sync::mpsc::sync_channel(1);
     let gpu = std::thread::Builder::new()

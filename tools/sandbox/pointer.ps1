@@ -3,8 +3,8 @@
 
 <#
 .SYNOPSIS
-Synthetic pen and touch input to 3.0, run inside Windows Sandbox (M6-9,
-M6-10).
+Synthetic pen and touch input to 3.0, run inside Windows Sandbox
+(docs/rust/evidence.md section 33).
 
 .DESCRIPTION
 Started at logon by the .wsb that prepare.ps1 -Scenario pointer writes,
@@ -23,7 +23,7 @@ Runs in Windows PowerShell 5.1.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$title = 'M6-9 and M6-10 synthetic pen and touch'
+$title = 'Synthetic pen and touch'
 $in = 'C:\ugu\in'
 $out = 'C:\ugu\out'
 $installRoot = $in

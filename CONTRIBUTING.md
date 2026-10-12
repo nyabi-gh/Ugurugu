@@ -22,30 +22,39 @@ GPL without collecting permission from every past contributor.
 
 ## License headers
 
-Every tracked `.cpp`, `.hpp`, `.mm`, `.vert`, `.frag`, and `.js` file starts
-with:
+Every tracked `.rs`, `.cpp`, `.hpp`, `.mm`, `.vert`, `.frag`, and `.js` file
+starts with:
 
 ```
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) <year> <your name>
 ```
 
-New files need the same two lines. CI fails the `Format and release metadata`
-job when a tracked source file is missing the SPDX identifier. `src/main.cpp`
-carries the full GNU notice in addition, and it is the copy that states the
-warranty disclaimer in source form.
+Python and PowerShell tools start with the same two lines as `#` comments.
+New files need them too. CI fails the `Format and release metadata` job when a
+tracked source file is missing the SPDX identifier. `src/main.cpp` carries the
+full GNU notice in addition, and it is the copy that states the warranty
+disclaimer in source form.
 
-When you add a third-party dependency, record it in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and install its license text
-from `cmake/UguruguPackaging.cmake` so release packages ship it. A dependency
-whose license is incompatible with `GPL-3.0-or-later` cannot be linked in.
+## Dependencies
+
+A dependency whose license is incompatible with `GPL-3.0-or-later` cannot be
+linked in. For Ugurugu 3, `cargo deny` checks crate licenses and advisories
+against `deny.toml`, `tools/native_deps.py` rejects crates that build or link
+native code not on its approved list, and the package's
+`THIRD_PARTY_NOTICES.txt` is generated from `about.toml` by
+`tools/third_party_notices.py`. Code or assets that no crate license covers
+are added in that script.
 
 ## Before you open a pull request
 
-- Build and run the tests as described in [BUILDING.md](BUILDING.md).
-- Run `npm run check` in `web/` when you touch the web shell.
-- Format sources with `clang-format` using the repository `.clang-format`.
-- Add Korean and Japanese translations for every new `tr()` string. CI
-  rejects `.ts` files that still contain unfinished entries.
+Ugurugu 3 (`apps/`, `crates/`) is the maintained app. The C++ 2.2.13 sources
+(`src/`, `web/`) are kept for macOS 2.2.13 and as a reference, and are no
+longer changed.
+
+- Run the checks in [BUILDING.md](BUILDING.md#checks).
+- Write interface text in `apps/ugurugu/i18n/strings.txt` with Korean and
+  Japanese translations, then generate the `.ftl` files with
+  `python -X utf8 tools/ts_to_ftl.py`. Do not edit the `.ftl` files by hand.
 - Add a release note to `release-notes/<version>.en.md` when the change is
   user visible. Release notes are written in English only.

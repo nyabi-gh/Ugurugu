@@ -3,7 +3,7 @@
 
 //! Regression fixtures: documents made through the session as the app makes
 //! them, saved, read back and drawn frame by frame, each frame pinned by its
-//! digest. They cover what M4 must keep (docs/rust/m4-plan.md): a moved
+//! digest. They cover what M4 must keep (docs/rust/decisions.md M4-15): a moved
 //! selection moves each frame's own result, merging keeps every frame, an
 //! eraser reaches only what came before it, and pending edits are applied in
 //! order. Besides the digests, each fixture is checked for that meaning, so

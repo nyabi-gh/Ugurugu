@@ -3,7 +3,8 @@
 
 <#
 .SYNOPSIS
-The clean-install acceptance of 3.0, run inside Windows Sandbox (M6-7).
+The clean-install acceptance of 3.0, run inside Windows Sandbox
+(docs/rust/evidence.md section 32).
 
 .DESCRIPTION
 Started at logon by the .wsb that prepare.ps1 writes, with C:\ugu\in
@@ -16,7 +17,7 @@ Runs in Windows PowerShell 5.1, which has the .NET UI Automation client.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$title = 'M6-7 Windows Sandbox'
+$title = 'Clean install, Windows Sandbox'
 $in = 'C:\ugu\in'
 $out = 'C:\ugu\out'
 $env:UGURUGU_LANGUAGE = 'en'

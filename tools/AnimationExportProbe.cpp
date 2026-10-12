@@ -5,7 +5,7 @@
 // window, as ExportWorker::writeAnimation does it (exact frames scaled to the
 // size chosen, then GifWriter or WebPWriter), and prints the peak working
 // set. The output's extension picks the format. Compared with `ugu-doc gif`
-// and `ugu-doc webp` (docs/rust/m5-plan.md M5-8 and M5-9).
+// and `ugu-doc webp` (docs/rust/decisions.md M5-8 and M5-9).
 //
 // Usage: ugurugu_animation_export_probe <document.ugu> <out.gif|out.webp>
 //            <percent>

@@ -65,7 +65,7 @@ M4-3에서 고정한 규칙(2.2.13 `applyFillStroke`와 같음): coverage ∩ cl
 | `CanvasEpoch` | A가 시작한 캔버스가 B가 끝난 캔버스와 다르다 |
 | `CanvasChange` | A 안의 자르기·리사이즈가 B까지 움직인다. 불투명하지 않은 B의 자르기·리사이즈도 section 안에 들어가므로 거절한다 |
 
-병합을 거듭하면 section이 중첩된다. 깊이는 문서 검증에서 제한한다(초안 16). 참조가 아니라 값으로 담으므로 순환은 생길 수 없다.
+병합을 거듭하면 section이 중첩된다. 깊이는 문서 검증에서 16단계로 제한한다(`ugu_core::document::limits::SECTION_DEPTH`). 참조가 아니라 값으로 담으므로 순환은 생길 수 없다.
 
 ## 4. 결정: `.ugurugu` 파일 스키마 1
 
@@ -78,15 +78,16 @@ document.json        캔버스·배경·프레임 수·FPS·문서 wobble, 레�
 strokes.bin          모든 획의 점 데이터
 masks.bin            모든 마스크의 비트
 images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
-thumbnail.png        선택. 파생 데이터라 읽을 때 믿지 않는다
 ```
 
-- **document.json**: 레이어는 아래부터 순서대로 배열하고, 그룹 관계는 `parent` id로 나타낸다. 연산은 `{"op":"paint","stroke":7,"clip":null}`처럼 태그를 붙인 객체이고, `isolated`는 `ops`를 중첩한다. 획 표 항목은 `id, color("#rrggbbaa"), width, brush{...}, seed`다. seed는 JSON 숫자의 정밀도(2^53)를 넘으므로 16진 문자열로 둔다. 좌표는 문서 화소이며 viewport 상태는 저장하지 않는다.
+처음 안에는 선택 항목 `thumbnail.png`(파생 데이터)도 있었으나 구현하지 않았다. writer는 쓰지 않고, reader는 위 목록 밖의 항목을 손상으로 거절하므로 `thumbnail.png`가 든 파일도 열지 않는다(`crates/ugu-io/src/read.rs` `known_name`).
+
+- **document.json**: 레이어는 아래부터 순서대로 배열하고, 그룹은 자식 레이어를 `group.children`에 같은 방식으로 담는다(처음 안의 `parent` id가 아니라 중첩). 연산은 `{"op":"paint","stroke":7,"clip":null}`처럼 태그를 붙인 객체이고, `isolated`는 `ops`를 중첩한다. `PlaceImage`의 태그는 `image`다. 획 표 항목은 `id, color("#rrggbbaa"), width, brush{...}, seed`다. seed는 JSON 숫자의 정밀도(2^53)를 넘으므로 16진 문자열로 둔다. 좌표는 문서 화소이며 viewport 상태는 저장하지 않는다.
 - **strokes.bin**: `"UGS\0"`, u16 version=1, u16 flags=0, u32 획 수, 이어서 id 순으로 획마다 u32 id, u32 점 수, 점마다 f32 x, f32 y, f32 pressure. 모두 little-endian이다. Rust 구조체를 덤프하지 않고 이 순서로 직접 쓰고 읽는다. f32는 4096² 캔버스에서 약 0.0005px 정밀도라 충분하다.
 - **masks.bin**: `"UGM\0"`, u16 version=1, u16 flags=0, u32 마스크 수, 이어서 id 순으로 마스크마다 u32 id, i32 left, top, width, height, 행마다 MSB가 왼쪽인 비트열(행 단위 byte padding, 남는 비트는 0). 2.2.13 `PackedMaskRegion`과 같은 배치다.
-- **한 항목에 모으는 이유**: 처음에는 획마다 `strokes/<id>.bin` 항목을 두었다. 그러자 짧은 획 20,000개(fixture ④)의 저장이 646ms로 2.2.13(286ms)보다 느렸다. 원인은 데이터 양이 아니라 ZIP 항목마다 드는 고정 비용(로컬 헤더, Deflate 스트림 시작)이었다. 메모리로 인코딩만 해도 313ms가 걸렸다. 한 항목으로 모은 뒤 저장은 57ms, 열기는 226ms에서 25ms가 됐다(m0-evidence 9절). 읽을 때는 레코드가 id 순으로 엄격히 증가하고 항목을 정확히 덮어야 하며, `document.json`의 획·마스크 표와 일대일로 맞아야 한다.
+- **한 항목에 모으는 이유**: 처음에는 획마다 `strokes/<id>.bin` 항목을 두었다. 그러자 짧은 획 20,000개(fixture ④)의 저장이 646ms로 2.2.13(286ms)보다 느렸다. 원인은 데이터 양이 아니라 ZIP 항목마다 드는 고정 비용(로컬 헤더, Deflate 스트림 시작)이었다. 메모리로 인코딩만 해도 313ms가 걸렸다. 한 항목으로 모은 뒤 저장은 57ms, 열기는 226ms에서 25ms가 됐다(evidence.md 24절). 읽을 때는 레코드가 id 순으로 엄격히 증가하고 항목을 정확히 덮어야 하며, `document.json`의 획·마스크 표와 일대일로 맞아야 한다.
 - **images**: 이름이 내용의 SHA-256이므로 같은 이미지를 여러 번 배치해도 한 번만 저장한다. PNG는 다시 압축하지 않고 ZIP에 stored로 넣는다. 나머지 항목은 Deflate(`zip` crate의 pure-Rust `zlib-rs` backend)로 넣는다.
-- **읽기 검증**: 항목 수·이름 중복·경로(디렉터리 탈출 금지)·압축/해제 크기·실제 해제량 누계·이미지 화소 수·좌표 유한성·연산 수·section 깊이·id 참조를 제한하고 검사한다. manifest 선언값만 믿지 않는다. `schema`·`render_revision`이 모르는 값이거나 `required`에 모르는 기능이 있으면 거절한다. 구형 `.ugu`는 schema 13만 가져오기로 변환하고(2026-10-10, m5-plan 2절 15), 그 밖의 구형 파일은 "지원하지 않는 형식" 판별만 한다(scope.md 4절).
+- **읽기 검증**: 항목 수·이름 중복·경로(디렉터리 탈출 금지)·압축/해제 크기·실제 해제량 누계·이미지 화소 수·좌표 유한성·연산 수·section 깊이·id 참조를 제한하고 검사한다. manifest 선언값만 믿지 않는다. `schema`·`render_revision`이 모르는 값이거나 `required`에 모르는 기능이 있으면 거절한다. 구형 `.ugu`는 schema 13만 가져오기로 변환하고(2026-10-10, decisions.md 파일·형식·가져오기), 그 밖의 구형 파일은 "지원하지 않는 형식" 판별만 한다(scope.md 4절).
 - **저장**: 같은 디렉터리의 임시 파일에 쓰고 검증·flush한 뒤 교체한다(계획 8.2절). 작업자 스레드에서 직렬화한다.
 
 ## 5. 결과
@@ -94,9 +95,33 @@ thumbnail.png        선택. 파생 데이터라 읽을 때 믿지 않는다
 - 연산 enum에 mode와 무관한 optional 조합이 없다. `TransformSelection`에 `drawDestination=false`가 섞이는 대신 `ClearSelection`이 따로 있다.
 - 병합이 2.2.13보다 넓게 허용된다(불투명도·모션 차이).
 - 채우기는 움직이지 않는다. 2.2.13의 새 채우기와 같은 모습이다.
-- 남은 일: undo delta 형식(M1), 브러시·모션 필드(M2, [m2-plan.md](m2-plan.md) 3절), 문자 도구가 만드는 연산(M4. 적용 시 윤곽을 `Fill`과 `Paint`로 확정)은 각 단계에서 이 enum을 넓혀 정한다.
+- 이 ADR 때 남겼던 undo delta 형식(M1), 브러시·모션 필드(M2·M4), 문자 도구의 연산(M4. 적용 시 윤곽을 `Fill`과 `Paint`로 확정)은 각 단계에서 정했다. 파일에 더한 필드는 7절에 모았다.
 
 ## 6. 사용자 확인 (2026-10-07)
 
 1. 파일 확장자는 `.ugurugu`로 한다.
 2. 병합 조건 완화(불투명도·모션 차이가 있어도 병합 허용)를 3.0 동작으로 받아들인다.
+
+## 7. ADR 뒤에 schema 1에 더한 것 (2026-10-12 정리)
+
+3.0은 출시 전이라 schema 번호를 올리지 않고 schema 1을 제자리에서 넓혔다(decisions.md 파일·형식·가져오기). 그래서 이 사이의 개발 빌드가 저장한 파일은 열지 못할 수 있다. 3.0.0 출시부터는 schema 1을 고정하고, 바꾸려면 schema를 올리거나 `required`에 기능 이름을 넣는다(4절 읽기 검증). 필드 이름은 `crates/ugu-io/src/format.rs`에서 확인했다. 모든 JSON 구조체는 `deny_unknown_fields`라 모르는 필드가 있으면 열지 않는다.
+
+`document.json`:
+
+| 위치 | 필드 | 더한 때 | 내용 |
+|---|---|---|---|
+| 획 `brush` | `size_dynamics`, `wobble_scale` | M2 | 굵기 필압 0~1, 흔들림 배율 0~2 |
+| 획 `brush` | `engine`(`line`·`airbrush`·`spray`·`pixel`), `tip`(`round`·`square`), `opacity`, `flow`, `hardness`, `spacing`, `scatter`, `particle_size`, `density`, `opacity_dynamics`, `size_jitter`, `animated_jitter`, `antialias` | M4-6 | 2.2.13 `BrushSettings`의 모든 필드. `pixel`은 M5-16 픽셀 연필 |
+| 문서·레이어·`isolated`의 `wobble` | `amount`, `style`(`classic`·`smooth`·`stepped`), `poses`, `detail`, `linked`, `randomness`, `broken`, `break_amount`, `break_range` | M2(`style`), M4-7(나머지) | 2.2.13 `MotionSettings`. `poses`는 1~60을 그대로 두고 렌더할 때 프레임 수로 줄인다 |
+| 문서 | `pixel` | M6-17 | 문서 단위 픽셀 모드(decisions.md 픽셀 모드). 꺼져 있으면 쓰지 않으므로 그 파일의 바이트는 전과 같다. render revision은 그대로 |
+| 문서 | `active_layer` | M6(2절 23) | 저장할 때 편집하던 페인트 레이어 id. 선택 필드이고, 열 때 페인트 레이어가 아니면 무시한다. 프레임은 저장하지 않는다(2.2.13과 같음). API는 `ugu_io::write_with`·`read_with`·`save_with` |
+
+그 밖의 검증 한도(`ugu_core::document::limits`): 레이어 256개, 그룹 깊이 9단계(2.2.13 파일을 받으려고 8에서 올림, ugu-import.md 2절 3), 연산 20,000개, section 깊이 16단계, 캔버스 한 변 1~4096, 프레임 2~60.
+
+`.ugurugu` 밖의 형식(앱, `apps/ugurugu/src`):
+
+| 파일 | 머리 | 내용 |
+|---|---|---|
+| 복구 설명 `recovery\<창 폴더>\<0·1>.json` (M5-6) | `format: "ugurugu.recovery"`, `version: 1` | `sequence`, `name`, `path`, `time`, `canvas`, `layer`(M6에 더함, 활성 레이어). 문서는 같은 칸의 `<0·1>.ugurugu`. 폴더는 `%LOCALAPPDATA%\Ugurugu Data\3\recovery`(`recovery.rs`) |
+| 설정 `%APPDATA%\Ugurugu\3\settings.json` (M5-3) | `format: "ugurugu.settings"`, `version: 1` | `language`, `accent`, `wobbleAnimation`, `pixelGrid`, `defaultSaveFolder`, `exportSize`, `checkForUpdates`, `updateChecked`, `tools`(도구 상태, 필압 켬·끔은 `tools.tablet.pressure`), `colorHistory`, `shortcuts`(기본과 다른 키만), `panels`(도크 배치). 기본값인 선택 키는 쓰지 않는다. 모르는 키는 지우지 않고 다시 쓴다. 여러 창은 `settings.json.lock`으로 차례를 지키고 바꾼 최상위 키만 덮어쓴다(decisions.md UI·단축키·번역). `settings.rs` |
+| 도구 프리셋 `*.ugurugu-tools` (M5-10) | `format: "ugurugu.tools"`, `version: 1` | `tools`(설정의 `tools`와 같은 글, `tablet` 제외)와 `motion`(`amount`, `style`, `poses`, `detail`, `linked`, `randomness`, `broken`, `breakAmount`, `breakRange`). 1MiB 상한, 모르는 키는 무시하고 있는 값만 덮어쓴다. 2.2.13 `.wwpreset`은 읽지 않는다. `settings/preset.rs` |

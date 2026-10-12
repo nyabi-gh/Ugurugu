@@ -11,8 +11,8 @@ C:\ugu\in (ugurugu.exe; read-only) and C:\ugu\out (results and screenshots)
 mapped. Keys and the mouse go to the front window, so this runs only in the
 Sandbox, where the app is the only window. Checks: the notice about an
 unexpected close, the exe and window icons, the help window, turning and
-flipping the view, the eyedropper's cursor, the docks of a short window
-(review U3-07), the save dialog's added extension (review U3-08), the
+flipping the view, the eyedropper's cursor, the docks of a short window,
+the save dialog's added extension, the
 transform box's cursors and no blank frame when pressing during playback.
 in\only.txt, from prepare.ps1 -Only, limits the run to the steps it names.
 The screenshots are of the Sandbox's screen.
@@ -410,7 +410,7 @@ Step 'Eyedropper cursor' {
     "cursor over the canvas: $cursor"
 }
 
-Step 'Docks of a short window (U3-07)' {
+Step 'Docks of a short window' {
     $process = Start-App 1000 520
     $rect = Get-Rect $process
     $before = Save-Screen 'short-window'
@@ -428,7 +428,7 @@ Step 'Docks of a short window (U3-07)' {
     "window 1000x520; $before, $after, $right"
 }
 
-Step 'Save dialog with another extension typed (U3-08)' {
+Step 'Save dialog with another extension typed' {
     $documents = [Environment]::GetFolderPath('MyDocuments')
     $existing = Join-Path $documents 'probe.png.ugurugu'
     Set-Content -Path $existing -Encoding ascii -Value 'keep'

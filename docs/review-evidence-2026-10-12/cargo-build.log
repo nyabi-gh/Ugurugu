@@ -1,7 +1,0 @@
-warn: could not canonicalize path C:\Users\Nyabi\Documents\Code\Ugurugu
-   Compiling ugu-session v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\crates\ugu-session)
-   Compiling ugu-doc v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\tools\ugu-doc)
-   Compiling latency-probe v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\tools\latency-probe)
-   Compiling render-bench v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\tools\render-bench)
-   Compiling ugurugu v3.0.0 (C:\Users\Nyabi\Documents\Code\Ugurugu\apps\ugurugu)
-    Finished `release` profile [optimized + debuginfo] target(s) in 11.84s

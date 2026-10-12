@@ -3,9 +3,9 @@
 
 <#
 .SYNOPSIS
-Prepares a Windows Sandbox run of 3.0: the clean-install acceptance (M6-7),
-an install next to 2.2.13 (M6-8), synthetic pen and touch input (M6-9,
-M6-10) or GUI checks.
+Prepares a Windows Sandbox run of 3.0: the clean-install acceptance,
+an install next to 2.2.13, synthetic pen and touch input or GUI checks
+(docs/rust/evidence.md sections 32 to 34).
 
 .DESCRIPTION
 For the installer runs, packs the executable twice, as 3.0.0 to install and

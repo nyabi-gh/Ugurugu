@@ -3,7 +3,8 @@
 
 <#
 .SYNOPSIS
-3.0 installed next to 2.2.13, run inside Windows Sandbox (M6-8).
+3.0 installed next to 2.2.13, run inside Windows Sandbox
+(docs/rust/evidence.md section 32).
 
 .DESCRIPTION
 Started at logon by the .wsb that prepare.ps1 -Scenario alongside writes,
@@ -17,7 +18,7 @@ Runs in Windows PowerShell 5.1, which has the .NET UI Automation client.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$title = 'M6-8 Windows Sandbox, next to 2.2.13'
+$title = 'Windows Sandbox, next to 2.2.13'
 $in = 'C:\ugu\in'
 $out = 'C:\ugu\out'
 $env:UGURUGU_LANGUAGE = 'en'

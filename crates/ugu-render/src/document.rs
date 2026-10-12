@@ -602,7 +602,7 @@ impl DocumentRenderer {
         self.timings = Timings::default();
         // A layer drawn in several runs (moved selections, resamples) can
         // take many times longer than the others, so it gets every thread
-        // on its own instead of one beside them (docs/rust/m6-plan.md M6-2).
+        // on its own instead of one beside them (docs/rust/decisions.md M6-2).
         work.sort_by_key(|each| !draws_in_runs(&each.paint.ops));
         let alone = work.partition_point(|each| draws_in_runs(&each.paint.ops));
         let together = work.len() - alone;
@@ -701,7 +701,7 @@ impl DocumentRenderer {
     /// shares the threads among them: Vello encodes a layer's paths on one
     /// thread, so a layer alone on every thread waits on that, and a layer
     /// on a single thread leaves the others waiting for the slowest
-    /// (docs/rust/m6-plan.md M6-14).
+    /// (docs/rust/decisions.md M6-14).
     fn draw_at_once(
         &mut self,
         document: &Document,

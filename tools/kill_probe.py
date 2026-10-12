@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
 """Kills the 3.0 app at bad moments and checks what is left, for M5-15
-(docs/rust/m5-plan.md, plan 8.2 and 9):
+(docs/rust/decisions.md, M5-15, port 8.2 and 9):
 
 - save: kills it 0-60ms after Ctrl+S. The document must still read, as the
   old or the new version; a temporary file left beside it must go with the

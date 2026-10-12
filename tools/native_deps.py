@@ -5,7 +5,7 @@
 
 Native code comes in through crates that link a system library (`links`)
 or build C, C++ or assembly in their build scripts. Each one shipped is
-listed here with the reason it is accepted (docs/rust/m6-plan.md M6-6).
+listed here with the reason it is accepted (docs/rust/decisions.md M6-6).
 
     python tools/native_deps.py
 """
@@ -19,7 +19,7 @@ BUILDERS = {"cc", "cmake", "bindgen", "nasm-rs", "pkg-config", "vcpkg"}
 APPROVED = {
     # libwebp 1.6.0 from source, for animated WebP export (scope.md).
     "libwebp-sys",
-    # TLS for the update check through Velopack (m6-plan.md M6-5).
+    # TLS for the update check through Velopack (decisions.md M6-5).
     "ring",
     # Sets `links` only so that a build has one copy; no native code.
     "rayon-core",

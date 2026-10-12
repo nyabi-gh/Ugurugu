@@ -8,7 +8,7 @@
 //! motion like a pen's.
 //!
 //! A stroke's dabs are painted here into a buffer of its own rather than
-//! drawn as Vello paths, which costs about half (docs/rust/m4-plan.md M4-6):
+//! drawn as Vello paths, which costs about half (docs/rust/decisions.md M4-6):
 //! a path has a fixed cost that a one-pixel particle never pays back, and
 //! Vello makes a gradient table for every soft dab. Aliased pixels are those
 //! whose centres the shape covers, as Qt paints them for 2.2.13.

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-// Writes the Rust 3.0 comparison fixtures (plan 10.2) in the 2.2.13 format,
-// so the current app can be measured on the same content. Fixture 3 is
-// ugurugu_stress_document_generator. Each document is saved, loaded back
-// through the app's own validation, and described in a manifest next to it.
+// Writes the Rust 3.0 comparison fixtures (docs/rust/decisions.md, port 10.2)
+// in the 2.2.13 format, so the current app can be measured on the same
+// content. Fixture 3 is ugurugu_stress_document_generator. Each document is
+// saved, loaded back through the app's own validation, and described in a
+// manifest next to it.
 // The named fixtures cover every schema 13 feature the 3.0 import maps or
 // refuses (docs/rust/ugu-import.md); `frames` renders a document's frames
 // with 2.2.13's exact renderer for the comparison.
@@ -417,8 +418,8 @@ QVector<QUuid> strokeIds(const Layer &layer)
 }
 
 // 2.2.13 composites each piece of a translucent line stroke whose pressure
-// varies, so the overlaps darken; 3.0 draws it at one opacity (m2-plan
-// decision 2). The named fixtures check the import, so such strokes keep one
+// varies, so the overlaps darken; 3.0 draws it at one opacity (decisions.md,
+// rendering). The named fixtures check the import, so such strokes keep one
 // pressure there.
 void evenTranslucentPressure(Document &document)
 {
@@ -992,7 +993,7 @@ Document depth()
 
 // moves: fixture 2 with what M5-15's session did 177 times on its top
 // layer: three strokes, then everything selected and moved by a fraction of
-// a pixel, smoothly (docs/rust/m0-evidence.md section 23).
+// a pixel, smoothly (docs/rust/evidence.md section 26).
 std::optional<Document> manyMoves()
 {
     Document document = mixedWork();

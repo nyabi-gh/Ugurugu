@@ -1,18 +1,19 @@
 # Security policy
 
-Ugurugu opens files that other people made — `.ugu` projects, `.wawa` drawings
-from WiggleWiggleTool, `.wwpreset` presets, and imported images. A bug in that
+Ugurugu opens files that other people made — `.ugurugu` projects, `.ugu`
+projects from 2.x, `.ugurugu-tools` presets, and imported images. A bug in that
 code can be more than a crash, so security reports get their own channel.
 
 ## Supported versions
 
-Only the latest release is supported. Ugurugu updates itself, and fixes ship in
-the next release rather than as patches to older versions.
+Only the latest 3.x release, for Windows, is supported. Ugurugu updates itself,
+and fixes ship in the next release rather than as patches to older versions.
+2.x, including 2.2.13 for macOS, gets no more releases.
 
 | Version | Supported |
 | --- | --- |
-| Latest release | Yes |
-| Anything older | No — please update first |
+| Latest 3.x release | Yes |
+| 2.x and older 3.x | No — please update first |
 
 Check **Help → Check for Updates** to confirm you are on the latest version
 before reporting.
@@ -56,9 +57,9 @@ not something you need permission for.
 
 ## In scope
 
-- Opening or importing a file — `.ugu`, `.wagle`, `.wobble`, `.wawa`,
-  `.wwpreset`, or an imported image — that causes memory corruption, code
-  execution, or reads and writes outside the document.
+- Opening or importing a file — `.ugurugu`, `.ugu`, `.ugurugu-tools`, or an
+  imported image — that causes memory corruption, code execution, or reads and
+  writes outside the document.
 - Anything that lets a crafted file or a network position influence what the
   built-in updater installs.
 - Recovery, autosave, or export writing outside the folder the user chose,
@@ -73,10 +74,11 @@ not something you need permission for.
   compromised regardless of Ugurugu.
 - A plain crash or hang with no memory-safety consequence. Those are welcome as
   ordinary [issues](https://github.com/nyabi-gh/Ugurugu/issues).
-- Unfixed vulnerabilities in Qt, libwebp, spdlog, Sparkle, or Velopack. Report
-  those upstream — but do tell us if Ugurugu ships an affected version, and we
-  will bump it. Bundled versions are recorded in
-  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- Unfixed vulnerabilities in a dependency such as wgpu, egui, Vello, the image
+  crates, libwebp, rustls or Velopack. Report those upstream — but do tell us
+  if Ugurugu ships an affected version, and we will bump it. Shipped versions
+  are listed in `THIRD_PARTY_NOTICES.txt` in the installed app and pinned in
+  `Cargo.lock`.
 - The unrecognized-app warning Windows shows for the installer, and anything
   else that follows from the project not buying a code-signing certificate.
   This is a known cost tradeoff, not an oversight.

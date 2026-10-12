@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
 # Checks what the Rust app exposes to UI Automation, the interface Narrator
-# and other screen readers use (docs/rust/m0-evidence.md section 7): prints the
+# and other screen readers use (docs/rust/evidence.md section 27): prints the
 # tree, renames the top layer with F2 from its focused row and presses the Add
 # layer button through InvokePattern. Then, from the keyboard alone (M5-14):
 # F10, Alt alone and Alt+E reach the menus, the settings dialog takes the focus and gives

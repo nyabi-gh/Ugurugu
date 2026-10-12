@@ -10,7 +10,7 @@
 //! pixel, as 2.2.13 does; the second codes the frames on several threads.
 //!
 //! Unlike 2.2.13, an animation of no more colours than the palette holds
-//! keeps them exactly instead (m5-plan M5-17): pixel art's colours would
+//! keeps them exactly instead (decisions.md M5-17): pixel art's colours would
 //! otherwise be merged and moved by the 15-bit keys. While that can still
 //! be so, the first pass also keeps each pixel's colour's number, a byte a
 //! pixel.

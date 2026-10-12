@@ -29,7 +29,7 @@ allow = [
 confidence-threshold = 0.9
 # Mozilla's root certificates, which the update check's TLS (Velopack ->
 # ureq -> rustls) trusts. A permissive data licence; its text goes into the
-# third-party notices (docs/rust/m6-plan.md M6-5).
+# third-party notices (docs/rust/decisions.md M6-5).
 exceptions = [
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
 ]

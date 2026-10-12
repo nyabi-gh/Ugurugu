@@ -38,9 +38,13 @@ CI runs these before anything is merged:
 cargo fmt --all --check
 cargo deny --locked check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --release --locked
+cargo test --workspace --locked
+cargo build --workspace --release --locked
 python tools/native_deps.py
 ```
+
+Running `cargo test --workspace --release --locked` as well catches
+differences that only the optimised build shows.
 
 `cargo deny` is [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
 0.18.9. `tools/native_deps.py` fails when a crate the app links builds or
@@ -69,9 +73,12 @@ association, updating with unsaved changes, checking offline and
 uninstalling. The results are in `<folder>\out\results.md`. The app looks for
 updates in the folder `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
-`.github/workflows/release-3.yml`; `v2.*` tags still use `release.yml`.
+`.github/workflows/release-3.yml`.
 
 ## Ugurugu 2.2.13
+
+2.x (the C++ app and the browser build) is no longer changed or released. It is
+built to compare with 3.0 and to write the `.ugu` test fixtures.
 
 ### Requirements
 

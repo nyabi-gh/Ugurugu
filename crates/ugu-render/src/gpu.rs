@@ -103,7 +103,7 @@ impl Gpu {
     }
 
     /// Whether this is WARP, which draws on the CPU and shows input several
-    /// frames late (m0-evidence section 8).
+    /// frames late (evidence.md section 28).
     pub fn is_software(&self) -> bool {
         self.adapter.get_info().device_type == wgpu::DeviceType::Cpu
     }

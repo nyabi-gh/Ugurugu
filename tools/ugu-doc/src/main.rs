@@ -4,12 +4,12 @@
 //! Headless `.ugurugu` tool.
 //!
 //! - `ugu-doc fixture <1-5> <out.ugurugu>`: writes a comparison fixture with the
-//!   same make-up as the 2.2.13 ones (docs/rust/m0-evidence.md section 2):
+//!   same make-up as the 2.2.13 ones (docs/rust/evidence.md section 2):
 //!   the same canvases, layers, stroke and point counts and stroke shapes,
 //!   from a different random sequence.
 //! - `ugu-doc many <operations> <layers> <out.ugurugu>`: fixture 4's short
 //!   strokes, as many as asked, spread over that many layers, to measure the
-//!   operation limit (docs/rust/m3-plan.md M3-10).
+//!   operation limit (docs/rust/decisions.md M3-10).
 //! - `ugu-doc info <file.ugurugu>`: reads, validates and summarises a file, and
 //!   lists its layers top first.
 //! - `ugu-doc bench <file.ugurugu> [rounds]`: times reading and saving it.
@@ -26,7 +26,7 @@
 //! - `ugu-doc moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy>`: adds to the
 //!   top paint layer, `count` times, three opaque strokes and then everything
 //!   selected and moved smoothly by (`dx`, `dy`), as M5-15's long session did
-//!   (docs/rust/m0-evidence.md section 23).
+//!   (docs/rust/evidence.md section 26).
 //! - `ugu-doc fills <in.ugurugu> <out.ugurugu>`: adds a large clipped fill and a
 //!   clear to every layer, to measure what masks cost to draw.
 //! - `ugu-doc digest <file.ugurugu> <threads>`: draws every frame whole, at

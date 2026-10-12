@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The pixels a pixel brush stroke covers on a frame (m5-plan decision 14).
+//! The pixels a pixel brush stroke covers on a frame (decisions.md, pixel mode).
 //!
 //! Each raw point lands in the pixel under it. Consecutive pixels are joined
 //! by Bresenham's line, and a pixel that only turns an L corner between its

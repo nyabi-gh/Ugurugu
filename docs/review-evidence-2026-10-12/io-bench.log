@@ -1,3 +1,0 @@
-open: n=5 p50=10.6 ms max=17.5 ms
-encode in memory: n=5 p50=40.0 ms max=41.9 ms
-save: n=5 p50=51.5 ms max=56.8 ms

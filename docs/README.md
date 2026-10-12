@@ -1,33 +1,27 @@
 # 문서 안내
 
-Rust 3.0의 현재 구현 검토는 **[Ugurugu 3.0 Rust 종합 검토 보고서](RUST_3_REVIEW_2026-10-12.md)**를 참고한다.
-2026-10-12, `rust/m6`의 `03ef8a8` 기준으로 웹을 제외한 구조·데이터 보존·UI/UX·성능·코드 품질·배포를 검토했다.
-기존 검사와 추가 재현의 원자료는 `review-evidence-2026-10-12/`에 있으며, 보고서는 구현 수정 완료 기록이 아니다.
-그 뒤 `b809009` 기준 분석은 **[Ugurugu 3.0 Rust 재작성 분석 보고서](analysis-3.0.md)**에 있고, 끝의 6절에 코드 확인 결과와 조치를 붙였다.
+## 지금 상태
 
-Rust 전면 재작성 방향과 실행 계획은
-**[Rust / Windows 전면 재작성 계획](RUST_WINDOWS_PORT_PLAN.md)**에서 확인한다.
-2026-10-06 요청 기준으로 Windows 우선, macOS·모바일 제외, C++ 버전과의 호환 제거를 전제로 한다.
-이 문서는 소스 분석·최신 기술 조사와 제안이며 아직 Rust 구현·Windows 실측을 완료한 기록은 아니다.
+- Ugurugu 3.0(Rust, `apps/`, `crates/`)은 Windows판으로 출시를 기다린다. M0~M6를 마쳤고, 남은 것은 [backlog.md](rust/backlog.md) 1절의 출시 전 일이다.
+- 2.2.13(C++, `src/`)과 웹판(`web/`)은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이고, macOS 3.x는 나중에 따로 한다. C++ 트리는 비교 기준·`.ugu` fixture 생성·번역 원본(`i18n/*.ts`)으로 남는다.
 
-기존 C++·웹 제품의 상태와 개선 이력은 **[Ugurugu 통합 검토·개선 계획](project-status.md)**에서 관리한다.
-그 문서의 Android·구형 파일 호환 계획은 새 Rust 제품의 요구사항으로 승계하지 않는다.
+## 3.0 문서 (`rust/`)
 
-기존 통합 문서의 초기 정리 기준일은 2026-09-18이다. 데스크톱 검토, 이전 종합 검토, 성능 후속,
-웹 진행·타당성 조사, Android 계획의 미해결 항목과 완료 조건을 통합했다.
-구현 완료, 검증 대기, 미해결, 조사·제안을 구분하며 과거 발견 번호를 유지한다.
+| 문서 | 내용 |
+|---|---|
+| [scope.md](rust/scope.md) | 제품 범위: 기능, 플랫폼, 하드웨어, 뺀 것, 측정 PC |
+| [decisions.md](rust/decisions.md) | 설계 결정과 2.2.13과 다르게 정한 점. 출처 칸의 옛 ID(M5-17 등)로 코드 주석에서 찾는다 |
+| [evidence.md](rust/evidence.md) | 지금 코드가 기대는 측정과 시험 결과, 측정 방법 |
+| [backlog.md](rust/backlog.md) | 열린 일: 출시 전 할 일, 열린 gate, 미룬 결정, 알려진 한계, 개선 후보 |
+| [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
+| [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
 
-통합 전의 데스크톱 검토, 이전 종합 검토, 성능 후속, 웹 진행·타당성 조사,
-Android 계획 문서는 중복과 오래된 판단을 없애기 위해 제거했다. 필요한 근거와
-정정 사항은 통합 문서에 옮겼으며 이후 상태도 한곳에서만 갱신한다.
+새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다.
 
-`review-evidence-2026-09-08/`는 당시 재현·로그·캡처의 원자료다.
-현재 코드의 새 실행 결과나 실기기·성능·업데이트 완료 근거로 대체하지 않는다.
+## 지운 문서
 
-[ANALYSIS_REPORT.md](ANALYSIS_REPORT.md)는 `main` `60a11be`(2026-10-03) 기준
-데스크톱 앱 종합 분석 보고서다. 발견 번호(B-01 등)의 근거로 남기며,
-이후 진행 상태는 통합 문서에서만 갱신한다.
+2026-10-12에 마일스톤 계획(`RUST_WINDOWS_PORT_PLAN.md`, `rust/m0-close.md`, `rust/m2-plan.md`~`m6-plan.md`), 옛 측정 기록(`rust/m0-evidence.md`), 2.x 상태 문서(`project-status.md`), 검토 보고서(`ANALYSIS_REPORT.md`, `analysis-3.0.md`, `RUST_3_REVIEW_2026-10-12.md`)와 그 원자료(`review-evidence-*`)를 지웠다. 남길 것은 위 문서로 옮겼고, 원문은 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md`).
 
-사용자 안내는 root README(ko/en/ja), 빌드 절차는 BUILDING.md,
-기여 절차는 CONTRIBUTING.md, 보안·외부 고지는 SECURITY.md와
-THIRD_PARTY_NOTICES.md, 버전별 이력은 `release-notes/`를 사용한다.
+## 그 밖
+
+사용자 안내는 루트 README(ko·en·ja), 빌드는 BUILDING.md, 기여는 CONTRIBUTING.md, 보안은 SECURITY.md, 2.x 고지는 THIRD_PARTY_NOTICES.md, 판별 변경 내용은 `release-notes/`에 있다.

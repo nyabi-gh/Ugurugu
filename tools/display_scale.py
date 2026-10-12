@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
 """Reads or sets the primary monitor's display scale, as the Settings app does,
-for the M0 DPI checks (docs/rust/m0-evidence.md section 7).
+for the M0 DPI checks (docs/rust/evidence.md section 27).
 
 Usage: python display_scale.py [percent]
 
