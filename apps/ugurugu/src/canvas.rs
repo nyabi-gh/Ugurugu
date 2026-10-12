@@ -535,6 +535,47 @@ impl Canvas {
             .expect("the tab shown is in the order");
     }
 
+    /// Each open document's generation and session, in tab order.
+    pub fn sessions(&self) -> Vec<(u64, &Session)> {
+        (0..self.tab_count())
+            .map(|index| {
+                let tab = self.tab_at(index);
+                (tab.generation, &tab.session)
+            })
+            .collect()
+    }
+
+    /// The session and file of the tab of document `generation`, when it is
+    /// not the one shown.
+    pub fn hidden_tab(&self, generation: u64) -> Option<(&Session, &crate::files::DocumentFile)> {
+        self.others
+            .iter()
+            .find(|tab| tab.generation == generation)
+            .map(|tab| (&tab.session, &tab.file))
+    }
+
+    /// The document of a tab not shown as it is now, shared: its last
+    /// snapshot while that is current, as for the tab shown.
+    pub fn hidden_document(&mut self, generation: u64) -> Option<Arc<Document>> {
+        let tab = self
+            .others
+            .iter_mut()
+            .find(|tab| tab.generation == generation)?;
+        let revision = tab.session.revision();
+        match &tab.snapshot {
+            Some((at, snapshot)) if *at == revision => Some(snapshot.document.clone()),
+            _ => {
+                let snapshot = Snapshot {
+                    document: Arc::new(tab.session.document().clone()),
+                    layers: Arc::new(tab.session.layer_revisions().clone()),
+                };
+                let document = snapshot.document.clone();
+                tab.snapshot = Some((revision, snapshot));
+                Some(document)
+            }
+        }
+    }
+
     /// Each open document's generation, in tab order.
     pub fn tab_generations(&self) -> Vec<u64> {
         (0..self.tab_count())

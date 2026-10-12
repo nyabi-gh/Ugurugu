@@ -14,7 +14,7 @@
 //! in order with saves, so a write queued before a save or a clean close
 //! never brings back what they removed.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -120,8 +120,8 @@ pub enum FileEvent {
     /// This window's recovery folder is locked, and the folders of windows
     /// no longer running were found.
     RecoveryBegun(Result<(File, Vec<Found>), String>),
-    /// How the recovery write numbered `.0` ended.
-    RecoveryWritten(u64, Result<(), String>),
+    /// How tab `.0`'s recovery write numbered `.1` ended.
+    RecoveryWritten(u64, u64, Result<(), String>),
     /// Work read back from a folder found at start.
     Recovered(Result<Box<Recovered>, String>),
     Update(crate::update::Event),
@@ -216,6 +216,8 @@ enum Job {
     },
     WriteRecovery {
         folder: PathBuf,
+        /// The generation of the tab whose work it is.
+        tab: u64,
         document: Arc<Document>,
         id: [u8; 16],
         meta: Meta,
@@ -246,9 +248,12 @@ struct Mark {
 
 impl Mark {
     fn of(canvas: &Canvas) -> Self {
-        let session = canvas.session();
+        Self::of_session(canvas.generation(), canvas.session())
+    }
+
+    fn of_session(generation: u64, session: &ugu_session::Session) -> Self {
         Self {
-            generation: canvas.generation(),
+            generation,
             revision: session.revision(),
             transform: session
                 .pending()
@@ -270,23 +275,30 @@ struct Recovering {
     folder: PathBuf,
     /// Held from when the folder is made until the window closes.
     lock: Option<File>,
+    /// Whether the last write failed, so the failure is said once.
+    failing: bool,
+    /// Each tab's, by its document's generation.
+    tabs: HashMap<u64, TabRecovery>,
+}
+
+/// How a tab's work stands on disk.
+#[derive(Default)]
+struct TabRecovery {
     sequence: u64,
     /// Whether a generation may be on disk.
     stored: bool,
     /// The work as last written.
     written: Option<Mark>,
-    /// Since when the work shown is not on disk, when it last changed, and
-    /// how it is now.
+    /// Since when the work is not on disk, when it last changed, and how it
+    /// is now.
     unwritten: Option<(Instant, Instant, Mark)>,
     writing: bool,
-    /// Whether the last write failed, so the failure is said once.
-    failing: bool,
     /// Work recovered from another folder, removed once write `.0` or a
-    /// later one is on disk here, or the work is saved or dropped.
+    /// later one is on disk here, or the work is saved, dropped or closed.
     handoff: Option<(u64, Found)>,
 }
 
-impl Recovering {
+impl TabRecovery {
     fn due(&self) -> Option<Instant> {
         let (since, last, _) = self.unwritten.as_ref()?;
         (!self.writing).then(|| (*last + recovery::QUIET).min(*since + recovery::LONGEST))
@@ -473,95 +485,153 @@ impl Files {
         self.recovery = Some(Recovering {
             folder,
             lock: None,
-            sequence: 0,
-            stored: false,
-            written: None,
-            unwritten: None,
-            writing: false,
             failing: false,
-            handoff: None,
+            tabs: HashMap::new(),
         });
     }
 
-    /// Writes the unsaved work once editing has paused, or has gone on for
-    /// long, and removes what was written once the work is saved.
+    /// Writes each tab's unsaved work once editing has paused, or has gone
+    /// on for long, and removes what was written once the work is saved,
+    /// dropped or its tab closed.
     pub fn keep_recovery(&mut self, canvas: &mut Canvas, now: Instant) {
         let Some(recovering) = self.recovery.as_mut() else {
             return;
         };
-        let session = canvas.session();
-        if !session.is_dirty() {
-            recovering.unwritten = None;
-            recovering.written = None;
-            if std::mem::take(&mut recovering.stored) {
-                let _ = self
-                    .to_worker
-                    .send(Job::ForgetRecovery(recovering.folder.clone()));
+        let open = canvas.tab_generations();
+        let closed: Vec<u64> = recovering
+            .tabs
+            .keys()
+            .filter(|generation| !open.contains(generation))
+            .copied()
+            .collect();
+        for generation in closed {
+            let tab = self
+                .recovery
+                .as_mut()
+                .and_then(|recovering| recovering.tabs.remove(&generation));
+            if let Some(tab) = tab {
+                self.forget_recovery(generation, tab);
             }
-            // Saved, or dropped after asking.
-            if let Some((_, found)) = recovering.handoff.take() {
-                let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
+        }
+        let shown = canvas.generation();
+        let mut due = Vec::new();
+        for (generation, session) in canvas.sessions() {
+            let Some(recovering) = self.recovery.as_mut() else {
+                return;
+            };
+            let tab = recovering.tabs.entry(generation).or_default();
+            if !session.is_dirty() {
+                tab.unwritten = None;
+                tab.written = None;
+                let tab = std::mem::take(tab);
+                self.forget_recovery(generation, tab);
+                continue;
             }
-            return;
-        }
-        let mark = Mark::of(canvas);
-        if recovering.written.as_ref() == Some(&mark) {
-            recovering.unwritten = None;
-            return;
-        }
-        match &mut recovering.unwritten {
-            Some((_, last, seen)) => {
-                if *seen != mark {
-                    *last = now;
-                    *seen = mark;
+            let mark = if generation == shown {
+                Mark::of(canvas)
+            } else {
+                Mark::of_session(generation, session)
+            };
+            if tab.written.as_ref() == Some(&mark) {
+                tab.unwritten = None;
+                continue;
+            }
+            match &mut tab.unwritten {
+                Some((_, last, seen)) => {
+                    if *seen != mark {
+                        *last = now;
+                        *seen = mark;
+                    }
                 }
+                None => tab.unwritten = Some((now, now, mark)),
             }
-            None => recovering.unwritten = Some((now, now, mark)),
+            if tab.due().is_some_and(|at| at <= now) {
+                due.push(generation);
+            }
         }
-        if recovering.due().is_some_and(|due| due <= now) {
-            self.write_recovery(canvas);
+        for generation in due {
+            self.write_recovery(canvas, generation);
+        }
+    }
+
+    /// Removes what tab `generation` wrote, and the work it took over.
+    fn forget_recovery(&mut self, generation: u64, tab: TabRecovery) {
+        let Some(recovering) = self.recovery.as_ref() else {
+            return;
+        };
+        if tab.stored {
+            let folder = recovery::tab_folder(&recovering.folder, generation);
+            let _ = self.to_worker.send(Job::ForgetRecovery(folder));
+        }
+        if let Some((_, found)) = tab.handoff {
+            let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
         }
     }
 
     /// When unsaved work is next due to be written.
     pub fn recovery_due(&self) -> Option<Instant> {
-        self.recovery.as_ref()?.due()
+        self.recovery
+            .as_ref()?
+            .tabs
+            .values()
+            .filter_map(TabRecovery::due)
+            .min()
     }
 
-    /// Writes the work as saving would, with a pending transform or placed
-    /// text in it, leaving them pending.
-    fn write_recovery(&mut self, canvas: &mut Canvas) {
-        let name = canvas.file().display_name();
-        let path = canvas.file().path.clone();
+    /// Writes tab `generation`'s work as saving would; the tab shown's with a
+    /// pending transform or placed text in it, leaving them pending.
+    fn write_recovery(&mut self, canvas: &mut Canvas, generation: u64) {
         let Some(recovering) = self.recovery.as_mut() else {
             return;
         };
-        let mark = Mark::of(canvas);
-        let document = match canvas.session().settled_document() {
-            Ok(Some(document)) => Arc::new(document),
-            Ok(None) => canvas.snapshot_now(),
-            // Kept in the window until applied or cancelled; the document
-            // cannot hold it.
-            Err(error) => {
-                tracing::warn!(%error, "work pending is not written for recovery");
-                canvas.snapshot_now()
-            }
+        let (name, path, id, layer, mark, document) = if generation == canvas.generation() {
+            let file = canvas.file();
+            let (name, path, id) = (file.display_name(), file.path.clone(), file.id);
+            let mark = Mark::of(canvas);
+            let document = match canvas.session().settled_document() {
+                Ok(Some(document)) => Arc::new(document),
+                Ok(None) => canvas.snapshot_now(),
+                // Kept in the window until applied or cancelled; the
+                // document cannot hold it.
+                Err(error) => {
+                    tracing::warn!(%error, "work pending is not written for recovery");
+                    canvas.snapshot_now()
+                }
+            };
+            let layer = canvas.session().current_layer();
+            (name, path, id, layer, mark, document)
+        } else {
+            // A tab left has nothing pending: leaving applies it.
+            let Some((session, file)) = canvas.hidden_tab(generation) else {
+                return;
+            };
+            let (name, path, id) = (file.display_name(), file.path.clone(), file.id);
+            let (layer, mark) = (
+                session.current_layer(),
+                Mark::of_session(generation, session),
+            );
+            let Some(document) = canvas.hidden_document(generation) else {
+                return;
+            };
+            (name, path, id, layer, mark, document)
         };
-        recovering.sequence += 1;
+        let tab = recovering.tabs.entry(generation).or_default();
+        tab.sequence += 1;
         let meta = Meta {
-            layer: Some(canvas.session().current_layer()),
-            ..Meta::new(recovering.sequence, name, path, document.canvas)
+            layer: Some(layer),
+            ..Meta::new(tab.sequence, name, path, document.canvas)
         };
         let _ = self.to_worker.send(Job::WriteRecovery {
-            folder: recovering.folder.clone(),
+            folder: recovery::tab_folder(&recovering.folder, generation),
+            tab: generation,
             document,
-            id: canvas.file().id,
+            id,
             meta,
         });
-        recovering.writing = true;
-        recovering.stored = true;
-        recovering.written = Some(mark);
-        recovering.unwritten = None;
+        tab.writing = true;
+        tab.stored = true;
+        tab.written = Some(mark);
+        tab.unwritten = None;
     }
 
     /// Removes this window's recovery folder and waits for the file thread
@@ -1465,19 +1535,23 @@ impl Files {
                     self.fail(tr("recovery-not-saving").to_owned());
                 }
             },
-            FileEvent::RecoveryWritten(sequence, result) => {
+            FileEvent::RecoveryWritten(generation, sequence, result) => {
                 let Some(recovering) = self.recovery.as_mut() else {
                     return;
                 };
-                recovering.writing = false;
+                // A tab closed meanwhile has had its folder removed.
+                let Some(tab) = recovering.tabs.get_mut(&generation) else {
+                    return;
+                };
+                tab.writing = false;
                 match result {
                     Ok(()) => {
                         recovering.failing = false;
-                        if recovering
+                        if tab
                             .handoff
                             .as_ref()
                             .is_some_and(|(written, _)| *written <= sequence)
-                            && let Some((_, found)) = recovering.handoff.take()
+                            && let Some((_, found)) = tab.handoff.take()
                         {
                             let _ = self.to_worker.send(Job::DiscardRecovery(Box::new(found)));
                         }
@@ -1485,7 +1559,7 @@ impl Files {
                     Err(error) => {
                         tracing::error!(%error, "cannot write the work for recovery");
                         // Tried again once the work changes.
-                        recovering.written = None;
+                        tab.written = None;
                         if !std::mem::replace(&mut recovering.failing, true) {
                             self.fail(tr("recovery-not-saving").to_owned());
                         }
@@ -1523,9 +1597,11 @@ impl Files {
                         self.say(tr("recovery-done").to_owned());
                         // In this window's folder before the other one goes,
                         // which stays until it is.
-                        self.write_recovery(canvas);
+                        let generation = canvas.generation();
+                        self.write_recovery(canvas, generation);
                         if let Some(recovering) = self.recovery.as_mut() {
-                            let earlier = recovering.handoff.replace((recovering.sequence, found));
+                            let tab = recovering.tabs.entry(generation).or_default();
+                            let earlier = tab.handoff.replace((tab.sequence, found));
                             // Replaced after asking about unsaved changes.
                             if let Some((_, earlier)) = earlier {
                                 let _ =
@@ -1750,9 +1826,9 @@ fn failure(job: &Job) -> Option<Box<dyn FnOnce(String) -> FileEvent + Send>> {
             Box::new(move |error| FileEvent::ToolsWritten(path, Err(error)))
         }
         Job::BeginRecovery { .. } => Box::new(|error| FileEvent::RecoveryBegun(Err(error))),
-        Job::WriteRecovery { meta, .. } => {
-            let sequence = meta.sequence;
-            Box::new(move |error| FileEvent::RecoveryWritten(sequence, Err(error)))
+        Job::WriteRecovery { tab, meta, .. } => {
+            let (tab, sequence) = (*tab, meta.sequence);
+            Box::new(move |error| FileEvent::RecoveryWritten(tab, sequence, Err(error)))
         }
         Job::ReadRecovery(_) => Box::new(|error| FileEvent::Recovered(Err(error))),
         Job::ForgetRecovery(_) | Job::DiscardRecovery(_) | Job::EndRecovery { .. } | Job::Stop => {
@@ -1837,6 +1913,7 @@ fn run(job: Job) -> Option<FileEvent> {
         ),
         Job::WriteRecovery {
             folder,
+            tab,
             document,
             id,
             meta,
@@ -1849,10 +1926,10 @@ fn run(job: Job) -> Option<FileEvent> {
                 sequence = meta.sequence,
                 "work written for recovery"
             );
-            FileEvent::RecoveryWritten(meta.sequence, result)
+            FileEvent::RecoveryWritten(tab, meta.sequence, result)
         }
         Job::ForgetRecovery(folder) => {
-            if let Err(error) = recovery::forget(&folder) {
+            if let Err(error) = recovery::remove_tab(&folder) {
                 tracing::warn!(%error, "cannot remove the work written for recovery");
             }
             return None;

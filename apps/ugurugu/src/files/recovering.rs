@@ -37,8 +37,8 @@ fn folder(files: &Files) -> PathBuf {
     files.recovery.as_ref().unwrap().folder.clone()
 }
 
-/// The sequences of the generations on disk, waiting first for the jobs
-/// already sent: a missing file opens only after them.
+/// The sequences of the shown tab's generations on disk, waiting first for
+/// the jobs already sent: a missing file opens only after them.
 fn written(files: &mut Files, canvas: &mut Canvas, events: &Receiver<FileEvent>) -> Vec<u64> {
     files.open_path(PathBuf::from("missing.ugurugu"), canvas);
     loop {
@@ -50,7 +50,7 @@ fn written(files: &mut Files, canvas: &mut Canvas, events: &Receiver<FileEvent>)
             event => files.handle(event, canvas),
         }
     }
-    let folder = folder(files);
+    let folder = recovery::tab_folder(&folder(files), canvas.generation());
     let mut sequences: Vec<u64> = (0..2)
         .filter_map(|slot| {
             let text = std::fs::read(folder.join(format!("{slot}.json"))).ok()?;
@@ -152,7 +152,8 @@ fn a_pending_transform_is_written_in_and_stays_pending() {
     files.keep_recovery(&mut canvas, start + recovery::QUIET);
     assert_eq!(written(&mut files, &mut canvas, &events), [1]);
     assert!(canvas.session().pending().is_some());
-    let file = File::open(folder(&files).join("1.ugurugu")).unwrap();
+    let tab = recovery::tab_folder(&folder(&files), canvas.generation());
+    let file = File::open(tab.join("1.ugurugu")).unwrap();
     let (document, _) = ugu_io::read::read(std::io::BufReader::new(file)).unwrap();
     let ugu_core::document::LayerKind::Paint(paint) = &document.layers[0].kind else {
         panic!("a paint layer");
@@ -250,9 +251,10 @@ fn recovered_work_stays_where_it_was_until_it_is_written_here() {
     drop(lock);
 
     let (mut files, mut canvas, events) = setup(&root);
-    let own = folder(&files);
-    // The first write here fails.
-    std::fs::create_dir(own.join("1.json")).unwrap();
+    // The first write here fails: the tab it goes in is the window's second
+    // document, taking the place of the empty first.
+    let own = recovery::tab_folder(&folder(&files), 1);
+    std::fs::create_dir_all(own.join("1.json")).unwrap();
     files.request(Action::Recover, &mut canvas);
     files.handle(next(&events), &mut canvas);
     assert_eq!(written(&mut files, &mut canvas, &events), [0u64; 0]);
@@ -281,7 +283,7 @@ fn recovered_work_saved_before_it_is_written_here_goes() {
     drop(lock);
 
     let (mut files, mut canvas, events) = setup(&root);
-    std::fs::create_dir(folder(&files).join("1.json")).unwrap();
+    std::fs::create_dir_all(recovery::tab_folder(&folder(&files), 1).join("1.json")).unwrap();
     files.request(Action::Recover, &mut canvas);
     files.handle(next(&events), &mut canvas);
     written(&mut files, &mut canvas, &events);
@@ -292,5 +294,44 @@ fn recovered_work_saved_before_it_is_written_here_goes() {
     files.keep_recovery(&mut canvas, Instant::now());
     written(&mut files, &mut canvas, &events);
     assert!(!crashed.exists());
+    files.end();
+}
+
+#[test]
+fn every_tab_s_unsaved_work_is_written_and_a_closed_tab_s_removed() {
+    let root = Root::new("files-tabs");
+    let (mut files, mut canvas, events) = setup(&root);
+    canvas.edit(Session::add_layer).unwrap();
+    canvas.open_tab(Document::new([8, 8]), true);
+    canvas.edit(Session::add_layer).unwrap();
+    // Saved as it is: nothing to keep.
+    canvas.open_tab(Document::new([9, 9]), true);
+    let start = Instant::now();
+    files.keep_recovery(&mut canvas, start);
+    files.keep_recovery(&mut canvas, start + recovery::QUIET);
+    written(&mut files, &mut canvas, &events);
+    let own = folder(&files);
+    let tabs = || {
+        let mut names: Vec<String> = std::fs::read_dir(&own)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    // The tabs not shown are written too.
+    assert_eq!(tabs(), ["tab-0", "tab-1"]);
+    let (document, _) = ugu_io::read::read(std::io::BufReader::new(
+        File::open(recovery::tab_folder(&own, 1).join("1.ugurugu")).unwrap(),
+    ))
+    .unwrap();
+    assert_eq!((document.canvas, document.layers.len()), ([8, 8], 2));
+    // Closing a tab removes its work.
+    canvas.close_tab(0, Files::new_canvas());
+    files.keep_recovery(&mut canvas, start + recovery::QUIET);
+    written(&mut files, &mut canvas, &events);
+    assert_eq!(tabs(), ["tab-1"]);
     files.end();
 }

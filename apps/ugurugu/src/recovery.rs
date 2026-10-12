@@ -2,15 +2,18 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! Automatic recovery. Each window keeps its unsaved work in a folder of its
-//! own under the recovery root, locked while it runs, as two generations
-//! written in turn, so a crash loses only the last few seconds and never
-//! another window's work. Everything here touches the disk and runs on the
-//! file thread, in order with saves.
+//! own under the recovery root, locked while it runs, each tab's in a folder
+//! of the tab's in it, as two generations written in turn, so a crash loses
+//! only the last few seconds and never another window's work. A window of
+//! 3.0 before tabs wrote its one document in its own folder; that is still
+//! read. Everything here touches the disk and runs on the file thread, in
+//! order with saves.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
@@ -106,13 +109,47 @@ impl Meta {
 }
 
 /// The folder of a window that is not running any more, locked by this one
-/// until the user decides what becomes of it.
+/// until the user decides what becomes of all its work. It goes then if
+/// nothing is left in it.
+#[derive(Debug)]
+struct Left {
+    folder: PathBuf,
+    lock: Option<File>,
+}
+
+impl Drop for Left {
+    fn drop(&mut self) {
+        drop(self.lock.take());
+        if holds_nothing(&self.folder)
+            && let Err(error) = std::fs::remove_dir_all(&self.folder)
+        {
+            tracing::warn!(%error, folder = %self.folder.display(), "cannot remove an emptied recovery folder");
+        }
+    }
+}
+
+/// Whether nothing but a lock is in `folder`.
+fn holds_nothing(folder: &Path) -> bool {
+    std::fs::read_dir(folder).is_ok_and(|mut entries| {
+        entries.all(|entry| entry.is_ok_and(|entry| entry.file_name() == LOCK))
+    })
+}
+
+/// One document a window no longer running left: a tab's, or the window's
+/// own as before tabs.
 #[derive(Debug)]
 pub struct Found {
+    /// Where its generations are.
     pub folder: PathBuf,
-    lock: File,
+    /// The window's folder, held for as long as any of its work is.
+    window: Arc<Left>,
     /// The newest generation's.
     pub meta: Meta,
+}
+
+/// Where the tab `tab` of the window whose folder is `window` keeps its work.
+pub fn tab_folder(window: &Path, tab: u64) -> PathBuf {
+    window.join(format!("tab-{tab}"))
 }
 
 /// Opens a folder's lock with no sharing, which fails while another process
@@ -184,9 +221,10 @@ fn undescribed(path: &Path) -> Option<Meta> {
 }
 
 /// Makes and locks this window's folder, `session` under `root`, and finds
-/// the folders of windows no longer running, newest first. Folders of
-/// running windows are left alone; left folders with no document are
-/// removed, and those whose documents do not read are set aside.
+/// the work of windows no longer running, each document of theirs on its
+/// own, newest first. Folders of running windows are left alone; left
+/// folders with no document are removed, and documents that do not read are
+/// set aside.
 pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
     std::fs::create_dir_all(session)?;
     let own = lock(session)?;
@@ -205,26 +243,44 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
                 continue;
             }
         };
-        match generations(&folder).into_iter().next() {
-            Some((_, meta)) => found.push(Found { folder, lock, meta }),
-            None if (0..2).any(|slot| document_path(&folder, slot).exists()) => {
-                let found = Found {
-                    folder,
-                    lock,
-                    meta: Meta::new(0, String::new(), None, [0, 0]),
-                };
-                match set_aside(found) {
-                    Ok(aside) => {
-                        tracing::warn!(folder = %aside.display(), "recovery documents that do not read were set aside")
+        let window = Arc::new(Left {
+            folder: folder.clone(),
+            lock: Some(lock),
+        });
+        // The window's own document from before tabs, then its tabs'.
+        let mut places = vec![folder.clone()];
+        places.extend(
+            std::fs::read_dir(&folder)?
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir()),
+        );
+        for place in places {
+            match generations(&place).into_iter().next() {
+                Some((_, meta)) => found.push(Found {
+                    folder: place,
+                    window: window.clone(),
+                    meta,
+                }),
+                None if (0..2).any(|slot| document_path(&place, slot).exists()) => {
+                    let unread = Found {
+                        folder: place,
+                        window: window.clone(),
+                        meta: Meta::new(0, String::new(), None, [0, 0]),
+                    };
+                    match set_aside(unread) {
+                        Ok(aside) => {
+                            tracing::warn!(folder = %aside.display(), "recovery documents that do not read were set aside")
+                        }
+                        Err(error) => tracing::warn!(%error, "cannot set aside recovery documents"),
                     }
-                    Err(error) => tracing::warn!(%error, "cannot set aside a recovery folder"),
                 }
-            }
-            None => {
-                drop(lock);
-                if let Err(error) = std::fs::remove_dir_all(&folder) {
-                    tracing::warn!(%error, folder = %folder.display(), "cannot remove an empty recovery folder");
+                None if place != folder => {
+                    if let Err(error) = std::fs::remove_dir_all(&place) {
+                        tracing::warn!(%error, folder = %place.display(), "cannot remove an empty recovery folder");
+                    }
                 }
+                None => {}
             }
         }
     }
@@ -235,6 +291,7 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
 /// Writes `document` as the generation `meta.sequence` picks, over the older
 /// of the two.
 pub fn write(folder: &Path, document: &Document, id: [u8; 16], meta: &Meta) -> Result<(), String> {
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     let slot = meta.sequence % 2;
     remove(&meta_path(folder, slot)).map_err(|error| error.to_string())?;
     let replace = &ugu_win::file::replace_file;
@@ -290,28 +347,57 @@ pub fn read(found: &Found) -> Result<(Document, [u8; 16], Meta), String> {
     Err(last_error)
 }
 
-/// Removes a folder whose work is not wanted, or that this window took over.
+/// Removes a tab's folder, as the tab closes.
+pub fn remove_tab(folder: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(folder) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Removes work that is not wanted, or that this window took over; its
+/// window's folder goes with the last of it.
 pub fn discard(found: Found) -> io::Result<()> {
-    let Found { folder, lock, .. } = found;
-    drop(lock);
-    std::fs::remove_dir_all(folder)
+    if found.folder == found.window.folder {
+        forget(&found.folder)
+    } else {
+        remove_tab(&found.folder)
+    }
 }
 
 /// Moves a folder whose work could not be read out of the way, where the
 /// user can still find it; returns where.
 pub fn set_aside(found: Found) -> io::Result<PathBuf> {
-    let Found { folder, lock, .. } = found;
-    drop(lock);
+    let window = &found.window.folder;
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let name = folder
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let aside = folder.with_file_name(format!("{FAILED}{time}-{name}"));
-    std::fs::rename(&folder, &aside)?;
+    let name_of = |folder: &Path| {
+        folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut name = format!("{FAILED}{time}-{}", name_of(window));
+    if found.folder != *window {
+        name = format!("{name}-{}", name_of(&found.folder));
+    }
+    let aside = window.with_file_name(name);
+    std::fs::create_dir_all(&aside)?;
+    for slot in 0..2 {
+        for path in [
+            document_path(&found.folder, slot),
+            meta_path(&found.folder, slot),
+        ] {
+            if path.exists() {
+                std::fs::rename(&path, aside.join(path.file_name().unwrap_or_default()))?;
+            }
+        }
+    }
+    if found.folder != *window {
+        remove_tab(&found.folder)?;
+    }
     Ok(aside)
 }
 
@@ -445,6 +531,36 @@ pub(crate) mod tests {
                 .iter()
                 .any(|name| name.starts_with(FAILED) && name.ends_with("broken"))
         );
+    }
+
+    #[test]
+    fn each_tab_s_work_is_found_on_its_own_and_the_window_goes_with_the_last() {
+        let root = Root::new("tabs");
+        let crashed = root.0.join("crashed");
+        let (held, _) = begin(&root.0, &crashed).unwrap();
+        write(&tab_folder(&crashed, 1), &document(11), [1; 16], &meta(1)).unwrap();
+        write(&tab_folder(&crashed, 4), &document(14), [4; 16], &meta(1)).unwrap();
+        // A tab closed before the crash left nothing.
+        std::fs::create_dir_all(tab_folder(&crashed, 7)).unwrap();
+        drop(held);
+        let (_own, mut found) = begin(&root.0, &root.0.join("next")).unwrap();
+        assert!(!tab_folder(&crashed, 7).exists());
+        found.sort_by_key(|found| found.folder.clone());
+        let widths: Vec<u32> = found
+            .iter()
+            .map(|found| read(found).unwrap().0.canvas[0])
+            .collect();
+        assert_eq!(widths, [11, 14]);
+        let last = found.pop().unwrap();
+        discard(found.pop().unwrap()).unwrap();
+        // The other is still there, and its window's folder with it.
+        assert!(crashed.exists() && last.folder.exists());
+        assert_eq!(
+            lock(&crashed).unwrap_err().raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION)
+        );
+        discard(last).unwrap();
+        assert!(!crashed.exists());
     }
 
     #[test]
