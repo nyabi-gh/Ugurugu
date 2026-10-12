@@ -164,6 +164,15 @@ impl Session {
         let egui_ctx = egui::Context::default();
         crate::theme::apply(&egui_ctx);
         crate::theme::set_accent(&egui_ctx, settings.get().accent);
+        // `UGURUGU_UI_SCALE` draws the interface at that percentage whatever
+        // the display's, to check a 100% display's pixels on any PC.
+        if let Some(percent) = std::env::var("UGURUGU_UI_SCALE")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|percent| (50.0..=400.0).contains(percent))
+        {
+            egui_ctx.set_zoom_factor(percent / 100.0 / window.scale_factor() as f32);
+        }
         let egui_state = EguiState::new(egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
