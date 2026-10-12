@@ -13,7 +13,9 @@
   again and answers the question with Enter (Recover). The recovered work
   must hold every edit.
 - windows: two windows share the recovery root; one is killed. The other's
-  folder stays, and a new start offers only the killed window's work.
+  folder stays, and a new start offers only the killed window's work. The
+  second window starts without a document: a start with one hands it to the
+  first window.
 
 Usage: python kill_probe.py <ugurugu.exe> <ugu-doc.exe> <fixture.ugurugu>
        <output-dir> [--repeat N]"""
@@ -200,11 +202,9 @@ def kill_and_recover(args, out):
         # Written 3s after editing pauses.
         time.sleep(4.5)
         window.kill()
-        folders = [path for path in glob.glob(os.path.join(root, "recovery", "*")) if os.path.isdir(path)]
-        written = []
-        for folder in folders:
-            for generation in glob.glob(os.path.join(folder, "*.ugurugu")):
-                written.append(operations(args.ugu_doc, generation)[0])
+        # recovery\<window>\tab-<n>\ holds each tab's generations.
+        written = [operations(args.ugu_doc, generation)[0]
+                   for generation in glob.glob(os.path.join(root, "recovery", "*", "tab-*", "*.ugurugu"))]
         again = Window(args.exe, None, root)
         time.sleep(1.0)
         again.check_front()
@@ -232,12 +232,10 @@ def kill_and_recover(args, out):
 def two_windows(args, out):
     root = fresh_root(out, "windows")
     first_document = os.path.join(root, "first.ugurugu")
-    second_document = os.path.join(root, "second.ugurugu")
     shutil.copyfile(args.fixture, first_document)
-    shutil.copyfile(args.fixture, second_document)
     first = Window(args.exe, first_document, root)
     first.stroke()
-    second = Window(args.exe, second_document, root)
+    second = Window(args.exe, None, root)
     second.stroke(0.6, 0.6)
     time.sleep(4.5)
     folders_before = sorted(os.listdir(os.path.join(root, "recovery")))
