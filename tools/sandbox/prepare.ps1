@@ -3,21 +3,29 @@
 
 <#
 .SYNOPSIS
-Prepares the clean-install acceptance run of 3.0 in Windows Sandbox (M6-7).
+Prepares a Windows Sandbox run of the 3.0 installer: the clean-install
+acceptance (M6-7) or an install next to 2.2.13 (M6-8).
 
 .DESCRIPTION
 Packs the executable twice, as 3.0.0 to install and as 3.0.1 in a local
-update feed, makes a document to open, and writes a .wsb that maps them
-read-only into a Sandbox with no network and the vGPU disabled, and runs
-accept.ps1 there at logon. The results come back in
-<Work>\out\results.md. Nothing on this PC is installed or registered.
+update feed, and writes a .wsb that maps them read-only into a Sandbox with
+the vGPU disabled and runs the scenario's script there at logon:
+accept.ps1 (no network; with a document to open) or alongside.ps1 (with the
+network, which the 2.2.13 Setup given by -Legacy needs for its Visual C++
+runtime). The results come back in <Work>\out\results.md. Nothing on this
+PC is installed or registered.
 
 .EXAMPLE
 tools/sandbox/prepare.ps1 -Work $env:TEMP\m6-7
-Start-Process $env:TEMP\m6-7\m6-7.wsb
+Start-Process $env:TEMP\m6-7\sandbox.wsb
+
+.EXAMPLE
+tools/sandbox/prepare.ps1 -Work $env:TEMP\m6-8 -Scenario alongside -Legacy <2.2.13 Setup>
 #>
 param(
     [Parameter(Mandatory)] [string] $Work,
+    [ValidateSet('accept', 'alongside')] [string] $Scenario = 'accept',
+    [string] $Legacy,
     [string] $Executable = 'target/release/ugurugu.exe',
     [string] $UguDoc = 'target/release/ugu-doc.exe',
     [string] $Vpk = 'vpk'
@@ -27,6 +35,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
+if ($Scenario -eq 'alongside' -and -not $Legacy) {
+    throw 'The alongside scenario needs -Legacy, the 2.2.13 Setup'
+}
 if (Test-Path $Work) {
     throw "$Work already exists"
 }
@@ -42,32 +53,39 @@ $package = Join-Path $root 'tools/package_windows.ps1'
 & $package -Executable $Executable -OutputDirectory (Join-Path $in 'feed') -Vpk $Vpk `
     -Version 3.0.1 -ReleaseNotes (Join-Path $root 'release-notes/3.0.0.en.md')
 
-& $UguDoc fixture 1 (Join-Path $in 'drawing.ugurugu')
-if ($LASTEXITCODE -ne 0) {
-    throw "ugu-doc fixture failed with exit code $LASTEXITCODE"
+if ($Scenario -eq 'accept') {
+    & $UguDoc fixture 1 (Join-Path $in 'drawing.ugurugu')
+    if ($LASTEXITCODE -ne 0) {
+        throw "ugu-doc fixture failed with exit code $LASTEXITCODE"
+    }
+    $networking = 'Disable'
+} else {
+    New-Item -ItemType Directory -Path (Join-Path $in 'legacy') | Out-Null
+    Copy-Item $Legacy (Join-Path $in 'legacy\Ugurugu-Windows-x64-Setup.exe')
+    $networking = 'Enable'
 }
-Copy-Item (Join-Path $PSScriptRoot 'accept.ps1') $in
+Copy-Item (Join-Path $PSScriptRoot 'common.ps1'), (Join-Path $PSScriptRoot "$Scenario.ps1") $in
 
 $wsb = @"
 <Configuration>
   <VGpu>Disable</VGpu>
-  <Networking>Disable</Networking>
+  <Networking>$networking</Networking>
   <MappedFolders>
     <MappedFolder>
       <HostFolder>$in</HostFolder>
-      <SandboxFolder>C:\m6-7\in</SandboxFolder>
+      <SandboxFolder>C:\ugu\in</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
       <HostFolder>$out</HostFolder>
-      <SandboxFolder>C:\m6-7\out</SandboxFolder>
+      <SandboxFolder>C:\ugu\out</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\m6-7\in\accept.ps1</Command>
+    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ugu\in\$Scenario.ps1</Command>
   </LogonCommand>
 </Configuration>
 "@
-Set-Content -Path (Join-Path $Work 'm6-7.wsb') -Value $wsb -Encoding utf8
-Write-Host "Ready: start $(Join-Path $Work 'm6-7.wsb'); results in $(Join-Path $out 'results.md')"
+Set-Content -Path (Join-Path $Work 'sandbox.wsb') -Value $wsb -Encoding utf8
+Write-Host "Ready: start $(Join-Path $Work 'sandbox.wsb'); results in $(Join-Path $out 'results.md')"

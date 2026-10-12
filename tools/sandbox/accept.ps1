@@ -6,24 +6,23 @@
 The clean-install acceptance of 3.0, run inside Windows Sandbox (M6-7).
 
 .DESCRIPTION
-Started at logon by the .wsb that prepare.ps1 writes, with C:\m6-7\in
-(packages, feed, document; read-only) and C:\m6-7\out (results) mapped.
+Started at logon by the .wsb that prepare.ps1 writes, with C:\ugu\in
+(packages, feed, document; read-only) and C:\ugu\out (results) mapped.
 The Sandbox has no network. Each step is recorded in
-C:\m6-7\out\results.md as it ends, and the app's logs are copied there.
+C:\ugu\out\results.md as it ends, and the app's logs are copied there.
 Dialog buttons are pressed through UI Automation by their English names.
 Runs in Windows PowerShell 5.1, which has the .NET UI Automation client.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-
-$in = 'C:\m6-7\in'
-$out = 'C:\m6-7\out'
+$title = 'M6-7 Windows Sandbox'
+$in = 'C:\ugu\in'
+$out = 'C:\ugu\out'
 $env:UGURUGU_LANGUAGE = 'en'
 $installRoot = Join-Path $env:LOCALAPPDATA 'Ugurugu3'
 $app = Join-Path $installRoot 'current\ugurugu.exe'
-$logs = Join-Path $env:LOCALAPPDATA 'Ugurugu\3\logs'
+$logs = Join-Path $env:LOCALAPPDATA 'Ugurugu Data\3\logs'
 $association = 'HKCU:\Software\Classes\.ugurugu'
 $progId = 'Ugurugu.Document.3'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Ugurugu3'
@@ -33,99 +32,10 @@ $shortcuts = @(
 )
 $results = New-Object System.Collections.ArrayList
 
-function Text([int[]] $codes) {
-    -join ($codes | ForEach-Object { [char] $_ })
-}
+. (Join-Path $PSScriptRoot 'common.ps1')
 
-function Save-Results {
-    $lines = @('# M6-7 Windows Sandbox', '', "$(Get-Date -Format s), $([Environment]::OSVersion.VersionString)", '',
-        '| Step | Result | Detail |', '|---|---|---|')
-    foreach ($row in $results) {
-        $lines += "| $($row.Step) | $($row.Result) | $($row.Detail -replace '\|', '/') |"
-    }
-    [IO.File]::WriteAllLines((Join-Path $out 'results.md'), $lines, (New-Object Text.UTF8Encoding $false))
-}
-
-function Step([string] $Name, [scriptblock] $Body) {
-    Write-Host "== $Name"
-    try {
-        $detail = @(& $Body) -join '; '
-        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = 'pass'; Detail = $detail })
-    } catch {
-        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = 'FAIL'; Detail = $_.Exception.Message })
-        Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
-    }
-    Save-Results
-}
-
-function Get-DefaultValue([string] $Key) {
-    if (-not (Test-Path $Key)) {
-        return $null
-    }
-    (Get-Item $Key).GetValue('')
-}
-
-function Get-AppProcess {
-    @(Get-Process ugurugu -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -and $_.Path.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase) })
-}
-
-function Get-InstalledVersion {
-    $nuspec = [xml](Get-Content (Join-Path $installRoot 'current\sq.version'))
-    $nuspec.package.metadata.version
-}
-
-function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
-    $deadline = (Get-Date).AddSeconds($Seconds)
-    while ((Get-Date) -lt $deadline) {
-        $value = & $Condition
-        if ($value) {
-            return $value
-        }
-        Start-Sleep -Milliseconds 500
-    }
-    throw "Timed out after $Seconds s waiting for $What"
-}
-
-function Wait-Window([int] $Seconds = 90) {
-    Wait-Until {
-        $process = Get-AppProcess | Select-Object -First 1
-        if ($process -and $process.MainWindowHandle -ne 0) { $process }
-    } $Seconds 'the app window'
-}
-
-# egui builds its UI Automation tree once asked, so elements are looked for
-# again until they appear.
-function Find-Element($Process, [scriptblock] $Match, [int] $Seconds = 30, [string] $What) {
-    Wait-Until {
-        $Process.Refresh()
-        $window = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
-        $all = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-        foreach ($element in $all) {
-            # Elements without a label have a null name.
-            if (& $Match ([string] $element.Current.Name)) {
-                return $element
-            }
-        }
-    } $Seconds $What
-}
-
-function Press($Process, [string] $Name, [int] $Seconds = 30) {
-    $element = Find-Element $Process { param($n) $n -eq $Name } $Seconds "'$Name'"
-    $element.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 500
-}
-
-function Close-App($Process) {
-    [void]$Process.CloseMainWindow()
-    if (-not $Process.WaitForExit(30000)) {
-        throw 'The app did not close'
-    }
-}
-
-function Log-Lines([string] $Pattern) {
-    @(Get-ChildItem $logs -Filter 'ugurugu-*.log' -ErrorAction SilentlyContinue |
-        Select-String -Pattern $Pattern | ForEach-Object { $_.Line.Trim() })
+function Stop-Apps {
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
 }
 
 Step 'Install 3.0.0' {
@@ -267,7 +177,7 @@ Step 'Uninstall' {
         throw "Left after uninstalling: $($left -join ', ')"
     }
     $kept = @(
-        (Join-Path $env:LOCALAPPDATA 'Ugurugu'),
+        (Join-Path $env:LOCALAPPDATA 'Ugurugu Data'),
         (Join-Path $env:APPDATA 'Ugurugu'),
         $installRoot
     ) | Where-Object { Test-Path $_ } | ForEach-Object {

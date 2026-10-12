@@ -27,17 +27,12 @@ const FAILED: &str = "failed-";
 const FORMAT: &str = "ugurugu.recovery";
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
-/// `UGURUGU_RECOVERY_PATH`, else `%LOCALAPPDATA%\Ugurugu\3\recovery`.
+/// `UGURUGU_RECOVERY_PATH`, else `recovery` in [`crate::logs::local_data`].
 pub fn default_root() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("UGURUGU_RECOVERY_PATH") {
         return Some(PathBuf::from(path));
     }
-    Some(
-        ugu_win::folder::local_app_data()?
-            .join("Ugurugu")
-            .join("3")
-            .join("recovery"),
-    )
+    Some(crate::logs::local_data()?.join("recovery"))
 }
 
 /// What a generation holds, for choosing the newest and for the question

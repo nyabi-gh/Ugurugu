@@ -1187,3 +1187,28 @@ M6-2 앱 확인(24절)에서 이 PC의 앱 기본 작업자 23개가 8개보다 
 | Uninstall | pass | 앱·바로 가기·연결·앱 목록 항목 제거. 남음: `AppData\Local\Ugurugu`(로그 6개), `AppData\Roaming\Ugurugu`(파일 1개) |
 
 로그 6개 중 WARN은 오프라인 확인 하나, ERROR·panic 기록 없음. Sandbox가 `<VGpu>Disable</VGpu>`에도 호스트 GPU를 보여 주는 원인(이 Sandbox 판이 설정을 무시하는지, 다른 설정이 필요한지)은 확인하지 않았다(가설). GPU가 정말 없을 때의 자연 WARP 경로는 CI smoke(windows-2025)가 확인한다.
+
+## 29. M6-8 2.2.13과 함께 설치 (2026-10-12, `rust/m6`)
+
+Windows Sandbox(게스트 10.0.26100), 네트워크 켬(2.2.13 Setup이 `vcredist145-x64`를 받음), vGPU 끔. 2.2.13 Setup은 v2.2.13 릴리스에서 받아 `SHA256SUMS-Windows.txt`와 대조(`46622fec131d00aa0467c814e4f76c6142363c22749202b76f4a4200ed6edfba`). 3.0은 `tools/sandbox/prepare.ps1 -Scenario alongside`로 3.0.0 설치본과 3.0.1 피드를 만들었다. 시험은 `tools/sandbox/alongside.ps1`.
+
+**1회차** (`dbbbc60` 빌드, 3.0 지역 데이터 `%LOCALAPPDATA%\Ugurugu\3`): 8단계 중 7단계 통과. 2.2.13 제거 FAIL: "Lost 3.0 data after 2.2.13 was uninstalled: recovery 0 files (was 3), logs 0 (was 4), settings True; left in C:\Users\WDAGUtilityAccount\AppData\Local\Ugurugu: nothing". 2.2.13의 Velopack 설치 루트가 `%LOCALAPPDATA%\Ugurugu`(`--packId Ugurugu`)이고, 제거가 루트를 통째로 지운다(측정). 2.2.13 자신의 복구·로그(`AppLocalDataLocation` = `...\Ugurugu\Ugurugu`)도 그 안이다. 이 PC에서도 2.2.13 루트(`current`, `packages`, `Update.exe`, `Ugurugu`) 옆에 개발 중 3.0이 쓴 `3` 폴더가 있었다.
+
+**고침:** 3.0 지역 데이터를 `%LOCALAPPDATA%\Ugurugu Data\3`로 옮겼다(`apps/ugurugu/src/logs.rs` `local_data`, 복구는 그 아래 `recovery`). `vpk pack --packId "Ugurugu Data"`는 "packId is an invalid NuGet package id ... It must contain only alphanumeric characters, underscores, dashes, and dots."로 거부되므로 이 폴더는 어느 Velopack 설치 루트도 될 수 없다.
+
+**2회차** (고친 빌드): 8단계 모두 통과.
+
+| 단계 | 결과 | 기록 |
+|---|---|---|
+| Install 2.2.13 | pass | version 2.2.13, Apps entry 'Ugurugu', 설정 레지스트리 있음, 2.2.13 데이터 1개 |
+| Install 3.0.0 next to 2.2.13 | pass | 2.2.13 install unchanged (41 files), Apps entry 둘, 바로 가기 넷, `.ugu` 연결 '' |
+| Update 3.0 to 3.0.1 | pass | 2.2.13 install unchanged (41 files) |
+| Leave 3.0 work for recovery | pass | `work written for recovery ms=6.96 ok=true sequence=1`, recovery 3, logs 4, settings True |
+| Run 2.2.13 while 3.0 has work to recover | pass | recovery 3 (was 3), logs 4 (was 4) |
+| Uninstall 2.2.13 | pass | recovery 3 (was 3), logs 4 (was 4), settings True; `Local\Ugurugu`에 남은 것 없음 |
+| Install 2.2.13 again with 3.0 data there | pass | recovery 3, logs 4, settings True |
+| Uninstall 3.0 next to 2.2.13 | pass | 2.2.13 install unchanged (41 files), 2.2.13 실행 |
+
+3.0 로그에 WARN·ERROR·panic 기록 없음.
+
+고친 빌드로 M6-7(28절)도 3회차를 돌려 7단계 모두 통과했다. 제거 뒤 남는 것: `AppData\Local\Ugurugu Data`(6 files), `AppData\Roaming\Ugurugu`(1 file).

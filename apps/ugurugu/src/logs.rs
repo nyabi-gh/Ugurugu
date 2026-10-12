@@ -33,20 +33,25 @@ static GPU: Mutex<String> = Mutex::new(String::new());
 /// Records left by earlier runs, not yet told about.
 static EARLIER: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// `UGURUGU_LOG_PATH`, else `%LOCALAPPDATA%\Ugurugu\3\logs`.
+/// `%LOCALAPPDATA%\Ugurugu Data\3`, for what stays on this PC. Not under
+/// `%LOCALAPPDATA%\Ugurugu`: that is the 2.2.13 install, which its
+/// uninstaller removes whole. Velopack package ids cannot hold a space, so
+/// no install of either version can be this folder.
+pub fn local_data() -> Option<PathBuf> {
+    Some(
+        ugu_win::folder::local_app_data()?
+            .join("Ugurugu Data")
+            .join("3"),
+    )
+}
+
+/// `UGURUGU_LOG_PATH`, else `logs` in [`local_data`].
 pub fn folder() -> Option<PathBuf> {
     FOLDER
         .get_or_init(|| {
             std::env::var_os("UGURUGU_LOG_PATH")
                 .map(PathBuf::from)
-                .or_else(|| {
-                    Some(
-                        ugu_win::folder::local_app_data()?
-                            .join("Ugurugu")
-                            .join("3")
-                            .join("logs"),
-                    )
-                })
+                .or_else(|| Some(local_data()?.join("logs")))
         })
         .clone()
 }
