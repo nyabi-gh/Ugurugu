@@ -140,6 +140,30 @@ impl Window {
         self.tab_to(|focused, _| focused.starts_with(label));
     }
 
+    /// Presses the control whose name starts with `name` as a screen reader
+    /// does, by its accessibility node.
+    fn click_named(&mut self, name: &str) {
+        let (node, _) = self
+            .tree
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label().is_some_and(|label| label.starts_with(name))
+                    && node.supports_action(egui::accesskit::Action::Click)
+            })
+            .unwrap_or_else(|| panic!("no {name} to press"));
+        let request = egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: *node,
+            data: None,
+        };
+        self.frame(vec![Event::AccessKitActionRequest(request)]);
+        self.frame(Vec::new());
+    }
+
     fn popup(&self) -> bool {
         Popup::is_any_open(&self.ctx)
     }
@@ -245,6 +269,16 @@ fn a_dialog_from_a_menu_closes_on_escape_and_gives_the_focus_back() {
     window.frame(Vec::new());
     assert!(!window.dialog());
     assert_eq!(window.label(), tr("menu-edit"));
+}
+
+#[test]
+fn a_menu_item_pressed_by_a_screen_reader_closes_the_menu() {
+    let mut window = Window::new();
+    window.click_named(tr("menu-edit"));
+    assert!(window.popup());
+    window.click_named(tr("edit-settings"));
+    assert!(window.dialog());
+    assert!(!window.popup(), "the menu closes when an item is chosen");
 }
 
 #[test]
@@ -387,4 +421,31 @@ fn control_tab_goes_through_the_tabs() {
     assert_eq!(window.canvas.tab_position(), 1);
     window.key(Modifiers::COMMAND, Key::PageDown);
     assert_eq!(window.canvas.tab_position(), 0);
+}
+
+#[test]
+fn the_canvas_size_dialog_lays_out_inside_the_window() {
+    let mut window = Window::new();
+    window.click_named(tr("menu-edit"));
+    window.click_named(tr("edit-canvas-size").trim_end_matches('…'));
+    window.frame(Vec::new());
+    assert!(window.dialog());
+    let placed: Vec<_> = window
+        .tree
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.label()
+                .is_some_and(|label| label == tr("dialog-ok") || label == tr("anchor-top-left"))
+        })
+        .map(|(_, node)| node.bounds().unwrap())
+        .collect();
+    assert_eq!(placed.len(), 2, "{placed:?}");
+    for bounds in placed {
+        let inside =
+            bounds.x0 >= 0.0 && bounds.y0 >= 0.0 && bounds.x1 <= 1600.0 && bounds.y1 <= 900.0;
+        assert!(inside, "{bounds:?}");
+    }
 }

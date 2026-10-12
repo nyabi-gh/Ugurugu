@@ -469,9 +469,13 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
     widgets::section(ui, tr("canvas-size-anchor"), false);
     let mut offset = dialog.offset.map(i64::from);
     widgets::card(ui, |ui| {
-        widgets::setting_row(ui, true, tr("canvas-size-anchor"), None, |ui| {
-            anchors(ui, dialog);
-        });
+        widgets::tall_setting_row(
+            ui,
+            true,
+            tr("canvas-size-anchor"),
+            egui::Vec2::splat(ANCHORS_EDGE),
+            |ui| anchors(ui, dialog),
+        );
         let reach = i64::from(*EDGE.end());
         for (axis, label, name) in [
             (0, "canvas-size-offset-x", "canvas-size-offset-x-name"),
@@ -489,44 +493,48 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
     dialog.changes()
 }
 
-/// The nine points the canvas can grow or shrink around, as squares.
+const ANCHOR: f32 = 24.0;
+const ANCHOR_GAP: f32 = 4.0;
+const ANCHORS_EDGE: f32 = 3.0 * ANCHOR + 2.0 * ANCHOR_GAP;
+
+/// The nine points the canvas can grow or shrink around, as squares. Laid
+/// out by hand: a row's control column is filled from the right, which
+/// `egui::Grid` does not expect.
 fn anchors(ui: &mut egui::Ui, dialog: &mut CanvasSize) {
-    egui::Grid::new("anchor")
-        .spacing([4.0, 4.0])
-        .show(ui, |ui| {
-            for (index, &key) in ANCHORS.iter().enumerate() {
-                let chosen = dialog.anchor == Some(index);
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
-                let (fill, edge) = if chosen {
-                    (theme::accent(), theme::accent_ink())
-                } else if response.hovered() {
-                    (theme::hover(), theme::disabled())
-                } else {
-                    (theme::control(), theme::border())
-                };
-                ui.painter().rect(
-                    rect,
-                    egui::CornerRadius::same(theme::radius::CONTROL),
-                    fill,
-                    egui::Stroke::new(1.0, edge),
-                    egui::StrokeKind::Inside,
-                );
-                if response.has_focus() {
-                    widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
-                }
-                let response = response.on_hover_text(tr(key));
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, tr(key))
-                });
-                if response.clicked() {
-                    dialog.set_anchor(index);
-                }
-                if index % 3 == 2 {
-                    ui.end_row();
-                }
-            }
+    let (area, _) = ui.allocate_exact_size(egui::Vec2::splat(ANCHORS_EDGE), egui::Sense::hover());
+    for (index, &key) in ANCHORS.iter().enumerate() {
+        let chosen = dialog.anchor == Some(index);
+        let step = ANCHOR + ANCHOR_GAP;
+        let rect = egui::Rect::from_min_size(
+            area.min + egui::vec2((index % 3) as f32 * step, (index / 3) as f32 * step),
+            egui::Vec2::splat(ANCHOR),
+        );
+        let response = ui.interact(rect, ui.id().with(("anchor", index)), egui::Sense::click());
+        let (fill, edge) = if chosen {
+            (theme::accent(), theme::accent_ink())
+        } else if response.hovered() {
+            (theme::hover(), theme::disabled())
+        } else {
+            (theme::control(), theme::border())
+        };
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(theme::radius::CONTROL),
+            fill,
+            egui::Stroke::new(1.0, edge),
+            egui::StrokeKind::Inside,
+        );
+        if response.has_focus() {
+            widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+        }
+        let response = response.on_hover_text(tr(key));
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, tr(key))
         });
+        if response.clicked() {
+            dialog.set_anchor(index);
+        }
+    }
 }
 
 /// The image size form; returns whether it can be applied.

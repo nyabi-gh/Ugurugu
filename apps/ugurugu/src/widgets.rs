@@ -737,7 +737,26 @@ pub fn setting_row<R>(
     description: Option<&str>,
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    row_with(ui, first, title, description, ROW_CONTROL, control)
+    row_with(
+        ui,
+        first,
+        title,
+        description,
+        [ROW_CONTROL, theme::CONTROL_HEIGHT],
+        control,
+    )
+}
+
+/// A setting whose control is `size` and taller than the others, which the
+/// row grows to hold.
+pub fn tall_setting_row<R>(
+    ui: &mut Ui,
+    first: bool,
+    title: &str,
+    size: egui::Vec2,
+    control: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    row_with(ui, first, title, None, size.into(), control)
 }
 
 /// A setting turned on or off by a switch alone, which leaves the name and
@@ -750,9 +769,14 @@ pub fn switch_row(
     on: &mut bool,
     enabled: bool,
 ) -> Response {
-    row_with(ui, first, title, description, 40.0, |ui| {
-        ui.add_enabled_ui(enabled, |ui| switch(ui, on, title)).inner
-    })
+    row_with(
+        ui,
+        first,
+        title,
+        description,
+        [40.0, theme::CONTROL_HEIGHT],
+        |ui| ui.add_enabled_ui(enabled, |ui| switch(ui, on, title)).inner,
+    )
 }
 
 /// A settings row whose control takes `control_width` at the right.
@@ -761,7 +785,7 @@ fn row_with<R>(
     first: bool,
     title: &str,
     description: Option<&str>,
-    control_width: f32,
+    [control_width, control_height]: [f32; 2],
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     const PADDING: f32 = theme::space::L;
@@ -781,7 +805,7 @@ fn row_with<R>(
     };
     let text_height = measure(title, theme::BODY)
         + description.map_or(0.0, |description| 2.0 + measure(description, theme::SMALL));
-    let height = text_height.max(theme::CONTROL_HEIGHT) + 2.0 * PADDING;
+    let height = text_height.max(control_height) + 2.0 * PADDING;
     if !first {
         // Up against the row before, or egui's room after it would widen
         // the room under that row's text and not over it.
