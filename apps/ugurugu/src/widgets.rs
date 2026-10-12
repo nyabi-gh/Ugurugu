@@ -708,18 +708,47 @@ pub fn section(ui: &mut Ui, text: &str, first: bool) {
     ui.add_space(2.0);
 }
 
-/// A menu item: a check mark in the accent when `checked` is on, the text,
-/// and the shortcut quieter at the right. The pointer or the focus on it
-/// raises it.
+const MENU_CHECK: f32 = 22.0;
+const MENU_PADDING: f32 = 8.0;
+/// Between an item's text and its shortcut.
+const MENU_GAP: f32 = 28.0;
+
+/// The narrowest a menu is, so short ones do not look cramped.
+pub const MENU_WIDTH: f32 = 200.0;
+
+/// How wide `menu_item` needs to be for `text` and `shortcut`.
+pub fn menu_item_width(ui: &Ui, text: &str, shortcut: &str) -> f32 {
+    let measure = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(
+                text.to_owned(),
+                FontId::proportional(theme::BODY),
+                Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    };
+    let key = if shortcut.is_empty() {
+        0.0
+    } else {
+        MENU_GAP + measure(shortcut)
+    };
+    MENU_PADDING + MENU_CHECK + measure(text) + key + MENU_PADDING * 1.5
+}
+
+/// A menu item `width` wide, the widest of its menu's: a check mark in the
+/// accent when `checked` is on, the text, and the shortcut quieter at the
+/// right. The pointer or the focus on it raises it.
 pub fn menu_item(
     ui: &mut Ui,
+    width: f32,
     text: &str,
     shortcut: &str,
     checked: Option<bool>,
     enabled: bool,
 ) -> Response {
-    const CHECK: f32 = 22.0;
-    const PADDING: f32 = 8.0;
+    const CHECK: f32 = MENU_CHECK;
+    const PADDING: f32 = MENU_PADDING;
     let ink = if enabled {
         theme::text()
     } else {
@@ -733,18 +762,12 @@ pub fn menu_item(
         ui.painter()
             .layout_no_wrap(shortcut.to_owned(), font, theme::muted())
     });
-    let wanted = PADDING
-        + CHECK
-        + label.size().x
-        + key.as_ref().map_or(0.0, |key| 28.0 + key.size().x)
-        + PADDING * 1.5;
     let sense = if enabled {
         Sense::click()
     } else {
         Sense::hover()
     };
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(wanted.max(ui.available_width()), 28.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), sense);
     response.widget_info(|| match checked {
         Some(on) => {
             egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, text)

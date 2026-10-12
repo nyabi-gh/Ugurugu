@@ -225,13 +225,27 @@ pub fn items(
     panels: &Panels,
 ) -> Option<Action> {
     let mut chosen = None;
+    let width = entries
+        .iter()
+        .filter_map(|entry| match *entry {
+            Do(action) => Some(crate::widgets::menu_item_width(
+                ui,
+                label(action, canvas),
+                &panels.keys.text(action),
+            )),
+            _ => None,
+        })
+        .fold(crate::widgets::MENU_WIDTH, f32::max);
     for entry in entries {
         let &Do(action) = entry else {
-            ui.separator();
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 9.0), egui::Sense::hover());
+            ui.painter()
+                .hline(rect.x_range(), rect.center().y, crate::widgets::rule());
             continue;
         };
         let mut response = crate::widgets::menu_item(
             ui,
+            width,
             label(action, canvas),
             &panels.keys.text(action),
             checked(action, canvas, &panels.layout),
