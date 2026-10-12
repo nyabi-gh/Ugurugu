@@ -1263,3 +1263,17 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 | One finger does not draw | pass | no stroke |
 
 점 1478개는 보낸 정수 좌표 중 바로 앞과 다른 것의 수(1478)와 같다. 지우개 끝은 단위 시험 `a_pens_eraser_end_erases_whatever_tool_is_chosen`이 확인한다(시험 498 → 499).
+
+## 31. GUI 확인 (2026-10-12, `rust/m6`, Windows Sandbox)
+
+`tools/sandbox/gui.ps1`, 창 1600×1000, 영어 UI, 설정·복구·로그 격리. 1회차(도움말 위치 고치기 전): 비정상 종료 안내·아이콘·도움말 통과(도움말 창이 메뉴 줄을 덮음), 회전·스포이드 FAIL("Unsupported Pattern": 같은 이름의 요소에 패턴 없음), U3-07 통과, U3-08 FAIL(대화상자를 못 찾음). 2·3회차: 패턴 있는 요소를 고르게 고친 뒤 회전·스포이드 통과, 3회차 화면에 "다른 이름으로 저장" 대화상자가 열려 있음을 확인(UIA 루트 자식 검색이 못 잡음). 4회차: `EnumWindows`로 찾자 `robe.png.ugurugu`로 저장됨(첫 글자 누락, 확장자는 붙음). 5회차:
+
+| Step | Result | Detail |
+|---|---|---|
+| Notice about an unexpected close | pass | notice shown and closed, record marked seen |
+| Exe and window icons | pass | exe icon 48x48; title bar and taskbar in a screenshot |
+| Help window | pass | F1 opened it (centred over the window after the fix) |
+| Turn and flip the view | pass | turn 0 -> 5 (right) -> 0 (reset); flip pressed |
+| Eyedropper cursor | pass | cursor over the canvas: cross |
+| Docks of a short window (U3-07) | pass | window 1000x520; both docks scroll with the wheel |
+| Save dialog with another extension typed (U3-08) | pass | after 'probe.png': '다른 이름으로 저장 확인'; probe.png.ugurugu kept |

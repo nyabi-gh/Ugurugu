@@ -26,10 +26,14 @@ const SECTIONS: [(&str, &[&str]); 4] = [
 ];
 
 pub fn show(ctx: &egui::Context, open: &mut bool) {
+    // Opens over the middle of the window, as 2.2.13's dialog did, rather
+    // than over the menus.
     egui::Window::new(tr("help-title"))
         .open(open)
         .collapsible(false)
         .default_size([520.0, 440.0])
+        .default_pos(ctx.content_rect().center())
+        .pivot(egui::Align2::CENTER_CENTER)
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (heading, paragraphs) in SECTIONS {

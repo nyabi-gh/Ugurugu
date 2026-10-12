@@ -4,17 +4,18 @@
 <#
 .SYNOPSIS
 Prepares a Windows Sandbox run of 3.0: the clean-install acceptance (M6-7),
-an install next to 2.2.13 (M6-8) or synthetic pen and touch input (M6-9,
-M6-10).
+an install next to 2.2.13 (M6-8), synthetic pen and touch input (M6-9,
+M6-10) or GUI checks.
 
 .DESCRIPTION
 For the installer runs, packs the executable twice, as 3.0.0 to install and
-as 3.0.1 in a local update feed; for the pointer run, copies the executable
-and ugu-doc. Then writes a .wsb that maps them read-only into a Sandbox with
+as 3.0.1 in a local update feed; for the pointer and GUI runs, copies the
+executable and ugu-doc. Then writes a .wsb that maps them read-only into a Sandbox with
 the vGPU disabled and runs the scenario's script there at logon:
 accept.ps1 (no network; with a document to open and a feed whose package is
 damaged), alongside.ps1 (with the network, which the 2.2.13 Setup given by
--Legacy needs for its Visual C++ runtime) or pointer.ps1 (no network). The
+-Legacy needs for its Visual C++ runtime), pointer.ps1 or gui.ps1 (no
+network). The
 results come back in <Work>\out\results.md. Nothing on this PC is installed
 or registered.
 
@@ -27,7 +28,7 @@ tools/sandbox/prepare.ps1 -Work $env:TEMP\m6-8 -Scenario alongside -Legacy <2.2.
 #>
 param(
     [Parameter(Mandatory)] [string] $Work,
-    [ValidateSet('accept', 'alongside', 'pointer')] [string] $Scenario = 'accept',
+    [ValidateSet('accept', 'alongside', 'pointer', 'gui')] [string] $Scenario = 'accept',
     [string] $Legacy,
     [string] $Executable = 'target/release/ugurugu.exe',
     [string] $UguDoc = 'target/release/ugu-doc.exe',
@@ -51,14 +52,14 @@ $Work = (Resolve-Path $Work).Path
 $in = Join-Path $Work 'in'
 $out = Join-Path $Work 'out'
 
-if ($Scenario -ne 'pointer') {
+if ($Scenario -in 'accept', 'alongside') {
     $package = Join-Path $root 'tools/package_windows.ps1'
     & $package -Executable $Executable -OutputDirectory (Join-Path $in 'install') -Vpk $Vpk
     & $package -Executable $Executable -OutputDirectory (Join-Path $in 'feed') -Vpk $Vpk `
         -Version 3.0.1 -ReleaseNotes (Join-Path $root 'release-notes/3.0.0.en.md')
 }
 
-if ($Scenario -eq 'pointer') {
+if ($Scenario -in 'pointer', 'gui') {
     Copy-Item $Executable, $UguDoc $in
     $networking = 'Disable'
 } elseif ($Scenario -eq 'accept') {
