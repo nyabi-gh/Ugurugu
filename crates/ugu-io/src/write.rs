@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 use std::io::{Seek, Write};
 
-use ugu_core::document::{Document, Layer, LayerKind};
+use ugu_core::document::{Document, Layer, LayerId, LayerKind};
 use ugu_core::ops::{AssetId, Blend, MaskId, MotionStyle, Op, Sampling, StrokeId, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Point, TipShape};
 use zip::CompressionMethod;
@@ -54,6 +54,16 @@ impl From<zip::result::ZipError> for WriteError {
 pub fn write<W: Write + Seek>(
     document: &Document,
     document_id: [u8; 16],
+    out: W,
+) -> Result<W, WriteError> {
+    write_with(document, document_id, None, out)
+}
+
+/// [`write`] with the layer being edited, to choose again when opened.
+pub fn write_with<W: Write + Seek>(
+    document: &Document,
+    document_id: [u8; 16],
+    active_layer: Option<LayerId>,
     out: W,
 ) -> Result<W, WriteError> {
     let mut used = Used::default();
@@ -120,6 +130,7 @@ pub fn write<W: Write + Seek>(
                 size: document.store.assets[id].size,
             })
             .collect(),
+        active_layer: active_layer.map(|id| id.0),
     };
 
     let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);

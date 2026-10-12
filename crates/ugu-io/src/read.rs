@@ -72,6 +72,29 @@ impl std::fmt::Display for ReadError {
 
 impl std::error::Error for ReadError {}
 
+/// Whether `png` decodes in full to 8-bit RGBA of `size`, as the renderer
+/// draws images; read a row at a time, so it holds no image.
+fn draws_as(png: &[u8], size: [u32; 2]) -> bool {
+    let Ok(mut reader) = png::Decoder::new(std::io::Cursor::new(png)).read_info() else {
+        return false;
+    };
+    let info = reader.info();
+    if [info.width, info.height] != size
+        || (info.color_type, info.bit_depth) != (png::ColorType::Rgba, png::BitDepth::Eight)
+        || info.interlaced
+    {
+        return false;
+    }
+    let mut rows = 0;
+    loop {
+        match reader.next_row() {
+            Ok(Some(_)) => rows += 1,
+            Ok(None) => return rows == size[1],
+            Err(_) => return false,
+        }
+    }
+}
+
 fn corrupt(reason: impl Into<String>) -> ReadError {
     ReadError::Corrupt(reason.into())
 }
@@ -96,7 +119,15 @@ pub fn legacy(start: &[u8]) -> Option<Legacy> {
 }
 
 /// Reads a document and its id.
-pub fn read<R: Read + Seek>(mut input: R) -> Result<(Document, [u8; 16]), ReadError> {
+pub fn read<R: Read + Seek>(input: R) -> Result<(Document, [u8; 16]), ReadError> {
+    read_with(input).map(|(document, id, _)| (document, id))
+}
+
+/// [`read`] with the paint layer that was being edited, if it was saved and
+/// is still one.
+pub fn read_with<R: Read + Seek>(
+    mut input: R,
+) -> Result<(Document, [u8; 16], Option<LayerId>), ReadError> {
     let mut start = [0u8; 64];
     let length = read_up_to(&mut input, &mut start).map_err(ReadError::Io)?;
     input.rewind().map_err(ReadError::Io)?;
@@ -155,7 +186,13 @@ pub fn read<R: Read + Seek>(mut input: R) -> Result<(Document, [u8; 16]), ReadEr
         store,
     };
     document.validate().map_err(ReadError::Invalid)?;
-    Ok((document, id))
+    let active = dto.active_layer.map(LayerId).filter(|id| {
+        matches!(
+            document.layer(*id).map(|layer| &layer.kind),
+            Some(LayerKind::Paint(_))
+        )
+    });
+    Ok((document, id, active))
 }
 
 fn read_up_to(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
@@ -297,6 +334,12 @@ impl<R: Read + Seek> Entries<R> {
             if <[u8; 32]>::from(Sha256::digest(&png)) != id {
                 return Err(corrupt(format!(
                     "image {} does not match its name",
+                    image.id
+                )));
+            }
+            if !draws_as(&png, image.size) {
+                return Err(corrupt(format!(
+                    "image {} is not an 8-bit RGBA PNG of its size",
                     image.id
                 )));
             }

@@ -13,9 +13,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 
-use ugu_core::document::Document;
+use ugu_core::document::{Document, LayerId};
 
-use crate::write::{WriteError, write};
+use crate::write::{WriteError, write_with};
 
 /// Puts a finished temporary file in place of the target.
 pub type Replace<'a> = &'a dyn Fn(&Path, &Path) -> io::Result<()>;
@@ -55,7 +55,18 @@ pub fn save(
     target: &Path,
     replace: Replace<'_>,
 ) -> Result<(), SaveError> {
-    save_through(document, document_id, target, replace, Ok)
+    save_with(document, document_id, None, target, replace)
+}
+
+/// [`save`] with the layer being edited, to choose again when opened.
+pub fn save_with(
+    document: &Document,
+    document_id: [u8; 16],
+    active_layer: Option<LayerId>,
+    target: &Path,
+    replace: Replace<'_>,
+) -> Result<(), SaveError> {
+    save_through(document, document_id, active_layer, target, replace, Ok)
 }
 
 /// `wrap` stands between the writer and the file, for tests to inject
@@ -63,13 +74,19 @@ pub fn save(
 fn save_through<W: Write + Seek>(
     document: &Document,
     document_id: [u8; 16],
+    active_layer: Option<LayerId>,
     target: &Path,
     replace: Replace<'_>,
     wrap: impl FnOnce(File) -> io::Result<W>,
 ) -> Result<(), SaveError> {
     replace_with(target, replace, |file, temporary| {
-        let out =
-            write(document, document_id, BufWriter::new(wrap(file)?)).map_err(SaveError::Write)?;
+        let out = write_with(
+            document,
+            document_id,
+            active_layer,
+            BufWriter::new(wrap(file)?),
+        )
+        .map_err(SaveError::Write)?;
         out.into_inner()
             .map_err(|error| SaveError::Write(WriteError::Io(error.into_error())))?;
         let entries = zip::ZipArchive::new(File::open(temporary)?)
@@ -262,7 +279,7 @@ mod tests {
             replaced.set(true);
             rename(from, to)
         };
-        let result = save_through(&sample(), [1; 16], &target, &replace, |file| {
+        let result = save_through(&sample(), [1; 16], None, &target, &replace, |file| {
             Ok(FullDisk { file, left: 300 })
         });
         assert!(matches!(result, Err(SaveError::Write(_))), "{result:?}");

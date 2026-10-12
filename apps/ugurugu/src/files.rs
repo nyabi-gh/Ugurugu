@@ -52,42 +52,41 @@ fn args_path(path: &Path) -> fluent_bundle::FluentArgs<'static> {
     args
 }
 
-const DOCUMENT_TYPE: FileType = FileType {
-    name: "Ugurugu document",
-    extensions: &["ugurugu"],
-};
+fn file_type(name: &'static str, extensions: &'static [&'static str]) -> FileType {
+    FileType {
+        name: tr(name),
+        extensions,
+    }
+}
+
+fn document_type() -> FileType {
+    file_type("type-document", &["ugurugu"])
+}
+
 /// What opens: documents, and 2.2.13 projects, imported as new ones.
-const OPEN_TYPE: FileType = FileType {
-    name: "Ugurugu document",
-    extensions: &["ugurugu", "ugu"],
-};
-const PNG_TYPE: FileType = FileType {
-    name: "PNG image",
-    extensions: &["png"],
-};
-const JPEG_TYPE: FileType = FileType {
-    name: "JPEG image",
-    extensions: &["jpg", "jpeg"],
-};
-/// What a frame is exported as, as 2.2.13 offers; the extension picks it.
-const STILL_TYPES: &[FileType] = &[PNG_TYPE, JPEG_TYPE];
-const GIF_TYPE: FileType = FileType {
-    name: "GIF image",
-    extensions: &["gif"],
-};
-const WEBP_TYPE: FileType = FileType {
-    name: "WebP image",
-    extensions: &["webp"],
-};
-const TOOLS_TYPE: FileType = FileType {
-    name: "Ugurugu tool preset",
-    extensions: &[preset::EXTENSION],
-};
+fn open_type() -> FileType {
+    file_type("type-open", &["ugurugu", "ugu"])
+}
+
+fn still_types() -> Vec<FileType> {
+    vec![
+        file_type("type-png", &["png"]),
+        file_type("type-jpeg", &["jpg", "jpeg"]),
+    ]
+}
+
+fn tools_type() -> FileType {
+    file_type("type-tools", &[preset::EXTENSION])
+}
+
 /// What an image can be inserted from, as 2.2.13 offers.
-const IMAGE_TYPE: FileType = FileType {
-    name: "Image",
-    extensions: &["png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"],
-};
+fn image_type() -> FileType {
+    file_type(
+        "type-image",
+        &["png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"],
+    )
+}
+
 /// 2.2.13's new document.
 const NEW_CANVAS: [u32; 2] = [1024, 768];
 /// How long a save or export runs before the status bar says it is running.
@@ -128,7 +127,8 @@ pub enum FileEvent {
 }
 
 pub enum Opened {
-    Document(Box<Document>, [u8; 16]),
+    /// With the paint layer that was being edited, if saved.
+    Document(Box<Document>, [u8; 16], Option<LayerId>),
     /// A 2.2.13 project, which becomes a new document.
     Imported(Box<ugu_io::legacy::Imported>),
 }
@@ -192,6 +192,8 @@ enum Job {
         generation: u64,
         document: Arc<Document>,
         id: [u8; 16],
+        /// The layer being edited, chosen again when the file is opened.
+        layer: LayerId,
         path: PathBuf,
         state: StateId,
     },
@@ -341,6 +343,9 @@ pub struct Files {
     animation_job: Option<ExportJob>,
     /// Cancelled exports whose threads may still be finishing.
     cancelled: Vec<Exporting>,
+    /// The export cancelled last, whose file may still have been put in
+    /// place if it was that far.
+    last_cancelled: Option<u64>,
     exports: u64,
     updates: crate::update::Updates,
 }
@@ -376,7 +381,7 @@ impl Files {
                     if let Job::Stop = job {
                         break;
                     }
-                    if let Some(event) = run(job) {
+                    if let Some(event) = run_answering(job, run) {
                         worker_events(event);
                     }
                 }
@@ -414,6 +419,7 @@ impl Files {
             new_document: None,
             animation_job: None,
             cancelled: Vec::new(),
+            last_cancelled: None,
             exports: 0,
             updates,
         }
@@ -510,7 +516,10 @@ impl Files {
             }
         };
         recovering.sequence += 1;
-        let meta = Meta::new(recovering.sequence, name, path, document.canvas);
+        let meta = Meta {
+            layer: Some(canvas.session().current_layer()),
+            ..Meta::new(recovering.sequence, name, path, document.canvas)
+        };
         let _ = self.to_worker.send(Job::WriteRecovery {
             folder: recovering.folder.clone(),
             document,
@@ -668,7 +677,7 @@ impl Files {
             Action::New => {
                 self.new_document = Some(canvas.session().document().canvas.map(i64::from));
             }
-            Action::Open => self.pick(Purpose::Open, Dialog::Open(OPEN_TYPE)),
+            Action::Open => self.pick(Purpose::Open, Dialog::Open(open_type())),
             Action::Close => self.close = true,
             Action::Recover => {
                 if let Some(found) = self.found.pop_front() {
@@ -691,8 +700,13 @@ impl Files {
     /// Shows a document read.
     fn show_opened(&mut self, path: PathBuf, opened: Opened, canvas: &mut Canvas) {
         match opened {
-            Opened::Document(document, id) => {
+            Opened::Document(document, id, layer) => {
                 canvas.replace(*document, true);
+                if let Some(layer) = layer {
+                    canvas
+                        .edit(|session| session.select_layer(layer))
+                        .expect("nothing is pending in a new document");
+                }
                 self.path = Some(path);
                 self.unsaved_name = None;
                 self.unsaved_from = None;
@@ -772,7 +786,7 @@ impl Files {
     }
 
     pub fn save_as(&mut self) {
-        self.pick_save(Purpose::SaveAs, &[DOCUMENT_TYPE]);
+        self.pick_save(Purpose::SaveAs, vec![document_type()]);
     }
 
     /// Where new documents are first saved and exported, from the settings.
@@ -806,7 +820,7 @@ impl Files {
 
     /// Saves as `file_type` under the document's name, in its folder, or in
     /// the default save folder for a document never saved, as 2.2.13 does.
-    fn pick_save(&mut self, purpose: Purpose, file_types: &'static [FileType]) {
+    fn pick_save(&mut self, purpose: Purpose, file_types: Vec<FileType>) {
         let name = format!("{}.{}", self.display_name(), file_types[0].extensions[0]);
         let folder = self
             .path
@@ -856,23 +870,23 @@ impl Files {
     }
 
     pub fn insert_image(&mut self) {
-        self.pick(Purpose::InsertImage, Dialog::Open(IMAGE_TYPE));
+        self.pick(Purpose::InsertImage, Dialog::Open(image_type()));
     }
 
     /// Asks which tool preset to take the tools and wobble from.
     pub fn import_tools(&mut self) {
-        self.pick(Purpose::ImportTools, Dialog::Open(TOOLS_TYPE));
+        self.pick(Purpose::ImportTools, Dialog::Open(tools_type()));
     }
 
     /// Asks where to write the tools and wobble as a preset.
     pub fn export_tools(&mut self) {
-        self.pick_save(Purpose::ExportTools, &[TOOLS_TYPE]);
+        self.pick_save(Purpose::ExportTools, vec![tools_type()]);
     }
 
     /// Asks where to export the frame shown, one export at a time.
     pub fn export_image(&mut self) {
         if self.exporting.is_none() {
-            self.pick_save(Purpose::ExportImage, STILL_TYPES);
+            self.pick_save(Purpose::ExportImage, still_types());
         }
     }
 
@@ -1095,9 +1109,9 @@ impl Files {
                     threads: threads.unwrap_or(1),
                 });
                 self.animation_dialog = None;
-                let types: &'static [FileType] = match format {
-                    Animation::Gif => &[GIF_TYPE],
-                    Animation::WebP => &[WEBP_TYPE],
+                let types = match format {
+                    Animation::Gif => vec![file_type("type-gif", &["gif"])],
+                    Animation::WebP => vec![file_type("type-webp", &["webp"])],
                 };
                 self.pick_save(Purpose::ExportAnimation, types);
             }
@@ -1155,6 +1169,7 @@ impl Files {
     pub fn cancel_export(&mut self) {
         if let Some(export) = self.exporting.take() {
             export.cancel();
+            self.last_cancelled = Some(export.number);
             self.cancelled.push(export);
             self.say(tr("export-canceled").to_owned());
         }
@@ -1180,6 +1195,7 @@ impl Files {
             generation: canvas.generation(),
             document: canvas.snapshot_now(),
             id: self.id,
+            layer: canvas.session().current_layer(),
             path,
             state: canvas.session().state(),
         });
@@ -1288,12 +1304,16 @@ impl Files {
                 path,
                 outcome,
             } => {
-                // A cancelled one was answered when it was cancelled.
+                // A cancelled one was answered when it was cancelled, unless
+                // its file was put in place before the cancel was seen.
                 if self
                     .exporting
                     .as_ref()
                     .is_none_or(|export| export.number != number)
                 {
+                    if self.last_cancelled == Some(number) && matches!(outcome, Outcome::Done) {
+                        self.say(tr_with("export-done", &args_path(&path)));
+                    }
                     return;
                 }
                 self.exporting = None;
@@ -1404,6 +1424,11 @@ impl Files {
                             meta,
                         } = *recovered;
                         canvas.replace(document, false);
+                        if let Some(layer) = meta.layer {
+                            canvas
+                                .edit(|session| session.select_layer(layer))
+                                .expect("nothing is pending in a new document");
+                        }
                         self.path = None;
                         self.id = id;
                         self.unsaved_name = Some(if meta.name.ends_with("-recovered") {
@@ -1547,6 +1572,64 @@ impl Files {
     }
 }
 
+/// Runs `job`; one that panics is answered as failed, which the panic hook
+/// has recorded, so what waits for it goes on and the thread takes the next.
+fn run_answering(job: Job, run: impl FnOnce(Job) -> Option<FileEvent>) -> Option<FileEvent> {
+    let failed = failure(&job);
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(job)))
+        .unwrap_or_else(|_| failed.map(|answer| answer(tr("file-job-failed").to_owned())))
+}
+
+/// How `job` is answered when it fails unexpectedly; `None` for jobs nothing
+/// waits for.
+fn failure(job: &Job) -> Option<Box<dyn FnOnce(String) -> FileEvent + Send>> {
+    Some(match job {
+        Job::Save {
+            number,
+            generation,
+            path,
+            state,
+            ..
+        } => {
+            let (number, document, path, state) = (*number, *generation, path.clone(), *state);
+            Box::new(move |error| FileEvent::Saved {
+                number,
+                document,
+                path,
+                state,
+                result: Err(error),
+            })
+        }
+        Job::Open(path) => {
+            let path = path.clone();
+            Box::new(move |error| FileEvent::Opened(path, Err(error)))
+        }
+        Job::Insert {
+            path, generation, ..
+        } => {
+            let (path, generation) = (path.clone(), *generation);
+            Box::new(move |error| FileEvent::Inserted(path, generation, Err(error)))
+        }
+        Job::ReadTools(path) => {
+            let path = path.clone();
+            Box::new(move |error| FileEvent::ToolsRead(path, Err(PresetError::Unreadable(error))))
+        }
+        Job::WriteTools { path, .. } => {
+            let path = path.clone();
+            Box::new(move |error| FileEvent::ToolsWritten(path, Err(error)))
+        }
+        Job::BeginRecovery { .. } => Box::new(|error| FileEvent::RecoveryBegun(Err(error))),
+        Job::WriteRecovery { meta, .. } => {
+            let sequence = meta.sequence;
+            Box::new(move |error| FileEvent::RecoveryWritten(sequence, Err(error)))
+        }
+        Job::ReadRecovery(_) => Box::new(|error| FileEvent::Recovered(Err(error))),
+        Job::ForgetRecovery(_) | Job::DiscardRecovery(_) | Job::EndRecovery { .. } | Job::Stop => {
+            return None;
+        }
+    })
+}
+
 fn run(job: Job) -> Option<FileEvent> {
     Some(match job {
         Job::Save {
@@ -1554,12 +1637,14 @@ fn run(job: Job) -> Option<FileEvent> {
             generation,
             document,
             id,
+            layer,
             path,
             state,
         } => {
             remove_stale_temporaries(&path);
             let started = std::time::Instant::now();
-            let result = ugu_io::save::save(&document, id, &path, &ugu_win::file::replace_file)
+            let replace = &ugu_win::file::replace_file;
+            let result = ugu_io::save::save_with(&document, id, Some(layer), &path, replace)
                 .map_err(|error| error.to_string());
             tracing::info!(
                 ms = started.elapsed().as_secs_f64() * 1000.0,
@@ -1687,6 +1772,57 @@ mod tests {
         });
         let canvas = Canvas::new(Files::new_canvas(), |_| {});
         (files, canvas, events)
+    }
+
+    #[test]
+    fn a_saved_document_opens_on_the_layer_being_edited() {
+        let (mut files, mut canvas, events) = setup();
+        let bottom = canvas.session().current_layer();
+        canvas.edit(|session| session.add_layer()).unwrap();
+        assert_ne!(canvas.session().current_layer(), bottom);
+        canvas.edit(|session| session.select_layer(bottom)).unwrap();
+        let path = folder("active-layer").join("layers.ugurugu");
+        files.path = Some(path.clone());
+        files.save(&mut canvas);
+        files.handle(next(&events), &mut canvas);
+        assert!(path.exists());
+
+        let (mut other, mut reopened, _) = setup();
+        let opened = open(&path).unwrap();
+        other.handle(FileEvent::Opened(path, Ok(opened)), &mut reopened);
+        assert_eq!(reopened.session().current_layer(), bottom);
+    }
+
+    #[test]
+    fn a_save_that_panics_is_answered_as_failed_and_ends_the_wait() {
+        let (mut files, mut canvas, _events) = setup();
+        files.path = Some(std::env::temp_dir().join("ugurugu-never-written.ugurugu"));
+        files.saves_started = 6;
+        files.saving = 1;
+        let job = Job::Save {
+            number: 7,
+            generation: canvas.generation(),
+            document: canvas.snapshot_now(),
+            id: files.id,
+            layer: canvas.session().current_layer(),
+            path: files.path.clone().unwrap(),
+            state: canvas.session().state(),
+        };
+        let event = run_answering(job, |_| panic!("a bug in a save")).expect("answered");
+        let FileEvent::Saved {
+            number, ref result, ..
+        } = event
+        else {
+            panic!("not a save's answer");
+        };
+        assert_eq!(
+            (number, result.clone()),
+            (7, Err(tr("file-job-failed").to_owned()))
+        );
+        files.handle(event, &mut canvas);
+        assert!(!files.busy());
+        // Jobs nothing waits for go unanswered.
+        assert!(run_answering(Job::ForgetRecovery(PathBuf::new()), |_| panic!("again")).is_none());
     }
 
     #[test]
@@ -2160,17 +2296,34 @@ mod tests {
         assert!(first.exists());
         assert!(!folder.join("other.png").exists());
 
-        // Cancelled: said at once; the thread's late answer changes nothing.
+        // Cancelled: said at once; the thread's late answer corrects it only
+        // if the file was put in place first, so what is said matches.
         let second = folder.join("second.png");
         files.handle(
-            FileEvent::Picked(Purpose::ExportImage, Some(second)),
+            FileEvent::Picked(Purpose::ExportImage, Some(second.clone())),
             &mut canvas,
         );
         files.cancel_export();
         assert_eq!(files.export_status(), None);
         assert_eq!(files.message(), Some(tr("export-canceled")));
         files.handle(next(&events), &mut canvas);
-        assert_eq!(files.message(), Some(tr("export-canceled")));
+        let done = tr_with("export-done", &args_path(&second));
+        if second.exists() {
+            assert_eq!(files.message(), Some(done.as_str()));
+        } else {
+            assert_eq!(files.message(), Some(tr("export-canceled")));
+        }
+        // The file was put in place just before the cancel was seen.
+        let number = files.last_cancelled.unwrap();
+        files.handle(
+            FileEvent::Exported {
+                number,
+                path: second.clone(),
+                outcome: Outcome::Done,
+            },
+            &mut canvas,
+        );
+        assert_eq!(files.message(), Some(done.as_str()));
         files.end();
         // Whether it got as far as writing or not, nothing is left half done.
         let left: Vec<_> = std::fs::read_dir(&folder)
@@ -2210,8 +2363,8 @@ pub fn remove_stale_temporaries(path: &Path) {
 /// Reads a document, or imports a 2.2.13 project.
 fn open(path: &Path) -> Result<Opened, String> {
     let file = File::open(path).map_err(|error| error.to_string())?;
-    match ugu_io::read::read(std::io::BufReader::new(file)) {
-        Ok((document, id)) => Ok(Opened::Document(Box::new(document), id)),
+    match ugu_io::read::read_with(std::io::BufReader::new(file)) {
+        Ok((document, id, layer)) => Ok(Opened::Document(Box::new(document), id, layer)),
         Err(ugu_io::read::ReadError::Legacy(ugu_io::read::Legacy::Json)) => {
             let file = File::open(path).map_err(|error| error.to_string())?;
             ugu_io::legacy::read(std::io::BufReader::new(file))

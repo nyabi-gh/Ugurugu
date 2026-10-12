@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
-use ugu_core::document::Document;
+use ugu_core::document::{Document, LayerId};
 
 /// How long editing pauses before the work is written.
 pub const QUIET: Duration = Duration::from_secs(3);
@@ -48,6 +48,8 @@ pub struct Meta {
     /// When it was written.
     pub time: Duration,
     pub canvas: [u32; 2],
+    /// The layer being edited, chosen again when the work is recovered.
+    pub layer: Option<LayerId>,
 }
 
 impl Meta {
@@ -65,6 +67,7 @@ impl Meta {
             path,
             time,
             canvas,
+            layer: None,
         }
     }
 
@@ -77,6 +80,7 @@ impl Meta {
             "path": self.path.as_ref().map(|path| path.to_string_lossy()),
             "time": self.time.as_secs(),
             "canvas": self.canvas,
+            "layer": self.layer.map(|layer| layer.0),
         })
     }
 
@@ -92,6 +96,11 @@ impl Meta {
             path: value.get("path").and_then(Value::as_str).map(PathBuf::from),
             time: Duration::from_secs(value.get("time")?.as_u64()?),
             canvas: [edge(0)?, edge(1)?],
+            layer: value
+                .get("layer")
+                .and_then(Value::as_u64)
+                .and_then(|layer| u32::try_from(layer).ok())
+                .map(LayerId),
         })
     }
 }
@@ -128,7 +137,10 @@ fn meta_path(folder: &Path, slot: u64) -> PathBuf {
 
 /// The generations whose description was written, newest first. A
 /// description is written after its document and removed before it is
-/// replaced, so each one listed has its document written in full.
+/// replaced, so each one listed has its document written in full. Without
+/// any, as when the window stopped between the first document and its
+/// description, the documents that read are listed, newest first, with
+/// what they tell of themselves.
 fn generations(folder: &Path) -> Vec<(u64, Meta)> {
     let mut found: Vec<_> = (0..2)
         .filter_map(|slot| {
@@ -137,14 +149,44 @@ fn generations(folder: &Path) -> Vec<(u64, Meta)> {
             (meta.sequence % 2 == slot).then_some((slot, meta))
         })
         .collect();
+    if found.is_empty() {
+        found = (0..2)
+            .filter_map(|slot| Some((slot, undescribed(&document_path(folder, slot))?)))
+            .collect();
+        found.sort_by_key(|(_, meta)| std::cmp::Reverse(meta.time));
+        return found;
+    }
     found.sort_by_key(|(_, meta)| std::cmp::Reverse(meta.sequence));
     found
 }
 
+/// A description for the document at `path` written without one: untitled,
+/// never saved, from when the file was written.
+fn undescribed(path: &Path) -> Option<Meta> {
+    let file = File::open(path).ok()?;
+    let time = file
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?;
+    let (document, _) = ugu_io::read::read(io::BufReader::new(file))
+        .inspect_err(|error| tracing::warn!(%error, path = %path.display(), "a recovery document without a description does not read"))
+        .ok()?;
+    Some(Meta {
+        sequence: 0,
+        name: crate::i18n::tr("untitled").to_owned(),
+        path: None,
+        time: Duration::from_secs(time.as_secs()),
+        canvas: document.canvas,
+        layer: None,
+    })
+}
+
 /// Makes and locks this window's folder, `session` under `root`, and finds
 /// the folders of windows no longer running, newest first. Folders of
-/// running windows are left alone; left folders with nothing written are
-/// removed.
+/// running windows are left alone; left folders with no document are
+/// removed, and those whose documents do not read are set aside.
 pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
     std::fs::create_dir_all(session)?;
     let own = lock(session)?;
@@ -165,6 +207,19 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
         };
         match generations(&folder).into_iter().next() {
             Some((_, meta)) => found.push(Found { folder, lock, meta }),
+            None if (0..2).any(|slot| document_path(&folder, slot).exists()) => {
+                let found = Found {
+                    folder,
+                    lock,
+                    meta: Meta::new(0, String::new(), None, [0, 0]),
+                };
+                match set_aside(found) {
+                    Ok(aside) => {
+                        tracing::warn!(folder = %aside.display(), "recovery documents that do not read were set aside")
+                    }
+                    Err(error) => tracing::warn!(%error, "cannot set aside a recovery folder"),
+                }
+            }
             None => {
                 drop(lock);
                 if let Err(error) = std::fs::remove_dir_all(&folder) {
@@ -209,10 +264,16 @@ fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
-/// The newest generation of `found` that reads, with its description.
+/// The newest generation of `found` that reads, with its description; if
+/// none does, a document left without its description that reads.
 pub fn read(found: &Found) -> Result<(Document, [u8; 16], Meta), String> {
     let mut last_error = "nothing was written".to_owned();
-    for (slot, meta) in generations(&found.folder) {
+    let described = generations(&found.folder);
+    let rest: Vec<(u64, Meta)> = (0..2)
+        .filter(|slot| described.iter().all(|(each, _)| each != slot))
+        .filter_map(|slot| Some((slot, undescribed(&document_path(&found.folder, slot))?)))
+        .collect();
+    for (slot, meta) in described.into_iter().chain(rest) {
         let result = File::open(document_path(&found.folder, slot))
             .map_err(|error| error.to_string())
             .and_then(|file| {
@@ -334,8 +395,13 @@ pub(crate) mod tests {
             .unwrap();
         let (read_back, _, meta) = read(&found).unwrap();
         assert_eq!((read_back.canvas[0], meta.sequence), (12, 2));
-        // A generation whose description was not written yet is not used.
+        // Without any description, the documents that read are used.
         std::fs::remove_file(meta_path(&session, 0)).unwrap();
+        let (read_back, _, meta) = read(&found).unwrap();
+        assert_eq!((read_back.canvas[0], meta.canvas[0]), (12, 12));
+        assert_eq!(meta.name, crate::i18n::tr("untitled"));
+        // Nor with none that reads.
+        std::fs::remove_file(document_path(&session, 0)).unwrap();
         assert!(read(&found).is_err());
         let aside = set_aside(found).unwrap();
         assert!(
@@ -348,6 +414,37 @@ pub(crate) mod tests {
         // Set aside, it is not offered again.
         let (_own, found) = begin(&root.0, &root.0.join("third")).unwrap();
         assert!(found.is_empty());
+    }
+
+    #[test]
+    fn a_document_written_without_its_description_is_offered_not_removed() {
+        let root = Root::new("undescribed");
+        let crashed = root.0.join("crashed");
+        let (lock, _) = begin(&root.0, &crashed).unwrap();
+        write(&crashed, &document(21), [3; 16], &meta(1)).unwrap();
+        // Stopped before the description of the first document was written.
+        std::fs::remove_file(meta_path(&crashed, 1)).unwrap();
+        drop(lock);
+        let (own, mut found) = begin(&root.0, &root.0.join("next")).unwrap();
+        assert_eq!(found.len(), 1);
+        let found = found.remove(0);
+        assert_eq!(found.meta.canvas, [21, 10]);
+        assert_eq!(read(&found).unwrap().0.canvas, [21, 10]);
+        drop(found);
+        drop(own);
+
+        // One that does not read either is set aside, never removed.
+        let broken = root.0.join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(document_path(&broken, 0), b"not a document").unwrap();
+        let (_own, found) = begin(&root.0, &root.0.join("third")).unwrap();
+        assert!(found.iter().all(|found| found.folder != broken));
+        assert!(!broken.exists());
+        assert!(
+            root.names()
+                .iter()
+                .any(|name| name.starts_with(FAILED) && name.ends_with("broken"))
+        );
     }
 
     #[test]
@@ -392,13 +489,19 @@ pub(crate) mod tests {
 
     #[test]
     fn descriptions_read_back_and_odd_ones_are_refused() {
-        let meta = Meta::new(
-            5,
-            "Cat".to_owned(),
-            Some(PathBuf::from(r"C:\a\Cat.ugurugu")),
-            [3, 4],
-        );
+        let meta = Meta {
+            layer: Some(LayerId(7)),
+            ..Meta::new(
+                5,
+                "Cat".to_owned(),
+                Some(PathBuf::from(r"C:\a\Cat.ugurugu")),
+                [3, 4],
+            )
+        };
         assert_eq!(Meta::parse(&meta.to_json()), Some(meta.clone()));
+        let mut without = meta.to_json();
+        without.as_object_mut().unwrap().remove("layer");
+        assert_eq!(Meta::parse(&without).unwrap().layer, None);
         let mut other = meta.to_json();
         other["format"] = json!("something else");
         assert_eq!(Meta::parse(&other), None);

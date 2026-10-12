@@ -268,7 +268,11 @@ function Invoke-Named($Process, [string] $Name, [switch] $Prefix) {
 }
 
 function Get-Value($Process, [string] $Name) {
-    $pattern = Find-Pattern $Process $Name @([Windows.Automation.RangeValuePattern]::Pattern)
+    $pattern = Find-Pattern $Process $Name @([Windows.Automation.RangeValuePattern]::Pattern,
+        [Windows.Automation.ValuePattern]::Pattern)
+    if ($pattern -is [Windows.Automation.ValuePattern]) {
+        return [double]($pattern.Current.Value -replace '[^0-9.\-]', '')
+    }
     [double]$pattern.Current.Value
 }
 
@@ -535,6 +539,11 @@ Step 'Pressing during playback keeps the frame shown' {
     foreach ($tool in @(@('pen', 'b', 0), @('wand', 'w', 60))) {
         Send-Keys $process $tool[1]
         [Native]::MoveTo($paper.Right - 5, $paper.Bottom - 5)
+        # Playing on after the pen's press, it is stopped for the wand.
+        if ($tool[0] -eq 'wand') {
+            Send-Keys $process 'p'
+            Start-Sleep -Milliseconds 500
+        }
         Send-Keys $process 'p'
         Start-Sleep -Milliseconds 1500
         $counts = [Native]::PressAndWatch($press[0] + $tool[2], $press[1], $x, $y, $rw, $rh, 30, 1000)
@@ -542,9 +551,17 @@ Step 'Pressing during playback keeps the frame shown' {
         if ($flash.Low -lt 100) {
             throw "Too little drawn to watch: $counts"
         }
-        $lines += "$($tool[0]): $($flash.Frames) frames after the press, $($flash.Flashes) flashed (fewest dark while playing $($flash.Low)): $counts"
+        # Playback goes on once the stroke or the click is over.
+        Start-Sleep -Milliseconds 300
+        $frame = Get-Value $process 'Current frame'
+        Start-Sleep -Milliseconds 1000
+        $later = Get-Value $process 'Current frame'
+        $lines += "$($tool[0]): $($flash.Frames) frames after the press, $($flash.Flashes) flashed (fewest dark while playing $($flash.Low)), frame after release $frame -> $later 1 s later: $counts"
         if ($flash.Flashes) {
             $flashed += $tool[0]
+        }
+        if ($frame -eq $later) {
+            $flashed += "$($tool[0]) (playback did not go on)"
         }
         Start-Sleep -Seconds 1
     }

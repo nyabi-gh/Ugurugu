@@ -80,15 +80,19 @@ pub(crate) fn sample() -> Document {
             bits: vec![0xff, 0xc0, 0x80, 0x40].into(),
         },
     );
-    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
-    let asset = AssetId(Sha256::digest(&png).into());
-    store.assets.insert(
-        asset,
-        Asset {
-            size: [2, 2],
-            png: png.into(),
-        },
-    );
+    let (asset, image) = crate::import::from_rgba(
+        [2, 2],
+        [
+            [255, 0, 0, 255],
+            [0, 255, 0, 128],
+            [0, 0, 255, 0],
+            [9, 9, 9, 9],
+        ]
+        .concat(),
+        [2, 2],
+    )
+    .unwrap();
+    store.assets.insert(asset, image);
     let LayerKind::Paint(base) = &mut document.layers[0].kind else {
         unreachable!()
     };
@@ -185,6 +189,42 @@ fn written(document: &Document) -> Vec<u8> {
 }
 
 #[test]
+fn the_active_paint_layer_reads_back_and_any_other_is_dropped() {
+    let document = sample();
+    let paint = document
+        .layers
+        .iter()
+        .find(|layer| matches!(layer.kind, LayerKind::Paint(_)))
+        .unwrap()
+        .id;
+    let with = |active: Option<LayerId>| {
+        let bytes = crate::write::write_with(&document, [3; 16], active, Cursor::new(Vec::new()))
+            .unwrap()
+            .into_inner();
+        crate::read::read_with(Cursor::new(bytes)).unwrap().2
+    };
+    assert_eq!(with(Some(paint)), Some(paint));
+    assert_eq!(with(None), None);
+    assert_eq!(with(Some(LayerId(999))), None);
+    let group = document
+        .layers
+        .iter()
+        .find(|layer| matches!(layer.kind, LayerKind::Group(_)))
+        .unwrap()
+        .id;
+    assert_eq!(with(Some(group)), None);
+    // Without it the bytes are as before.
+    assert_eq!(
+        crate::write::write_with(&document, [3; 16], None, Cursor::new(Vec::new()))
+            .unwrap()
+            .into_inner(),
+        crate::write::write(&document, [3; 16], Cursor::new(Vec::new()))
+            .unwrap()
+            .into_inner()
+    );
+}
+
+#[test]
 fn the_same_document_writes_the_same_bytes() {
     let document = sample();
     assert_eq!(written(&document), written(&document.clone()));
@@ -197,7 +237,7 @@ fn entries_come_in_a_fixed_order_with_only_used_data() {
     let names: Vec<_> = (0..archive.len())
         .map(|index| archive.by_index(index).unwrap().name().to_owned())
         .collect();
-    let image = image_entry(&hex(&Sha256::digest([0x89, b'P', b'N', b'G', 1, 2, 3])));
+    let image = sample_image_entry();
     assert_eq!(names, [MANIFEST, DOCUMENT, STROKES, MASKS, image.as_str()]);
     assert_eq!(
         archive.by_name(&image).unwrap().compression(),
@@ -288,6 +328,11 @@ fn archive(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
 }
 
 /// The sample with one entry changed by `edit`.
+fn sample_image_entry() -> String {
+    let id = *sample().store.assets.keys().next().unwrap();
+    image_entry(&hex(&id.0))
+}
+
 fn with_entry(name: &str, edit: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     let mut all = entries(&written(&sample()));
     let entry = all.iter_mut().find(|(entry, _)| entry == name).unwrap();
@@ -394,9 +439,44 @@ fn broken_binary_entries_are_refused() {
     });
     assert!(matches!(read_bytes(mask), Err(ReadError::Corrupt(_))));
     // An image whose bytes no longer match its name.
-    let name = image_entry(&hex(&Sha256::digest([0x89, b'P', b'N', b'G', 1, 2, 3])));
-    let image = with_entry(&name, |data| data[4] ^= 1);
+    let image = with_entry(&sample_image_entry(), |data| data[4] ^= 1);
     assert!(matches!(read_bytes(image), Err(ReadError::Corrupt(_))));
+}
+
+#[test]
+fn an_image_that_matches_its_name_but_does_not_draw_is_refused() {
+    let with_image = |png: Vec<u8>, size: [u32; 2]| {
+        let mut document = sample();
+        document.store.assets.clear();
+        let id = AssetId(Sha256::digest(&png).into());
+        document.store.assets.insert(
+            id,
+            Asset {
+                size,
+                png: png.into(),
+            },
+        );
+        let LayerKind::Paint(base) = &mut document.layers[0].kind else {
+            unreachable!()
+        };
+        for op in &mut base.ops {
+            if let Op::PlaceImage { asset, .. } = op {
+                *asset = id;
+            }
+        }
+        read_bytes(written(&document))
+    };
+    let real = sample().store.assets.into_values().next().unwrap();
+    assert!(with_image(real.png.to_vec(), [2, 2]).is_ok());
+    // Bytes that are no PNG, under the name of their own hash.
+    let broken = with_image(vec![0x89, b'P', b'N', b'G', 1, 2, 3], [2, 2]);
+    assert!(matches!(broken, Err(ReadError::Corrupt(_))), "{broken:?}");
+    // A real 2×2 image recorded as 4×4.
+    let sized = with_image(real.png.to_vec(), [4, 4]);
+    assert!(matches!(sized, Err(ReadError::Corrupt(_))), "{sized:?}");
+    // Cut short after its header.
+    let short = with_image(real.png[..real.png.len() - 20].to_vec(), [2, 2]);
+    assert!(matches!(short, Err(ReadError::Corrupt(_))), "{short:?}");
 }
 
 #[test]

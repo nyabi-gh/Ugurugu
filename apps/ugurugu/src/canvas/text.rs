@@ -196,7 +196,11 @@ impl Canvas {
                 None
             }
             Ok(Outcome::NoChange) => Some(tr("text-empty").to_owned()),
-            Err(error) => Some(format!("The text was not added: {error}")),
+            Err(error) if super::is_point_limit(&error) => {
+                tracing::warn!(%error, "the text could not be committed");
+                Some(tr("text-point-limit").to_owned())
+            }
+            Err(error) => Some(super::failed_because(tr("text-failed"), &error)),
         };
         self.session.placed_text().is_none()
     }

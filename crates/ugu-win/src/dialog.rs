@@ -20,7 +20,7 @@ use windows::Win32::UI::Shell::{
 };
 use windows::core::{HRESULT, HSTRING, PCWSTR};
 
-/// A file type the dialog offers: a name such as "PNG image" and its
+/// A file type the dialog offers: a name such as "PNG images (*.png)" and its
 /// extensions without the dot, the first one added to a saved name that has
 /// none.
 #[derive(Clone, Copy, Debug)]
@@ -37,7 +37,7 @@ pub enum Dialog {
     /// with; the chosen one's first extension is added to a name without
     /// one of its own.
     Save {
-        file_types: &'static [FileType],
+        file_types: Vec<FileType>,
         name: String,
         folder: Option<PathBuf>,
     },

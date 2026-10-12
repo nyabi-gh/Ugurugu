@@ -180,3 +180,61 @@ pub fn adapter_summary(info: &wgpu::AdapterInfo) -> String {
     }
     summary + ")"
 }
+
+/// What `open` makes with the adapter `choice` asks for, or, when that is
+/// the hardware one and anything opened on it fails, such as its device or
+/// swap chain, with WARP.
+pub fn with_warp_fallback<T>(
+    choice: AdapterChoice,
+    mut open: impl FnMut(AdapterChoice) -> Result<T, String>,
+) -> Result<T, String> {
+    match open(choice) {
+        Err(error) if choice == AdapterChoice::Hardware => {
+            tracing::warn!(%error, "the hardware GPU cannot show the window; trying WARP");
+            open(AdapterChoice::Warp).map_err(|warp| format!("{error}; with WARP: {warp}"))
+        }
+        result => result,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hardware_failure_falls_back_to_warp_and_warp_is_tried_once() {
+        let mut tried = Vec::new();
+        let opened = with_warp_fallback(AdapterChoice::Hardware, |choice| {
+            tried.push(choice);
+            match choice {
+                AdapterChoice::Hardware => Err("no device".to_owned()),
+                AdapterChoice::Warp => Ok("warp"),
+            }
+        });
+        assert_eq!(opened, Ok("warp"));
+        assert_eq!(tried, [AdapterChoice::Hardware, AdapterChoice::Warp]);
+
+        let mut tried = Vec::new();
+        let failed: Result<(), String> = with_warp_fallback(AdapterChoice::Warp, |choice| {
+            tried.push(choice);
+            Err("no WARP".to_owned())
+        });
+        assert_eq!(failed, Err("no WARP".to_owned()));
+        assert_eq!(tried, [AdapterChoice::Warp]);
+
+        let both: Result<(), String> =
+            with_warp_fallback(AdapterChoice::Hardware, |_| Err("broken".to_owned()));
+        assert_eq!(both, Err("broken; with WARP: broken".to_owned()));
+    }
+
+    #[test]
+    fn a_hardware_success_is_kept() {
+        let mut tried = Vec::new();
+        let opened = with_warp_fallback(AdapterChoice::Hardware, |choice| {
+            tried.push(choice);
+            Ok::<_, String>(choice)
+        });
+        assert_eq!(opened, Ok(AdapterChoice::Hardware));
+        assert_eq!(tried, [AdapterChoice::Hardware]);
+    }
+}

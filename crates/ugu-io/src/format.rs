@@ -53,6 +53,10 @@ pub struct DocumentDto {
     pub strokes: Vec<StrokeDto>,
     pub masks: Vec<MaskDto>,
     pub images: Vec<ImageDto>,
+    /// The paint layer being edited when saved, chosen again when opened,
+    /// as 2.2.13 keeps `activeLayerId`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_layer: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

@@ -1308,3 +1308,11 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 
 나머지 단계(barrel, hover, 창 밖 해제, 1000개/초, 지우개 플래그, 터치 팬·핀치·회전·한 손가락)도 30절과 같은 결과다.
 
+## 34. 분석 보고서 조치의 측정 (2026-10-12, `rust/m6-finish`)
+
+**내장 PNG 검증 비용(A-01).** `draws_as`(행 단위 디코드, 큰 버퍼 없음)를 Release로 5회. 4096² 압축 잘 되는 그라데이션(PNG 494KiB) 46.6~47.6ms, 4096² 잡음(PNG 64MiB) 17.5~18.1ms. 잡음은 deflate가 거의 저장만 해 풀기가 빠르다. 임시 시험으로 재고 지웠다.
+
+**그룹 썸네일 시험.** 렌더러의 표면을 빼 두는 두 줄을 지우면 `a_group_thumbnail_is_the_group_drawn_alone_and_keeps_the_kept_surfaces`가 실패한다(다른 문서의 표면 9216바이트가 사라짐). 시험이 그 경우를 잡는 것을 확인했다.
+
+**GUI(Windows Sandbox `gui.ps1`, 7회차).** 9단계 모두 통과. 재생 단계는 이제 놓은 뒤 1초 동안 "Current frame" 값이 바뀌는지도 본다. 펜: 누른 뒤 33프레임 깜빡임 0, 놓은 뒤 프레임 27 → 1초 뒤 24(30프레임 한 바퀴). 마술봉: 깜빡임 0, 프레임 5 → 3. 1회차는 앞선 합성 펜 Sandbox가 남아 있어 시작되지 않았다("실행 중인 Windows 샌드박스 인스턴스는 하나만 허용됩니다").
+

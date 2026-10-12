@@ -9,7 +9,6 @@
 //! did not.
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, Ui, Vec2};
@@ -54,28 +53,6 @@ struct Thumbnail {
     size: [usize; 2],
     pixels: Arc<Vec<u8>>,
     texture: egui::TextureHandle,
-}
-
-/// Puts `layers` over each other, bottom first, Normal at their opacity.
-fn stack(layers: &[(&[u8], f32)], size: [usize; 2]) -> Vec<u8> {
-    let mut out = vec![0u8; size[0] * size[1] * 4];
-    for (pixels, opacity) in layers {
-        for (to, from) in out
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(pixels.as_chunks::<4>().0)
-        {
-            let alpha = f32::from(from[3]) * opacity / 255.0;
-            for channel in 0..4 {
-                let source = f32::from(from[channel]) * opacity;
-                to[channel] = (source + f32::from(to[channel]) * (1.0 - alpha))
-                    .round()
-                    .min(255.0) as u8;
-            }
-        }
-    }
-    out
 }
 
 /// `pixels` over the paper colour, for showing.
@@ -213,7 +190,7 @@ fn report(refusal: &mut Option<String>, result: Result<Outcome, EditError>) {
         Ok(Outcome::NoChange) => {}
         Err(error) => {
             tracing::warn!(%error, "edit refused");
-            *refusal = Some(error.to_string());
+            *refusal = Some(crate::canvas::edit_reason(&error).to_owned());
         }
     }
 }
@@ -251,40 +228,17 @@ impl LayerDock {
                 }),
                 LayerKind::Group(group) => {
                     self.refresh(ctx, canvas, &group.children, paper);
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    let shown: Vec<_> = group
-                        .children
-                        .iter()
-                        .filter(|child| child.visible)
-                        .filter_map(|child| {
-                            self.thumbnails
-                                .get(&child.id)
-                                .map(|thumbnail| (child, thumbnail))
-                        })
-                        .collect();
-                    for (child, thumbnail) in &shown {
-                        (child.id.0, thumbnail.key, child.opacity().to_bits()).hash(&mut hasher);
-                    }
-                    let key = hasher.finish();
-                    let size = shown.first().map(|(_, thumbnail)| thumbnail.size);
-                    match size {
-                        Some(size)
-                            if self
-                                .thumbnails
-                                .get(&layer.id)
-                                .is_none_or(|thumbnail| thumbnail.key != key) =>
+                    canvas.thumbnail(layer.id).and_then(|(key, pixmap)| {
+                        if self
+                            .thumbnails
+                            .get(&layer.id)
+                            .is_some_and(|thumbnail| thumbnail.key == key)
                         {
-                            let parts: Vec<(&[u8], f32)> = shown
-                                .iter()
-                                .filter(|(_, thumbnail)| thumbnail.size == size)
-                                .map(|(child, thumbnail)| {
-                                    (thumbnail.pixels.as_slice(), child.opacity())
-                                })
-                                .collect();
-                            Some((key, size, stack(&parts, size)))
+                            return None;
                         }
-                        _ => None,
-                    }
+                        let size = [usize::from(pixmap.width()), usize::from(pixmap.height())];
+                        Some((key, size, pixmap.data_as_u8_slice().to_vec()))
+                    })
                 }
             };
             if let Some((key, size, pixels)) = made {

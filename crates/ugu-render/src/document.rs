@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use ugu_core::document::{Document, LayerId, LayerKind};
+use ugu_core::document::{Document, Layer, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
 use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{self, AssetId, MaskId, Op, PaintLayer, Sampling, Wobble};
@@ -445,15 +445,42 @@ impl DocumentRenderer {
     /// factor so that they fit in `fit`; `None` for a group or a missing
     /// layer.
     pub fn thumbnail(&mut self, document: &Document, id: LayerId, fit: [u32; 2]) -> Option<Pixmap> {
-        let Some(LayerKind::Paint(paint)) = document.layer(id).map(|layer| &layer.kind) else {
-            return None;
-        };
+        let layer = document.layer(id)?;
         let shrink = (0..2)
             .map(|axis| document.canvas[axis].div_ceil(fit[axis].max(1)))
             .max()
             .unwrap_or(1)
             .max(1);
-        Some(self.draw_alone(document, 0, shrink, paint).to_pixmap())
+        Some(match &layer.kind {
+            LayerKind::Paint(paint) => self.draw_alone(document, 0, shrink, paint).to_pixmap(),
+            LayerKind::Group(_) => self.group_alone(document, layer, shrink.next_power_of_two()),
+        })
+    }
+
+    /// A group as 2.2.13 shows it in the layer list: the document with only
+    /// the group, shown, at full opacity and Normal, over transparency, its
+    /// children blended and clipped as they are. The surfaces kept for reuse
+    /// are left as they were.
+    fn group_alone(&mut self, document: &Document, group: &Layer, shrink: u32) -> Pixmap {
+        let mut root = group.clone();
+        root.visible = true;
+        if let LayerKind::Group(group) = &mut root.kind {
+            group.opacity = 1.0;
+            group.blend = ops::Blend::Normal;
+            group.clip_to_below = false;
+        }
+        let alone = Document {
+            layers: vec![root],
+            background: ops::Rgba8([0, 0, 0, 0]),
+            ..document.clone()
+        };
+        let plan = RenderPlan::new(&alone, Purpose::Display);
+        let [width, height] = scaled_size(alone.canvas, shrink).map(|edge| edge as u16);
+        let mut pixmap = Pixmap::new(width, height);
+        let kept = std::mem::take(&mut self.cache);
+        self.render_scaled(&alone, &plan, 0, None, shrink, &mut pixmap);
+        self.cache = kept;
+        pixmap
     }
 
     /// Uses tiles of `edge` pixels, a multiple of 4, instead of `TILE_EDGE`.
@@ -2029,7 +2056,7 @@ fn pixel_path(cells: &pixel::Cells, path: &mut BezPath) {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use ugu_core::document::{Layer, LayerId};
+    use ugu_core::document::{Group, Layer, LayerId};
     use ugu_core::motion::stepped_pose;
     use ugu_core::ops::{Blend, Motion, MotionStyle, Rgba8, Section, StrokeId, merge_down};
     use ugu_core::store::{Brush, Point};
@@ -3809,10 +3836,10 @@ mod tests {
         let mut renderer = DocumentRenderer::new(0);
         let mut seen = 0;
         for layer in &document.layers {
-            let Some(thumbnail) = renderer.thumbnail(&document, layer.id, [48, 32]) else {
-                assert!(matches!(layer.kind, LayerKind::Group(_)));
+            if matches!(layer.kind, LayerKind::Group(_)) {
                 continue;
-            };
+            }
+            let thumbnail = renderer.thumbnail(&document, layer.id, [48, 32]).unwrap();
             assert!(thumbnail.width() <= 48 && thumbnail.height() <= 32);
             let shrink = document.canvas[0]
                 .div_ceil(48)
@@ -3829,6 +3856,80 @@ mod tests {
             );
         }
         assert!(seen > 0);
+    }
+
+    #[test]
+    fn a_group_thumbnail_is_the_group_drawn_alone_and_keeps_the_kept_surfaces() {
+        let (base, below, mut above) = two_layers();
+        above.blend = Blend::Multiply;
+        let grouped = |above: &PaintLayer, shown: bool| {
+            let mut document = with_layers(&base, &[below.clone(), above.clone()]);
+            for child in &mut document.layers {
+                child.visible = shown;
+            }
+            let children = std::mem::take(&mut document.layers);
+            document.layers = vec![Layer {
+                id: LayerId(10),
+                name: "Group".to_owned(),
+                visible: false,
+                reference: false,
+                kind: LayerKind::Group(Group {
+                    opacity: 0.25,
+                    blend: Blend::Screen,
+                    clip_to_below: false,
+                    children,
+                }),
+            }];
+            document
+        };
+        let document = grouped(&above, true);
+        // Surfaces of another document, with the same layer ids, are kept.
+        let other = many_layers();
+        let mut renderer = DocumentRenderer::new(0);
+        let plan = RenderPlan::new(&other, Purpose::Display);
+        let revisions = LayerRevisions::default();
+        let mut full = Pixmap::new(96, 48);
+        renderer.render_plan(&other, &plan, 1, Some(&revisions), &mut full);
+        let kept = renderer.surface_bytes();
+        assert!(kept > 0);
+        let thumbnail = renderer
+            .thumbnail(&document, LayerId(10), [48, 24])
+            .unwrap();
+        assert_eq!(renderer.surface_bytes(), kept);
+        renderer.render_plan(&other, &plan, 1, Some(&revisions), &mut full);
+        assert_eq!(renderer.layers_drawn(), 0, "the kept surfaces are reused");
+
+        // The children as they are, blended as they are, at the size asked.
+        let alone = with_layers(&base, &[below.clone(), above.clone()]);
+        let mut expected = Pixmap::new(48, 24);
+        DocumentRenderer::new(0).render_scaled(
+            &alone,
+            &RenderPlan::new(&alone, Purpose::Display),
+            0,
+            None,
+            2,
+            &mut expected,
+        );
+        assert_eq!(thumbnail.data_as_u8_slice(), expected.data_as_u8_slice());
+        let normal = {
+            let mut above = above.clone();
+            above.blend = Blend::Normal;
+            renderer
+                .thumbnail(&grouped(&above, true), LayerId(10), [48, 24])
+                .unwrap()
+        };
+        assert_ne!(normal.data_as_u8_slice(), thumbnail.data_as_u8_slice());
+
+        // With every child hidden, nothing shows.
+        let hidden = renderer
+            .thumbnail(&grouped(&above, false), LayerId(10), [48, 24])
+            .unwrap();
+        assert!(
+            hidden
+                .data_as_u8_slice()
+                .chunks(4)
+                .all(|pixel| pixel[3] == 0)
+        );
     }
 
     #[test]

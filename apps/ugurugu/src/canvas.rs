@@ -13,11 +13,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ugu_core::document::DocumentError;
 use ugu_core::document::{Document, LayerId, LayerKind};
-use ugu_core::edit::Outcome;
+use ugu_core::edit::{EditError, Outcome};
 use ugu_core::motion::frame_in_cycle;
-use ugu_core::ops::Op;
+use ugu_core::ops::{MergeRefusal, Op};
 use ugu_core::selection::Combine;
+use ugu_core::store::StoreError;
 use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::LiveStroke;
@@ -144,6 +146,9 @@ pub struct Canvas {
     /// The frame playback stopped on and how much smaller it is, shown
     /// until the split of that frame arrives.
     held: Option<(Arc<Pixmap>, u32)>,
+    /// Playback paused for a stroke or a click, to go on once it is over,
+    /// as 2.2.13's.
+    resume_playback: bool,
     /// Display pixels not yet uploaded.
     upload: Option<PixelRect>,
     /// The size, shrink and origin of the pixels shown when last uploaded.
@@ -219,6 +224,7 @@ impl Canvas {
             requested: None,
             display: Pixmap::new(width, height),
             held: None,
+            resume_playback: false,
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             uploaded: None,
             stamp: Stamp::default(),
@@ -267,6 +273,7 @@ impl Canvas {
         self.requested = None;
         self.display = Pixmap::new(width, height);
         self.held = None;
+        self.resume_playback = false;
         self.interaction = Interaction::Idle;
         self.spare_coverage = None;
         self.playback = None;
@@ -414,24 +421,27 @@ impl Canvas {
             .map(|(revision, pixels)| (*revision, pixels))
     }
 
-    /// Asks for the thumbnails of paint layers whose pixels changed since
-    /// theirs were drawn, unless some are already on their way.
+    /// Asks for the thumbnails of layers whose pixels changed since theirs
+    /// were drawn, unless some are already on their way.
     fn sync_thumbnails(&mut self) {
         if self.thumbnails_asked || matches!(self.interaction, Interaction::Drawing { .. }) {
             return;
         }
         let revisions = self.session.layer_revisions();
         let mut stale = Vec::new();
-        paint_layers(&self.session.document().layers, &mut |id| {
-            let revision = revisions.of(id);
-            if self
-                .thumbnails
-                .get(&id)
-                .is_none_or(|(shown, _)| *shown != revision)
-            {
-                stale.push((id, revision));
-            }
-        });
+        thumbnail_keys(
+            &self.session.document().layers,
+            revisions,
+            &mut |id, key| {
+                if self
+                    .thumbnails
+                    .get(&id)
+                    .is_none_or(|(shown, _)| *shown != key)
+                {
+                    stale.push((id, key));
+                }
+            },
+        );
         if stale.is_empty() {
             return;
         }
@@ -536,8 +546,11 @@ impl Canvas {
     /// Allows the wobble animation to play or not; not stops it.
     pub fn allow_animation(&mut self, allowed: bool) {
         self.animation_allowed = allowed;
-        if !allowed && self.is_playing() {
-            self.toggle_playback();
+        if !allowed {
+            self.resume_playback = false;
+            if self.is_playing() {
+                self.toggle_playback();
+            }
         }
     }
 
@@ -552,9 +565,18 @@ impl Canvas {
         true
     }
 
+    /// Stops on the frame shown while a stroke is drawn or an area clicked,
+    /// and plays on once it is over.
+    fn pause_playback(&mut self) {
+        if self.stop_playback() {
+            self.resume_playback = true;
+        }
+    }
+
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
-        if self.stop_playback() {
+        // Paused for a stroke, it stays stopped.
+        if std::mem::take(&mut self.resume_playback) || self.stop_playback() {
             return;
         }
         if !self.animation_allowed {
@@ -591,6 +613,10 @@ impl Canvas {
     /// Shows the next frame if it is due and rendered, and returns when to
     /// look again; `None` when not playing.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
+        if self.resume_playback && !matches!(self.interaction, Interaction::Drawing { .. }) {
+            self.resume_playback = false;
+            self.toggle_playback();
+        }
         let document = self.session.document();
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
         let period = Duration::from_secs_f64(1.0 / fps);
@@ -853,7 +879,7 @@ impl Canvas {
     fn click_area(&mut self, point: [f64; 2]) {
         let started = Instant::now();
         self.notice = None;
-        self.stop_playback();
+        self.pause_playback();
         let read = self.read_reference();
         let reference = self
             .reference
@@ -946,13 +972,39 @@ impl Canvas {
         self.recomposite(added);
     }
 
+    /// Why the current layer cannot be drawn on when it is no paint layer,
+    /// in 2.2.13's words.
+    fn no_paint_layer(&self) -> &'static str {
+        if self.session.document().layers.is_empty() {
+            tr("draw-no-layer")
+        } else {
+            tr("draw-on-group")
+        }
+    }
+
+    /// Why the current layer cannot be drawn on when it is not shown: it,
+    /// or a group holding it, is hidden.
+    fn hidden_layer(&self) -> &'static str {
+        let layer = self.session.current_layer();
+        if self
+            .session
+            .document()
+            .layer(layer)
+            .is_some_and(|layer| layer.visible)
+        {
+            tr("draw-group-hidden")
+        } else {
+            tr("draw-layer-hidden")
+        }
+    }
+
     fn fill_notice(&mut self, error: &FillError) {
         let reads = self.session.fill.reads;
         self.notice = Some(match error {
-            FillError::NoLayer => "Select a paint layer to draw on".to_owned(),
-            FillError::HiddenLayer => "The current layer is hidden".to_owned(),
+            FillError::NoLayer => self.no_paint_layer().to_owned(),
+            FillError::HiddenLayer => self.hidden_layer().to_owned(),
             FillError::NoReference if reads == Reads::Marked => tr("fill-no-reference").to_owned(),
-            FillError::NoReference => "Select a paint layer to draw on".to_owned(),
+            FillError::NoReference => self.no_paint_layer().to_owned(),
             FillError::NothingThere if self.session.tool() == Tool::Wand => {
                 tr("wand-nothing").to_owned()
             }
@@ -960,13 +1012,13 @@ impl Canvas {
             FillError::OutsideSelection => tr("fill-outside").to_owned(),
             FillError::NoSelection => tr("fill-no-selection").to_owned(),
             FillError::Pending => tr("restyle-pending").to_owned(),
-            FillError::Edit(error) => format!("The fill was not added: {error}"),
+            FillError::Edit(error) => failed_because(tr("fill-failed"), error),
         });
     }
 
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
         self.notice = None;
-        self.stop_playback();
+        self.pause_playback();
         // The eraser end of a pen erases whatever tool is chosen.
         let tool = self.session.tool();
         let point = self.input_point(sample);
@@ -988,11 +1040,11 @@ impl Canvas {
                 return;
             }
             Err(StrokeRefused::HiddenLayer) => {
-                self.notice = Some("The current layer is hidden".to_owned());
+                self.notice = Some(self.hidden_layer().to_owned());
                 return;
             }
             Err(StrokeRefused::NoLayer) => {
-                self.notice = Some("Select a paint layer to draw on".to_owned());
+                self.notice = Some(self.no_paint_layer().to_owned());
                 return;
             }
         }
@@ -1050,8 +1102,12 @@ impl Canvas {
             Ok(Outcome::Committed(_)) => {}
             Ok(Outcome::NoChange) => return self.recomposite(rect),
             Err(error) => {
-                tracing::error!(%error, "the stroke could not be committed");
-                self.notice = Some(format!("The stroke was not added: {error}"));
+                self.notice = Some(if is_point_limit(&error) {
+                    tracing::warn!(%error, "the stroke could not be committed");
+                    tr("stroke-point-limit").to_owned()
+                } else {
+                    failed_because(tr("stroke-failed"), &error)
+                });
                 return self.recomposite(rect);
             }
         }
@@ -1316,13 +1372,78 @@ fn last_fill(
 }
 
 /// Calls `each` with every paint layer's id, inside groups too.
-fn paint_layers(layers: &[ugu_core::document::Layer], each: &mut impl FnMut(LayerId)) {
+/// Each layer with what its thumbnail shows: a paint layer's pixels, or what
+/// a group's children are and how they are blended, clipped and shown.
+fn thumbnail_keys(
+    layers: &[ugu_core::document::Layer],
+    revisions: &ugu_core::history::LayerRevisions,
+    each: &mut impl FnMut(LayerId, u64),
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut all = std::collections::hash_map::DefaultHasher::new();
     for layer in layers {
-        match &layer.kind {
-            LayerKind::Paint(_) => each(layer.id),
-            LayerKind::Group(group) => paint_layers(&group.children, each),
-        }
+        let key = match &layer.kind {
+            LayerKind::Paint(_) => revisions.of(layer.id),
+            LayerKind::Group(group) => {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                thumbnail_keys(&group.children, revisions, each).hash(&mut hasher);
+                hasher.finish()
+            }
+        };
+        each(layer.id, key);
+        let (opacity, blend, clip) = match &layer.kind {
+            LayerKind::Paint(paint) => (paint.opacity, paint.blend, paint.clip_to_below),
+            LayerKind::Group(group) => (group.opacity, group.blend, group.clip_to_below),
+        };
+        (
+            layer.id.0,
+            key,
+            layer.visible,
+            layer.reference,
+            opacity.to_bits(),
+            std::mem::discriminant(&blend),
+            clip,
+        )
+            .hash(&mut all);
     }
+    all.finish()
+}
+
+/// Why an edit was refused, in the interface's words: a limit the user can
+/// act on, or else where the details are.
+pub(crate) fn edit_reason(error: &EditError) -> &'static str {
+    let store = match error {
+        EditError::Store(store) | EditError::Document(DocumentError::Store(store)) => Some(store),
+        _ => None,
+    };
+    match (error, store) {
+        (_, Some(StoreError::TooManyPoints(_) | StoreError::TooManyBytes(_)))
+        | (EditError::Document(DocumentError::TooManyOperations(_)), _) => tr("edit-data-limit"),
+        (EditError::Document(DocumentError::TooManyLayers(_)), _) => tr("edit-layer-limit"),
+        (EditError::Document(DocumentError::TooDeep(_)), _) => tr("edit-too-deep"),
+        (
+            EditError::CannotMerge | EditError::Merge(MergeRefusal::Blend | MergeRefusal::Clipping),
+            _,
+        ) => tr("merge-properties"),
+        (EditError::Merge(MergeRefusal::CanvasChange), _) => tr("merge-canvas-change"),
+        (EditError::Merge(MergeRefusal::CanvasEpoch), _) => tr("merge-epoch"),
+        _ => tr("edit-internal"),
+    }
+}
+
+/// `failed`, then why; the error itself goes to the log.
+pub(crate) fn failed_because(failed: &str, error: &EditError) -> String {
+    tracing::warn!(%error, failed, "an edit was refused");
+    format!("{failed} {}", edit_reason(error))
+}
+
+/// Whether `error` is the project's point limit, which 2.2.13 names.
+pub(crate) fn is_point_limit(error: &EditError) -> bool {
+    matches!(
+        error,
+        EditError::Store(StoreError::TooManyPoints(_))
+            | EditError::Document(DocumentError::Store(StoreError::TooManyPoints(_)))
+    )
 }
 
 #[cfg(test)]
@@ -1403,7 +1524,7 @@ mod tests {
     }
 
     #[test]
-    fn drawing_or_filling_stops_playback_on_the_frame_shown() {
+    fn drawing_or_filling_pauses_playback_on_the_frame_shown_and_plays_on() {
         for tool in [Tool::Pen, Tool::Fill, Tool::Wand] {
             let (to_test, renders) = std::sync::mpsc::channel();
             let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
@@ -1428,7 +1549,63 @@ mod tests {
             assert!(!canvas.is_playing());
             assert_eq!(canvas.display().width(), 160, "{tool:?}");
             assert_eq!(canvas.shown_placement().scale, 1.0, "{tool:?}");
+            if tool == Tool::Pen {
+                canvas.apply(CanvasInput::Extend(press(90.0, 50.0)));
+                canvas.tick(now);
+                assert!(!canvas.is_playing(), "still drawing");
+            }
+            canvas.apply(CanvasInput::End(press(90.0, 50.0)));
+            canvas.tick(now);
+            assert!(canvas.is_playing(), "{tool:?}");
         }
+    }
+
+    #[test]
+    fn refusals_are_told_in_the_interface_language() {
+        let mut canvas = super::Canvas::new(Document::new([64, 64]), |_| {});
+        let layer = canvas.session().current_layer();
+        canvas
+            .edit(|session| session.update_layer(layer, "Hide", |layer| layer.visible = false))
+            .unwrap();
+        canvas.apply(CanvasInput::Begin(
+            Gesture::Draw,
+            PointerKind::Mouse,
+            press(10.0, 10.0),
+        ));
+        assert_eq!(canvas.notice(), Some(tr("draw-layer-hidden")));
+
+        let limit = EditError::Document(DocumentError::TooManyLayers(1000));
+        assert_eq!(super::edit_reason(&limit), tr("edit-layer-limit"));
+        let points = EditError::Store(StoreError::TooManyPoints(9));
+        assert!(super::is_point_limit(&points));
+        assert_eq!(super::edit_reason(&points), tr("edit-data-limit"));
+        assert_eq!(
+            super::edit_reason(&EditError::Merge(MergeRefusal::CanvasEpoch)),
+            tr("merge-epoch")
+        );
+        assert_eq!(
+            super::edit_reason(&EditError::NoSuchLayer(LayerId(9))),
+            tr("edit-internal")
+        );
+        assert_eq!(
+            super::failed_because(tr("fill-failed"), &limit),
+            format!("{} {}", tr("fill-failed"), tr("edit-layer-limit"))
+        );
+    }
+
+    #[test]
+    fn stopping_playback_during_a_stroke_keeps_it_stopped() {
+        let mut canvas = super::Canvas::new(Document::new([64, 64]), |_| {});
+        canvas.toggle_playback();
+        canvas.apply(CanvasInput::Begin(
+            Gesture::Draw,
+            PointerKind::Mouse,
+            press(10.0, 10.0),
+        ));
+        canvas.toggle_playback();
+        canvas.apply(CanvasInput::End(press(20.0, 20.0)));
+        canvas.tick(Instant::now());
+        assert!(!canvas.is_playing());
     }
 
     #[test]

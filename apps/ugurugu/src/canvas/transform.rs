@@ -197,7 +197,10 @@ impl Canvas {
     /// Whether no transform is left pending.
     pub fn apply_transform(&mut self) -> bool {
         if let Err(error) = self.edit(|session| session.apply_transform()) {
-            self.notice = Some(format!("The transform was not applied: {error}"));
+            self.notice = Some(super::failed_because(
+                crate::i18n::tr("transform-failed"),
+                &error,
+            ));
         }
         self.session.pending().is_none()
     }

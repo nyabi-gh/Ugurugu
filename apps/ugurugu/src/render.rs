@@ -201,6 +201,29 @@ struct Shown {
 }
 
 impl Display {
+    /// Opens the display on the adapter `choice` asks for, or on WARP when
+    /// the hardware one fails; `first` is the instance and surface for the
+    /// first try, and `surface_source` makes another for WARP.
+    fn open_any(
+        first: (wgpu::Instance, wgpu::Surface<'static>),
+        early: Option<EarlyGpu>,
+        surface_source: &SurfaceSource,
+        choice: AdapterChoice,
+        size: [u32; 2],
+    ) -> Result<Self, String> {
+        let mut first = Some((first, early));
+        ugu_render::gpu::with_warp_fallback(choice, |choice| match first.take() {
+            Some(((instance, surface), Some(early))) => {
+                Self::open_with_early(early, &instance, surface, choice, size)
+            }
+            Some(((instance, surface), None)) => Self::open(&instance, surface, choice, size),
+            None => {
+                let (instance, surface) = surface_source()?;
+                Self::open(&instance, surface, choice, size)
+            }
+        })
+    }
+
     fn open(
         instance: &wgpu::Instance,
         surface: wgpu::Surface<'static>,
@@ -304,14 +327,9 @@ impl RenderThread {
         } = links;
         let adapter_choice = AdapterChoice::from_env();
         let size = window.inner_size();
-        let (instance, surface) = surface_source()?;
+        let first = surface_source()?;
         let size = [size.width, size.height];
-        let display = match early {
-            Some(early) => {
-                Display::open_with_early(early, &instance, surface, adapter_choice, size)
-            }
-            None => Display::open(&instance, surface, adapter_choice, size),
-        }?;
+        let display = Display::open_any(first, early, &surface_source, adapter_choice, size)?;
         let mut render = Self {
             window,
             egui_ctx,
@@ -378,11 +396,12 @@ impl RenderThread {
         // new device, so it goes before the window gets a new one.
         drop(self.display);
         let dropped = started.elapsed();
-        let (instance, surface) = (self.surface_source)()?;
+        let first = (self.surface_source)()?;
         let surfaced = started.elapsed();
-        self.display = Display::open(
-            &instance,
-            surface,
+        self.display = Display::open_any(
+            first,
+            None,
+            &self.surface_source,
             self.adapter_choice,
             [size.width, size.height],
         )?;

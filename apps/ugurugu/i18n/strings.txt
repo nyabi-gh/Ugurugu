@@ -458,3 +458,26 @@ update-download-failed | - | Could not download the update. | 업데이트를 �
 update-install-failed | - | The update was downloaded but could not be installed. | 업데이트를 받았지만 설치할 수 없습니다. | アップデートをダウンロードしましたが、インストールできませんでした。
 update-not-installed | - | Updates are checked only in the installed app. | 업데이트는 설치한 앱에서만 확인할 수 있습니다. | アップデートはインストールしたアプリでのみ確認できます。
 settings-check-updates | - | Check for updates automatically | 자동으로 업데이트 확인 | アップデートを自動的に確認
+draw-layer-hidden | ugurugu::CanvasWidget | The active layer is hidden. Make it visible to draw.
+draw-group-hidden | ugurugu::CanvasWidget | The group holding the active layer is hidden. Make it visible to draw.
+draw-on-group | ugurugu::CanvasWidget | Groups can't be painted on. Select a paint layer to draw.
+draw-no-layer | ugurugu::CanvasWidget | Add a layer before using this tool.
+stroke-failed | ugurugu::CanvasWidget | The stroke could not be added.
+stroke-point-limit | ugurugu::CanvasWidget | The stroke could not be added because the project point limit was reached.
+text-failed | ugurugu::CanvasWidget | The text could not be added.
+text-point-limit | ugurugu::CanvasWidget | The text could not be added because the project point limit was reached.
+fill-failed | - | The fill could not be added. | 채우기를 추가하지 못했습니다. | 塗りつぶしを追加できませんでした。
+transform-failed | - | The transform could not be applied. | 변형을 적용하지 못했습니다. | 変形を適用できませんでした。
+edit-data-limit | - | The project data limit was reached. | 프로젝트 데이터 한도에 이르렀습니다. | プロジェクトのデータ上限に達しました。
+edit-layer-limit | - | The project layer limit was reached. | 프로젝트 레이어 수 한도에 이르렀습니다. | プロジェクトのレイヤー数の上限に達しました。
+edit-too-deep | - | Groups cannot be nested any deeper. | 그룹을 더 깊이 넣을 수 없습니다. | グループをこれ以上深く入れられません。
+edit-internal | - | Something went wrong inside Ugurugu. The log folder in Settings > About has the details. | Ugurugu 안에서 문제가 생겼습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다. | Ugurugu の内部で問題が起きました。詳細は設定 > 情報のログフォルダーにあります。
+type-document | - | Ugurugu projects (*.ugurugu) | Ugurugu 프로젝트 (*.ugurugu) | Uguruguプロジェクト (*.ugurugu)
+type-open | - | Ugurugu projects (*.ugurugu *.ugu) | Ugurugu 프로젝트 (*.ugurugu *.ugu) | Uguruguプロジェクト (*.ugurugu *.ugu)
+type-png | ugurugu::MainWindow | PNG images (*.png)
+type-jpeg | ugurugu::MainWindow | JPEG images (*.jpg *.jpeg)
+type-gif | ugurugu::MainWindow | GIF images (*.gif)
+type-webp | ugurugu::MainWindow | WebP images (*.webp)
+type-tools | - | Ugurugu tool presets (*.ugurugu-tools) | Ugurugu 도구 프리셋 (*.ugurugu-tools) | Uguruguツールプリセット (*.ugurugu-tools)
+type-image | - | Image files | 이미지 파일 | 画像ファイル
+file-job-failed | - | an unexpected error stopped it; the log folder in Settings > About has the details | 예기치 않은 오류로 멈췄습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | 予期しないエラーで止まりました。詳細は設定 > 情報のログフォルダーにあります
