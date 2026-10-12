@@ -13,16 +13,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  QT_VERSION: 6.11.1
-  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@16db45a70b5905ad596941b223469bc86a56901e'
-  QT_FORCE_STDERR_LOGGING: 1
-
 jobs:
   # Runs only the jobs the changes can affect: a pull request against its base,
   # a push to main against the newest main commit whose CI succeeded, so a
   # cancelled or failed run's changes are checked again. Releases rely on this.
   # Paths no rule recognises, and pushes without such a commit, run everything.
+  # 2.x C++ and the web build are no longer checked: 3.x is the Rust app.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -31,8 +27,6 @@ jobs:
       actions: read
       contents: read
     outputs:
-      cpp: ${{ steps.detect.outputs.cpp }}
-      web: ${{ steps.detect.outputs.web }}
       rust: ${{ steps.detect.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -46,7 +40,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          cpp=false web=false rust=false
+          rust=false
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             BASE=
             passed=$(gh api --method GET \
@@ -63,28 +57,21 @@ jobs:
             echo "Last successful CI on $GITHUB_REF_NAME: ${BASE:-none}"
           fi
           if [[ -z "$BASE" ]]; then
-            cpp=true web=true rust=true
+            rust=true
           else
             while IFS= read -r path; do
               case "$path" in
                 docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md|tools/sandbox/*) ;;
                 apps/*|crates/*|tools/latency-probe/*|tools/render-bench/*|tools/ugu-doc/*|tools/ime_probe.py|tools/baseline_probe.py|tools/display_scale.py|tools/uia_probe.ps1|tools/native_deps.py|tools/package_*.ps1|tools/third_party_notices.py|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml|about.toml|.cargo/*)
                   rust=true ;;
-                web/*|tools/check_itchio_package.mjs|tools/wasm_*)
-                  web=true ;;
-                # Everything else can reach the desktop app, and the wasm
-                # engine and web package build from the same sources.
+                # Everything else may reach the app or its checks.
                 *)
-                  cpp=true web=true rust=true ;;
+                  rust=true ;;
               esac
             done < <(git diff --name-only "$BASE" HEAD)
           fi
-          {
-            echo "cpp=$cpp"
-            echo "web=$web"
-            echo "rust=$rust"
-          } >> "$GITHUB_OUTPUT"
-          echo "cpp=$cpp web=$web rust=$rust"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust"
 
   static:
     name: Format and release metadata
@@ -92,14 +79,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install clang-format
-        run: pipx install clang-format==22.1.3
-
-      - name: Check source formatting
-        run: >-
-          git ls-files -z -- '*.cpp' '*.hpp' '*.mm' |
-          xargs -0 clang-format --dry-run --Werror
 
       - name: Check license headers
         shell: bash
@@ -134,377 +113,6 @@ jobs:
             echo "Missing or empty release notes: $notes"
             exit 1
           fi
-
-  translations:
-    name: Translations
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          cache: true
-
-      - name: Check translation completeness
-        run: |
-          translation_dir="$RUNNER_TEMP/translations"
-          mkdir -p "$translation_dir"
-          cp i18n/ugurugu_ko.ts i18n/ugurugu_ja.ts "$translation_dir/"
-          "$QT_ROOT_DIR/bin/lupdate" \
-            src \
-            -extensions cpp,hpp,mm \
-            -no-obsolete \
-            -warnings-are-errors \
-            -ts \
-            "$translation_dir/ugurugu_ko.ts" \
-            "$translation_dir/ugurugu_ja.ts"
-          if grep -n 'type="unfinished"' "$translation_dir"/*.ts; then
-            echo "Translations contain unfinished entries"
-            exit 1
-          fi
-
-  web:
-    name: Web shell
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check types
-        run: npm run check
-
-      # The wasm engine comes from the wasm-release preset, which this job does
-      # not build, so this covers the shell's bundling only.
-      - name: Build shell
-        run: npm run build
-
-      - name: Check the itch.io package rules
-        run: node ../tools/check_itchio_package.mjs dist
-
-  wasm:
-    name: Wasm engine parity
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24
-
-      # The desktop kit builds the native probe and, as QT_HOST_PATH, supplies
-      # moc and rcc for the cross build.
-      - name: Install Linux build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y ninja-build
-          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          modules: qtshadertools qtimageformats
-          cache: true
-
-      # Qt ships wasm as a single Windows-built archive; only qtbase exists for
-      # it, which is all the engine subset needs. The preset resolves the
-      # toolchain file under ~/Qt, so it has to land there.
-      - name: Install the Qt wasm kit
-        run: |
-          python3 -m pip install --break-system-packages "$AQT_SOURCE"
-          python3 -m aqt install-qt all_os wasm "$QT_VERSION" \
-            wasm_singlethread --outputdir "$HOME/Qt"
-
-      # Pinned by Qt 6.11.1: the ABI has to match exactly.
-      - name: Install Emscripten
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git \
-            "$HOME/emsdk"
-          "$HOME/emsdk/emsdk" install 4.0.7
-          "$HOME/emsdk/emsdk" activate 4.0.7
-
-      - name: Build the wasm engine
-        run: |
-          source "$HOME/emsdk/emsdk_env.sh"
-          cmake --preset wasm-release -DQT_HOST_PATH="$QT_ROOT_DIR"
-          cmake --build --preset wasm-release --parallel
-
-      - name: Smoke the wasm engine
-        run: node tools/wasm_engine_smoke.mjs examples/Wave.ugu |
-          tee "$RUNNER_TEMP/wasm.txt"
-
-      - name: Verify wasm content editing
-        run: node tools/wasm_content_smoke.mjs
-
-      - name: Build the native probe
-        run: |
-          cmake --preset linux-debug -DBUILD_TESTING=OFF
-          cmake --build --preset linux-debug \
-            --target ugurugu_engine_digest_probe --parallel
-
-      - name: Compare native and wasm digests
-        run: |
-          ./out/build/linux-debug/ugurugu_engine_digest_probe \
-            examples/Wave.ugu > "$RUNNER_TEMP/native.txt"
-          cat "$RUNNER_TEMP/native.txt"
-          # The smoke script prints the same lines plus a header and a verdict,
-          # so every probe line has to appear verbatim in its output.
-          while IFS= read -r line; do
-            if ! grep -qxF "$line" "$RUNNER_TEMP/wasm.txt"; then
-              echo "native line missing from the wasm run: $line"
-              exit 1
-            fi
-          done < "$RUNNER_TEMP/native.txt"
-
-      # The shell's browser suite covers what neither the smoke nor the digest
-      # comparison can — drawing, recovery, export, selection, the presenter's
-      # fallbacks — and it needs a real engine, which only this job builds. The
-      # Web shell job deliberately runs without one.
-      - name: Install the web shell dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Bundle the shell against the engine built above
-        working-directory: web
-        run: npm run build
-
-      # The shell's own playwright-core installs the browser build it expects;
-      # a separately pinned CLI drifted from the lockfile and fetched another.
-      - name: Install Chromium
-        working-directory: web
-        run: npx playwright-core install --with-deps chromium
-
-      - name: Verify the web shell in a browser
-        working-directory: web
-        run: npm run test:browser
-
-  fuzz:
-    name: Fuzz parsers
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          modules: qtshadertools qtimageformats
-          cache: true
-
-      - name: Install Linux build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y ninja-build
-          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
-
-      # Ubuntu 24.04 packages LLVM 18; these checks are pinned to LLVM 22.
-      - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key |
-            sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" |
-            sudo tee /etc/apt/sources.list.d/llvm-22.list
-          sudo apt-get update
-          sudo apt-get install -y clang-22 clang-tidy-22 libclang-rt-22-dev
-
-      # Deliberately without UGURUGU_WARNINGS_AS_ERRORS: the build jobs already
-      # gate warnings on the toolchains releases ship with, and an LLVM
-      # bump should not be able to fail this job over a new diagnostic.
-      - name: Configure
-        run: >-
-          cmake --preset linux-fuzzing
-          -DCMAKE_C_COMPILER=clang-22
-          -DCMAKE_CXX_COMPILER=clang++-22
-
-      - name: Build
-        run: cmake --build --preset linux-fuzzing --parallel
-
-      # Qt's process-lifetime caches are indistinguishable from leaks here, so
-      # only the memory-safety and undefined-behaviour checks gate the build.
-      # libFuzzer prints a crashing input as base64, so no artifact upload is
-      # needed to reproduce a failure.
-      - name: Fuzz
-        env:
-          ASAN_OPTIONS: detect_leaks=0
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: |
-          build=out/build/linux-fuzzing
-          fuzzed=0
-          for target in "$build"/ugurugu_fuzz_*; do
-            if [[ ! -f "$target" ]]; then
-              continue
-            fi
-            fuzzed=$((fuzzed + 1))
-            name=$(basename "$target")
-            echo "::group::$name"
-            "$target" \
-              "$build/fuzz-corpus/$name" \
-              -max_total_time=90 \
-              -max_len=65536 \
-              -timeout=25 \
-              -rss_limit_mb=4096 \
-              -print_final_stats=1
-            echo "::endgroup::"
-          done
-          if [[ "$fuzzed" -eq 0 ]]; then
-            echo "No fuzz targets were built"
-            exit 1
-          fi
-
-  tidy:
-    name: Clang-Tidy
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          modules: qtshadertools qtimageformats
-          cache: true
-
-      - name: Install Linux build dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y ninja-build
-          libgl-dev libegl-dev libxkbcommon-dev libfontconfig1-dev libfreetype-dev
-
-      # Ubuntu 24.04 packages LLVM 18; these checks are pinned to LLVM 22.
-      - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key |
-            sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" |
-            sudo tee /etc/apt/sources.list.d/llvm-22.list
-          sudo apt-get update
-          sudo apt-get install -y clang-22 clang-tidy-22 libclang-rt-22-dev
-
-      - name: Configure
-        run: >-
-          cmake --preset linux-debug
-          -DCMAKE_C_COMPILER=clang-22
-          -DCMAKE_CXX_COMPILER=clang++-22
-          -DUGURUGU_WARNINGS_AS_ERRORS=ON
-          -DUGURUGU_CLANG_TIDY=/usr/bin/clang-tidy-22
-          -DUGURUGU_RUN_CLANG_TIDY=/usr/bin/run-clang-tidy-22
-
-      - name: Build analysis inputs
-        run: >-
-          cmake --build --preset linux-debug
-          --target ugurugu_tests --parallel
-
-      - name: Run Clang-Tidy
-        run: >-
-          cmake --build --preset linux-debug
-          --target ugurugu_tidy
-
-  # The Windows desktop app in its debug build and its distribution build,
-  # whose installed package is smoke-tested too.
-  build:
-    name: ${{ matrix.name }}
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows Debug
-            preset: windows-debug
-            package: false
-          - name: Windows package
-            preset: windows-distribution
-            package: true
-    runs-on: windows-2025
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: windows
-          target: desktop
-          arch: win64_msvc2022_64
-          modules: qtshadertools qtimageformats
-          cache: true
-
-      - name: Configure
-        run: >-
-          cmake --preset ${{ matrix.preset }}
-          -DUGURUGU_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
-
-      - name: Test
-        run: ctest --preset ${{ matrix.preset }} --parallel --output-on-failure
-
-      - name: Test installed Windows package
-        if: matrix.package
-        run: >-
-          cmake --build --preset ${{ matrix.preset }}
-          --config Release --target ugurugu_package_smoke_test
-
-      - name: Test diagnostics
-        if: failure()
-        shell: pwsh
-        run: |
-          Get-Content "out/build/${{ matrix.preset }}/Testing/Temporary/LastTest.log" -ErrorAction SilentlyContinue
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $env:PATH = "$env:QT_ROOT_DIR\bin;$env:PATH"
-          $testExecutable = Get-ChildItem `
-            "out/build/${{ matrix.preset }}" `
-            -Recurse `
-            -Filter ugurugu_tests.exe |
-            Select-Object -First 1
-          if ($testExecutable) {
-            & $testExecutable.FullName 2>&1
-            "direct run exit code: $LASTEXITCODE"
-          }
 
   rust:
     name: Rust Windows
@@ -567,7 +175,7 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, rust]
+    needs: [changes, static, rust]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -575,12 +183,6 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_RESULT: ${{ needs.static.result }}
-          TRANSLATIONS_RESULT: ${{ needs.translations.result }}
-          WEB_RESULT: ${{ needs.web.result }}
-          WASM_RESULT: ${{ needs.wasm.result }}
-          FUZZ_RESULT: ${{ needs.fuzz.result }}
-          TIDY_RESULT: ${{ needs.tidy.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
           RUST_RESULT: ${{ needs.rust.result }}
         run: |
           failed=0
@@ -590,7 +192,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD RUST; do
+          for check in STATIC RUST; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
