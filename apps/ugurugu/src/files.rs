@@ -743,8 +743,9 @@ impl Files {
         }
     }
 
-    /// Puts `document` in a tab of its own, or in place of the tab shown
-    /// when that holds nothing to keep; `saved` when it is on disk as it is.
+    /// Puts a document read in a tab of its own, or in place of the tab
+    /// shown when that holds nothing to keep, as the empty one a window
+    /// starts with; `saved` when it is on disk as it is.
     fn show_document(canvas: &mut Canvas, document: Document, saved: bool) {
         if canvas.is_pristine() {
             canvas.replace(document, saved);
@@ -992,9 +993,9 @@ impl Files {
 
     /// Starts a new document of `size`, in pixel mode or not.
     fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
-        // Clean until edited, as the document at start.
-        Self::show_document(
-            canvas,
+        // Always beside the others, the empty one at start included: a new
+        // document is asked for to have one more. Clean until edited.
+        canvas.open_tab(
             Document {
                 pixel,
                 ..Document::new(size)
@@ -1503,7 +1504,7 @@ impl Files {
                             id,
                             meta,
                         } = *recovered;
-                        canvas.replace(document, false);
+                        Self::show_document(canvas, document, false);
                         if let Some(layer) = meta.layer {
                             canvas
                                 .edit(|session| session.select_layer(layer))

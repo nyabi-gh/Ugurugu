@@ -297,14 +297,15 @@ fn unsaved_changes_are_answered_from_the_keyboard() {
     assert!(!window.dialog());
     assert_eq!(window.canvas.session().document().layers.len(), 1);
     assert!(window.canvas.is_pristine());
-    // A new document asks only its size, and Enter takes it.
+    // A new document asks only its size, and Enter takes it, in a tab
+    // beside the empty one.
     window.key(Modifiers::COMMAND, Key::N);
     window.frame(Vec::new());
     assert_eq!(window.label(), tr("size-width"));
     window.key(NONE, Key::Enter);
     window.frame(Vec::new());
     assert!(!window.dialog());
-    assert_eq!(window.canvas.tab_count(), 1);
+    assert_eq!(window.canvas.tab_count(), 2);
 }
 
 #[test]

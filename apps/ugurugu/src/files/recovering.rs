@@ -186,8 +186,13 @@ fn work_left_by_a_crash_is_recovered_under_a_new_name() {
     let (mut files, mut canvas, events) = setup(&root);
     assert_eq!(files.found.len(), 1);
     assert_eq!(files.found[0].meta.name, "Cat");
+    // Work in this window stays: what is recovered goes in a tab beside it.
+    canvas.edit(Session::add_layer).unwrap();
+    canvas.edit(Session::add_layer).unwrap();
     files.request(Action::Recover, &mut canvas);
     files.handle(next(&events), &mut canvas);
+    assert_eq!((canvas.tab_count(), canvas.tab_position()), (2, 1));
+    assert!(canvas.tab_infos()[0].dirty);
     assert_eq!(canvas.session().document().layers.len(), 2);
     assert!(canvas.session().is_dirty());
     assert_eq!(files.title(&canvas), "Cat-recovered* - Ugurugu");
