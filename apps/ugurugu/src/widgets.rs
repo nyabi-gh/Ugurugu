@@ -204,6 +204,44 @@ pub fn field_label(ui: &mut Ui, text: &str) -> Response {
     )
 }
 
+/// A heading over a group of panel rows, set apart from their names.
+pub fn panel_heading(ui: &mut Ui, text: &str) -> Response {
+    ui.label(
+        egui::RichText::new(text)
+            .size(theme::SMALL)
+            .strong()
+            .color(theme::text()),
+    )
+}
+
+/// A panel row: `label` in a column of the same width on every row, so the
+/// controls of rows one under another start in line, cut short with the
+/// whole name on hover if it does not fit; `control` fills the rest from
+/// the right.
+pub fn form_row<R>(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui) -> R) -> R {
+    let width = (ui.available_width() * 0.36).clamp(56.0, 112.0);
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, theme::CONTROL_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(width);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(label)
+                            .size(theme::SMALL)
+                            .color(theme::muted()),
+                    )
+                    .truncate(),
+                );
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control)
+            .inner
+    })
+    .inner
+}
+
 /// A slider: a 5-point groove filled with the accent up to the value and a
 /// round handle that turns amber when the pointer is on it.
 pub fn slider(

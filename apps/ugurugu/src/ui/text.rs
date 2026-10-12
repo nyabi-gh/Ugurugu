@@ -53,7 +53,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     }
 
     let mut size = canvas.tools().text.size;
-    super::form_row(ui, tr("text-size"), |ui| {
+    widgets::form_row(ui, tr("text-size"), |ui| {
         widgets::number(
             ui,
             &mut size,

@@ -309,7 +309,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     }
 }
 
-/// A slider with its number field, on one row under a field label.
+/// A slider with its number field, on one row after its name.
 fn slider_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -319,17 +319,11 @@ fn slider_row(
     suffix: &str,
     decimals: usize,
 ) -> egui::Response {
-    ui.horizontal(|ui| {
-        widgets::field_label(ui, label);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let field = widgets::number(ui, value, range.clone(), suffix, decimals, 64.0, name);
-            let width = ui.available_width().max(40.0);
-            let slider = widgets::slider(ui, value, range, name, width);
-            slider.union(field)
-        })
-        .inner
+    widgets::form_row(ui, label, |ui| {
+        let field = widgets::number(ui, value, range.clone(), suffix, decimals, 64.0, name);
+        let width = ui.available_width().max(40.0);
+        widgets::slider(ui, value, range, name, width).union(field)
     })
-    .inner
 }
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
@@ -410,7 +404,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
 /// The selection tool's mode and shapes, as 2.2.13's area select panel;
 /// painting also shows how fills look.
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
-    widgets::field_label(ui, tr("lasso-mode"));
+    widgets::panel_heading(ui, tr("lasso-mode"));
     let mut paints = canvas.tools().lasso_paints;
     widgets::segmented(
         ui,
@@ -436,7 +430,7 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     ui.add_space(theme::space::S);
     sampling_choice(ui, canvas);
     ui.add_space(theme::space::S);
-    widgets::field_label(ui, tr("selection-shape"));
+    widgets::panel_heading(ui, tr("selection-shape"));
     let current = canvas.tools().selection_shape;
     for (kind, title, description) in [
         (ShapeKind::Freehand, "shape-freehand", "shape-freehand-tip"),
@@ -458,7 +452,7 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
 /// The wand shows the comparison too, as it uses it.
 fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
     let mut fill: FillSettings = canvas.tools().fill;
-    widgets::field_label(ui, tr("fill-reference"));
+    widgets::panel_heading(ui, tr("fill-reference"));
     for (reads, title, description) in [
         (Reads::Current, "reads-current", "reads-current-tip"),
         (Reads::Marked, "reads-marked", "reads-marked-tip"),
@@ -469,7 +463,7 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
         }
     }
     ui.add_space(theme::space::S);
-    widgets::field_label(ui, tr("fill-comparison"));
+    widgets::panel_heading(ui, tr("fill-comparison"));
     widgets::segmented(
         ui,
         &mut fill.by_colour,
@@ -508,7 +502,7 @@ fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
     if canvas.session().pixel_mode() {
         return;
     }
-    widgets::field_label(ui, tr("transform-method"));
+    widgets::panel_heading(ui, tr("transform-method"));
     let current = canvas.tools().transform_sampling;
     for (sampling, title, description) in [
         (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
@@ -1103,7 +1097,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             }));
         }
     }
-    widgets::field_label(ui, tr("wobble"));
+    widgets::panel_heading(ui, tr("wobble"));
     let mut edited = panels.wobble.unwrap_or(shown);
     // A drag commits when it stops, anything else at once.
     let mut ended = false;
@@ -1136,7 +1130,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         MotionStyle::Stepped => tr("motion-stepped"),
     };
     let before = motion.style;
-    form_row(ui, tr("motion-style"), |ui| {
+    widgets::form_row(ui, tr("motion-style"), |ui| {
         egui::ComboBox::from_id_salt("motion-style")
             .width(ui.available_width())
             .selected_text(style_name(motion.style))
@@ -1158,7 +1152,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     // Poses, detail, linking and randomness move Smooth and Stepped only.
     ui.add_enabled_ui(motion.style != MotionStyle::Classic, |ui| {
         let mut poses = motion.poses.min(frames) as f32;
-        let response = form_row(ui, tr("motion-poses"), |ui| {
+        let response = widgets::form_row(ui, tr("motion-poses"), |ui| {
             widgets::number(
                 ui,
                 &mut poses,
@@ -1175,7 +1169,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         }
         let range = limits::MOTION_DETAIL;
         let mut detail = motion.detail as f32;
-        let response = form_row(ui, tr("motion-detail"), |ui| {
+        let response = widgets::form_row(ui, tr("motion-detail"), |ui| {
             let range = *range.start() as f32..=*range.end() as f32;
             widgets::number(ui, &mut detail, range, "", 0, 64.0, tr("motion-detail"))
         });
@@ -1205,7 +1199,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         ));
         let range = limits::BREAK_RANGE;
         let mut length = motion.break_range;
-        let response = form_row(ui, tr("motion-break-range"), |ui| {
+        let response = widgets::form_row(ui, tr("motion-break-range"), |ui| {
             widgets::number(
                 ui,
                 &mut length,
@@ -1248,20 +1242,10 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     }
 }
 
-/// A caption on the left and `control` on the right, as 2.2.13's form rows.
-fn form_row<R>(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        widgets::field_label(ui, label);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control)
-            .inner
-    })
-    .inner
-}
-
 /// A share from 0 to 1 as a slider and a field of whole percent.
 fn percent_row(ui: &mut egui::Ui, label: &str, share: &mut f32) -> egui::Response {
     let mut percent = *share * 100.0;
-    let response = form_row(ui, label, |ui| {
+    let response = widgets::form_row(ui, label, |ui| {
         let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, label);
         let width = ui.available_width().max(40.0);
         widgets::slider(ui, &mut percent, 0.0..=100.0, label, width).union(field)

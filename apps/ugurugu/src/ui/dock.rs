@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use super::Panels;
 use crate::canvas::Canvas;
 use crate::i18n::{args, tr, tr_with};
+use crate::icons::Glyph;
 use crate::layout::{FLOATING_MIN, FLOATING_SIZE, Group, Layout, Panel, Place, Side, WIDTHS};
 use crate::{theme, widgets};
 
@@ -80,6 +81,8 @@ impl Target {
 
 /// The width of a folded area's strip, and of an empty side's drop zone.
 const EDGE: f32 = 30.0;
+/// How tall a group's head is.
+const HEAD: f32 = 24.0;
 /// The layers' group is not squeezed below this.
 const LAYERS_LEAST: f32 = 280.0;
 
@@ -419,6 +422,8 @@ fn group_ui(
     whole.extend(group.panels.iter().copied().filter(|panel| *panel != front));
     let header = ui
         .horizontal(|ui| {
+            // As tall with tabs as with a title alone.
+            ui.set_min_height(HEAD);
             let handle = handle(ui, front);
             if handle.drag_started() {
                 start(
@@ -448,7 +453,7 @@ fn group_ui(
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if small_button(ui, "×", tr("dock-close")).clicked() {
+                if widgets::icon_button(ui, Glyph::Cancel, 12.0, tr("dock-close"), true).clicked() {
                     panels.layout.set_open(front, false);
                 }
                 if let Holder::Area { side, first: true } = holder {
@@ -640,8 +645,10 @@ fn tab(ui: &mut Ui, panel: Panel, front: bool) -> Response {
     let galley =
         ui.painter()
             .layout_no_wrap(name.to_owned(), FontId::proportional(theme::SMALL), ink);
-    let (rect, response) =
-        ui.allocate_exact_size(galley.size() + vec2(14.0, 8.0), Sense::click_and_drag());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(galley.size().x + 14.0, HEAD - 2.0),
+        Sense::click_and_drag(),
+    );
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, front, name)
     });

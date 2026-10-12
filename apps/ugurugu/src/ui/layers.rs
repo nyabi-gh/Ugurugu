@@ -768,73 +768,64 @@ impl LayerDock {
         let mut groups = Vec::new();
         groups_outside(&document.layers, current, &mut groups);
 
-        egui::Grid::new("layer-properties")
-            .num_columns(2)
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                widgets::field_label(ui, tr("blend-mode"));
-                let mut chosen = blend;
-                egui::ComboBox::from_id_salt("layer-blend")
-                    .width(ui.available_width())
-                    .selected_text(blend_name(blend))
-                    .show_ui(ui, |ui| {
-                        for each in BLENDS {
-                            widgets::choice(ui, &mut chosen, each, blend_name(each));
+        let mut chosen = blend;
+        widgets::form_row(ui, tr("blend-mode"), |ui| {
+            egui::ComboBox::from_id_salt("layer-blend")
+                .width(ui.available_width())
+                .selected_text(blend_name(blend))
+                .show_ui(ui, |ui| {
+                    for each in BLENDS {
+                        widgets::choice(ui, &mut chosen, each, blend_name(each));
+                    }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        true,
+                        tr("blend-mode-name"),
+                    )
+                });
+        });
+        if chosen != blend {
+            report(
+                refusal,
+                canvas.edit(|session| {
+                    session.update_layer(current, "Change layer blend mode", |layer| {
+                        match &mut layer.kind {
+                            LayerKind::Paint(paint) => paint.blend = chosen,
+                            LayerKind::Group(group) => group.blend = chosen,
                         }
                     })
-                    .response
-                    .widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::ComboBox,
-                            true,
-                            tr("blend-mode-name"),
-                        )
-                    });
-                ui.end_row();
-                if chosen != blend {
-                    report(
-                        refusal,
-                        canvas.edit(|session| {
-                            session.update_layer(current, "Change layer blend mode", |layer| {
-                                match &mut layer.kind {
-                                    LayerKind::Paint(paint) => paint.blend = chosen,
-                                    LayerKind::Group(group) => group.blend = chosen,
-                                }
-                            })
-                        }),
-                    );
-                }
+                }),
+            );
+        }
 
-                widgets::field_label(ui, tr("group"));
-                let mut target = parent;
-                let shown = parent
-                    .and_then(|id| groups.iter().find(|(group, _)| *group == id))
-                    .map_or(tr("group-none"), |(_, name)| name.as_str());
-                egui::ComboBox::from_id_salt("layer-group")
-                    .width(ui.available_width())
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        widgets::choice(ui, &mut target, None, tr("group-none"));
-                        for (id, name) in &groups {
-                            widgets::choice(ui, &mut target, Some(*id), name);
-                        }
-                    })
-                    .response
-                    .widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::ComboBox,
-                            true,
-                            tr("group-parent"),
-                        )
-                    });
-                ui.end_row();
-                if target != parent {
-                    report(
-                        refusal,
-                        canvas.edit(|session| session.move_to_group(target)),
-                    );
-                }
-            });
+        let mut target = parent;
+        let shown = parent
+            .and_then(|id| groups.iter().find(|(group, _)| *group == id))
+            .map_or(tr("group-none"), |(_, name)| name.as_str());
+        widgets::form_row(ui, tr("group"), |ui| {
+            egui::ComboBox::from_id_salt("layer-group")
+                .width(ui.available_width())
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    widgets::choice(ui, &mut target, None, tr("group-none"));
+                    for (id, name) in &groups {
+                        widgets::choice(ui, &mut target, Some(*id), name);
+                    }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, tr("group-parent"))
+                });
+        });
+        if target != parent {
+            report(
+                refusal,
+                canvas.edit(|session| session.move_to_group(target)),
+            );
+        }
 
         if is_paint {
             let mut clip = clipped;
@@ -873,20 +864,11 @@ impl LayerDock {
             self.opacity = Some((current, opacity));
         }
         let mut percent = self.opacity.expect("set").1 * 100.0;
-        let slider = ui
-            .horizontal(|ui| {
-                widgets::field_label(ui, tr("opacity"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(tr_with(
-                        "percent",
-                        &super::args([("value", format!("{percent:.0}"))]),
-                    ));
-                    let width = ui.available_width().max(40.0);
-                    widgets::slider(ui, &mut percent, 0.0..=100.0, tr("opacity"), width)
-                })
-                .inner
-            })
-            .inner;
+        let slider = widgets::form_row(ui, tr("opacity"), |ui| {
+            let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, tr("opacity"));
+            let width = ui.available_width().max(40.0);
+            widgets::slider(ui, &mut percent, 0.0..=100.0, tr("opacity"), width).union(field)
+        });
         let value = percent.round() / 100.0;
         self.opacity = Some((current, value));
         // One undo step when the drag ends, as 2.2.13 commits on release.
