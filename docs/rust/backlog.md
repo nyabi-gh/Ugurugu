@@ -15,7 +15,7 @@
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
 | B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | auto mode는 태그 push를 막는다. 릴리스는 main에서 CI가 성공한 커밋만 낸다(`wait-for-main-ci.sh`) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
 | B3-05 | 개발용 `%LOCALAPPDATA%\Ugurugu\3`를 지울지 정한다 | 2.2.13 설치 루트 안의 옛 3.0 개발 폴더. 2026-10-12에 빈 `recovery` 폴더뿐이었다. 3.0은 더 쓰지 않는다(지금은 `%LOCALAPPDATA%\Ugurugu Data\3`) | 이 PC | m6-plan 6절 M6-8 결과, 8절 |
-| B3-77 | UI 다듬기(특히 설정) | 2026-10-12 사용자 평가: 투박하고 별로라 예쁘게 다듬어야 한다. 3.0 출시 전에 한다. 같은 날 밝은 테마, 설정 창, 대화상자, 메뉴, 크기 토큰을 했다. 남은 것은 계획서 "진행"의 마지막 줄 | `apps/ugurugu/src/theme.rs`, `widgets.rs`, `ui/settings.rs` | [plan-document-tabs.md](plan-document-tabs.md) 7절 |
+| B3-77 | UI 다듬기(특히 설정) | 2026-10-12 사용자 평가: 투박하고 별로라 예쁘게 다듬어야 한다. 3.0 출시 전에 한다. 같은 날 밝은 테마, 설정 창, 대화상자, 메뉴, 크기 토큰, 위젯 통일을 했다. 남은 것은 계획서 "진행"의 마지막 줄 | `apps/ugurugu/src/theme.rs`, `widgets.rs`, `ui/settings.rs` | [plan-document-tabs.md](plan-document-tabs.md) 7절 |
 | B3-75 | 한 창 안의 문서 탭 | 2026-10-12 사용자 요청, 3.0에 넣기로 함(출시가 늦어짐). 새로 만들기·열기가 지금 문서를 바꿔 끼워 저장하거나 버려야 한다 | `apps/ugurugu/src/render.rs`, `files.rs`, `canvas.rs` | [plan-document-tabs.md](plan-document-tabs.md) |
 
 ## 2. 열린 gate
@@ -40,6 +40,7 @@
 | B3-14 | macOS 2.2.13의 업데이트 확인 | 2.2.13의 Sparkle 피드는 `releases/latest/download/appcast.xml`이다. `v3.0.0`이 GitHub Latest가 되면 이 주소는 404가 된다. m6-plan은 "업데이트 없음"으로 끝난다고 적었지만 확인하지 않았다(**가설**). Sparkle이 404를 오류로 보여 줄 수도 있다. 자동 확인이면 조용히 실패하고 수동 확인이면 오류 창이 뜰 것으로 보인다(가설). 피하려면 3.x 릴리스마다 2.2.13의 `appcast.xml`을 자산으로 함께 올리는 방법이 있다(정하지 않음) | GitHub Releases, `release-3.yml` | m6-plan 2절 14 |
 | B3-15 | ARM64 Windows | 범위 밖으로 뺐다. 빌드 대상·libwebp·ring·Velopack 런타임을 함께 봐야 한다 | `.cargo/config.toml`, 패키지 | m6-plan 1절, 8절 |
 | B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/render.rs` | [plan-document-tabs.md](plan-document-tabs.md) 3절 3 |
+| B3-79 | egui 기본 모양이 남은 곳 | 선 속성 대화상자의 색 버튼과 그 색 선택기(`color_edit_button_srgba_unmultiplied`), 드롭다운의 닫힌 버튼(`egui::ComboBox`)은 egui 것을 팔레트로 칠해 쓴다. 다른 위젯과 어긋나는지 화면으로 확인하지 않았다 | `apps/ugurugu/src/ui/restyle.rs`, `ComboBox` 쓰는 곳 | 2026-10-12 위젯 통일 |
 
 ## 4. 알려진 한계
 
@@ -86,7 +87,7 @@
 | B3-38 | 프로세스 전체 메모리 예산과 저메모리·여러 창 측정 | 캐시 `Budget`은 최소 256MiB를 강제하고(가용 100MiB여도), 디코더·히스토리·GPU staging·내보내기·다른 창은 이 예약에 묶이지 않는다. 이미지 디코더 1GiB 한도도 고정값이다. 저메모리·여러 창·큰 내보내기 조합의 OOM·지연은 재현하지 않았다(가설) | `apps/ugurugu/src/budget.rs` 17행, `crates/ugu-io/src/import.rs` | 분석 3.3-1·3.3-5, 4절 12; 검토 8절 |
 | B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다 | `apps/ugurugu/src/cache.rs` 300·315행 | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
-| B3-41 | 키보드 포커스 표시 | `tool_button`·`slider`·`checkbox`는 포커스를 그리지만 `icon_button_tip`·`icon_toggle`·`text_icon_button`에는 포커스 표시 분기가 없다(2026-10-12 확인). Tab 위치를 알기 어렵다(가설). 실제 Tab 순회로 확인한 뒤 focus ring | `apps/ugurugu/src/widgets.rs`의 `icon_button_tip`·`icon_toggle`·`text_icon_button`. 바깥 테두리는 `widgets::focus_ring` | 분석 3.7 |
+| B3-41 | 키보드 포커스 표시의 실제 확인 | 2026-10-12 `1583a8d`에서 클릭 위젯 모두에 포커스 테두리를 넣었다(아이콘 버튼, 상태 표시줄 버튼, 재생, 모양 선택, 색 기록, 레이어 줄의 버튼). 실제 Tab 순회로 모든 곳에서 보이는지는 확인하지 않았다. 색 휠은 포인터 전용(9절) | `apps/ugurugu/src/widgets.rs` `focus_ring` | 분석 3.7 |
 | B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다 | `apps/ugurugu/src/settings.rs` 515·542행 근처 | 분석 3.2 |
 | B3-43 | 작업자 스레드 생성의 `expect` | 파일·대화상자·캔버스 캐시·내보내기·클립보드 스레드 생성이 실패하면 panic이다(자원 부족 때). 업데이트·설정 스레드는 이미 오류로 처리한다 | `apps/ugurugu/src/files.rs` 391·873행, `cache.rs` 199행, `export.rs` 251행, `clipboard.rs` 57행 근처 | 분석 3.2 |
 | B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml` 10행, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
