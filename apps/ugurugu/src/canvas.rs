@@ -420,10 +420,25 @@ impl Canvas {
         self.position
     }
 
-    /// Each tab's name and whether it has unsaved changes, in order.
+    /// Each tab's name and whether it has unsaved changes, in order. Tabs
+    /// of the same name are told apart by a number in the order they were
+    /// opened, which stays when they are moved.
     pub fn tab_infos(&self) -> Vec<TabInfo> {
-        let mut infos: Vec<TabInfo> = self.others.iter().map(TabInfo::of).collect();
-        infos.insert(self.position, TabInfo::of(&self.tab));
+        let tabs: Vec<&Tab> = (0..self.tab_count())
+            .map(|index| self.tab_at(index))
+            .collect();
+        let mut infos: Vec<TabInfo> = tabs.iter().map(|tab| TabInfo::of(tab)).collect();
+        let names: Vec<String> = infos.iter().map(|info| info.name.clone()).collect();
+        for (index, info) in infos.iter_mut().enumerate() {
+            let earlier = (0..tabs.len())
+                .filter(|&other| {
+                    names[other] == names[index] && tabs[other].generation < tabs[index].generation
+                })
+                .count();
+            if earlier > 0 {
+                info.name = format!("{} ({})", info.name, earlier + 1);
+            }
+        }
         infos
     }
 
@@ -1886,6 +1901,36 @@ mod tests {
         canvas.show_tab(1);
         assert!(canvas.session().is_dirty());
         assert_eq!(canvas.session().document().layers.len(), 2);
+    }
+
+    #[test]
+    fn tabs_of_the_same_name_are_numbered_in_the_order_opened() {
+        let mut canvas = Canvas::new(Document::new([10, 10]), |_| {});
+        canvas.open_tab(Document::new([20, 20]), true);
+        canvas.file_mut().unsaved_name = Some("Cat".to_owned());
+        canvas.open_tab(Document::new([30, 30]), true);
+        canvas.open_tab(Document::new([40, 40]), true);
+        canvas.file_mut().unsaved_name = Some("Cat".to_owned());
+        let names = |canvas: &Canvas| -> Vec<String> {
+            canvas
+                .tab_infos()
+                .into_iter()
+                .map(|info| info.name)
+                .collect()
+        };
+        let untitled = crate::i18n::tr("untitled");
+        assert_eq!(
+            names(&canvas),
+            [
+                untitled.to_owned(),
+                "Cat".to_owned(),
+                format!("{untitled} (2)"),
+                "Cat (2)".to_owned()
+            ]
+        );
+        canvas.move_tab(3, 0);
+        assert_eq!(names(&canvas)[0], "Cat (2)");
+        assert_eq!(names(&canvas)[2], "Cat");
     }
 
     #[test]

@@ -725,7 +725,8 @@ impl Files {
 
     /// The window title: file name, a mark for unsaved changes.
     pub fn title(&self, canvas: &Canvas) -> String {
-        let name = canvas.file().display_name();
+        // As its tab names it.
+        let name = canvas.tab_infos().swap_remove(canvas.tab_position()).name;
         let mark = if canvas.session().is_dirty() { "*" } else { "" };
         format!("{name}{mark} - Ugurugu")
     }
