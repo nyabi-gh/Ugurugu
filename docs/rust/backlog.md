@@ -41,7 +41,8 @@
 | B3-15 | ARM64 Windows | 범위 밖으로 뺐다. 빌드 대상·libwebp·ring·Velopack 런타임을 함께 봐야 한다 | `.cargo/config.toml`, 패키지 | m6-plan 1절, 8절 |
 | B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/render.rs` | [plan-document-tabs.md](plan-document-tabs.md) 3절 3 |
 | B3-80 | 탭이 많을 때 보이는 탭의 표면 예산 | 숨은 탭은 레이어 표면을 놓지 않고(⑤ 탭당 약 405MiB), 표면 예산은 탭마다 빈 메모리로 정한다. 메모리가 적은 PC에서 큰 문서 탭이 많으면 보이는 탭이 바닥값(128MiB)으로 내려가 레이어를 하나씩 그릴 수 있다(가설, 8GiB PC에서 재지 않음). 고치려면 숨은 탭 작업자에 표면을 비우는 일을 보내고 예산을 창 전체에서 보이는 탭 먼저 나눈다. 탭마다 래스터 스레드 풀(8개)을 따로 두는 것도 함께 볼 수 있다(쉬는 스레드라 비용은 측정상 없음) | `apps/ugurugu/src/cache.rs`, `budget.rs`, `canvas.rs` | evidence.md 41절, plan-document-tabs 4절 5 |
-| B3-79 | egui 기본 모양이 남은 곳 | 선 속성 대화상자의 색 버튼과 그 색 선택기(`color_edit_button_srgba_unmultiplied`), 드롭다운의 닫힌 버튼(`egui::ComboBox`)은 egui 것을 팔레트로 칠해 쓴다. 다른 위젯과 어긋나는지 화면으로 확인하지 않았다 | `apps/ugurugu/src/ui/restyle.rs`, `ComboBox` 쓰는 곳 | 2026-10-12 위젯 통일 |
+| B3-79 | egui 기본 모양이 남은 곳 | 드롭다운의 닫힌 버튼(`egui::ComboBox`)은 egui 것을 팔레트로 칠해 쓴다(높이 28·모서리·색은 테마 값, 화살표는 egui 삼각형). 다른 위젯과 어긋나는지는 사용자가 Screen set 화면으로 본다. 선 속성의 색 버튼은 `6b2f565`에서 앱의 색 견본(`widgets::color_swatch`)으로 바꿈 | `ComboBox` 쓰는 곳 | 2026-10-12 위젯 통일, evidence.md 42절 |
+| B3-81 | 상태 표시줄의 Tab 순서 | 오른쪽부터 놓는 줄이라 Tab이 화면 순서와 반대로 간다(Fit → 왼쪽 회전). 클릭은 그대로 된다 | `apps/ugurugu/src/ui/mod.rs` 상태 표시줄 | evidence.md 42절 |
 
 ## 4. 알려진 한계
 
@@ -88,7 +89,6 @@
 | B3-38 | 프로세스 전체 메모리 예산과 저메모리·여러 창 측정 | 캐시 `Budget`은 최소 256MiB를 강제하고(가용 100MiB여도), 디코더·히스토리·GPU staging·내보내기·다른 창은 이 예약에 묶이지 않는다. 이미지 디코더 1GiB 한도도 고정값이다. 저메모리·여러 창·큰 내보내기 조합의 OOM·지연은 재현하지 않았다(가설) | `apps/ugurugu/src/budget.rs` 17행, `crates/ugu-io/src/import.rs` | 분석 3.3-1·3.3-5, 4절 12; 검토 8절 |
 | B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다 | `apps/ugurugu/src/cache.rs` 300·315행 | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
-| B3-41 | 키보드 포커스 표시의 실제 확인 | 2026-10-12 `1583a8d`에서 클릭 위젯 모두에 포커스 테두리를 넣었다(아이콘 버튼, 상태 표시줄 버튼, 재생, 모양 선택, 색 기록, 레이어 줄의 버튼). 실제 Tab 순회로 모든 곳에서 보이는지는 확인하지 않았다. 색 휠은 포인터 전용(9절) | `apps/ugurugu/src/widgets.rs` `focus_ring` | 분석 3.7 |
 | B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다 | `apps/ugurugu/src/settings.rs` 515·542행 근처 | 분석 3.2 |
 | B3-43 | 작업자 스레드 생성의 `expect` | 파일·대화상자·캔버스 캐시·내보내기·클립보드 스레드 생성이 실패하면 panic이다(자원 부족 때). 업데이트·설정 스레드는 이미 오류로 처리한다 | `apps/ugurugu/src/files.rs` 391·873행, `cache.rs` 199행, `export.rs` 251행, `clipboard.rs` 57행 근처 | 분석 3.2 |
 | B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml` 10행, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |

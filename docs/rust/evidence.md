@@ -846,3 +846,19 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 - 바꾼 뒤 캐시 렌더 요청 없이 한 프레임에 끝났다(숨은 탭이 분할을 들고 있음).
 
 **결론:** 숨은 탭의 작업자는 멈추지 않는다(멈춰서 얻을 CPU가 없다). 표시 텍스처는 창에 하나로 두고 탭을 바꿀 때 다시 올린다(4096²도 10ms 안, 계획 4절 4의 목표 "한 프레임 안" 충족). 메모리는 문서 수에 비례하고, 숨은 탭이 표면을 놓지 않으므로 메모리가 적은 PC에서 탭이 많으면 보이는 탭의 표면 예산이 줄 수 있다(가설, 8GiB PC에서 재지 않음, backlog B3-80).
+
+## 42. 탭·넘기기·Tab 순회·화면 모음 (Windows Sandbox, 2026-10-13)
+
+**방법:** `tools/sandbox/gui.ps1`(`3bb743c`), `prepare.ps1 -Scenario gui -Only …`, release 빌드. 각 1회.
+
+| 단계 | 결과 |
+|---|---|
+| A tab keeps its drawing while another is shown | 통과. 첫 탭 획의 어두운 픽셀 1,841, 새 탭으로 갔다가 Ctrl+Shift+Tab으로 돌아와 1,841 |
+| A file opened from outside becomes a tab of the open window | 통과. 창을 최소화하고 파일을 주어 실행: 실행은 코드 0으로 끝남, 창 1개, 최소화가 풀리고 맨 앞(`GetForegroundWindow`), 탭 `handed`가 생김(빈 시작 탭 자리) |
+| Every tab comes back after a crash | 통과(39절과 같음) |
+| Tab moves the keyboard focus through the controls | 통과. 메인: File > Edit > View > Tools > Window > Help > 패널 > 설정 > Fit > 좌우 반전 > 회전 초기화 > 오른쪽 회전 > 각도 > 왼쪽 회전. 설정: 쪽 목록 4 > 테마 > 테마 색 > 언어 > 업데이트 > 기본값 > 닫기 > 처음으로 돌아감. 설정 쪽 목록의 포커스는 hover 채움뿐이라 선택 쪽과 구분되지 않아 `2bb9c41`에서 테두리를 넣음 |
+| Screen set | 한국어·영어 61장, 놓침 1(ko 복구 안내: UI Automation `FromHandle` 시간 초과, en은 찍힘) |
+
+처음 돌린 Screen set은 한국어 장면이 모두 빠졌다: 창이 준비됐는지를 영어 이름 `Canvas zoom percentage`로 찾았기 때문(스크립트 잘못, 언어별 이름으로 고침). Tab 단계의 첫 두 번은 시험 쪽 잘못이었다(앞 단계가 남긴 복구 질문, `Send-Keys`가 누르는 Alt가 포커스를 메뉴로 보냄).
+
+**남은 것:** 상태 표시줄은 오른쪽부터 놓여 Tab 순서가 화면과 반대다(Fit부터 왼쪽으로, backlog B3-81). Screen set 화면은 사용자가 본다(`%TEMP%\tabs-6-3\out`, 이 실행은 `6322cff`의 같은 이름 번호 전 빌드). DPI 100%와 일본어 넘침은 아직 찍지 않았다.
