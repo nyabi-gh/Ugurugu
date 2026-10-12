@@ -437,7 +437,8 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         ui.radio_value(&mut paints, true, tr("lasso-paint"));
     });
     let mut fill = canvas.session().fill;
-    if paints {
+    // Pixel mode never blends edges.
+    if paints && !canvas.session().pixel_mode() {
         widgets::check_row(
             ui,
             tr("fill-antialias"),
@@ -503,7 +504,7 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
         );
     });
     fill.tolerance = tolerance.round().clamp(0.0, 255.0) as u8;
-    if bucket {
+    if bucket && !canvas.session().pixel_mode() {
         ui.add_space(4.0);
         widgets::check_row(
             ui,
@@ -517,8 +518,11 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
     }
 }
 
-/// How a transform resamples.
+/// How a transform resamples; always whole pixels in pixel mode.
 fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    if canvas.session().pixel_mode() {
+        return;
+    }
     widgets::field_label(ui, tr("transform-method"));
     let current = canvas.session().transform_sampling;
     for (sampling, title, description) in [

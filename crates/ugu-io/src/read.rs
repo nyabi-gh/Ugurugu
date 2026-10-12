@@ -182,6 +182,7 @@ pub fn read_with<R: Read + Seek>(
         frames: dto.frames,
         frames_per_second: dto.frames_per_second,
         wobble: wobble(&dto.wobble),
+        pixel: dto.pixel,
         layers: dto.layers.iter().map(layer).collect::<Result<_, _>>()?,
         store,
     };

@@ -41,6 +41,9 @@ pub struct Document {
     pub frames: u32,
     pub frames_per_second: f32,
     pub wobble: Wobble,
+    /// Pixel mode: drawn with pixel brushes and edited by whole pixels. The
+    /// tools follow it; it changes nothing drawn.
+    pub pixel: bool,
     /// Bottom first.
     pub layers: Vec<Layer>,
     pub store: Store,
@@ -153,6 +156,7 @@ impl Document {
             frames: 30,
             frames_per_second: 25.0,
             wobble: Wobble::classic(1.6),
+            pixel: false,
             layers: vec![Layer {
                 id: LayerId(1),
                 name: "Layer 1".to_owned(),

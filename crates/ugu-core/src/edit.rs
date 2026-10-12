@@ -20,6 +20,7 @@ pub struct Settings {
     pub frames: u32,
     pub frames_per_second: f32,
     pub wobble: Wobble,
+    pub pixel: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -138,6 +139,7 @@ impl Document {
             frames: self.frames,
             frames_per_second: self.frames_per_second,
             wobble: self.wobble,
+            pixel: self.pixel,
         }
     }
 
@@ -308,6 +310,7 @@ impl Change {
                 document.frames = settings.frames;
                 document.frames_per_second = settings.frames_per_second;
                 document.wobble = settings.wobble;
+                document.pixel = settings.pixel;
                 Self::SetSettings(old)
             }
         }))

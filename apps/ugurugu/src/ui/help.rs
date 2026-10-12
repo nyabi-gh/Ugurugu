@@ -9,7 +9,10 @@ use crate::theme;
 
 /// Each section's heading and paragraphs.
 const SECTIONS: [(&str, &[&str]); 4] = [
-    ("help-start", &["help-start-draw", "help-start-export"]),
+    (
+        "help-start",
+        &["help-start-draw", "help-start-pixel", "help-start-export"],
+    ),
     (
         "help-files",
         &["help-files-format", "help-files-import", "help-files-older"],

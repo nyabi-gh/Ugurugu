@@ -82,6 +82,7 @@ pub fn write_with<W: Write + Seek>(
         frames: document.frames,
         frames_per_second: document.frames_per_second,
         wobble: wobble(document.wobble),
+        pixel: document.pixel,
         layers: document.layers.iter().map(layer).collect(),
         strokes: used
             .strokes

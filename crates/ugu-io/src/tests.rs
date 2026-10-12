@@ -225,6 +225,24 @@ fn the_active_paint_layer_reads_back_and_any_other_is_dropped() {
 }
 
 #[test]
+fn pixel_mode_reads_back_and_is_left_out_when_off() {
+    let off = sample();
+    let on = Document {
+        pixel: true,
+        ..sample()
+    };
+    let (read, _) = read_bytes(written(&on)).unwrap();
+    assert!(read.pixel);
+    let document = entries(&written(&off))
+        .into_iter()
+        .find(|(name, _)| name == DOCUMENT)
+        .unwrap()
+        .1;
+    assert!(!String::from_utf8(document).unwrap().contains("pixel"));
+    assert!(!read_bytes(written(&off)).unwrap().0.pixel);
+}
+
+#[test]
 fn the_same_document_writes_the_same_bytes() {
     let document = sample();
     assert_eq!(written(&document), written(&document.clone()));

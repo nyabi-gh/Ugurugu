@@ -234,11 +234,12 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     };
     let mut close = false;
     let mut apply = false;
+    let pixel = canvas.session().pixel_mode();
     let modal = egui::Modal::new(egui::Id::new("resize dialog")).show(ctx, |ui| {
         ui.set_width(420.0);
         let can_apply = match dialog {
             Dialog::Canvas(dialog) => canvas_form(ui, dialog),
-            Dialog::Image(dialog) => image_form(ui, dialog),
+            Dialog::Image(dialog) => image_form(ui, dialog, pixel),
         };
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -477,7 +478,8 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
 }
 
 /// The image size form; returns whether it can be applied.
-fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize) -> bool {
+/// In pixel mode it always resamples by whole pixels, so there is no choice.
+fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
     heading(ui, tr("image-size-title"), tr("image-size-description"));
     let [width, height] = dialog.current.map(f64::from);
     let [new_width, new_height] = dialog.size.map(f64::from);
@@ -557,17 +559,18 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize) -> bool {
     } else if keep != dialog.keep_aspect {
         dialog.set_keep_aspect(keep);
     }
-    ui.add_space(8.0);
-
-    widgets::field_label(ui, tr("image-size-sampling"));
-    ui.horizontal(|ui| {
-        for (sampling, title) in [
-            (Sampling::Smooth, "sampling-smooth"),
-            (Sampling::Nearest, "sampling-pixels"),
-        ] {
-            ui.radio_value(&mut dialog.sampling, sampling, tr(title));
-        }
-    });
+    if !pixel {
+        ui.add_space(8.0);
+        widgets::field_label(ui, tr("image-size-sampling"));
+        ui.horizontal(|ui| {
+            for (sampling, title) in [
+                (Sampling::Smooth, "sampling-smooth"),
+                (Sampling::Nearest, "sampling-pixels"),
+            ] {
+                ui.radio_value(&mut dialog.sampling, sampling, tr(title));
+            }
+        });
+    }
     dialog.size != dialog.current
 }
 

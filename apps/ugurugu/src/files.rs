@@ -339,6 +339,8 @@ pub struct Files {
     animation_dialog: Option<AnimationDialog>,
     /// The new document's size, while it is asked for.
     new_document: Option<[i64; 2]>,
+    /// Whether the new document asked for is in pixel mode.
+    new_pixel: bool,
     /// The animation export chosen, waiting for where it goes.
     animation_job: Option<ExportJob>,
     /// Cancelled exports whose threads may still be finishing.
@@ -417,6 +419,7 @@ impl Files {
             exporting: None,
             animation_dialog: None,
             new_document: None,
+            new_pixel: false,
             animation_job: None,
             cancelled: Vec::new(),
             last_cancelled: None,
@@ -676,6 +679,7 @@ impl Files {
             // starting from the document's.
             Action::New => {
                 self.new_document = Some(canvas.session().document().canvas.map(i64::from));
+                self.new_pixel = canvas.session().pixel_mode();
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open(open_type())),
             Action::Close => self.close = true,
@@ -925,10 +929,16 @@ impl Files {
         });
     }
 
-    /// Starts a new document of `size`.
-    fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2]) {
+    /// Starts a new document of `size`, in pixel mode or not.
+    fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
         // Clean until edited, as the document at start.
-        canvas.replace(Document::new(size), true);
+        canvas.replace(
+            Document {
+                pixel,
+                ..Document::new(size)
+            },
+            true,
+        );
         self.path = None;
         self.unsaved_name = None;
         self.unsaved_from = None;
@@ -971,6 +981,9 @@ impl Files {
                     }
                 }
             });
+            ui.add_space(4.0);
+            crate::widgets::checkbox(ui, &mut self.new_pixel, tr("pixel-mode"))
+                .on_hover_text(tr("pixel-mode-tip"));
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let back = ui.button(tr("dialog-cancel"));
@@ -988,7 +1001,7 @@ impl Files {
         });
         if let Some(size) = chosen {
             self.new_document = None;
-            self.start_new(canvas, size);
+            self.start_new(canvas, size, self.new_pixel);
         } else if cancel || modal.should_close() {
             self.new_document = None;
         }
@@ -1842,7 +1855,7 @@ mod tests {
         files.proceed(Action::New, &mut canvas);
         // Its size is asked for, starting from the document's.
         assert_eq!(files.new_document, Some([1024, 768]));
-        files.start_new(&mut canvas, [64, 48]);
+        files.start_new(&mut canvas, [64, 48], false);
         assert!(!canvas.session().is_dirty());
         assert_eq!(canvas.session().document().canvas, [64, 48]);
     }

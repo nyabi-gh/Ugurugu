@@ -317,6 +317,14 @@ function Test-Flash([string] $Counts, [int] $Area) {
     [pscustomobject]@{ Low = $low; Frames = $seen.Count; Flashes = $flashes.Count; Counts = $Counts }
 }
 
+# Whether an element named $Name is there now.
+function Test-Named($Process, [string] $Name) {
+    Start-Sleep -Milliseconds 500
+    $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+    $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $null -ne $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $match)
+}
+
 function Send-Keys($Process, [string] $Keys) {
     [Native]::Front($Process.MainWindowHandle)
     Start-Sleep -Milliseconds 200
@@ -571,6 +579,31 @@ Step 'Pressing during playback keeps the frame shown' {
         throw "flashed with $($flashed -join ', '); $($lines -join ' // '); $shot"
     }
     "$($lines -join ' // '); $shot"
+}
+
+Step 'Pixel mode from the Edit menu' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    Send-Keys $process 'b'
+    $before = (Test-Named $process 'Ink Pen'), (Test-Named $process 'Pixel Pencil')
+    Invoke-Named $process 'Edit'
+    Invoke-Named $process 'Pixel mode'
+    Start-Sleep -Milliseconds 500
+    $on = (Test-Named $process 'Ink Pen'), (Test-Named $process 'Pixel Pencil')
+    $tabs = Test-Named $process 'Airbrush'
+    $shot = Save-Screen 'pixel-mode-brushes'
+    Send-Keys $process 'g'
+    $fillEdge = Test-Named $process 'Antialias fill edge'
+    Send-Keys $process '^z'
+    Send-Keys $process 'b'
+    # The pixel pencil stays chosen, so its tab is shown; the tabs are back.
+    $after = (Test-Named $process 'Airbrush'), (Test-Named $process 'Pixel Pencil')
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "before: ink $($before[0]), pixel $($before[1]); on: ink $($on[0]), pixel $($on[1]), tabs $tabs, fill edge choice $fillEdge; undone: tabs $($after[0]), pixel $($after[1]); $shot"
+    if (-not $before[0] -or $on[0] -or -not $on[1] -or $tabs -or $fillEdge -or -not $after[0]) {
+        throw $detail
+    }
+    $detail
 }
 
 if (Test-Path $logs) {

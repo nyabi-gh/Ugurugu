@@ -107,7 +107,7 @@ impl Session {
             self.ended = Some(Ended::Dropped);
             return Ok(Outcome::NoChange);
         }
-        let sampling = self.transform_sampling;
+        let sampling = self.sampling();
         let outcome = match self.history.group("Transform selection", |group| {
             transform_into(group, &pending, sampling)
         }) {
@@ -189,7 +189,7 @@ impl Session {
         if let Some(pending) = &self.pending
             && pending.transform != Affine::IDENTITY
         {
-            let sampling = self.transform_sampling;
+            let sampling = self.sampling();
             scratch.group("", |group| transform_into(group, pending, sampling))?;
         }
         if let Some(drawing) = self.text_drawing() {

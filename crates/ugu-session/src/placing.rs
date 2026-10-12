@@ -128,7 +128,7 @@ impl Session {
                 .flatten(),
             strokes: text::strokes(contours, placed.at, &template, placed.seed),
             clip: self.clip(),
-            antialias: self.pen.antialias,
+            antialias: self.pen.antialias && !self.pixel_mode(),
         })
     }
 

@@ -189,7 +189,8 @@ impl Session {
         coverage: &Selection,
         clip: Option<Arc<Selection>>,
     ) -> Result<Outcome, FillError> {
-        let (layer, color, antialias) = (self.layer, self.pen.color, self.fill.antialias);
+        let antialias = self.fill.antialias && !self.pixel_mode();
+        let (layer, color) = (self.layer, self.pen.color);
         let outcome = self.history_mut()?.group("Fill", |group| {
             let coverage = selecting::stored_mask(group, coverage)?;
             let clip = match &clip {

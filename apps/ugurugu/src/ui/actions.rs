@@ -48,6 +48,7 @@ pub const EDIT: &[Entry] = &[
     Gap,
     Do(A::ImageSize),
     Do(A::CanvasSize),
+    Do(A::PixelMode),
     Gap,
     Do(A::SelectAll),
     Do(A::InvertSelection),
@@ -188,6 +189,7 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     match action {
         A::Animate => Some(canvas.is_playing()),
         A::Mirror => Some(canvas.is_mirrored()),
+        A::PixelMode => Some(canvas.session().pixel_mode()),
         _ => None,
     }
 }
@@ -210,6 +212,7 @@ fn tip(action: Action) -> Option<&'static str> {
         A::TurnRight => "view-turn-right-tip",
         A::ResetTurn => "view-turn-reset-tip",
         A::Mirror => "view-mirror-tip",
+        A::PixelMode => "pixel-mode-tip",
         _ => return None,
     }))
 }
@@ -292,6 +295,11 @@ pub fn run(
         }
         A::CanvasSize => {
             panels.resize = Some(resize::Dialog::Canvas(resize::CanvasSize::new(canvas_size)));
+        }
+        A::PixelMode => {
+            let on = !canvas.session().pixel_mode();
+            let result = canvas.edit(|session| session.set_pixel_mode(on));
+            panels.report(result);
         }
         A::SelectAll => {
             canvas.edit_settled(Session::select_all);

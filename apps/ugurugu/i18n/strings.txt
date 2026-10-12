@@ -433,6 +433,7 @@ help-contents | ugurugu::MainWindow | Ugurugu &Help
 help-title | ugurugu::HelpDialog | Ugurugu Help
 help-start | - | Getting started | 시작하기 | はじめに
 help-start-draw | - | Draw a stroke, choose a motion in the Wobble panel and press P to play it. | 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요. | 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。
+help-start-pixel | - | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 작업을 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。
 help-start-export | - | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。
 help-files | - | Projects | 작업 파일 | 作業ファイル
 help-files-format | - | Ugurugu 3 saves projects as .ugurugu files. | Ugurugu 3은 작업을 .ugurugu 파일로 저장합니다. | Ugurugu 3 は作業を .ugurugu ファイルに保存します。
@@ -472,6 +473,8 @@ edit-data-limit | - | The project data limit was reached. | 프로젝트 데이�
 edit-layer-limit | - | The project layer limit was reached. | 프로젝트 레이어 수 한도에 이르렀습니다. | プロジェクトのレイヤー数の上限に達しました。
 edit-too-deep | - | Groups cannot be nested any deeper. | 그룹을 더 깊이 넣을 수 없습니다. | グループをこれ以上深く入れられません。
 edit-internal | - | Something went wrong inside Ugurugu. The log folder in Settings > About has the details. | Ugurugu 안에서 문제가 생겼습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다. | Ugurugu の内部で問題が起きました。詳細は設定 > 情報のログフォルダーにあります。
+pixel-mode | - | Pixel mode | 픽셀 모드 | ピクセルモード
+pixel-mode-tip | - | Draw pixel art: pixel brushes only, no blended edges, and transforms and image resizing by whole pixels. | 픽셀 그림을 그립니다. 픽셀 브러시만 쓰고, 가장자리를 섞지 않으며, 변형과 이미지 크기 변경을 픽셀 단위로 합니다. | ピクセルアートを描きます。ピクセルブラシだけを使い、縁をなじませず、変形と画像サイズの変更をピクセル単位で行います。
 type-document | - | Ugurugu projects (*.ugurugu) | Ugurugu 프로젝트 (*.ugurugu) | Uguruguプロジェクト (*.ugurugu)
 type-open | - | Ugurugu projects (*.ugurugu *.ugu) | Ugurugu 프로젝트 (*.ugurugu *.ugu) | Uguruguプロジェクト (*.ugurugu *.ugu)
 type-png | ugurugu::MainWindow | PNG images (*.png)

@@ -1316,3 +1316,15 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 
 **GUI(Windows Sandbox `gui.ps1`, 7회차).** 9단계 모두 통과. 재생 단계는 이제 놓은 뒤 1초 동안 "Current frame" 값이 바뀌는지도 본다. 펜: 누른 뒤 33프레임 깜빡임 0, 놓은 뒤 프레임 27 → 1초 뒤 24(30프레임 한 바퀴). 마술봉: 깜빡임 0, 프레임 5 → 3. 1회차는 앞선 합성 펜 Sandbox가 남아 있어 시작되지 않았다("실행 중인 Windows 샌드박스 인스턴스는 하나만 허용됩니다").
 
+## 35. 문서 단위 픽셀 모드 (2026-10-12, `rust/m6-finish`, Windows Sandbox)
+
+`tools/sandbox/gui.ps1` 8회차, 10단계 모두 통과. 새 단계 "Pixel mode from the Edit menu": 붓을 고른 뒤 UIA로 편집 → Pixel mode → 도구 설정의 요소를 이름으로 찾음 → G(페인트 통) → Ctrl+Z → B.
+
+| 시점 | Ink Pen 카드 | Pixel Pencil 카드 | Airbrush 탭 | Antialias fill edge |
+|---|---|---|---|---|
+| 켜기 전 | 있음 | 없음(Pen 탭) | — | — |
+| 켠 뒤 | 없음 | 있음 | 없음 | 없음(페인트 통) |
+| 실행 취소 뒤 | — | 있음(픽셀 연필이 남아 Pixel 탭) | 있음 | — |
+
+화면(`14-pixel-mode-brushes.png`): 도구 설정에 Pixel Pencil 카드 하나, SIZE 1px, 안티에일리어싱 줄 없음, 제목 `Untitled*`(모드 바꾸기가 실행 취소되는 편집). 같은 회차에서 재생 단계도 다시 통과(펜 놓은 뒤 프레임 28 → 25).
+

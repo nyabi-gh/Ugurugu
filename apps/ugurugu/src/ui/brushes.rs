@@ -13,7 +13,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKin
 use ugu_core::brush::{BRUSHES, Category, ERASERS, Preset};
 use ugu_core::document::{Document, LayerKind};
 use ugu_core::ops::{Op, Rgba8, StrokeId, Wobble};
-use ugu_core::store::{self, Point};
+use ugu_core::store::{self, BrushEngine, Point};
 use ugu_render::document::{DocumentRenderer, Purpose};
 use ugu_session::Tool;
 use vello_cpu::Pixmap;
@@ -75,6 +75,15 @@ impl Presets {
             Tool::Eraser => canvas.session().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
+            // Pixel mode has the pixel ones alone, with no tabs.
+            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper
+                if canvas.session().pixel_mode() =>
+            {
+                BRUSHES
+                    .iter()
+                    .filter(|preset| preset.brush.engine == BrushEngine::Pixel)
+                    .collect()
+            }
             Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
                 let shown = self.category.unwrap_or(current.category);
                 // As many equal tabs a row as fit their names, so the tabs
@@ -120,7 +129,12 @@ impl Presets {
                     .filter(|preset| preset.category == shown)
                     .collect()
             }
-            Tool::Eraser => ERASERS.iter().collect(),
+            Tool::Eraser => ERASERS
+                .iter()
+                .filter(|preset| {
+                    !canvas.session().pixel_mode() || preset.brush.engine == BrushEngine::Pixel
+                })
+                .collect(),
         };
         let columns = if tool == Tool::Pen { 2 } else { 3 };
         let gap = 4.0;

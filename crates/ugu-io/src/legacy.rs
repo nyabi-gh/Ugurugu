@@ -501,6 +501,8 @@ impl<'a> Importer<'a> {
             frames: animation.frames,
             frames_per_second: animation.fps as f32,
             wobble,
+            // 2.2.13 has no pixel mode.
+            pixel: false,
             layers,
             store: self.store,
         };

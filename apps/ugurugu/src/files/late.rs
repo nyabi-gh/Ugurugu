@@ -144,7 +144,7 @@ fn a_late_save_answer_leaves_a_newer_document_alone() {
     files.new_document = None;
     canvas.edit(Session::add_layer).unwrap();
     files.save(&mut canvas);
-    files.start_new(&mut canvas, [5, 5]);
+    files.start_new(&mut canvas, [5, 5], false);
     files.handle(next(&events), &mut canvas);
     assert_eq!(files.path, None);
     assert_eq!(canvas.session().document().canvas, [5, 5]);
@@ -157,7 +157,7 @@ fn an_image_read_for_a_document_replaced_since_is_not_inserted() {
     let (mut files, mut canvas, _events) = setup();
     let generation = canvas.generation();
     let image = ugu_io::import::from_rgba([2, 2], vec![255; 16], [8, 8]).unwrap();
-    files.start_new(&mut canvas, [5, 5]);
+    files.start_new(&mut canvas, [5, 5], false);
     files.handle(
         FileEvent::Inserted(PathBuf::from("a.png"), generation, Ok(image.clone())),
         &mut canvas,

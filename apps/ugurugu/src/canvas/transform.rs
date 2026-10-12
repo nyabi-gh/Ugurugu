@@ -157,10 +157,14 @@ impl Canvas {
         let point = self.to_document(position);
         let shift = self.modifiers.0;
         let transform = match grip {
-            Grip::Move => base.then(Affine::translation(
-                point[0] - start[0],
-                point[1] - start[1],
-            )),
+            Grip::Move => {
+                let mut by = [point[0] - start[0], point[1] - start[1]];
+                // Whole pixels in pixel mode, so the pixels moved stay pixels.
+                if self.session.pixel_mode() {
+                    by = by.map(f64::round);
+                }
+                base.then(Affine::translation(by[0], by[1]))
+            }
             Grip::Rotate => {
                 let centre = base.apply(handle_point(bounds, [0, 0]));
                 let angle = |[x, y]: [f64; 2]| (y - centre[1]).atan2(x - centre[0]);
@@ -363,7 +367,7 @@ impl Canvas {
         let preview = self.preview.as_mut().expect("made above");
         let wanted = (
             pending.transform,
-            self.session.transform_sampling,
+            self.session.sampling(),
             pending.keep_source,
         );
         if let Some(view) = view {

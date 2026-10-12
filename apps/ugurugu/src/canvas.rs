@@ -455,6 +455,10 @@ impl Canvas {
     /// shown one no longer matches, and for thumbnails that are out of date.
     /// Playback shows whole frames instead of a split.
     pub fn sync(&mut self) {
+        // Undo, redo and another document can change the mode.
+        if !matches!(self.interaction, Interaction::Drawing { .. }) {
+            self.session.follow_pixel_mode();
+        }
         self.refresh_preview();
         self.refresh_text_preview();
         self.sync_thumbnails();

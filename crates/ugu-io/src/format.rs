@@ -48,6 +48,9 @@ pub struct DocumentDto {
     pub frames: u32,
     pub frames_per_second: f32,
     pub wobble: WobbleDto,
+    /// Pixel mode; left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pixel: bool,
     /// Bottom first.
     pub layers: Vec<LayerDto>,
     pub strokes: Vec<StrokeDto>,

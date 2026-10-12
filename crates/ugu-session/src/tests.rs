@@ -1818,3 +1818,54 @@ fn text_the_document_cannot_take_stays_placed_and_unsaved() {
     assert!(session.placed_text().is_some());
     assert_eq!(session.document(), &document);
 }
+
+#[test]
+fn pixel_mode_is_one_step_and_the_tools_follow_it() {
+    let mut session = session();
+    session.fill.antialias = true;
+    session.transform_sampling = Sampling::Smooth;
+    assert_eq!(session.pen.preset.brush.engine, BrushEngine::Line);
+    session.set_pixel_mode(true).unwrap();
+    assert!(session.pixel_mode());
+    assert_eq!(session.pen.preset.brush.engine, BrushEngine::Pixel);
+    assert_eq!(session.eraser.preset.brush.engine, BrushEngine::Pixel);
+    assert_eq!(session.sampling(), Sampling::Nearest);
+    assert_eq!(session.set_pixel_mode(true).unwrap(), Outcome::NoChange);
+
+    // A fill in pixel mode never blends its edge, whatever the setting.
+    session.fill.antialias = true;
+    let layer = session.current_layer();
+    session.bucket([100.0, 50.0], Some(&boxed())).unwrap();
+    assert!(
+        fills(&session, layer)
+            .iter()
+            .all(|(_, _, antialias, _)| !antialias)
+    );
+
+    // Undone, the mode goes; the tools stay as they are.
+    session.undo().unwrap();
+    session.undo().unwrap();
+    assert!(!session.pixel_mode());
+    assert_eq!(session.sampling(), Sampling::Smooth);
+    assert_eq!(session.pen.preset.brush.engine, BrushEngine::Pixel);
+    session.redo().unwrap();
+    assert!(session.pixel_mode());
+
+    // Another brush chosen meanwhile is followed back to a pixel one before
+    // a stroke.
+    session.choose_preset(Tool::Pen, &ugu_core::brush::BRUSHES[0]);
+    session.begin_stroke(at(10.0, 10.0, 0.0)).unwrap();
+    assert_eq!(
+        session.live().unwrap().template.brush.engine,
+        BrushEngine::Pixel
+    );
+}
+
+#[test]
+fn pixel_mode_stays_through_animation_changes() {
+    let mut session = session();
+    session.set_pixel_mode(true).unwrap();
+    let wobble = session.document().wobble;
+    session.set_animation(12, 10.0, wobble).unwrap();
+    assert!(session.pixel_mode());
+}

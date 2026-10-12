@@ -360,6 +360,7 @@ impl Session {
     pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
         self.live = None;
         self.can_paint()?;
+        self.follow_pixel_mode();
         self.settle().map_err(|_| StrokeRefused::Pending)?;
         let settings = *self.settings();
         let erase = self.tool == Tool::Eraser;
@@ -658,6 +659,11 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         self.lasso = None;
+        let sampling = if self.pixel_mode() {
+            Sampling::Nearest
+        } else {
+            sampling
+        };
         self.history_mut()?.group("Image size", |group| {
             group.apply(|document| command::resample_image(document, size, sampling))?;
             let scaled = group
@@ -666,6 +672,61 @@ impl Session {
             group.select(scaled);
             Ok(())
         })
+    }
+
+    /// Whether the document is in pixel mode, which the tools follow.
+    pub fn pixel_mode(&self) -> bool {
+        self.document().pixel
+    }
+
+    /// Turns pixel mode on or off as one step; on, the brush and eraser
+    /// become pixel ones.
+    pub fn set_pixel_mode(&mut self, on: bool) -> Result<Outcome, EditError> {
+        let mut settings = self.document().settings();
+        if settings.pixel == on {
+            return Ok(Outcome::NoChange);
+        }
+        settings.pixel = on;
+        let outcome = self.history_mut()?.edit("Pixel mode", |_| {
+            vec![ugu_core::edit::Change::SetSettings(settings)]
+        })?;
+        self.follow_pixel_mode();
+        Ok(outcome)
+    }
+
+    /// In pixel mode, a brush or eraser that is not a pixel one becomes the
+    /// pixel pencil or eraser; called when the mode may have changed, by
+    /// undo and redo or another document too.
+    pub fn follow_pixel_mode(&mut self) {
+        if !self.pixel_mode() {
+            return;
+        }
+        for (tool, presets) in [
+            (Tool::Pen, &brush::BRUSHES[..]),
+            (Tool::Eraser, &brush::ERASERS[..]),
+        ] {
+            let current = match tool {
+                Tool::Eraser => self.eraser.preset,
+                _ => self.pen.preset,
+            };
+            if current.brush.engine != BrushEngine::Pixel
+                && let Some(pixel) = presets
+                    .iter()
+                    .find(|preset| preset.brush.engine == BrushEngine::Pixel)
+            {
+                self.choose_preset(tool, pixel);
+            }
+        }
+    }
+
+    /// How a transform resamples: whole pixels in pixel mode, otherwise as
+    /// chosen.
+    pub fn sampling(&self) -> Sampling {
+        if self.pixel_mode() {
+            Sampling::Nearest
+        } else {
+            self.transform_sampling
+        }
     }
 
     /// Changes the frame count, playback speed and wobble together.
