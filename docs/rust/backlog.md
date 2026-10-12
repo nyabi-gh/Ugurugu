@@ -15,6 +15,7 @@
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
 | B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | auto mode는 태그 push를 막는다. 릴리스는 main에서 CI가 성공한 커밋만 낸다(`wait-for-main-ci.sh`) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
 | B3-05 | 개발용 `%LOCALAPPDATA%\Ugurugu\3`를 지울지 정한다 | 2.2.13 설치 루트 안의 옛 3.0 개발 폴더. 2026-10-12에 빈 `recovery` 폴더뿐이었다. 3.0은 더 쓰지 않는다(지금은 `%LOCALAPPDATA%\Ugurugu Data\3`) | 이 PC | m6-plan 6절 M6-8 결과, 8절 |
+| B3-77 | UI 다듬기(특히 설정) | 2026-10-12 사용자 평가: 투박하고 별로라 예쁘게 다듬어야 한다. 3.0 출시 전에 한다 | `apps/ugurugu/src/theme.rs`, `widgets.rs`, `ui/settings.rs` | [plan-document-tabs.md](plan-document-tabs.md) 7절 |
 | B3-75 | 한 창 안의 문서 탭 | 2026-10-12 사용자 요청, 3.0에 넣기로 함(출시가 늦어짐). 새로 만들기·열기가 지금 문서를 바꿔 끼워 저장하거나 버려야 한다 | `apps/ugurugu/src/render.rs`, `files.rs`, `canvas.rs` | [plan-document-tabs.md](plan-document-tabs.md) |
 
 ## 2. 열린 gate
