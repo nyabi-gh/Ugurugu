@@ -63,6 +63,10 @@ pub struct Dialog {
     refusal: Option<String>,
     /// What the shortcut list is narrowed to.
     search: String,
+    /// The app icon shown on the about tab, once it has been.
+    icon: Option<egui::TextureHandle>,
+    /// When the diagnostic info was last copied.
+    copied: Option<std::time::Instant>,
 }
 
 fn theme_name(mode: theme::Mode) -> &'static str {
@@ -196,7 +200,7 @@ pub fn show(
                             Tab::Drawing => drawing(ui, &mut settings),
                             Tab::Files => save_folder(ui, files, &mut settings),
                             Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings),
-                            Tab::About => about(ui),
+                            Tab::About => about(ui, dialog),
                         }
                     });
             });
@@ -723,31 +727,79 @@ fn key_field(ui: &mut egui::Ui, text: &str, capturing: bool, assigned: bool) -> 
     response
 }
 
-fn about(ui: &mut egui::Ui) {
+/// The app icon at 128 pixels, decoded once.
+fn app_icon() -> &'static egui::ColorImage {
+    static ICON: std::sync::OnceLock<egui::ColorImage> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        let started = std::time::Instant::now();
+        let bytes = include_bytes!("../../../../resources/icons/Ugurugu.png");
+        let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+            .map(|image| {
+                image
+                    .resize_exact(128, 128, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8()
+            })
+            .map(|pixels| egui::ColorImage::from_rgba_unmultiplied([128, 128], &pixels))
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "the app icon could not be read");
+                egui::ColorImage::filled([128, 128], egui::Color32::TRANSPARENT)
+            });
+        tracing::debug!(
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            "app icon decoded"
+        );
+        image
+    })
+}
+
+/// How long "Copied" stays on the copy button.
+const COPIED_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
+    let icon = dialog
+        .icon
+        .get_or_insert_with(|| {
+            ui.ctx()
+                .load_texture("app icon", app_icon().clone(), egui::TextureOptions::LINEAR)
+        })
+        .clone();
     widgets::card(ui, |ui| {
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(64.0, 64.0)));
+            ui.add_space(10.0);
+            ui.vertical(|ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Ugurugu")
+                        .size(theme::BODY + 9.0)
+                        .strong()
+                        .color(theme::text()),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{}  \u{b7}  {}",
+                        tr_with(
+                            "settings-version",
+                            &args([("version", env!("CARGO_PKG_VERSION").to_owned())]),
+                        ),
+                        tr_with(
+                            "settings-build",
+                            &args([("commit", crate::logs::COMMIT.to_owned())]),
+                        ),
+                    ))
+                    .color(theme::muted()),
+                );
+            });
+        });
+        ui.add_space(14.0);
+        let y = ui.cursor().top();
+        ui.painter().hline(
+            ui.max_rect().x_range(),
+            y,
+            egui::Stroke::new(1.0, theme::border().gamma_multiply(0.6)),
+        );
         ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new("Ugurugu")
-                .size(theme::BODY + 8.0)
-                .strong()
-                .color(theme::text()),
-        );
-        ui.label(
-            egui::RichText::new(tr_with(
-                "settings-version",
-                &args([("version", env!("CARGO_PKG_VERSION").to_owned())]),
-            ))
-            .color(theme::text()),
-        );
-        ui.label(
-            egui::RichText::new(tr_with(
-                "settings-build",
-                &args([("commit", crate::logs::COMMIT.to_owned())]),
-            ))
-            .size(theme::SMALL)
-            .color(theme::muted()),
-        );
-        ui.add_space(8.0);
         for credit in [
             tr("settings-credit-development"),
             tr("settings-credit-icon"),
@@ -758,45 +810,54 @@ fn about(ui: &mut egui::Ui) {
                     .color(theme::muted()),
             );
         }
-        ui.add_space(10.0);
+        ui.add_space(14.0);
     });
     ui.add_space(14.0);
     widgets::card(ui, |ui| {
-        ui.add_space(10.0);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(tr_with(
-                    "settings-gpu",
-                    &args([("gpu", crate::logs::gpu())]),
-                ))
-                .color(theme::text()),
-            )
-            .wrap(),
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if widgets::button(
-                ui,
-                tr("settings-open-logs"),
-                widgets::Emphasis::Secondary,
-                true,
-            )
-            .clicked()
-            {
-                crate::logs::show_folder();
-            }
-            if widgets::button(
-                ui,
-                tr("settings-copy-diagnostics"),
-                widgets::Emphasis::Secondary,
-                true,
-            )
-            .clicked()
-            {
+        let gpu = tr_with("settings-gpu", &args([("gpu", crate::logs::gpu())]));
+        let copied = dialog.copied.is_some_and(|at| at.elapsed() < COPIED_FOR);
+        widgets::setting_row(ui, true, tr("settings-diagnostics"), Some(&gpu), |ui| {
+            let text = if copied {
+                tr("settings-copied")
+            } else {
+                tr("settings-copy")
+            };
+            let button = widgets::button(ui, text, widgets::Emphasis::Secondary, true);
+            button.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    tr("settings-copy-diagnostics"),
+                )
+            });
+            if button.clicked() {
                 ui.ctx().copy_text(crate::logs::summary());
+                dialog.copied = Some(std::time::Instant::now());
             }
         });
-        ui.add_space(10.0);
+        if copied {
+            ui.ctx().request_repaint_after(COPIED_FOR);
+        }
+        widgets::setting_row(
+            ui,
+            false,
+            tr("settings-logs"),
+            Some(tr("settings-logs-hint")),
+            |ui| {
+                let button =
+                    widgets::button(ui, tr("settings-open"), widgets::Emphasis::Secondary, true);
+                button.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        tr("settings-open-logs"),
+                    )
+                });
+                if button.clicked() {
+                    crate::logs::show_folder();
+                }
+            },
+        );
     });
 }
 

@@ -392,6 +392,12 @@ settings-language | ugurugu::SettingsDialog | Language
 settings-language-system | ugurugu::SettingsDialog | System default
 settings-theme | - | Theme | 테마 | テーマ
 settings-appearance | - | Appearance | 화면 | 外観
+settings-diagnostics | - | Diagnostic info | 진단 정보 | 診断情報
+settings-logs | - | Logs | 로그 | ログ
+settings-logs-hint | - | Log files of recent runs, to attach to a problem report. | 최근 실행의 로그 파일입니다. 문제를 알릴 때 첨부하세요. | 最近の実行のログファイルです。問題を報告するときに添付してください。
+settings-copy | - | Copy | 복사 | コピー
+settings-copied | - | Copied | 복사했습니다 | コピーしました
+settings-open | - | Open | 열기 | 開く
 settings-updates | - | Updates | 업데이트 | アップデート
 settings-shortcuts-search | - | Search shortcuts | 단축키 검색 | ショートカットを検索
 settings-shortcuts-no-match | - | No shortcut matches. | 맞는 단축키가 없습니다. | 一致するショートカットはありません。

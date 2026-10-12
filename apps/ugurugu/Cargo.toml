@@ -11,6 +11,7 @@ egui.workspace = true
 egui-winit.workspace = true
 egui-wgpu.workspace = true
 fluent-bundle.workspace = true
+image.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -32,7 +33,6 @@ winit.workspace = true
 embed-resource.workspace = true
 
 [dev-dependencies]
-image.workspace = true
 png.workspace = true
 
 [lints]
