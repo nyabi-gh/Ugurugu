@@ -12,8 +12,10 @@ mapped. Keys and the mouse go to the front window, so this runs only in the
 Sandbox, where the app is the only window. Checks: the notice about an
 unexpected close, the exe and window icons, the help window, turning and
 flipping the view, the eyedropper's cursor, the docks of a short window
-(review U3-07) and the save dialog's added extension (review U3-08). The
-screenshots are of the Sandbox's screen.
+(review U3-07), the save dialog's added extension (review U3-08), the
+transform box's cursors and no blank frame when pressing during playback.
+in\only.txt, from prepare.ps1 -Only, limits the run to the steps it names.
+The screenshots are of the Sandbox's screen.
 Runs in Windows PowerShell 5.1.
 #>
 
@@ -26,11 +28,14 @@ $installRoot = $in
 $logs = Join-Path $out 'logs'
 $app = Join-Path $in 'ugurugu.exe'
 $results = New-Object System.Collections.ArrayList
+# Names of the steps to run, one a line; all without the file.
+$onlyFile = Join-Path $in 'only.txt'
+$only = if (Test-Path $onlyFile) { @(Get-Content $onlyFile | Where-Object { $_ }) } else { @() }
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
@@ -67,6 +72,74 @@ public static class Native
     public static void Wheel(int notches)
     {
         mouse_event(0x800, 0, 0, notches * 120, UIntPtr.Zero);
+    }
+
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+
+    // An absolute move, as a real mouse sends it.
+    public static void Glide(int x, int y)
+    {
+        int dx = (int)((x * 65535L) / (GetSystemMetrics(0) - 1));
+        int dy = (int)((y * 65535L) / (GetSystemMetrics(1) - 1));
+        mouse_event(0x8001, dx, dy, 0, UIntPtr.Zero);
+    }
+
+    public static void Down() { mouse_event(0x2, 0, 0, 0, UIntPtr.Zero); }
+    public static void Up() { mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); }
+
+    // A drag through the points, in steps of a few pixels every few ms.
+    public static void Drag(int[] xs, int[] ys)
+    {
+        Glide(xs[0], ys[0]);
+        System.Threading.Thread.Sleep(50);
+        Down();
+        for (int i = 1; i < xs.Length; i++)
+        {
+            int steps = Math.Max(1, (int)(Math.Sqrt(Math.Pow(xs[i] - xs[i - 1], 2) + Math.Pow(ys[i] - ys[i - 1], 2)) / 4));
+            for (int s = 1; s <= steps; s++)
+            {
+                Glide(xs[i - 1] + (xs[i] - xs[i - 1]) * s / steps, ys[i - 1] + (ys[i] - ys[i - 1]) * s / steps);
+                System.Threading.Thread.Sleep(4);
+            }
+        }
+        System.Threading.Thread.Sleep(50);
+        Up();
+    }
+
+    // Dark pixels in the screen rectangle, as fast as the screen can be read.
+    static int Dark(System.Drawing.Bitmap bitmap, System.Drawing.Graphics graphics, int x, int y)
+    {
+        graphics.CopyFromScreen(x, y, 0, 0, bitmap.Size);
+        var area = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(area, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var bytes = new byte[data.Stride * data.Height];
+        Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+        bitmap.UnlockBits(data);
+        int dark = 0;
+        for (int i = 0; i < bytes.Length; i += 4)
+            if (bytes[i] + bytes[i + 1] + bytes[i + 2] < 3 * 96) dark++;
+        return dark;
+    }
+
+    // Counts of dark pixels in the rectangle while playing: before, then
+    // after pressing at (px, py) and holding for the given time.
+    public static string PressAndWatch(int px, int py, int x, int y, int w, int h, int before, int holdMs)
+    {
+        var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        var counts = new System.Collections.Generic.List<string>();
+        for (int i = 0; i < before; i++) counts.Add(Dark(bitmap, graphics, x, y).ToString());
+        counts.Add("|");
+        Glide(px, py);
+        System.Threading.Thread.Sleep(30);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Down();
+        while (clock.ElapsedMilliseconds < holdMs)
+            counts.Add(Dark(bitmap, graphics, x, y).ToString());
+        Up();
+        graphics.Dispose();
+        bitmap.Dispose();
+        return string.Join(" ", counts);
     }
 
     public static bool CursorIs(int id)
@@ -197,6 +270,47 @@ function Invoke-Named($Process, [string] $Name, [switch] $Prefix) {
 function Get-Value($Process, [string] $Name) {
     $pattern = Find-Pattern $Process $Name @([Windows.Automation.RangeValuePattern]::Pattern)
     [double]$pattern.Current.Value
+}
+
+# The document's edges on the screen: from the middle of the window along a
+# row and a column until the colour changes. Run on an empty document.
+function Find-Paper($Process) {
+    $rect = Get-Rect $Process
+    [Native]::MoveTo($rect.Right - 5, $rect.Bottom - 5)
+    Start-Sleep -Milliseconds 300
+    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+    $cx = [int](($rect.Left + $rect.Right) / 2)
+    $cy = [int](($rect.Top + $rect.Bottom) / 2)
+    $paper = $bitmap.GetPixel($cx, $cy)
+    $same = {
+        param($x, $y)
+        $c = $bitmap.GetPixel($x, $y)
+        [Math]::Abs($c.R - $paper.R) + [Math]::Abs($c.G - $paper.G) + [Math]::Abs($c.B - $paper.B) -lt 30
+    }
+    $left = $cx; while ($left -gt $rect.Left -and (& $same ($left - 1) $cy)) { $left-- }
+    $right = $cx; while ($right -lt $rect.Right -and (& $same ($right + 1) $cy)) { $right++ }
+    $top = $cy; while ($top -gt $rect.Top -and (& $same $cx ($top - 1))) { $top-- }
+    $bottom = $cy; while ($bottom -lt $rect.Bottom -and (& $same $cx ($bottom + 1))) { $bottom++ }
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    if ($right - $left -lt 200 -or $bottom - $top -lt 200) {
+        throw "No document found in the middle of the window ($left, $top, $right, $bottom); $(Save-Screen 'no-document')"
+    }
+    [pscustomobject]@{ Left = $left; Top = $top; Right = $right; Bottom = $bottom; Colour = "$($paper.R),$($paper.G),$($paper.B)" }
+}
+
+# Frames whose dark pixels fall to under half of the fewest while playing,
+# or cover over half the area, are a flash.
+function Test-Flash([string] $Counts, [int] $Area) {
+    $before, $after = $Counts -split ' \| '
+    $base = @($before -split ' ' | ForEach-Object { [int]$_ })
+    $seen = @($after -split ' ' | ForEach-Object { [int]$_ })
+    $low = ($base | Measure-Object -Minimum).Minimum
+    $flashes = @($seen | Where-Object { $_ -lt $low / 2 -or $_ -gt $Area / 2 })
+    [pscustomobject]@{ Low = $low; Frames = $seen.Count; Flashes = $flashes.Count; Counts = $Counts }
 }
 
 function Send-Keys($Process, [string] $Keys) {
@@ -340,6 +454,106 @@ Step 'Save dialog with another extension typed (U3-08)' {
         throw "probe.png.ugurugu was replaced without asking; files: $($files -join ', '); $shot"
     }
     "dialog '$dialogName'; after 'probe.png': dialog then '$open'; probe.png.ugurugu kept; files: $($files -join ', '); $shot"
+}
+
+Step 'Transform box cursors' {
+    # A forced close before leaves a project to restore.
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $process 'b'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.3)), ($paper.Left + [int]($w * 0.45))),
+        @(($paper.Top + [int]($h * 0.3)), ($paper.Top + [int]($h * 0.4))))
+    Send-Keys $process '^a'
+    Send-Keys $process '^t'
+    Start-Sleep -Milliseconds 500
+    $mx = [int](($paper.Left + $paper.Right) / 2)
+    $my = [int](($paper.Top + $paper.Bottom) / 2)
+    $spots = [ordered]@{
+        'top left' = @($paper.Left, $paper.Top, 'sizenwse')
+        'top right' = @($paper.Right, $paper.Top, 'sizenesw')
+        'bottom right' = @($paper.Right, $paper.Bottom, 'sizenwse')
+        'bottom left' = @($paper.Left, $paper.Bottom, 'sizenesw')
+        'top' = @($mx, $paper.Top, 'sizens')
+        'right' = @($paper.Right, $my, 'sizewe')
+        'bottom' = @($mx, $paper.Bottom, 'sizens')
+        'left' = @($paper.Left, $my, 'sizewe')
+        'inside' = @(($mx + 40), ($my + 40), 'sizeall')
+        'outside (turn)' = @(($paper.Left - 30), ($paper.Top - 30), 'arrow')
+    }
+    $seen = @()
+    $wrong = @()
+    foreach ($spot in $spots.GetEnumerator()) {
+        [Native]::MoveTo($spot.Value[0], $spot.Value[1])
+        Start-Sleep -Milliseconds 300
+        [Native]::MoveTo($spot.Value[0] + 1, $spot.Value[1])
+        Start-Sleep -Milliseconds 300
+        $cursor = [Native]::CursorName()
+        $seen += "$($spot.Key) $cursor"
+        if ($cursor -ne $spot.Value[2]) {
+            $wrong += "$($spot.Key): $cursor, not $($spot.Value[2])"
+        }
+    }
+    [Native]::MoveTo($paper.Right, $paper.Bottom)
+    Start-Sleep -Milliseconds 300
+    $shot = Save-Screen 'transform-box'
+    Send-Keys $process '{ESC}'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    if ($wrong) {
+        throw "$($wrong -join ', '); $shot"
+    }
+    "document $($paper.Left),$($paper.Top)-$($paper.Right),$($paper.Bottom); $($seen -join ', '); $shot"
+}
+
+Step 'Pressing during playback keeps the frame shown' {
+    # A forced close before leaves a project to restore.
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    $x = $paper.Left + [int]($w * 0.3)
+    $y = $paper.Top + [int]($h * 0.3)
+    $rw = [int]($w * 0.4)
+    $rh = [int]($h * 0.4)
+    Send-Keys $process 'b'
+    $xs = @(); $ys = @()
+    for ($i = 0; $i -le 8; $i++) {
+        $xs += $x + 10 + [int](($rw - 20) * $i / 8)
+        $ys += if ($i % 2) { $y + $rh - 10 } else { $y + 10 }
+    }
+    [Native]::Drag($xs, $ys)
+    for ($i = 0; $i -le 8; $i++) {
+        $xs[$i] = $x + 10 + [int](($rw - 20) * (8 - $i) / 8) + 7
+    }
+    [Native]::Drag($xs, $ys)
+    $press = @(($paper.Left + [int]($w * 0.1)), ($paper.Top + [int]($h * 0.1)))
+    $lines = @()
+    $flashed = @()
+    foreach ($tool in @(@('pen', 'b', 0), @('wand', 'w', 60))) {
+        Send-Keys $process $tool[1]
+        [Native]::MoveTo($paper.Right - 5, $paper.Bottom - 5)
+        Send-Keys $process 'p'
+        Start-Sleep -Milliseconds 1500
+        $counts = [Native]::PressAndWatch($press[0] + $tool[2], $press[1], $x, $y, $rw, $rh, 30, 1000)
+        $flash = Test-Flash $counts ($rw * $rh)
+        if ($flash.Low -lt 100) {
+            throw "Too little drawn to watch: $counts"
+        }
+        $lines += "$($tool[0]): $($flash.Frames) frames after the press, $($flash.Flashes) flashed (fewest dark while playing $($flash.Low)): $counts"
+        if ($flash.Flashes) {
+            $flashed += $tool[0]
+        }
+        Start-Sleep -Seconds 1
+    }
+    $shot = Save-Screen 'after-pressing-during-playback'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    if ($flashed) {
+        throw "flashed with $($flashed -join ', '); $($lines -join ' // '); $shot"
+    }
+    "$($lines -join ' // '); $shot"
 }
 
 if (Test-Path $logs) {

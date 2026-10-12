@@ -30,6 +30,8 @@ param(
     [Parameter(Mandatory)] [string] $Work,
     [ValidateSet('accept', 'alongside', 'pointer', 'gui')] [string] $Scenario = 'accept',
     [string] $Legacy,
+    # GUI steps to run, by name; all when not given.
+    [string[]] $Only,
     [string] $Executable = 'target/release/ugurugu.exe',
     [string] $UguDoc = 'target/release/ugu-doc.exe',
     [string] $Vpk = 'vpk'
@@ -61,6 +63,9 @@ if ($Scenario -in 'accept', 'alongside') {
 
 if ($Scenario -in 'pointer', 'gui') {
     Copy-Item $Executable, $UguDoc $in
+    if ($Only) {
+        Set-Content -Path (Join-Path $in 'only.txt') -Value $Only -Encoding utf8
+    }
     $networking = 'Disable'
 } elseif ($Scenario -eq 'accept') {
     & $UguDoc fixture 1 (Join-Path $in 'drawing.ugurugu')

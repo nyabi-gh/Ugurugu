@@ -1279,3 +1279,20 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 | Eyedropper cursor | pass | cursor over the canvas: cross |
 | Docks of a short window (U3-07) | pass | window 1000x520; both docks scroll with the wheel |
 | Save dialog with another extension typed (U3-08) | pass | after 'probe.png': '다른 이름으로 저장 확인'; probe.png.ugurugu kept |
+
+## 32. 변형 상자 커서와 재생 중 누르기 (2026-10-12, `rust/m6-finish`, Windows Sandbox)
+
+`tools/sandbox/gui.ps1`에 두 단계를 더했다. `prepare.ps1 -Only`로 고른 단계만 돌릴 수 있다. 창 1600×1000, 영어 UI, 설정·복구·로그 격리, 각 단계 앞에서 복구 폴더를 비움.
+
+- **변형 상자 커서:** 빈 문서의 가장자리를 화면 색으로 찾고(가운데에서 행·열을 따라 색이 바뀌는 곳), 획 하나 → Ctrl+A → Ctrl+T 뒤 열 곳에서 `GetCursorInfo`를 읽음.
+- **재생 중 누르기:** 지그재그 획 두 번 → P → 1.5초 → 획 둘레(문서의 가운데 40%)를 `CopyFromScreen`으로 읽어 어두운 픽셀(RGB 합 < 288)을 셈. 누르기 전 30번, 누른 뒤 1초. 재생 중 가장 적은 값의 절반 밑이거나 넓이의 절반 위면 깜빡임.
+
+1회차는 지난 세션의 Sandbox가 떠 있어 시작되지 않았고(Sandbox는 하나만 뜸), 2회차는 추가한 C# 코드가 System.Drawing 참조 없이 컴파일되지 않아 스크립트가 바로 멈췄다. 3회차: 커서 통과, 재생 단계는 앞 단계에서 강제 종료한 문서의 복구 안내 때문에 문서를 못 찾음 → 복구 폴더를 비우게 고침. 고치기 전 빌드 1회차는 그 빌드가 VCRUNTIME140.dll을 써서(정적 CRT는 `cd6c98c`부터) Sandbox에서 창이 뜨지 않았다 → 같은 `.cargo/config.toml`로 다시 빌드.
+
+| 빌드 | 펜 | 마술봉 |
+|---|---|---|
+| 지금(`cbc8dcd`), 4회차 | 누른 뒤 33프레임, 깜빡임 0(재생 중 최소 10,302, 누른 뒤 10,456~10,514) | 33프레임, 0(누른 뒤 5,938~6,041: 선택 개미선이 획 가장자리를 덮음) |
+| 지금, 전체 9단계 6회차 | 32프레임, 0 | 33프레임, 0 |
+| 고치기 전(`988a898^`) | 누른 직후 한 프레임 52,934(넓이 54,000) | 누른 직후 한 프레임 40,502 |
+
+커서(6회차): top left sizenwse, top right sizenesw, bottom right sizenwse, bottom left sizenesw, top sizens, right sizewe, bottom sizens, left sizewe, inside sizeall, outside (turn) arrow.

@@ -26,6 +26,10 @@ function Save-Results {
 }
 
 function Step([string] $Name, [scriptblock] $Body) {
+    $chosen = Get-Variable only -ValueOnly -ErrorAction SilentlyContinue
+    if ($chosen -and $Name -notin $chosen) {
+        return
+    }
     Write-Host "== $Name"
     try {
         $detail = @(& $Body) -join '; '
