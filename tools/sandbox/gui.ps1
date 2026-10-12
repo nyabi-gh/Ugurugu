@@ -18,7 +18,9 @@ another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, and a file opened from outside going to the open window as
 a tab.
 "Screen set" photographs every panel, menu and dialog in Korean and English
-for reviewing the look; the names it presses come from the .ftl files.
+for reviewing the look, and "Screen set at 100%" in Korean, English and
+Japanese with the interface drawn at 100%; the names they press come from
+the .ftl files.
 in\only.txt, from prepare.ps1 -Only, limits the run to the steps it names.
 The screenshots are of the Sandbox's screen.
 Runs in Windows PowerShell 5.1.
@@ -650,13 +652,16 @@ function Draw-Stroke($Process) {
     $paper
 }
 
-Step 'Screen set' {
+# Photographs every panel, menu and dialog in each of $Languages; the files
+# are named with $Tag first.
+function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
     $taken = @()
     $missed = @()
-    foreach ($language in @('ko', 'en')) {
+    foreach ($language in $Languages) {
         $words = Read-Words $language
         # Each shot starts from a fresh window, so one that fails leaves
-        # nothing open for the next.
+        # nothing open for the next. Settings open with Ctrl+, because the
+        # gear button's name starts like the menu item's.
         $shots = [ordered]@{
             'main' = { param($p) }
             'menu-file' = { param($p) Invoke-Word $p $words 'menu-file' }
@@ -672,10 +677,10 @@ Step 'Screen set' {
             'tool-text' = { param($p) Send-Keys $p 't' }
             'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
             'pixel-mode' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'pixel-mode' }
-            'settings-general' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings' }
-            'settings-drawing' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-drawing' }
-            'settings-files' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-files' }
-            'settings-shortcuts' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-shortcuts' }
+            'settings-general' = { param($p) Send-Keys $p '^,' }
+            'settings-drawing' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-drawing' }
+            'settings-files' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-files' }
+            'settings-shortcuts' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-shortcuts' }
             'settings-about' = { param($p) Invoke-Word $p $words 'menu-help'; Invoke-Word $p $words 'help-about' }
             'new-document' = { param($p) Send-Keys $p '^n' }
             'image-size' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-image-size' }
@@ -701,9 +706,9 @@ Step 'Screen set' {
                 $process = Start-App -Language $language
                 & $shot.Value $process
                 Start-Sleep -Milliseconds 700
-                $taken += Save-Screen "$language-$($shot.Key)"
+                $taken += Save-Screen "$Tag$language-$($shot.Key)"
             } catch {
-                $missed += "$language-$($shot.Key): $($_.Exception.Message)"
+                $missed += "$Tag$language-$($shot.Key): $($_.Exception.Message)"
             }
             Stop-Apps
             Start-Sleep -Milliseconds 500
@@ -719,9 +724,9 @@ Step 'Screen set' {
             Start-Sleep -Seconds 1
             $process = Start-App -Language $language
             [void](Find-Element $process { param($n) $n -eq $words['recovery-title'] } 20 'the recovery notice')
-            $taken += Save-Screen "$language-recovery"
+            $taken += Save-Screen "$Tag$language-recovery"
         } catch {
-            $missed += "$language-recovery: $($_.Exception.Message)"
+            $missed += "$Tag$language-recovery: $($_.Exception.Message)"
         }
         Stop-Apps
     }
@@ -729,6 +734,21 @@ Step 'Screen set' {
         throw "missed $($missed.Count): $($missed -join ' // '); took $($taken.Count)"
     }
     "took $($taken.Count): $($taken -join ', ')"
+}
+
+Step 'Screen set' { Invoke-ScreenSet @('ko', 'en') }
+
+# The Sandbox's display takes the host's scale and cannot be changed, so the
+# app draws its interface at 100% itself (UGURUGU_UI_SCALE): the pixels of a
+# 100% display. Text is laid out in points, so each language overflows or not
+# alike at any scale.
+Step 'Screen set at 100%' {
+    $env:UGURUGU_UI_SCALE = '100'
+    try {
+        Invoke-ScreenSet @('ko', 'en', 'ja') '100-'
+    } finally {
+        Remove-Item Env:UGURUGU_UI_SCALE
+    }
 }
 
 Step 'Every tab comes back after a crash' {
