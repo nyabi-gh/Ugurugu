@@ -379,6 +379,22 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if pixel {
         settings.width = settings.width.round().max(1.0);
     }
+    // One setting for the brush and the eraser, as 2.2.13's; a pixel brush
+    // is the same width at any pressure.
+    if !pixel {
+        let mut uses_pressure = canvas.session().uses_pressure;
+        if widgets::check_row(
+            ui,
+            tr("pen-pressure"),
+            tr("pen-pressure-use"),
+            &mut uses_pressure,
+        )
+        .on_hover_text(tr("pen-pressure-tip"))
+        .changed()
+        {
+            canvas.edit(|session| session.uses_pressure = uses_pressure);
+        }
+    }
     let mut stabilization = settings.stabilizer * 100.0;
     slider_row(
         ui,

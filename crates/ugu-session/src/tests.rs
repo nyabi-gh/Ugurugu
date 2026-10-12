@@ -124,6 +124,37 @@ fn pen_pressure_is_kept_and_carried_to_the_lift() {
 }
 
 #[test]
+fn with_pressure_off_a_stroke_is_at_full_pressure_from_its_start() {
+    let mut session = session();
+    let pressed = |x: f64, pressure: f32, time: f64| InputPoint {
+        position: [x, 20.0],
+        pressure: Some(pressure),
+        time,
+    };
+    let pressures = |session: &Session| -> Vec<Vec<f32>> {
+        let mut all: Vec<Vec<f32>> = session
+            .document()
+            .store
+            .strokes
+            .values()
+            .map(|stroke| stroke.points.iter().map(|point| point.pressure).collect())
+            .collect();
+        all.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        all
+    };
+    session.uses_pressure = false;
+    session.begin_stroke(pressed(10.0, 0.2, 0.0)).unwrap();
+    // Turning it back on mid-stroke changes the next stroke, as in 2.2.13.
+    session.uses_pressure = true;
+    session.extend_stroke(pressed(20.0, 0.4, 8.0));
+    session.end_stroke(pressed(30.0, 0.0, 16.0)).unwrap();
+    assert_eq!(pressures(&session), [[1.0, 1.0, 1.0]]);
+    session.begin_stroke(pressed(10.0, 0.3, 24.0)).unwrap();
+    session.end_stroke(pressed(30.0, 0.0, 32.0)).unwrap();
+    assert_eq!(pressures(&session)[0], [0.3, 0.3]);
+}
+
+#[test]
 fn a_hidden_or_missing_layer_refuses_to_draw() {
     let mut session = session();
     let layer = session.current_layer();

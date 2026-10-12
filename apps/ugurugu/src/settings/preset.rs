@@ -59,10 +59,15 @@ pub fn write(tools: &Tools, wobble: Wobble) -> Vec<u8> {
         .find(|(style, _)| *style == motion.style)
         .map(|(_, name)| *name)
         .expect("every style is named");
+    // Pen pressure is the user's, not the tools', as 2.2.13 left it out.
+    let mut tools = tools::to_json(tools);
+    if let Some(tools) = tools.as_object_mut() {
+        tools.remove("tablet");
+    }
     let preset = json!({
         "format": FORMAT,
         "version": VERSION,
-        "tools": tools::to_json(tools),
+        "tools": tools,
         "motion": {
             "amount": wobble.amount,
             "style": style,
@@ -88,7 +93,10 @@ pub fn read(bytes: &[u8], tools: Tools, wobble: Wobble) -> Result<(Tools, Wobble
         return Err(PresetError::NotPreset);
     }
     let tools = match value.get("tools") {
-        Some(found) => tools::read(found, tools),
+        Some(found) => Tools {
+            uses_pressure: tools.uses_pressure,
+            ..tools::read(found, tools)
+        },
         None => tools,
     };
     let wobble = match value.get("motion") {
@@ -214,6 +222,28 @@ mod tests {
         let mine = Tools::default();
         let (read, _) = read(&write(&tools, wobble()), mine.clone(), wobble()).unwrap();
         assert_eq!(read.colors, mine.colors);
+    }
+
+    #[test]
+    fn pen_pressure_is_not_in_a_preset() {
+        let tools = Tools {
+            uses_pressure: false,
+            ..tools()
+        };
+        let bytes = write(&tools, wobble());
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["tools"].get("tablet"), None);
+        let mine = Tools::default();
+        let (read, _) = read(&bytes, mine.clone(), wobble()).unwrap();
+        assert!(read.uses_pressure);
+        // Nor is it taken from a file that has it.
+        let edited = json!({
+            "format": FORMAT,
+            "version": VERSION,
+            "tools": { "tablet": { "pressure": false } },
+        });
+        let (read, _) = super::read(edited.to_string().as_bytes(), mine, wobble()).unwrap();
+        assert!(read.uses_pressure);
     }
 
     #[test]

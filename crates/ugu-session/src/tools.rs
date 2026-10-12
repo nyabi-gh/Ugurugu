@@ -59,6 +59,7 @@ pub struct Tools {
     pub remembered: HashMap<&'static str, (f32, f32)>,
     pub selection_shape: ShapeKind,
     pub lasso_paints: bool,
+    pub uses_pressure: bool,
     pub fill: FillSettings,
     pub transform_sampling: Sampling,
     pub text: TextSettings,
@@ -75,6 +76,7 @@ impl Default for Tools {
             remembered: HashMap::new(),
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
+            uses_pressure: true,
             fill: FillSettings::DEFAULT,
             transform_sampling: Sampling::Smooth,
             text: TextSettings::DEFAULT,
@@ -93,6 +95,7 @@ impl Session {
             remembered: self.remembered.clone(),
             selection_shape: self.selection_shape,
             lasso_paints: self.lasso_paints,
+            uses_pressure: self.uses_pressure,
             fill: self.fill,
             transform_sampling: self.transform_sampling,
             text: self.text.clone(),
@@ -111,6 +114,7 @@ impl Session {
             remembered,
             selection_shape,
             lasso_paints,
+            uses_pressure,
             fill,
             transform_sampling,
             text,
@@ -122,6 +126,7 @@ impl Session {
         self.remembered = remembered;
         self.selection_shape = selection_shape;
         self.lasso_paints = lasso_paints;
+        self.uses_pressure = uses_pressure;
         self.fill = fill;
         self.transform_sampling = transform_sampling;
         self.text = text;

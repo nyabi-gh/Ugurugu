@@ -51,18 +51,22 @@ fn category_name(category: Category) -> &'static str {
 pub struct Presets {
     /// The brush category shown; `None` follows the current brush.
     category: Option<Category>,
-    /// Preview frames by preset and frame, for `scale` pixels per point.
+    /// Preview frames by preset and frame, for `scale` pixels per point and
+    /// pen pressure on or off.
     previews: HashMap<(&'static str, u32), egui::TextureHandle>,
     scale: f32,
+    pressure: bool,
     renderer: Option<DocumentRenderer>,
 }
 
 impl Presets {
     pub fn show(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, tool: Tool) {
         let scale = ui.ctx().pixels_per_point();
-        if scale != self.scale {
+        let pressure = canvas.session().uses_pressure;
+        if scale != self.scale || pressure != self.pressure {
             self.previews.clear();
             self.scale = scale;
+            self.pressure = pressure;
         }
         let current = match tool {
             Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
@@ -220,7 +224,7 @@ impl Presets {
         let document = if is_eraser(preset) {
             eraser_preview(preset, scale)
         } else {
-            brush_preview(preset, scale)
+            brush_preview(preset, scale, self.pressure)
         };
         let size = document.canvas;
         let mut pixmap = Pixmap::new(size[0] as u16, size[1] as u16);
@@ -283,8 +287,8 @@ fn with_ops(mut document: Document, ops: Vec<Op>) -> Document {
 }
 
 /// 2.2.13's brush preview: a gentle curve across the card, pressing
-/// hardest in the middle, at most 14 points wide.
-fn brush_preview(preset: &Preset, scale: f32) -> Document {
+/// hardest in the middle when pen pressure is on, at most 14 points wide.
+fn brush_preview(preset: &Preset, scale: f32, pressure: bool) -> Document {
     let mut document = preview_document(BRUSH_PREVIEW, scale);
     let samples = 26;
     let curve = (0..samples).map(|index| {
@@ -294,7 +298,12 @@ fn brush_preview(preset: &Preset, scale: f32) -> Document {
             10.0 + t * (BRUSH_PREVIEW[0] - 20.0),
             BRUSH_PREVIEW[1] * 0.5 - wave,
         ];
-        (at, 0.2 + 0.8 * (t * std::f32::consts::PI).sin())
+        let pressed = if pressure {
+            0.2 + 0.8 * (t * std::f32::consts::PI).sin()
+        } else {
+            1.0
+        };
+        (at, pressed)
     });
     let stroke = store::Stroke {
         points: points(curve, scale),
@@ -375,9 +384,11 @@ mod tests {
     fn every_preview_is_a_valid_document_that_shows_its_preset() {
         for scale in [1.0, 1.5] {
             for preset in &BRUSHES {
-                let document = brush_preview(preset, scale);
-                document.validate().unwrap();
-                assert!(drawn(&document) > 0, "{}", preset.id);
+                for pressure in [true, false] {
+                    let document = brush_preview(preset, scale, pressure);
+                    document.validate().unwrap();
+                    assert!(drawn(&document) > 0, "{}", preset.id);
+                }
             }
             for preset in &ERASERS {
                 let document = eraser_preview(preset, scale);
@@ -390,5 +401,15 @@ mod tests {
                 assert!(rubbed > 0 && rubbed < drawn(&band), "{}", preset.id);
             }
         }
+    }
+
+    #[test]
+    fn without_pen_pressure_a_preview_is_wider() {
+        let ink = BRUSHES
+            .iter()
+            .find(|preset| preset.id == "ink-pen")
+            .unwrap();
+        // Pressure under 1 only thins the stroke.
+        assert!(drawn(&brush_preview(ink, 1.0, false)) > drawn(&brush_preview(ink, 1.0, true)));
     }
 }

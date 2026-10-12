@@ -1296,3 +1296,15 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 | 고치기 전(`988a898^`) | 누른 직후 한 프레임 52,934(넓이 54,000) | 누른 직후 한 프레임 40,502 |
 
 커서(6회차): top left sizenwse, top right sizenesw, bottom right sizenwse, bottom left sizenesw, top sizens, right sizewe, bottom sizens, left sizewe, inside sizeall, outside (turn) arrow.
+
+## 33. 필압 켜고 끄기 (2026-10-12, `rust/m6-finish`, Windows Sandbox)
+
+`tools/sandbox/pointer.ps1`(`prepare.ps1 -Scenario pointer`) 13단계 모두 통과. 새 단계는 "Use tablet pressure" 체크 상자를 UIA Toggle로 끄고, 압력 64→1024(/1024) 합성 펜 획 61점을 그은 뒤 다시 켠다. 복구 파일을 `ugu-doc strokes`로 읽었다.
+
+| 단계 | 결과 | 저장된 획 |
+|---|---|---|
+| Pressure from 64 to 1024 of 1024 | pass | points 61, pressure 0.062..1.000 |
+| Pen pressure off draws at full pressure | pass | points 61, pressure 1.000..1.000; 다시 켜짐 True |
+
+나머지 단계(barrel, hover, 창 밖 해제, 1000개/초, 지우개 플래그, 터치 팬·핀치·회전·한 손가락)도 30절과 같은 결과다.
+

@@ -118,6 +118,8 @@ pub struct LiveStroke {
     /// The selection the stroke is cut to.
     pub clip: Option<Arc<Selection>>,
     stabilizer: Stabilizer,
+    /// The pressure setting when the stroke began, which it keeps.
+    uses_pressure: bool,
 }
 
 impl LiveStroke {
@@ -162,6 +164,9 @@ pub struct Session {
     pub selection_shape: ShapeKind,
     /// The selection tool fills its shape instead of selecting.
     pub lasso_paints: bool,
+    /// Pen pressure varies the brush and eraser; off, every point is at
+    /// full pressure, as 2.2.13's tablet pressure setting.
+    pub uses_pressure: bool,
     /// How the wand and the bucket find an area, and how fills look.
     pub fill: FillSettings,
     /// How a transformed selection is resampled.
@@ -195,6 +200,7 @@ impl Session {
             live: None,
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
+            uses_pressure: true,
             fill: FillSettings::DEFAULT,
             transform_sampling: Sampling::Smooth,
             pending: None,
@@ -387,10 +393,14 @@ impl Session {
             layer: self.layer,
             erase,
             template,
-            points: vec![point(position, pressure(input.pressure))],
+            points: vec![point(
+                position,
+                pressure(input.pressure, self.uses_pressure),
+            )],
             replaced_last: false,
             clip: self.clip(),
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
+            uses_pressure: self.uses_pressure,
         });
         Ok(())
     }
@@ -411,7 +421,10 @@ impl Session {
         if distance(position, last) < MIN_POINT_DISTANCE {
             return false;
         }
-        live.points.push(point(position, pressure(input.pressure)));
+        live.points.push(point(
+            position,
+            pressure(input.pressure, live.uses_pressure),
+        ));
         true
     }
 
@@ -723,10 +736,13 @@ fn clamp_position(position: [f64; 2]) -> [f64; 2] {
     position.map(|value| value.clamp(-limit, limit))
 }
 
-/// Devices without pressure draw at full pressure; a pen's light touch never
-/// reaches zero width.
-fn pressure(pressure: Option<f32>) -> f32 {
-    pressure.map_or(1.0, |pressure| pressure.clamp(0.05, 1.0))
+/// Devices without pressure, and any with pressure not `used`, draw at full
+/// pressure; a pen's light touch never reaches zero width.
+fn pressure(pressure: Option<f32>, used: bool) -> f32 {
+    match pressure {
+        Some(pressure) if used => pressure.clamp(0.05, 1.0),
+        _ => 1.0,
+    }
 }
 
 fn point(position: [f64; 2], pressure: f32) -> Point {

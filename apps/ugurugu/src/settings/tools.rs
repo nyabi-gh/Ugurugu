@@ -213,6 +213,9 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
             &mut tools.transform_sampling,
         );
     }
+    if let Some(tablet) = object(value, "tablet") {
+        boolean(tablet, "pressure", &mut tools.uses_pressure);
+    }
     if let Some(fill) = object(value, "fill") {
         named(fill, "reads", &READS, &mut tools.fill.reads);
         boolean(fill, "byColour", &mut tools.fill.by_colour);
@@ -277,6 +280,7 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "paint": tools.lasso_paints,
             "sampling": name(&SAMPLINGS, tools.transform_sampling),
         },
+        "tablet": { "pressure": tools.uses_pressure },
         "fill": {
             "reads": name(&READS, tools.fill.reads),
             "byColour": tools.fill.by_colour,
@@ -318,6 +322,7 @@ mod tests {
             tool: Tool::Wand,
             selection_shape: ShapeKind::Ellipse,
             lasso_paints: true,
+            uses_pressure: false,
             transform_sampling: Sampling::Nearest,
             ..Tools::default()
         };
@@ -370,6 +375,7 @@ mod tests {
             },
             "selection": { "shape": 3, "sampling": "nearest" },
             "fill": { "tolerance": 400, "reads": "marked" },
+            "tablet": { "pressure": "off" },
             "text": { "size": 2, "family": "" },
         }));
         assert_eq!(tools.tool, Tool::Pen);
@@ -383,6 +389,7 @@ mod tests {
         // "ink-pen" is in use, "nothing" no preset.
         assert!(tools.remembered.is_empty());
         assert_eq!(tools.transform_sampling, Sampling::Nearest);
+        assert!(tools.uses_pressure);
         assert_eq!(tools.fill.tolerance, 255);
         assert_eq!(tools.fill.reads, Reads::Marked);
         assert_eq!(tools.text.size, *TextSettings::SIZE.start());

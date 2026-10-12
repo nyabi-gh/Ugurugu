@@ -356,6 +356,25 @@ function Get-Value([string] $Name) {
     [double]$value
 }
 
+# Sets the check box named $Name and returns whether it is now on.
+function Set-Toggle([string] $Name, [bool] $On) {
+    $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $pattern = Wait-Until {
+        foreach ($element in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
+            $found = $null
+            if ($element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$found)) {
+                return , $found
+            }
+        }
+    } 10 "a check box named '$Name'"
+    if (($pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On) -ne $On) {
+        $pattern.Toggle()
+        Start-Sleep -Milliseconds 500
+    }
+    $pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On
+}
+
 function Get-Field([string] $Line, [string] $Name) {
     $words = $Line -split '\s+'
     $words[[array]::IndexOf($words, $Name) + 1]
@@ -425,6 +444,27 @@ Step 'Pressure from 64 to 1024 of 1024' {
         throw "Pressure $first .. ${last}: $($new[0])"
     }
     $new[0]
+}
+
+Step 'Pen pressure off draws at full pressure' {
+    if (Set-Toggle 'Use tablet pressure' $false) {
+        throw 'The check box stayed on'
+    }
+    $points = @(0..60 | ForEach-Object { , @(($cx - 300 + $_ * 10), ($cy - 150), (64 + $_ * 16)) })
+    Pen-Stroke $points
+    $on = Set-Toggle 'Use tablet pressure' $true
+    $lines = @(Get-Strokes -Changed)
+    $new = @($lines | Select-Object -Skip $script:before)
+    $script:before = $lines.Count
+    if ($new.Count -ne 1 -or $new[0] -notmatch ' paint ') {
+        throw "Strokes: $($new -join '; ')"
+    }
+    $first = [double](Get-Field $new[0] 'first')
+    $last = [double](Get-Field $new[0] 'last')
+    if ($first -ne 1 -or $last -ne 1 -or -not $on) {
+        throw "Pressure $first .. ${last}, back on: ${on}: $($new[0])"
+    }
+    "$($new[0]); back on: $on"
 }
 
 Step 'Barrel held does not draw' {
