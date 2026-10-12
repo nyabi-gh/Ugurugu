@@ -210,7 +210,6 @@ tool-settings = 도구 설정
 size = 크기
 brush-size = 브러시 크기
 eraser-size = 지우개 크기
-pen-pressure = 필압
 pen-pressure-use = 필압 반영
 pen-pressure-tip = 필압에 따라 선의 크기와 불투명도를 바꿉니다
 stabilization = 손떨림 보정

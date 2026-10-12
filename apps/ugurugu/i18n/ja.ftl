@@ -210,7 +210,6 @@ tool-settings = ツール設定
 size = サイズ
 brush-size = ブラシサイズ
 eraser-size = 消しゴムサイズ
-pen-pressure = 筆圧
 pen-pressure-use = タブレットの筆圧を反映
 pen-pressure-tip = タブレットの筆圧に応じて線のサイズと不透明度を変えます
 stabilization = 手ぶれ補正

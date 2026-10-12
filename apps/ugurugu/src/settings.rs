@@ -124,7 +124,11 @@ impl Settings {
     pub fn restored(&self) -> Self {
         Self {
             export_edge: self.export_edge,
-            tools: self.tools.clone(),
+            // Pen pressure is the one tool setting the dialog shows.
+            tools: Tools {
+                uses_pressure: Tools::default().uses_pressure,
+                ..self.tools.clone()
+            },
             shortcuts: self.shortcuts.restored(),
             update_checked: self.update_checked,
             layout: self.layout.clone(),
@@ -716,6 +720,16 @@ mod tests {
             assert_eq!(parse_rgb(accent), None, "{accent}");
         }
         assert_eq!(parse_rgb("#FFc94a"), Some([0xff, 0xc9, 0x4a]));
+    }
+
+    #[test]
+    fn restoring_the_defaults_turns_pen_pressure_back_on_and_keeps_the_brushes() {
+        let mut settings = Settings::default();
+        settings.tools.uses_pressure = false;
+        settings.tools.plain.pen.width = 31.0;
+        let restored = settings.restored();
+        assert!(restored.tools.uses_pressure);
+        assert_eq!(restored.tools.plain, settings.tools.plain);
     }
 
     #[test]

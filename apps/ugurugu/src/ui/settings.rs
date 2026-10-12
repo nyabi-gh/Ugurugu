@@ -115,6 +115,7 @@ pub fn apply(
     theme::set_accent(ctx, settings.accent);
     theme::set_mode(ctx, settings.theme);
     canvas.allow_animation(settings.wobble_animation);
+    canvas.tools_mut().uses_pressure = settings.tools.uses_pressure;
     files.set_default_save_folder(settings.default_save_folder.clone());
     files.set_export_edge(settings.export_edge);
     files.follow_updates(settings.check_updates, settings.update_checked);
@@ -450,6 +451,15 @@ fn drawing(ui: &mut egui::Ui, settings: &mut Settings) {
             tr("settings-pixel-grid"),
             Some(tr("settings-pixel-grid-tip")),
             &mut settings.pixel_grid,
+            true,
+        );
+        // Every brush and eraser at once; no tool keeps its own.
+        widgets::switch_row(
+            ui,
+            false,
+            tr("pen-pressure-use"),
+            Some(tr("pen-pressure-tip")),
+            &mut settings.tools.uses_pressure,
             true,
         );
     });

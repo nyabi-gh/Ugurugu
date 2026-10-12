@@ -208,7 +208,6 @@ tool-settings | ugurugu::ToolDock | Tool settings
 size | ugurugu::BrushSizeRow | SIZE
 brush-size | ugurugu::BrushSizeRow | Brush size
 eraser-size | ugurugu::BrushSizeRow | Eraser size
-pen-pressure | ugurugu::TabletPressureRow | PEN PRESSURE
 pen-pressure-use | ugurugu::TabletPressureRow | Use tablet pressure
 pen-pressure-tip | ugurugu::TabletPressureRow | Vary stroke size and opacity with tablet pressure
 stabilization | ugurugu::StrokeStabilizationRow | STABILIZATION

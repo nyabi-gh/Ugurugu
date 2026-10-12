@@ -210,7 +210,6 @@ tool-settings = Tool settings
 size = SIZE
 brush-size = Brush size
 eraser-size = Eraser size
-pen-pressure = PEN PRESSURE
 pen-pressure-use = Use tablet pressure
 pen-pressure-tip = Vary stroke size and opacity with tablet pressure
 stabilization = STABILIZATION
