@@ -749,8 +749,8 @@ impl RenderThread {
             ants: shown_ants,
         } = shown.expect("the frame ran");
         // Tools change through the panels, shortcuts and the canvas.
-        let tools = self.canvas.session().tools();
-        if tools != self.settings.get().tools {
+        if *self.canvas.tools() != self.settings.get().tools {
+            let tools = self.canvas.tools().clone();
             self.settings.change(|settings| settings.tools = tools);
         }
         if self.files.updates_checked() != self.settings.get().update_checked {

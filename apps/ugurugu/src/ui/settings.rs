@@ -72,8 +72,9 @@ fn language_name(language: Language) -> &'static str {
 
 /// Puts the tools and colour history kept in `settings` back, at start.
 pub fn restore_tools(settings: &Settings, canvas: &mut Canvas) {
-    let tools = settings.tools.clone();
-    canvas.edit_settled(|session| session.set_tools(tools));
+    if canvas.set_tools(settings.tools.clone()).is_err() {
+        tracing::warn!("the tools were not restored: an edit is pending");
+    }
 }
 
 /// Puts `settings` into effect everywhere but the interface language, which

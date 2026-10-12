@@ -62,7 +62,7 @@ pub struct Presets {
 impl Presets {
     pub fn show(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, tool: Tool) {
         let scale = ui.ctx().pixels_per_point();
-        let pressure = canvas.session().uses_pressure;
+        let pressure = canvas.tools().uses_pressure;
         if scale != self.scale || pressure != self.pressure {
             self.previews.clear();
             self.scale = scale;
@@ -70,9 +70,9 @@ impl Presets {
         }
         let current = match tool {
             Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                canvas.session().pen.preset
+                canvas.brushes().pen.preset
             }
-            Tool::Eraser => canvas.session().eraser.preset,
+            Tool::Eraser => canvas.brushes().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
             // Pixel mode has the pixel ones alone, with no tabs.
@@ -156,7 +156,7 @@ impl Presets {
                 }
             });
         if let Some(preset) = chosen {
-            canvas.edit(|session| session.choose_preset(tool, preset));
+            canvas.choose_preset(tool, preset);
         }
     }
 

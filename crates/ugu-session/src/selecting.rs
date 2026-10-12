@@ -14,7 +14,7 @@ use ugu_core::history::Group;
 use ugu_core::ops::MaskId;
 use ugu_core::selection::{Combine, Selection, Shape};
 
-use crate::{FillError, Session};
+use crate::{FillError, Session, Tools};
 
 /// A freehand point is added once the pointer is this far from the last.
 const FREEHAND_STEP: f64 = 1.0;
@@ -71,10 +71,10 @@ impl Session {
         [0, 1].map(|axis| position[axis].clamp(0.0, f64::from(canvas[axis])))
     }
 
-    pub fn begin_selection(&mut self, position: [f64; 2], combine: Combine) {
+    pub fn begin_selection(&mut self, kind: ShapeKind, position: [f64; 2], combine: Combine) {
         self.live = None;
         self.lasso = Some(Lasso {
-            kind: self.selection_shape,
+            kind,
             combine,
             points: vec![self.on_canvas(position)],
         });
@@ -105,14 +105,17 @@ impl Session {
     /// fills it; returns whether anything changed. A shape too small to
     /// select, as a click, clears the selection when replacing and does
     /// nothing otherwise.
-    pub fn end_selection(&mut self, position: [f64; 2]) -> Result<bool, FillError> {
+    pub fn end_selection(&mut self, tools: &Tools, position: [f64; 2]) -> Result<bool, FillError> {
         self.extend_selection(position);
         let Some(lasso) = self.lasso.take() else {
             return Ok(false);
         };
         let shape = Selection::of_shape(&lasso.shape(), self.document().canvas);
-        if self.lasso_paints {
-            return Ok(matches!(self.fill_shape(shape)?, Outcome::Committed(_)));
+        if tools.lasso_paints {
+            return Ok(matches!(
+                self.fill_shape(tools, shape)?,
+                Outcome::Committed(_)
+            ));
         }
         let label = match (lasso.combine, &shape) {
             (Combine::Replace, None) => "Deselect",

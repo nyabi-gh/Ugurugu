@@ -4,7 +4,7 @@
 //! Text placed on the canvas and not yet in the document. The caller lays
 //! the text out with its fonts and hands the outline over; the session
 //! keeps where it goes and turns it into strokes and a fill when applied,
-//! in the pen's colour, width and brush at that moment. Like a pending
+//! in the brush's colour, width and kind the window last handed in. Like a pending
 //! transform, undo, redo or Esc drop it and any other edit applies it
 //! first.
 
@@ -21,7 +21,7 @@ use ugu_core::store::{Brush, Stroke, limits};
 use ugu_core::text::{self, Outline};
 
 use crate::transforming::Ended;
-use crate::{FillError, Session, selecting};
+use crate::{FillError, Session, ToolSettings, Tools, selecting};
 
 /// The text tool's settings.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +43,25 @@ impl TextSettings {
         size: 48.0,
         filled: false,
     };
+}
+
+/// What placed text is drawn with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextStyle {
+    /// The brush of the brushes for the document's mode.
+    pub pen: ToolSettings,
+    pub color: Rgba8,
+    pub filled: bool,
+}
+
+impl TextStyle {
+    pub fn of(tools: &Tools, pixel_mode: bool) -> Self {
+        Self {
+            pen: tools.brushes(pixel_mode).pen,
+            color: tools.color,
+            filled: tools.text.filled,
+        }
+    }
 }
 
 /// Text placed but not applied.
@@ -72,9 +91,20 @@ impl Session {
         self.placed.as_ref()
     }
 
+    /// What placed text is drawn with: the tools as last handed in.
+    pub fn text_style(&self) -> &TextStyle {
+        &self.style.text
+    }
+
     /// Puts the text's top left at `at`, placing it on the current layer if
     /// it is not placed yet.
-    pub fn place_text(&mut self, at: [f64; 2], outline: Arc<Outline>) -> Result<(), FillError> {
+    pub fn place_text(
+        &mut self,
+        tools: &Tools,
+        at: [f64; 2],
+        outline: Arc<Outline>,
+    ) -> Result<(), FillError> {
+        self.use_tools(tools);
         if let Some(placed) = self.placed.as_mut() {
             placed.at = at;
             placed.outline = outline;
@@ -101,34 +131,34 @@ impl Session {
         }
     }
 
-    /// What the placed text draws with the pen as it is now; `None` when
-    /// none is placed.
+    /// What the placed text draws with the brush as last handed in; `None`
+    /// when none is placed.
     pub fn text_drawing(&self) -> Option<TextDrawing> {
         let placed = self.placed.as_ref()?;
+        let style = &self.style.text;
         let template = Stroke {
             points: Arc::from([]),
-            color: self.pen.color,
-            width: self
+            color: style.color,
+            width: style
                 .pen
                 .width
                 .clamp(*limits::STROKE_WIDTH.start(), *limits::STROKE_WIDTH.end()),
             brush: Brush {
-                antialias: self.pen.antialias,
-                ..self.pen.preset.brush
+                antialias: style.pen.antialias,
+                ..style.pen.preset.brush
             },
             seed: 0,
         };
         let contours = &placed.outline.contours;
         Some(TextDrawing {
             layer: placed.layer,
-            fill: self
-                .text
+            fill: style
                 .filled
                 .then(|| text::coverage(contours, placed.at, self.document().canvas))
                 .flatten(),
             strokes: text::strokes(contours, placed.at, &template, placed.seed),
             clip: self.clip(),
-            antialias: self.pen.antialias && !self.pixel_mode(),
+            antialias: style.pen.antialias && !self.pixel_mode(),
         })
     }
 
@@ -143,7 +173,7 @@ impl Session {
             self.ended = Some(Ended::Dropped);
             return Ok(Outcome::NoChange);
         }
-        let color = self.pen.color;
+        let color = self.style.text.color;
         let outcome = self
             .history
             .group("Add text", |group| text_into(group, drawing, color))?;
@@ -153,7 +183,7 @@ impl Session {
             self.ended = Some(Ended::Applied {
                 revision: self.history.revision(),
             });
-            self.colors.record(color);
+            self.used.push(color);
         }
         Ok(outcome)
     }

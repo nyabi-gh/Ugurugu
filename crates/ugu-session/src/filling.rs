@@ -14,7 +14,7 @@ use ugu_core::command;
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::selection::{Combine, Compare, Selection};
 
-use crate::{Session, selecting};
+use crate::{Session, Tools, selecting};
 
 /// Which layers the wand and the bucket read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -91,11 +91,16 @@ impl Session {
     }
 
     /// The area around `seed` in `reference`, the frame shown as
-    /// `self.fill.reads` says (premultiplied rows of the canvas); `None`
-    /// when there was nothing to read.
-    fn area(&self, seed: [u32; 2], reference: Option<&[[u8; 4]]>) -> Result<Selection, FillError> {
+    /// `fill.reads` says (premultiplied rows of the canvas); `None` when
+    /// there was nothing to read.
+    fn area(
+        &self,
+        seed: [u32; 2],
+        reference: Option<&[[u8; 4]]>,
+        fill: &FillSettings,
+    ) -> Result<Selection, FillError> {
         let reference = reference.ok_or(FillError::NoReference)?;
-        Selection::flood(reference, self.document().canvas, seed, self.fill.compare())
+        Selection::flood(reference, self.document().canvas, seed, fill.compare())
             .ok_or(FillError::NothingThere)
     }
 
@@ -105,6 +110,7 @@ impl Session {
     /// the selection tool does, and the reason is returned.
     pub fn wand(
         &mut self,
+        tools: &Tools,
         position: [f64; 2],
         combine: Combine,
         reference: Option<&[[u8; 4]]>,
@@ -115,7 +121,7 @@ impl Session {
             // Off the canvas, as a click with the selection tool.
             return Ok(combine == Combine::Replace && self.history_mut()?.select("Deselect", None));
         };
-        let area = match self.area(seed, reference) {
+        let area = match self.area(seed, reference, &tools.fill) {
             Ok(area) => area,
             Err(error) => {
                 if combine == Combine::Replace {
@@ -138,6 +144,7 @@ impl Session {
     /// inside it fills.
     pub fn bucket(
         &mut self,
+        tools: &Tools,
         position: [f64; 2],
         reference: Option<&[[u8; 4]]>,
     ) -> Result<Outcome, FillError> {
@@ -152,28 +159,32 @@ impl Session {
         {
             return Err(FillError::OutsideSelection);
         }
-        let area = self.area(seed, reference)?;
-        self.commit_fill(&area, self.clip())
+        let area = self.area(seed, reference, &tools.fill)?;
+        self.commit_fill(tools, &area, self.clip())
     }
 
     /// Fills the selection on the current layer with the brush colour.
-    pub fn fill_selection(&mut self) -> Result<Outcome, FillError> {
+    pub fn fill_selection(&mut self, tools: &Tools) -> Result<Outcome, FillError> {
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
         // Cut to the selection too, so the softened edge stays inside the
         // marching ants.
         let clip = Some(selection.clone()).filter(|selection| !selection.covers_canvas());
-        self.commit_fill(&selection, clip)
+        self.commit_fill(tools, &selection, clip)
     }
 
     /// Fills `shape`'s pixels cut to the selection: the selection tool in
     /// paint mode. A shape too small to cover a pixel does nothing.
-    pub(crate) fn fill_shape(&mut self, shape: Option<Selection>) -> Result<Outcome, FillError> {
+    pub(crate) fn fill_shape(
+        &mut self,
+        tools: &Tools,
+        shape: Option<Selection>,
+    ) -> Result<Outcome, FillError> {
         self.paintable()?;
         let Some(shape) = shape else {
             return Ok(Outcome::NoChange);
         };
-        self.commit_fill(&shape, self.clip())
+        self.commit_fill(tools, &shape, self.clip())
     }
 
     pub(crate) fn paintable(&self) -> Result<(), FillError> {
@@ -186,11 +197,12 @@ impl Session {
 
     fn commit_fill(
         &mut self,
+        tools: &Tools,
         coverage: &Selection,
         clip: Option<Arc<Selection>>,
     ) -> Result<Outcome, FillError> {
-        let antialias = self.fill.antialias && !self.pixel_mode();
-        let (layer, color) = (self.layer, self.pen.color);
+        let antialias = tools.fill.antialias && !self.pixel_mode();
+        let (layer, color) = (self.layer, tools.color);
         let outcome = self.history_mut()?.group("Fill", |group| {
             let coverage = selecting::stored_mask(group, coverage)?;
             let clip = match &clip {
@@ -200,7 +212,7 @@ impl Session {
             group.apply(|document| command::fill(document, layer, coverage, color, antialias, clip))
         })?;
         if let Outcome::Committed(_) = outcome {
-            self.colors.record(color);
+            self.used.push(color);
         }
         Ok(outcome)
     }

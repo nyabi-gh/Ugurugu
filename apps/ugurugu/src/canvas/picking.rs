@@ -14,7 +14,7 @@ impl Canvas {
     /// or Alt with a tool that paints, as in 2.2.13. The selection tools take
     /// Alt to subtract.
     pub fn picks_with(&self, alt: bool) -> bool {
-        match self.session.tool() {
+        match self.tools.tool {
             Tool::Eyedropper => true,
             Tool::Pen | Tool::Eraser | Tool::Fill => alt,
             Tool::Select | Tool::Wand | Tool::Text => false,
@@ -48,7 +48,7 @@ impl Canvas {
         let row = at(y, origin[1], pixels.height());
         let pixel = pixels.data_as_u8_slice().as_chunks::<4>().0
             [row * usize::from(pixels.width()) + column];
-        self.session.pick_color(pixel);
+        self.tools.pick_color(pixel);
     }
 
     /// What the selection touches on the current layer, for the stroke

@@ -271,13 +271,13 @@ fn a_colour_can_be_typed() {
     window.key(Modifiers::COMMAND, Key::A);
     window.frame(vec![Event::Text("#8000FF00".to_owned())]);
     window.key(NONE, Key::Enter);
-    assert_eq!(window.canvas.session().pen.color, Rgba8([0, 255, 0, 128]));
+    assert_eq!(window.canvas.tools().color, Rgba8([0, 255, 0, 128]));
     // Escape leaves the colour.
     window.tab_to(|_, role| role == Role::TextInput);
     window.key(Modifiers::COMMAND, Key::A);
     window.frame(vec![Event::Text("#FFFF0000".to_owned())]);
     window.key(NONE, Key::Escape);
-    assert_eq!(window.canvas.session().pen.color, Rgba8([0, 255, 0, 128]));
+    assert_eq!(window.canvas.tools().color, Rgba8([0, 255, 0, 128]));
 }
 
 #[test]

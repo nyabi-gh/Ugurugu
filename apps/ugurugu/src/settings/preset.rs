@@ -59,12 +59,10 @@ pub fn write(tools: &Tools, wobble: Wobble) -> Vec<u8> {
         .find(|(style, _)| *style == motion.style)
         .map(|(_, name)| *name)
         .expect("every style is named");
-    // Pen pressure is the user's, not the tools', as 2.2.13 left it out;
-    // what pixel mode replaced belongs to the window's document.
+    // Pen pressure is the user's, not the tools', as 2.2.13 left it out.
     let mut tools = tools::to_json(tools);
     if let Some(tools) = tools.as_object_mut() {
         tools.remove("tablet");
-        tools.remove("beforePixel");
     }
     let preset = json!({
         "format": FORMAT,
@@ -97,7 +95,6 @@ pub fn read(bytes: &[u8], tools: Tools, wobble: Wobble) -> Result<(Tools, Wobble
     let tools = match value.get("tools") {
         Some(found) => Tools {
             uses_pressure: tools.uses_pressure,
-            before_pixel: tools.before_pixel,
             ..tools::read(found, tools)
         },
         None => tools,
@@ -181,12 +178,12 @@ mod tests {
             tool: Tool::Fill,
             ..Tools::default()
         };
-        tools.pen = ToolSettings {
+        tools.color = Rgba8([0, 0, 255, 255]);
+        tools.plain.pen = ToolSettings {
             preset: &brush::BRUSHES[3],
             width: 21.0,
             stabilizer: 0.3,
             antialias: true,
-            color: Rgba8([0, 0, 255, 255]),
         };
         tools.fill.tolerance = 12;
         tools
@@ -228,24 +225,19 @@ mod tests {
     }
 
     #[test]
-    fn pen_pressure_and_what_pixel_mode_replaced_are_not_in_a_preset() {
-        let tools = Tools {
+    fn pen_pressure_is_not_in_a_preset_and_the_pixel_brushes_are() {
+        let mut tools = Tools {
             uses_pressure: false,
-            before_pixel: Some(ugu_session::BeforePixel {
-                pen: &ugu_core::brush::BRUSHES[0],
-                eraser: &ugu_core::brush::ERASERS[0],
-                fill_antialias: true,
-            }),
             ..tools()
         };
+        tools.pixel.pen.width = 5.0;
         let bytes = write(&tools, wobble());
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["tools"].get("tablet"), None);
-        assert_eq!(value["tools"].get("beforePixel"), None);
         let mine = Tools::default();
         let (read, _) = read(&bytes, mine.clone(), wobble()).unwrap();
         assert!(read.uses_pressure);
-        assert_eq!(read.before_pixel, None);
+        assert_eq!(read.pixel, tools.pixel);
         // Nor is it taken from a file that has it.
         let edited = json!({
             "format": FORMAT,
@@ -276,7 +268,8 @@ mod tests {
         let (tools, wobble) = read(preset.to_string().as_bytes(), tools(), self::wobble()).unwrap();
         assert_eq!(tools.tool, Tool::Fill);
         assert_eq!(tools.fill.tolerance, 255);
-        assert_eq!(tools.pen, self::tools().pen);
+        assert_eq!(tools.plain.pen, self::tools().plain.pen);
+        assert_eq!(tools.color, self::tools().color);
         assert_eq!(wobble.amount, *limits::WOBBLE_AMOUNT.end());
         assert_eq!(wobble.motion.style, MotionStyle::Smooth);
         assert_eq!(wobble.motion.poses, 1);

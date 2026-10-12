@@ -227,6 +227,14 @@ impl Canvas {
         })
     }
 
+    /// Changes the tool, saying why when a pending transform or placed text
+    /// the document cannot take keeps it.
+    pub fn choose_tool(&mut self, tool: ugu_session::Tool) {
+        if self.set_tool(tool).is_err() {
+            self.notice = Some(tr("restyle-pending").to_owned());
+        }
+    }
+
     pub fn cancel_transform(&mut self) {
         self.edit(|session| session.cancel_transform());
     }
@@ -261,7 +269,8 @@ impl Canvas {
     }
 
     pub fn set_transform_sampling(&mut self, sampling: Sampling) {
-        self.edit(|session| session.transform_sampling = sampling);
+        self.tools.transform_sampling = sampling;
+        self.edit(|_| ());
         self.refresh_preview();
     }
 
@@ -367,7 +376,7 @@ impl Canvas {
         let preview = self.preview.as_mut().expect("made above");
         let wanted = (
             pending.transform,
-            self.session.sampling(),
+            self.session.sampling(self.tools.transform_sampling),
             pending.keep_source,
         );
         if let Some(view) = view {

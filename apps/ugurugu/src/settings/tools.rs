@@ -10,7 +10,7 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::STROKE_WIDTH;
 use ugu_session::{
-    BeforePixel, ColorHistory, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools,
+    Brushes, ColorHistory, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools, is_pixel,
 };
 
 const TOOLS: [(Tool, &str); 7] = [
@@ -102,10 +102,12 @@ pub(super) fn parse_color(text: &str) -> Option<Rgba8> {
     Some(Rgba8([channel(0)?, channel(2)?, channel(4)?, channel(6)?]))
 }
 
-/// The preset named `id` among `presets`, else `kept`.
+/// The preset named `id` among `presets`, a pixel one when `pixel_only`,
+/// else `kept`.
 fn preset(
     id: Option<&Value>,
     presets: &'static [Preset],
+    pixel_only: bool,
     kept: &'static Preset,
 ) -> &'static Preset {
     let Some(id) = id else {
@@ -113,7 +115,7 @@ fn preset(
     };
     presets
         .iter()
-        .find(|preset| id.as_str() == Some(preset.id))
+        .find(|preset| id.as_str() == Some(preset.id) && (!pixel_only || is_pixel(preset)))
         .unwrap_or_else(|| {
             tracing::warn!(%id, "unknown preset in the settings");
             kept
@@ -124,25 +126,21 @@ pub(super) fn parse(value: &Value) -> Tools {
     read(value, Tools::default())
 }
 
-/// `tools` with what `value` holds taken over them.
-pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
-    let Some(top) = value.as_object() else {
-        tracing::warn!("the tool settings are not an object");
-        return tools;
-    };
-    named(top, "tool", &TOOLS, &mut tools.tool);
-
+/// `brushes` with what `value` holds taken over them: `brush`, `eraser` and
+/// every preset's width and stabilizer in `presets`.
+fn read_brushes(value: &Value, mut brushes: Brushes, pixel_only: bool) -> Brushes {
     // Every preset's width and stabilizer, the ones in use included; one
     // at its own is the same as one not kept.
-    for settings in [tools.pen, tools.eraser] {
+    for settings in [brushes.pen, brushes.eraser] {
         let kept = (settings.width, settings.stabilizer);
         if kept != (settings.preset.size, 0.0) {
-            tools.remembered.insert(settings.preset.id, kept);
+            brushes.remembered.insert(settings.preset.id, kept);
         }
     }
     if let Some(presets) = object(value, "presets") {
         for (id, kept) in presets {
-            let Some(preset) = brush::find(id) else {
+            let Some(preset) = brush::find(id).filter(|preset| !pixel_only || is_pixel(preset))
+            else {
                 tracing::warn!(id, "unknown preset in the settings");
                 continue;
             };
@@ -151,11 +149,11 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
             };
             let width = number(kept, "width", STROKE_WIDTH).unwrap_or(preset.size);
             let stabilizer = number(kept, "stabilizer", 0.0..=1.0).unwrap_or(0.0);
-            tools.remembered.insert(preset.id, (width, stabilizer));
+            brushes.remembered.insert(preset.id, (width, stabilizer));
         }
     }
     let settings_of = |chosen: &'static Preset, base: ToolSettings| {
-        let (width, stabilizer) = tools
+        let (width, stabilizer) = brushes
             .remembered
             .get(chosen.id)
             .copied()
@@ -171,47 +169,83 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
     let pen = preset(
         brush.and_then(|brush| brush.get("preset")),
         &brush::BRUSHES,
-        tools.pen.preset,
+        pixel_only,
+        brushes.pen.preset,
     );
-    tools.pen = settings_of(pen, tools.pen);
+    brushes.pen = settings_of(pen, brushes.pen);
     if let Some(brush) = brush {
-        if let Some(text) = brush.get("color") {
-            match text.as_str().and_then(parse_color) {
-                Some(color) => tools.pen.color = color,
-                None => tracing::warn!(%text, "the brush colour in the settings is not #rrggbbaa"),
-            }
-        }
-        boolean(brush, "antialias", &mut tools.pen.antialias);
+        boolean(brush, "antialias", &mut brushes.pen.antialias);
     }
     let eraser_value = object(value, "eraser");
     let eraser = preset(
         eraser_value.and_then(|eraser| eraser.get("preset")),
         &brush::ERASERS,
-        tools.eraser.preset,
+        pixel_only,
+        brushes.eraser.preset,
     );
     // Another eraser starts from its own antialiasing, as choosing it does.
-    let antialias = if eraser.id == tools.eraser.preset.id {
-        tools.eraser.antialias
+    let antialias = if eraser.id == brushes.eraser.preset.id {
+        brushes.eraser.antialias
     } else {
         eraser.brush.antialias
     };
-    tools.eraser = ToolSettings {
+    brushes.eraser = ToolSettings {
         antialias,
-        ..settings_of(eraser, tools.eraser)
+        ..settings_of(eraser, brushes.eraser)
     };
     if let Some(eraser) = eraser_value {
-        boolean(eraser, "antialias", &mut tools.eraser.antialias);
+        boolean(eraser, "antialias", &mut brushes.eraser.antialias);
     }
-    tools.remembered.remove(pen.id);
-    tools.remembered.remove(eraser.id);
-    if let Some(before) = object(value, "beforePixel") {
-        let mut fill_antialias = tools.fill.antialias;
-        boolean(before, "fillAntialias", &mut fill_antialias);
-        tools.before_pixel = Some(BeforePixel {
-            pen: preset(before.get("brush"), &brush::BRUSHES, tools.pen.preset),
-            eraser: preset(before.get("eraser"), &brush::ERASERS, tools.eraser.preset),
-            fill_antialias,
-        });
+    brushes.remembered.remove(pen.id);
+    brushes.remembered.remove(eraser.id);
+    brushes
+}
+
+/// Settings from before pixel mode had brushes of its own kept the pixel
+/// brush and eraser it chose in `brush` and `eraser`, and the ones they
+/// replaced in `beforePixel`: those go back out of pixel mode and the pixel
+/// ones become the pixel mode's.
+fn read_before_pixel(before: &Map<String, Value>, tools: &mut Tools) {
+    let pen = preset(
+        before.get("brush"),
+        &brush::BRUSHES,
+        false,
+        tools.plain.pen.preset,
+    );
+    let eraser = preset(
+        before.get("eraser"),
+        &brush::ERASERS,
+        false,
+        tools.plain.eraser.preset,
+    );
+    for (tool, chosen) in [(Tool::Pen, pen), (Tool::Eraser, eraser)] {
+        let replaced = *tools.plain.get(tool);
+        if !is_pixel(replaced.preset) {
+            continue;
+        }
+        *tools.pixel.get_mut(tool) = replaced;
+        tools.plain.choose(tool, chosen);
+        tools.plain.remembered.remove(replaced.preset.id);
+    }
+    boolean(before, "fillAntialias", &mut tools.fill.antialias);
+}
+
+/// `tools` with what `value` holds taken over them.
+pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
+    let Some(top) = value.as_object() else {
+        tracing::warn!("the tool settings are not an object");
+        return tools;
+    };
+    named(top, "tool", &TOOLS, &mut tools.tool);
+    if let Some(text) = object(value, "brush").and_then(|brush| brush.get("color")) {
+        match text.as_str().and_then(parse_color) {
+            Some(color) => tools.color = color,
+            None => tracing::warn!(%text, "the brush colour in the settings is not #rrggbbaa"),
+        }
+    }
+    tools.plain = read_brushes(value, tools.plain, false);
+    if let Some(pixel) = top.get("pixel") {
+        tools.pixel = read_brushes(pixel, tools.pixel, true);
     }
 
     if let Some(selection) = object(value, "selection") {
@@ -248,17 +282,21 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
         }
         boolean(text, "filled", &mut tools.text.filled);
     }
+    if let Some(before) = object(value, "beforePixel") {
+        read_before_pixel(before, &mut tools);
+    }
     tools
 }
 
-pub(super) fn to_json(tools: &Tools) -> Value {
+/// `brush`, `eraser` and `presets` of `brushes`.
+fn brushes_to_json(brushes: &Brushes) -> Map<String, Value> {
     let mut presets = Map::new();
-    let mut kept: Vec<(&str, (f32, f32))> = tools
+    let mut kept: Vec<(&str, (f32, f32))> = brushes
         .remembered
         .iter()
         .map(|(id, kept)| (*id, *kept))
         .collect();
-    for settings in [&tools.pen, &tools.eraser] {
+    for settings in [&brushes.pen, &brushes.eraser] {
         kept.retain(|(id, _)| *id != settings.preset.id);
         kept.push((settings.preset.id, (settings.width, settings.stabilizer)));
     }
@@ -268,6 +306,26 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             json!({ "width": width, "stabilizer": stabilizer }),
         );
     }
+    let mut object = Map::new();
+    object.insert(
+        "brush".to_owned(),
+        json!({
+            "preset": brushes.pen.preset.id,
+            "antialias": brushes.pen.antialias,
+        }),
+    );
+    object.insert(
+        "eraser".to_owned(),
+        json!({
+            "preset": brushes.eraser.preset.id,
+            "antialias": brushes.eraser.antialias,
+        }),
+    );
+    object.insert("presets".to_owned(), presets.into());
+    object
+}
+
+pub(super) fn to_json(tools: &Tools) -> Value {
     let mut text = Map::new();
     if let Some(family) = &tools.text.family {
         text.insert("family".to_owned(), family.clone().into());
@@ -276,16 +334,7 @@ pub(super) fn to_json(tools: &Tools) -> Value {
     text.insert("filled".to_owned(), tools.text.filled.into());
     let mut value = json!({
         "tool": name(&TOOLS, tools.tool),
-        "brush": {
-            "preset": tools.pen.preset.id,
-            "color": color_text(tools.pen.color),
-            "antialias": tools.pen.antialias,
-        },
-        "eraser": {
-            "preset": tools.eraser.preset.id,
-            "antialias": tools.eraser.antialias,
-        },
-        "presets": presets,
+        "pixel": brushes_to_json(&tools.pixel),
         "selection": {
             "shape": name(&SHAPES, tools.selection_shape),
             "paint": tools.lasso_paints,
@@ -300,15 +349,10 @@ pub(super) fn to_json(tools: &Tools) -> Value {
         },
         "text": text,
     });
-    if let (Some(before), Some(object)) = (tools.before_pixel, value.as_object_mut()) {
-        object.insert(
-            "beforePixel".to_owned(),
-            json!({
-                "brush": before.pen.id,
-                "eraser": before.eraser.id,
-                "fillAntialias": before.fill_antialias,
-            }),
-        );
+    let object = value.as_object_mut().expect("an object");
+    object.extend(brushes_to_json(&tools.plain));
+    if let Some(Value::Object(brush)) = object.get_mut("brush") {
+        brush.insert("color".to_owned(), color_text(tools.color).into());
     }
     value
 }
@@ -348,31 +392,33 @@ mod tests {
             transform_sampling: Sampling::Nearest,
             ..Tools::default()
         };
-        tools.pen = ToolSettings {
+        tools.color = Rgba8([10, 20, 30, 40]);
+        tools.plain.pen = ToolSettings {
             preset: &brush::BRUSHES[4],
             width: 33.5,
             stabilizer: 0.4,
             antialias: true,
-            color: Rgba8([10, 20, 30, 40]),
         };
-        tools.eraser = ToolSettings {
+        tools.plain.eraser = ToolSettings {
             preset: &brush::ERASERS[2],
             width: 80.0,
             stabilizer: 0.0,
             // Not the preset's own.
             antialias: !brush::ERASERS[2].brush.antialias,
-            ..ToolSettings::ERASER
         };
-        tools.remembered.insert(brush::BRUSHES[0].id, (12.0, 0.25));
-        tools.remembered.insert(brush::ERASERS[0].id, (40.0, 0.5));
+        tools
+            .plain
+            .remembered
+            .insert(brush::BRUSHES[0].id, (12.0, 0.25));
+        tools
+            .plain
+            .remembered
+            .insert(brush::ERASERS[0].id, (40.0, 0.5));
+        tools.pixel.pen.width = 3.0;
+        tools.pixel.eraser.stabilizer = 0.2;
         tools.fill.reads = Reads::Visible;
         tools.fill.by_colour = true;
         tools.fill.tolerance = 7;
-        tools.before_pixel = Some(BeforePixel {
-            pen: &brush::BRUSHES[0],
-            eraser: &brush::ERASERS[1],
-            fill_antialias: false,
-        });
         tools.fill.antialias = false;
         tools.text = TextSettings {
             family: Some("Malgun Gothic".to_owned()),
@@ -406,15 +452,15 @@ mod tests {
             "text": { "size": 2, "family": "" },
         }));
         assert_eq!(tools.tool, Tool::Pen);
-        assert_eq!(tools.pen.preset.id, brush::BRUSHES[0].id);
-        assert_eq!(tools.pen.width, *STROKE_WIDTH.end());
-        assert_eq!(tools.pen.stabilizer, 0.0);
-        assert_eq!(tools.pen.color, ToolSettings::PEN.color);
-        assert!(!tools.pen.antialias);
+        assert_eq!(tools.plain.pen.preset.id, brush::BRUSHES[0].id);
+        assert_eq!(tools.plain.pen.width, *STROKE_WIDTH.end());
+        assert_eq!(tools.plain.pen.stabilizer, 0.0);
+        assert_eq!(tools.color, Tools::default().color);
+        assert!(!tools.plain.pen.antialias);
         // A brush is no eraser.
-        assert_eq!(tools.eraser.preset.id, brush::ERASERS[0].id);
+        assert_eq!(tools.plain.eraser.preset.id, brush::ERASERS[0].id);
         // "ink-pen" is in use, "nothing" no preset.
-        assert!(tools.remembered.is_empty());
+        assert!(tools.plain.remembered.is_empty());
         assert_eq!(tools.transform_sampling, Sampling::Nearest);
         assert!(tools.uses_pressure);
         assert_eq!(tools.fill.tolerance, 255);
@@ -434,17 +480,65 @@ mod tests {
             }),
             kept.clone(),
         );
-        assert_eq!(tools.pen.preset.id, brush::BRUSHES[1].id);
-        assert_eq!(tools.pen.color, kept.pen.color);
+        assert_eq!(tools.plain.pen.preset.id, brush::BRUSHES[1].id);
+        assert_eq!(tools.color, kept.color);
         assert_eq!(tools.fill.tolerance, 9);
         assert_eq!(tools.fill.reads, kept.fill.reads);
         assert_eq!(tools.text, kept.text);
         // The brush left keeps its width for when it is chosen again.
         assert_eq!(
-            tools.remembered.get(kept.pen.preset.id),
-            Some(&(kept.pen.width, kept.pen.stabilizer))
+            tools.plain.remembered.get(kept.plain.pen.preset.id),
+            Some(&(kept.plain.pen.width, kept.plain.pen.stabilizer))
         );
-        assert!(!tools.remembered.contains_key(brush::BRUSHES[1].id));
+        assert!(!tools.plain.remembered.contains_key(brush::BRUSHES[1].id));
+        assert_eq!(tools.pixel, kept.pixel);
+    }
+
+    #[test]
+    fn pixel_mode_keeps_pixel_presets_alone() {
+        let tools = parse(&json!({
+            "pixel": {
+                "brush": { "preset": brush::BRUSHES[1].id },
+                "presets": { (brush::BRUSHES[1].id): { "width": 30 } },
+            },
+        }));
+        assert_eq!(tools.pixel, Brushes::pixel());
+    }
+
+    #[test]
+    fn settings_from_before_the_pixel_brushes_put_the_replaced_ones_back() {
+        let pencil = brush::find("pixel-pencil").unwrap();
+        let eraser = brush::find("pixel-eraser").unwrap();
+        let tools = parse(&json!({
+            "brush": { "preset": pencil.id, "color": "#102030ff" },
+            "eraser": { "preset": eraser.id },
+            "presets": {
+                (pencil.id): { "width": 2, "stabilizer": 0 },
+                (brush::BRUSHES[3].id): { "width": 17, "stabilizer": 0.5 },
+            },
+            "fill": { "antialias": false },
+            "beforePixel": {
+                "brush": brush::BRUSHES[3].id,
+                "eraser": brush::ERASERS[1].id,
+                "fillAntialias": true,
+            },
+        }));
+        assert_eq!(tools.plain.pen.preset.id, brush::BRUSHES[3].id);
+        assert_eq!(
+            (tools.plain.pen.width, tools.plain.pen.stabilizer),
+            (17.0, 0.5)
+        );
+        assert_eq!(tools.plain.eraser.preset.id, brush::ERASERS[1].id);
+        assert_eq!(tools.pixel.pen.preset.id, pencil.id);
+        assert_eq!(tools.pixel.pen.width, 2.0);
+        assert_eq!(tools.pixel.eraser.preset.id, eraser.id);
+        assert!(tools.fill.antialias);
+        assert_eq!(tools.color, Rgba8([0x10, 0x20, 0x30, 0xff]));
+        assert!(!tools.plain.remembered.contains_key(pencil.id));
+        // Written again, the old key is gone and nothing changes.
+        let written = to_json(&tools);
+        assert_eq!(written.get("beforePixel"), None);
+        assert_eq!(parse(&written), tools);
     }
 
     #[test]

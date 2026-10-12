@@ -107,7 +107,7 @@ impl Session {
             self.ended = Some(Ended::Dropped);
             return Ok(Outcome::NoChange);
         }
-        let sampling = self.sampling();
+        let sampling = self.sampling(self.style.sampling);
         let outcome = match self.history.group("Transform selection", |group| {
             transform_into(group, &pending, sampling)
         }) {
@@ -173,7 +173,7 @@ impl Session {
 
     /// Applies the pending transform or placed text before another edit.
     /// What the document cannot take stays pending, and the edit is refused.
-    pub(crate) fn settle(&mut self) -> Result<(), EditError> {
+    pub fn settle(&mut self) -> Result<(), EditError> {
         self.apply_transform()?;
         self.apply_text()?;
         Ok(())
@@ -189,11 +189,11 @@ impl Session {
         if let Some(pending) = &self.pending
             && pending.transform != Affine::IDENTITY
         {
-            let sampling = self.sampling();
+            let sampling = self.sampling(self.style.sampling);
             scratch.group("", |group| transform_into(group, pending, sampling))?;
         }
         if let Some(drawing) = self.text_drawing() {
-            let color = self.pen.color;
+            let color = self.style.text.color;
             scratch.group("", |group| crate::placing::text_into(group, drawing, color))?;
         }
         Ok(Some(scratch.into_document()))

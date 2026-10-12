@@ -181,7 +181,7 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
 /// Whether a menu shows it as on, for those that turn something on.
 fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     if let Some(tool) = tool(action) {
-        return Some(canvas.session().tool() == tool);
+        return Some(canvas.tool() == tool);
     }
     if let Some(panel) = panel(action) {
         return Some(is_open(layout, panel));
@@ -261,7 +261,7 @@ pub fn run(
     panels: &mut Panels,
 ) {
     if let Some(tool) = tool(action) {
-        canvas.edit_settled(|session| session.set_tool(tool));
+        canvas.choose_tool(tool);
         return;
     }
     if let Some(panel) = panel(action) {

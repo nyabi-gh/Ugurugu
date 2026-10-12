@@ -40,18 +40,18 @@ impl Canvas {
             Interaction::Drawing { .. } => self.drawn_at?,
             _ => return None,
         };
-        let session = &self.session;
-        if session.pending().is_some() || session.tool() == Tool::Text {
+        let tool = self.tools.tool;
+        if self.session.pending().is_some() || tool == Tool::Text {
             return None;
         }
-        let eraser = self.hover_eraser || session.tool() == Tool::Eraser;
-        if !eraser && session.tool() != Tool::Pen {
+        let eraser = self.hover_eraser || tool == Tool::Eraser;
+        if !eraser && tool != Tool::Pen {
             return None;
         }
         let settings = if eraser {
-            &session.eraser
+            &self.brushes().eraser
         } else {
-            &session.pen
+            &self.brushes().pen
         };
         let brush = settings.preset.brush;
         if brush.engine == BrushEngine::Pixel {
@@ -88,7 +88,7 @@ mod tests {
     fn the_cursor_is_as_wide_as_the_stroke_and_dashed_for_erasing() {
         let mut canvas = canvas();
         let scale = canvas.scale;
-        let width = f64::from(canvas.session().pen.width);
+        let width = f64::from(canvas.brushes().pen.width);
         let Some(BrushCursor::Circle {
             centre,
             radius,
@@ -105,7 +105,7 @@ mod tests {
             Some(BrushCursor::Circle { eraser: true, .. })
         ));
         canvas.set_hover_eraser(false);
-        canvas.edit(|session| session.set_tool(Tool::Fill)).unwrap();
+        canvas.set_tool(Tool::Fill).unwrap();
         assert!(canvas.brush_cursor([100.0, 80.0]).is_none());
     }
 
@@ -113,10 +113,8 @@ mod tests {
     fn a_pixel_brush_outlines_the_pixels_a_press_covers_and_follows_the_stroke() {
         let mut canvas = canvas();
         let pixel = ugu_core::brush::find("pixel-pencil").unwrap();
-        canvas.edit(|session| {
-            session.pen.preset = pixel;
-            session.pen.width = 1.0;
-        });
+        canvas.choose_preset(Tool::Pen, pixel);
+        canvas.brushes_mut().pen.width = 1.0;
         let pointer = canvas.to_client([10.4, 20.7]);
         let Some(BrushCursor::Pixels { outline, .. }) = canvas.brush_cursor(pointer) else {
             panic!("pixels");
@@ -152,5 +150,28 @@ mod tests {
             panic!("pixels while drawing");
         };
         assert_eq!(canvas.to_document(outline[3]).map(f64::round), [30.0, 40.0]);
+    }
+
+    #[test]
+    fn pixel_mode_draws_with_its_own_brushes_and_another_document_with_the_plain_ones() {
+        let mut canvas = canvas();
+        let plain = canvas.brushes().clone();
+        let pointer = canvas.to_client([10.4, 20.7]);
+        canvas.edit(|session| session.set_pixel_mode(true)).unwrap();
+        assert!(matches!(
+            canvas.brush_cursor(pointer),
+            Some(BrushCursor::Pixels { .. })
+        ));
+        canvas.brushes_mut().pen.width = 4.0;
+        canvas.replace(Document::new([320, 200]), true);
+        assert_eq!(canvas.brushes(), &plain);
+        assert!(matches!(
+            canvas.brush_cursor(pointer),
+            Some(BrushCursor::Circle { .. })
+        ));
+        let mut pixel = Document::new([320, 200]);
+        pixel.pixel = true;
+        canvas.replace(pixel, true);
+        assert_eq!(canvas.brushes().pen.width, 4.0);
     }
 }

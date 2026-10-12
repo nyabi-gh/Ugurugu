@@ -43,8 +43,8 @@ pub fn paint_swatch(ui: &Ui, rect: egui::Rect, color: Rgba8) {
 }
 
 pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
-    let colors = canvas.session().colors.colors().to_vec();
-    let current = canvas.session().pen.color;
+    let colors = canvas.tools().colors.colors().to_vec();
+    let current = canvas.tools().color;
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let clear = ui.add_enabled(
@@ -54,7 +54,7 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
                 ),
             );
             if clear.clicked() {
-                canvas.edit(|session| session.colors.clear());
+                canvas.tools_mut().colors.clear();
             }
         });
     });
@@ -98,6 +98,6 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
             });
         });
     if let Some(color) = chosen {
-        canvas.edit(|session| session.pen.color = color);
+        canvas.tools_mut().color = color;
     }
 }

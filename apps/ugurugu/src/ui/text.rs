@@ -33,7 +33,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     ui.add_space(6.0);
 
     widgets::field_label(ui, tr("text-font"));
-    let mut family = canvas.session().text.family.clone();
+    let mut family = canvas.tools().text.family.clone();
     let shown = family
         .clone()
         .unwrap_or_else(|| tr("text-font-default").to_owned());
@@ -48,11 +48,11 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
                 widgets::choice(ui, &mut family, chosen, name);
             }
         });
-    if family != canvas.session().text.family {
+    if family != canvas.tools().text.family {
         canvas.set_text(|_, settings| settings.family = family);
     }
 
-    let mut size = canvas.session().text.size;
+    let mut size = canvas.tools().text.size;
     super::form_row(ui, tr("text-size"), |ui| {
         widgets::number(
             ui,
@@ -65,12 +65,12 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         )
     });
     let size = size.round();
-    if size != canvas.session().text.size {
+    if size != canvas.tools().text.size {
         canvas.set_text(|_, settings| settings.size = size);
     }
-    let mut filled = canvas.session().text.filled;
+    let mut filled = canvas.tools().text.filled;
     widgets::check_row(ui, tr("text-filled"), tr("text-filled"), &mut filled);
-    if filled != canvas.session().text.filled {
+    if filled != canvas.tools().text.filled {
         canvas.set_text(|_, settings| settings.filled = filled);
     }
     ui.add_space(6.0);

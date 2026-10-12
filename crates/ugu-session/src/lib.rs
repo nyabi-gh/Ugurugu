@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! One open document and what the user is doing with it: the tools, the
-//! stroke being drawn, the current layer and frame, and the history that
-//! every change goes through.
+//! One open document and what the user is doing with it: the stroke being
+//! drawn, the current layer and frame, and the history that every change
+//! goes through. The tools are the window's, handed in when an edit starts.
 //!
 //! Input reaches the session in document pixels. A stroke is held here until
 //! the pen lifts and is then committed as one edit; a cancelled stroke leaves
@@ -18,7 +18,6 @@ pub mod stabilizer;
 mod tools;
 mod transforming;
 
-use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
 
@@ -31,10 +30,10 @@ use ugu_core::ops::{Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 
 pub use crate::filling::{FillError, FillSettings, Reads};
-pub use crate::placing::{Placed, TextDrawing, TextSettings};
+pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
-pub use crate::tools::{ColorHistory, Tools};
+pub use crate::tools::{Brushes, ColorHistory, Tools, is_pixel};
 pub use crate::transforming::{Ended, Pending};
 use ugu_core::selection::Selection;
 
@@ -52,19 +51,8 @@ pub enum Tool {
     Eyedropper,
 }
 
-/// The brush, eraser and fill edges that pixel mode replaced, put back when
-/// it goes off.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BeforePixel {
-    pub pen: &'static Preset,
-    pub eraser: &'static Preset,
-    pub fill_antialias: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolSettings {
-    /// Ignored by the eraser.
-    pub color: Rgba8,
     pub width: f32,
     /// The brush tool's own setting, which its presets follow; an eraser
     /// takes its preset's.
@@ -76,9 +64,8 @@ pub struct ToolSettings {
 }
 
 impl ToolSettings {
-    /// 2.2.13's ink pen: width 6, black, aliased.
+    /// 2.2.13's ink pen: width 6, aliased.
     pub const PEN: Self = Self {
-        color: Rgba8([0, 0, 0, 255]),
         width: 6.0,
         antialias: false,
         stabilizer: 0.0,
@@ -86,7 +73,6 @@ impl ToolSettings {
     };
     /// 2.2.13's hard eraser.
     pub const ERASER: Self = Self {
-        color: Rgba8([0, 0, 0, 255]),
         width: 6.0,
         antialias: true,
         stabilizer: 0.0,
@@ -162,36 +148,27 @@ pub struct Session {
     history: History,
     layer: LayerId,
     frame: i64,
-    tool: Tool,
-    pub pen: ToolSettings,
-    pub eraser: ToolSettings,
-    /// The width and stabilizer each preset not in use had when another was
-    /// chosen.
-    remembered: HashMap<&'static str, (f32, f32)>,
-    before_pixel: Option<BeforePixel>,
     live: Option<LiveStroke>,
-    /// The selection tool's shape.
-    pub selection_shape: ShapeKind,
-    /// The selection tool fills its shape instead of selecting.
-    pub lasso_paints: bool,
-    /// Pen pressure varies the brush and eraser; off, every point is at
-    /// full pressure, as 2.2.13's tablet pressure setting.
-    pub uses_pressure: bool,
-    /// How the wand and the bucket find an area, and how fills look.
-    pub fill: FillSettings,
-    /// How a transformed selection is resampled.
-    pub transform_sampling: Sampling,
     pending: Option<Pending>,
-    /// The text tool's settings and the text it places.
-    pub text: TextSettings,
+    /// The text the text tool places.
     pub text_content: String,
-    /// The colours drawn, filled and written with.
-    pub colors: ColorHistory,
     placed: Option<Placed>,
+    /// How the pending transform and placed text are applied.
+    style: Style,
+    /// The colours drawn, filled and written with since last taken.
+    used: Vec<Rgba8>,
     ended: Option<Ended>,
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
+}
+
+/// The window's tools as last handed in with `Session::use_tools`, for the
+/// work that waits: a pending transform and placed text.
+#[derive(Clone, Debug, PartialEq)]
+struct Style {
+    sampling: Sampling,
+    text: TextStyle,
 }
 
 impl Session {
@@ -199,87 +176,51 @@ impl Session {
     /// already on disk as it is.
     pub fn new(document: Document, saved: bool) -> Self {
         let layer = top_paint_layer(&document.layers).unwrap_or(LayerId(0));
-        Self {
+        let mut session = Self {
             history: History::new(document, saved),
             layer,
             frame: 0,
-            tool: Tool::Pen,
-            pen: ToolSettings::PEN,
-            eraser: ToolSettings::ERASER,
-            remembered: HashMap::new(),
-            before_pixel: None,
             live: None,
-            selection_shape: ShapeKind::default(),
-            lasso_paints: false,
-            uses_pressure: true,
-            fill: FillSettings::DEFAULT,
-            transform_sampling: Sampling::Smooth,
             pending: None,
-            text: TextSettings::DEFAULT,
             text_content: String::new(),
-            colors: ColorHistory::default(),
             placed: None,
+            style: Style {
+                sampling: Sampling::Smooth,
+                text: TextStyle::of(&Tools::default(), false),
+            },
+            used: Vec::new(),
             ended: None,
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
-        }
+        };
+        session.use_tools(&Tools::default());
+        session
     }
 
     pub fn document(&self) -> &Document {
         self.history.document()
     }
 
-    pub fn tool(&self) -> Tool {
-        self.tool
+    /// Takes the window's `tools` as what a pending transform and placed
+    /// text are applied with. Called whenever they may have changed.
+    pub fn use_tools(&mut self, tools: &Tools) {
+        self.style = Style {
+            sampling: tools.transform_sampling,
+            text: TextStyle::of(tools, self.pixel_mode()),
+        };
     }
 
-    /// Changes the tool; a pending transform or placed text is applied
-    /// first, as changing tools ends it.
-    pub fn set_tool(&mut self, tool: Tool) -> Result<(), EditError> {
-        if tool != self.tool {
-            self.settle()?;
-            self.tool = tool;
-        }
-        Ok(())
+    /// The colours drawn, filled and written with since last asked, oldest
+    /// first, for the colour history.
+    pub fn take_used_colors(&mut self) -> Vec<Rgba8> {
+        std::mem::take(&mut self.used)
     }
 
     /// The history, with a pending transform applied first.
     fn history_mut(&mut self) -> Result<&mut History, EditError> {
         self.settle()?;
         Ok(&mut self.history)
-    }
-
-    /// Makes `preset` the brush, or with `Tool::Eraser` the eraser. Each
-    /// preset keeps its own width and stabilizer, starting from its size and
-    /// none, as in 2.2.13.
-    pub fn choose_preset(&mut self, tool: Tool, preset: &'static Preset) {
-        let settings = match tool {
-            Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                &mut self.pen
-            }
-        };
-        if settings.preset.id == preset.id {
-            return;
-        }
-        self.remembered
-            .insert(settings.preset.id, (settings.width, settings.stabilizer));
-        let (width, stabilizer) = self
-            .remembered
-            .remove(preset.id)
-            .unwrap_or((preset.size, 0.0));
-        settings.preset = preset;
-        settings.width = width;
-        settings.stabilizer = stabilizer;
-        if tool == Tool::Eraser {
-            settings.antialias = preset.brush.antialias;
-        }
-        // Pixel art fills without blending edges too; it can be turned on
-        // again.
-        if preset.brush.engine == BrushEngine::Pixel && tool != Tool::Eraser {
-            self.fill.antialias = false;
-        }
     }
 
     /// Goes up on every change, undo and redo included.
@@ -342,16 +283,6 @@ impl Session {
         self.live.as_ref()
     }
 
-    /// The settings strokes are drawn with: the eraser's, else the pen's.
-    fn settings(&self) -> &ToolSettings {
-        match self.tool {
-            Tool::Eraser => &self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                &self.pen
-            }
-        }
-    }
-
     /// Whether the current layer can be drawn on.
     fn can_paint(&self) -> Result<(), StrokeRefused> {
         if !matches!(
@@ -366,15 +297,16 @@ impl Session {
         Ok(())
     }
 
-    /// Applies a pending transform or placed text first, so the stroke is
-    /// cut to the selection as they leave it.
-    pub fn begin_stroke(&mut self, input: InputPoint) -> Result<(), StrokeRefused> {
+    /// Starts a stroke with the current tool of `tools`: the eraser, else
+    /// the brush, of the brushes for the document's mode. Applies a pending
+    /// transform or placed text first, so the stroke is cut to the selection
+    /// as they leave it.
+    pub fn begin_stroke(&mut self, tools: &Tools, input: InputPoint) -> Result<(), StrokeRefused> {
         self.live = None;
         self.can_paint()?;
-        self.follow_pixel_mode();
         self.settle().map_err(|_| StrokeRefused::Pending)?;
-        let settings = *self.settings();
-        let erase = self.tool == Tool::Eraser;
+        let settings = *tools.stroke(self.pixel_mode());
+        let erase = tools.tool == Tool::Eraser;
         self.strokes_started += 1;
         // A pixel brush draws whole pixels, a whole number of them wide.
         let pixel = settings.preset.brush.engine == BrushEngine::Pixel;
@@ -388,7 +320,7 @@ impl Session {
             color: if erase {
                 Rgba8([0, 0, 0, 255])
             } else {
-                settings.color
+                tools.color
             },
             width: width.clamp(
                 *store::limits::STROKE_WIDTH.start(),
@@ -407,12 +339,12 @@ impl Session {
             template,
             points: vec![point(
                 position,
-                pressure(input.pressure, self.uses_pressure),
+                pressure(input.pressure, tools.uses_pressure),
             )],
             replaced_last: false,
             clip: self.clip(),
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
-            uses_pressure: self.uses_pressure,
+            uses_pressure: tools.uses_pressure,
         });
         Ok(())
     }
@@ -466,7 +398,7 @@ impl Session {
             group.apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
         })?;
         if !live.erase && matches!(outcome, Outcome::Committed(_)) {
-            self.colors.record(color);
+            self.used.push(color);
         }
         Ok(outcome)
     }
@@ -685,76 +617,32 @@ impl Session {
         })
     }
 
-    /// Whether the document is in pixel mode, which the tools follow.
+    /// Whether the document is in pixel mode: strokes take the window's
+    /// pixel brushes, fills and text have hard edges and transforms move
+    /// whole pixels.
     pub fn pixel_mode(&self) -> bool {
         self.document().pixel
     }
 
-    /// Turns pixel mode on or off as one step; on, the brush and eraser
-    /// become pixel ones.
+    /// Turns pixel mode on or off as one step.
     pub fn set_pixel_mode(&mut self, on: bool) -> Result<Outcome, EditError> {
         let mut settings = self.document().settings();
         if settings.pixel == on {
             return Ok(Outcome::NoChange);
         }
         settings.pixel = on;
-        let outcome = self.history_mut()?.edit("Pixel mode", |_| {
+        self.history_mut()?.edit("Pixel mode", |_| {
             vec![ugu_core::edit::Change::SetSettings(settings)]
-        })?;
-        self.follow_pixel_mode();
-        Ok(outcome)
-    }
-
-    /// In pixel mode, a brush or eraser that is not a pixel one becomes the
-    /// pixel pencil or eraser; out of it, the ones it replaced come back.
-    /// Called when the mode may have changed, by undo and redo or another
-    /// document too.
-    pub fn follow_pixel_mode(&mut self) {
-        let pixel = |preset: &Preset| preset.brush.engine == BrushEngine::Pixel;
-        if !self.pixel_mode() {
-            if let Some(before) = self.before_pixel.take() {
-                if pixel(self.pen.preset) {
-                    self.choose_preset(Tool::Pen, before.pen);
-                }
-                if pixel(self.eraser.preset) {
-                    self.choose_preset(Tool::Eraser, before.eraser);
-                }
-                self.fill.antialias = before.fill_antialias;
-            }
-            return;
-        }
-        if self.before_pixel.is_none() && !(pixel(self.pen.preset) && pixel(self.eraser.preset)) {
-            self.before_pixel = Some(BeforePixel {
-                pen: self.pen.preset,
-                eraser: self.eraser.preset,
-                fill_antialias: self.fill.antialias,
-            });
-        }
-        for (tool, presets) in [
-            (Tool::Pen, &brush::BRUSHES[..]),
-            (Tool::Eraser, &brush::ERASERS[..]),
-        ] {
-            let current = match tool {
-                Tool::Eraser => self.eraser.preset,
-                _ => self.pen.preset,
-            };
-            if current.brush.engine != BrushEngine::Pixel
-                && let Some(pixel) = presets
-                    .iter()
-                    .find(|preset| preset.brush.engine == BrushEngine::Pixel)
-            {
-                self.choose_preset(tool, pixel);
-            }
-        }
+        })
     }
 
     /// How a transform resamples: whole pixels in pixel mode, otherwise as
-    /// chosen.
-    pub fn sampling(&self) -> Sampling {
+    /// `chosen`.
+    pub fn sampling(&self, chosen: Sampling) -> Sampling {
         if self.pixel_mode() {
             Sampling::Nearest
         } else {
-            self.transform_sampling
+            chosen
         }
     }
 

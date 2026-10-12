@@ -25,7 +25,7 @@ use ugu_core::restyle::Style;
 use ugu_core::selection::Combine;
 use ugu_core::text::Outline;
 use ugu_render::document::{DocumentRenderer, Purpose};
-use ugu_session::{InputPoint, Session, ShapeKind, Tool};
+use ugu_session::{InputPoint, Session, ShapeKind, Tool, Tools};
 use vello_cpu::Pixmap;
 
 const CANVAS: [u32; 2] = [160, 120];
@@ -41,7 +41,7 @@ fn blessing() -> bool {
     std::env::var_os("UGU_BLESS").is_some()
 }
 
-fn line(session: &mut Session, from: [f64; 2], to: [f64; 2]) {
+fn line(session: &mut Session, tools: &Tools, from: [f64; 2], to: [f64; 2]) {
     let steps = ((to[0] - from[0]).hypot(to[1] - from[1]) / 2.0)
         .ceil()
         .max(1.0);
@@ -53,7 +53,9 @@ fn line(session: &mut Session, from: [f64; 2], to: [f64; 2]) {
         pressure: None,
         time: step * 8.0,
     };
-    session.begin_stroke(at(0.0)).expect("a shown paint layer");
+    session
+        .begin_stroke(tools, at(0.0))
+        .expect("a shown paint layer");
     for step in 1..steps as u32 {
         session.extend_stroke(at(f64::from(step)));
     }
@@ -61,9 +63,16 @@ fn line(session: &mut Session, from: [f64; 2], to: [f64; 2]) {
 }
 
 fn select(session: &mut Session, kind: ShapeKind, from: [f64; 2], to: [f64; 2]) {
-    session.selection_shape = kind;
-    session.begin_selection(from, Combine::Replace);
-    session.end_selection(to).expect("valid");
+    session.begin_selection(kind, from, Combine::Replace);
+    session.end_selection(&Tools::default(), to).expect("valid");
+}
+
+/// Changes the tool as the window does: what is pending is applied first.
+fn set_tool(session: &mut Session, tools: &mut Tools, tool: Tool) {
+    if tool != tools.tool {
+        session.settle().expect("valid");
+        tools.tool = tool;
+    }
 }
 
 fn new_session() -> Session {
@@ -113,18 +122,19 @@ fn ops(document: &Document, layer: LayerId) -> &[Op] {
 /// number of pixels, then the moved part copied and turned.
 fn selection_frames() -> Document {
     let mut session = new_session();
+    let mut tools = Tools::default();
     for y in [30.0, 45.0, 60.0, 75.0] {
-        line(&mut session, [10.0, y], [100.0, y + 8.0]);
+        line(&mut session, &tools, [10.0, y], [100.0, y + 8.0]);
     }
-    line(&mut session, [15.0, 95.0], [90.0, 20.0]);
+    line(&mut session, &tools, [15.0, 95.0], [90.0, 20.0]);
     select(
         &mut session,
         ShapeKind::Rectangle,
         [20.0, 20.0],
         [70.0, 90.0],
     );
-    session.pen.color = Rgba8([220, 0, 0, 255]);
-    line(&mut session, [5.0, 52.0], [150.0, 52.0]);
+    tools.color = Rgba8([220, 0, 0, 255]);
+    line(&mut session, &tools, [5.0, 52.0], [150.0, 52.0]);
     session.begin_transform().expect("a selection");
     session.set_transform(Affine::translation(60.0, 10.0));
     session.apply_transform().expect("valid");
@@ -187,13 +197,14 @@ fn check_selection_frames(document: &Document) {
 /// Two layers with their own erasers, the upper one see-through, merged.
 fn merge() -> (Document, Document) {
     let mut session = new_session();
+    let mut tools = Tools::default();
     for y in [30.0, 60.0, 90.0] {
-        line(&mut session, [10.0, y], [150.0, y]);
+        line(&mut session, &tools, [10.0, y], [150.0, y]);
     }
-    session.set_tool(Tool::Eraser).unwrap();
-    session.eraser.width = 14.0;
-    line(&mut session, [40.0, 10.0], [40.0, 110.0]);
-    session.set_tool(Tool::Pen).unwrap();
+    set_tool(&mut session, &mut tools, Tool::Eraser);
+    tools.plain.eraser.width = 14.0;
+    line(&mut session, &tools, [40.0, 10.0], [40.0, 110.0]);
+    set_tool(&mut session, &mut tools, Tool::Pen);
     session.add_layer().expect("valid");
     let upper = session.current_layer();
     session
@@ -203,13 +214,13 @@ fn merge() -> (Document, Document) {
             }
         })
         .expect("valid");
-    session.pen.color = BLUE;
-    session.pen.width = 10.0;
+    tools.color = BLUE;
+    tools.plain.pen.width = 10.0;
     for x in [60.0, 100.0, 130.0] {
-        line(&mut session, [x, 10.0], [x, 110.0]);
+        line(&mut session, &tools, [x, 10.0], [x, 110.0]);
     }
-    session.set_tool(Tool::Eraser).unwrap();
-    line(&mut session, [10.0, 60.0], [150.0, 60.0]);
+    set_tool(&mut session, &mut tools, Tool::Eraser);
+    line(&mut session, &tools, [10.0, 60.0], [150.0, 60.0]);
     let separate = session.document().clone();
     session.merge_down().expect("mergeable");
     (separate, session.document().clone())
@@ -233,16 +244,17 @@ fn check_merge(separate: &Document, merged: &Document) {
 /// A line, an eraser across it, and a blue line drawn over the eraser.
 fn erase() -> Document {
     let mut session = new_session();
-    session.pen.width = 10.0;
-    line(&mut session, [10.0, 40.0], [150.0, 40.0]);
-    line(&mut session, [10.0, 80.0], [150.0, 80.0]);
-    session.set_tool(Tool::Eraser).unwrap();
-    session.eraser.width = 20.0;
-    line(&mut session, [80.0, 15.0], [80.0, 105.0]);
-    session.set_tool(Tool::Pen).unwrap();
-    session.pen.color = BLUE;
-    session.pen.width = 12.0;
-    line(&mut session, [10.0, 60.0], [150.0, 60.0]);
+    let mut tools = Tools::default();
+    tools.plain.pen.width = 10.0;
+    line(&mut session, &tools, [10.0, 40.0], [150.0, 40.0]);
+    line(&mut session, &tools, [10.0, 80.0], [150.0, 80.0]);
+    set_tool(&mut session, &mut tools, Tool::Eraser);
+    tools.plain.eraser.width = 20.0;
+    line(&mut session, &tools, [80.0, 15.0], [80.0, 105.0]);
+    set_tool(&mut session, &mut tools, Tool::Pen);
+    tools.color = BLUE;
+    tools.plain.pen.width = 12.0;
+    line(&mut session, &tools, [10.0, 60.0], [150.0, 60.0]);
     session.document().clone()
 }
 
@@ -269,20 +281,21 @@ fn check_erase(document: &Document) {
 /// are cut to the selection as it was moved.
 fn pending() -> Document {
     let mut session = new_session();
-    line(&mut session, [20.0, 30.0], [90.0, 50.0]);
-    line(&mut session, [30.0, 90.0], [80.0, 25.0]);
+    let mut tools = Tools::default();
+    line(&mut session, &tools, [20.0, 30.0], [90.0, 50.0]);
+    line(&mut session, &tools, [30.0, 90.0], [80.0, 25.0]);
     select(&mut session, ShapeKind::Ellipse, [15.0, 20.0], [95.0, 95.0]);
-    session.transform_sampling = Sampling::Smooth;
+    tools.transform_sampling = Sampling::Smooth;
     session.begin_transform().expect("a selection");
     let turn = Affine::rotation_about(0.52, [55.0, 57.0])
         .then(Affine::scaling_about([1.2, 1.2], [55.0, 57.0]))
         .then(Affine::translation(45.0, 5.0));
     session.set_transform(turn);
     session.set_keep_source(true);
-    session.pen.color = BLUE;
-    line(&mut session, [10.0, 60.0], [150.0, 75.0]);
-    session.set_tool(Tool::Text).unwrap();
-    session.text.filled = true;
+    tools.color = BLUE;
+    line(&mut session, &tools, [10.0, 60.0], [150.0, 75.0]);
+    set_tool(&mut session, &mut tools, Tool::Text);
+    tools.text.filled = true;
     let outline = Outline {
         contours: vec![
             vec![[0.0, 0.0], [30.0, 0.0], [30.0, 16.0], [0.0, 16.0]],
@@ -291,9 +304,9 @@ fn pending() -> Document {
         size: [30.0, 16.0],
     };
     session
-        .place_text([80.0, 30.0], Arc::new(outline))
+        .place_text(&tools, [80.0, 30.0], Arc::new(outline))
         .expect("paintable");
-    session.set_tool(Tool::Pen).unwrap();
+    set_tool(&mut session, &mut tools, Tool::Pen);
     session.document().clone()
 }
 
@@ -337,24 +350,25 @@ fn check_pending(document: &Document) {
 /// everything touched given a new colour and width.
 fn canvas() -> Document {
     let mut session = new_session();
-    line(&mut session, [10.0, 20.0], [150.0, 100.0]);
+    let mut tools = Tools::default();
+    line(&mut session, &tools, [10.0, 20.0], [150.0, 100.0]);
     select(
         &mut session,
         ShapeKind::Rectangle,
         [30.0, 30.0],
         [90.0, 70.0],
     );
-    session.pen.color = Rgba8([0, 160, 60, 255]);
-    session.fill_selection().expect("a selection");
+    tools.color = Rgba8([0, 160, 60, 255]);
+    session.fill_selection(&tools).expect("a selection");
     session.deselect().unwrap();
     session.crop_canvas([-10, -5], [150, 110]).expect("valid");
-    session.pen.color = BLUE;
-    line(&mut session, [5.0, 100.0], [145.0, 10.0]);
+    tools.color = BLUE;
+    line(&mut session, &tools, [5.0, 100.0], [145.0, 10.0]);
     session
         .resample_image([120, 88], Sampling::Smooth)
         .expect("valid");
-    session.pen.color = Rgba8([0, 0, 0, 255]);
-    line(&mut session, [10.0, 44.0], [110.0, 44.0]);
+    tools.color = Rgba8([0, 0, 0, 255]);
+    line(&mut session, &tools, [10.0, 44.0], [110.0, 44.0]);
     select(&mut session, ShapeKind::Rectangle, [0.0, 0.0], [60.0, 88.0]);
     session
         .restyle_selected(Style {

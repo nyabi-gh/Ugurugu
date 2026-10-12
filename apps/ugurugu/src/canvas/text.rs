@@ -12,7 +12,7 @@ use std::time::Instant;
 use ugu_core::edit::Outcome;
 use ugu_core::text::Outline;
 use ugu_render::placing::Placing;
-use ugu_session::{Session, TextDrawing, TextSettings};
+use ugu_session::{Session, TextDrawing, TextSettings, TextStyle};
 use ugu_text::Fonts;
 
 use super::{Canvas, Interaction, wobble_of};
@@ -32,8 +32,7 @@ pub(super) struct TextPreview {
 struct Shown {
     at: [f64; 2],
     outline: Arc<Outline>,
-    pen: ugu_session::ToolSettings,
-    filled: bool,
+    style: TextStyle,
     selection: Option<Arc<ugu_core::selection::Selection>>,
 }
 
@@ -41,8 +40,7 @@ impl PartialEq for Shown {
     fn eq(&self, other: &Self) -> bool {
         self.at == other.at
             && Arc::ptr_eq(&self.outline, &other.outline)
-            && self.pen == other.pen
-            && self.filled == other.filled
+            && self.style == other.style
             && match (&self.selection, &other.selection) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                 (a, b) => a.is_none() && b.is_none(),
@@ -98,17 +96,15 @@ impl Canvas {
     }
 
     fn text_outline(&mut self) -> Arc<Outline> {
-        let session = &self.session;
         self.typesetter
-            .outline(&session.text_content, &session.text)
+            .outline(&self.session.text_content, &self.tools.text)
     }
 
     /// Changes the text or how it is set, laying placed text out again.
     pub fn set_text(&mut self, change: impl FnOnce(&mut String, &mut TextSettings)) {
-        let session = &mut self.session;
-        change(&mut session.text_content, &mut session.text);
-        session.text.size = session
-            .text
+        let text = &mut self.tools.text;
+        change(&mut self.session.text_content, text);
+        text.size = text
             .size
             .clamp(*TextSettings::SIZE.start(), *TextSettings::SIZE.end());
         if self.session.placed_text().is_some() {
@@ -121,7 +117,7 @@ impl Canvas {
     /// with nothing typed still has a box to grab.
     pub fn text_box(&self) -> Option<[f64; 4]> {
         let placed = self.session.placed_text()?;
-        let size = f64::from(self.session.text.size);
+        let size = f64::from(self.tools.text.size);
         let [width, height] = placed.outline.size;
         let [x, y] = placed.at;
         Some([
@@ -152,7 +148,8 @@ impl Canvas {
         }
         self.notice = None;
         let outline = self.text_outline();
-        match self.edit(|session| session.place_text(point, outline)) {
+        let tools = self.tools.clone();
+        match self.edit(|session| session.place_text(&tools, point, outline)) {
             Ok(()) => {
                 self.interaction = Interaction::MovingText {
                     start: point,
@@ -177,7 +174,7 @@ impl Canvas {
         };
         let point = self.to_document(position);
         let at = [base[0] + point[0] - start[0], base[1] + point[1] - start[1]];
-        let _ = self.session.place_text(at, outline);
+        let _ = self.session.place_text(&self.tools, at, outline);
     }
 
     /// Whether no text is left placed.
@@ -227,8 +224,7 @@ impl Canvas {
         let wanted = Shown {
             at: placed.at,
             outline: placed.outline.clone(),
-            pen: self.session.pen,
-            filled: self.session.text.filled,
+            style: *self.session.text_style(),
             selection: self.session.selection().cloned(),
         };
         if self.text_preview.is_none() {
@@ -256,7 +252,7 @@ impl Canvas {
             return;
         };
         let document = self.session.document();
-        let color = self.session.pen.color.0;
+        let color = self.session.text_style().color.0;
         let rect = split.show_place(
             &mut preview.placing,
             &mut self.stamp,

@@ -27,7 +27,7 @@ use ugu_render::plan::{Reference, RenderPlan};
 use ugu_render::raster::PixelRect;
 use ugu_render::stroke::Pen;
 use ugu_render::view::Placement;
-use ugu_session::{FillError, InputPoint, Reads, Session, StrokeRefused, Tool};
+use ugu_session::{Brushes, FillError, InputPoint, Reads, Session, StrokeRefused, Tool, Tools};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
@@ -133,6 +133,8 @@ enum Interaction {
 
 pub struct Canvas {
     session: Session,
+    /// The window's tools, for whichever document it shows.
+    tools: Tools,
     cache: CacheWorker,
     split: Option<(Key, Split)>,
     /// A pending transform shown on the split's layer.
@@ -216,6 +218,7 @@ impl Canvas {
         Self {
             // Nothing to lose until edited, as in 2.2.13.
             session: Session::new(document, true),
+            tools: Tools::default(),
             cache: CacheWorker::start(cache_done),
             split: None,
             preview: None,
@@ -256,16 +259,62 @@ impl Canvas {
         &self.session
     }
 
+    /// The tools stay as they are from one document to the next, as in
+    /// 2.2.13.
+    pub fn tools(&self) -> &Tools {
+        &self.tools
+    }
+
+    /// For settings that start nothing; changing the tool goes through
+    /// `set_tool`.
+    pub fn tools_mut(&mut self) -> &mut Tools {
+        &mut self.tools
+    }
+
+    pub fn tool(&self) -> Tool {
+        self.tools.tool
+    }
+
+    /// Changes the tool; a pending transform or placed text is applied
+    /// first, as changing tools ends it.
+    pub fn set_tool(&mut self, tool: Tool) -> Result<(), EditError> {
+        if tool != self.tools.tool {
+            self.edit(Session::settle)?;
+            self.tools.tool = tool;
+        }
+        Ok(())
+    }
+
+    /// The brush and eraser the document shown draws with: the pixel ones in
+    /// pixel mode.
+    pub fn brushes(&self) -> &Brushes {
+        self.tools.brushes(self.session.pixel_mode())
+    }
+
+    pub fn brushes_mut(&mut self) -> &mut Brushes {
+        self.tools.brushes_mut(self.session.pixel_mode())
+    }
+
+    /// Makes `preset` the brush, or with `Tool::Eraser` the eraser, of the
+    /// document's mode.
+    pub fn choose_preset(&mut self, tool: Tool, preset: &'static ugu_core::brush::Preset) {
+        let pixel_mode = self.session.pixel_mode();
+        self.tools.choose_preset(pixel_mode, tool, preset);
+    }
+
+    /// Takes over `tools`, as from the settings or a tool preset file; a
+    /// pending transform or placed text is applied first.
+    pub fn set_tools(&mut self, tools: Tools) -> Result<(), EditError> {
+        self.edit(Session::settle)?;
+        self.tools = tools;
+        Ok(())
+    }
+
     /// Puts `document` in place of the open one, with an empty history;
     /// `saved` when it is on disk as it is.
     pub fn replace(&mut self, document: Document, saved: bool) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
-        // The tools stay as they were, as in 2.2.13.
-        let tools = self.session.tools();
         self.session = Session::new(document, saved);
-        self.session
-            .set_tools(tools)
-            .expect("nothing is pending in a new session");
         self.generation += 1;
         self.split = None;
         self.preview = None;
@@ -307,7 +356,9 @@ impl Canvas {
         }
         let before = self.session.document().canvas;
         let key = self.key();
+        self.session.use_tools(&self.tools);
         let result = change(&mut self.session);
+        self.record_colors();
         if self.session.document().canvas != before {
             // The split is of the canvas before; what it shows stays until
             // the split of the new one arrives.
@@ -455,10 +506,8 @@ impl Canvas {
     /// shown one no longer matches, and for thumbnails that are out of date.
     /// Playback shows whole frames instead of a split.
     pub fn sync(&mut self) {
-        // Undo, redo and another document can change the mode.
-        if !matches!(self.interaction, Interaction::Drawing { .. }) {
-            self.session.follow_pixel_mode();
-        }
+        self.session.use_tools(&self.tools);
+        self.record_colors();
         self.refresh_preview();
         self.refresh_text_preview();
         self.sync_thumbnails();
@@ -700,6 +749,14 @@ impl Canvas {
         Some(wake)
     }
 
+    /// Puts what the document was drawn, filled and written with in the
+    /// colour history.
+    fn record_colors(&mut self) {
+        for color in self.session.take_used_colors() {
+            self.tools.colors.record(color);
+        }
+    }
+
     /// Puts `rect` of the display back together, with the stroke being drawn.
     fn recomposite(&mut self, rect: Option<PixelRect>) {
         let (Some(rect), Some((_, split))) = (rect, &self.split) else {
@@ -736,19 +793,21 @@ impl Canvas {
                 self.sample_count += 1;
                 self.begin_transform_drag(sample.position);
             }
-            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool() == Tool::Select => {
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Select => {
                 self.sample_count += 1;
                 self.notice = None;
                 let point = self.to_document(sample.position);
-                self.session.begin_selection(point, self.combine());
+                let combine = self.combine();
+                self.session
+                    .begin_selection(self.tools.selection_shape, point, combine);
                 self.interaction = Interaction::Selecting;
             }
-            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.tool() == Tool::Text => {
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Text => {
                 self.sample_count += 1;
                 self.press_text(sample.position);
             }
             CanvasInput::Begin(Gesture::Draw, _, sample)
-                if matches!(self.session.tool(), Tool::Wand | Tool::Fill) =>
+                if matches!(self.tools.tool, Tool::Wand | Tool::Fill) =>
             {
                 self.sample_count += 1;
                 let point = self.to_document(sample.position);
@@ -787,8 +846,9 @@ impl Canvas {
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
                         let before = self.key();
-                        let ended = self.session.end_selection(point);
-                        if self.session.lasso_paints {
+                        let ended = self.session.end_selection(&self.tools, point);
+                        self.record_colors();
+                        if self.tools.lasso_paints {
                             self.after_fill(before, ended);
                         }
                     }
@@ -844,7 +904,7 @@ impl Canvas {
                     .placed_text()
                     .map(|placed| placed.outline.clone())
                 {
-                    let _ = self.session.place_text(base, outline);
+                    let _ = self.session.place_text(&self.tools, base, outline);
                 }
                 self.refresh_text_preview();
             }
@@ -891,13 +951,14 @@ impl Canvas {
             .filter(|_| read)
             .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
         let before = self.key();
-        if self.session.tool() == Tool::Wand {
+        if self.tools.tool == Tool::Wand {
             let combine = self.combine();
-            if let Err(error) = self.session.wand(point, combine, reference) {
+            if let Err(error) = self.session.wand(&self.tools, point, combine, reference) {
                 self.fill_notice(&error);
             }
         } else {
-            let filled = self.session.bucket(point, reference);
+            let filled = self.session.bucket(&self.tools, point, reference);
+            self.record_colors();
             self.after_fill(before, filled.map(committed));
         }
         tracing::debug!(
@@ -911,7 +972,8 @@ impl Canvas {
         self.edit(|_| ());
         self.notice = None;
         let before = self.key();
-        let filled = self.session.fill_selection();
+        let filled = self.session.fill_selection(&self.tools);
+        self.record_colors();
         self.after_fill(before, filled.map(committed));
     }
 
@@ -921,7 +983,7 @@ impl Canvas {
     /// there is nothing to read.
     fn read_reference(&mut self) -> bool {
         let document = self.session.document();
-        let reference = match self.session.fill.reads {
+        let reference = match self.tools.fill.reads {
             Reads::Current => Reference::Layer(self.session.current_layer()),
             Reads::Marked => Reference::Marked,
             Reads::Visible => Reference::Visible,
@@ -1003,13 +1065,13 @@ impl Canvas {
     }
 
     fn fill_notice(&mut self, error: &FillError) {
-        let reads = self.session.fill.reads;
+        let reads = self.tools.fill.reads;
         self.notice = Some(match error {
             FillError::NoLayer => self.no_paint_layer().to_owned(),
             FillError::HiddenLayer => self.hidden_layer().to_owned(),
             FillError::NoReference if reads == Reads::Marked => tr("fill-no-reference").to_owned(),
             FillError::NoReference => self.no_paint_layer().to_owned(),
-            FillError::NothingThere if self.session.tool() == Tool::Wand => {
+            FillError::NothingThere if self.tools.tool == Tool::Wand => {
                 tr("wand-nothing").to_owned()
             }
             FillError::NothingThere => tr("fill-nothing").to_owned(),
@@ -1023,20 +1085,19 @@ impl Canvas {
     fn begin_stroke(&mut self, kind: PointerKind, sample: &PointerSample) {
         self.notice = None;
         self.pause_playback();
-        // The eraser end of a pen erases whatever tool is chosen.
-        let tool = self.session.tool();
         let point = self.input_point(sample);
-        let begun = if kind == PointerKind::Pen && sample.inverted {
-            self.session
-                .set_tool(Tool::Eraser)
-                .map_err(|_| StrokeRefused::Pending)
-                .and_then(|()| self.session.begin_stroke(point))
-        } else {
-            self.session.begin_stroke(point)
-        };
-        // Nothing is pending once a stroke begins, nor was the tool changed
-        // if something was, so changing it back cannot fail.
-        let _ = self.session.set_tool(tool);
+        // The eraser end of a pen erases whatever tool is chosen. A pending
+        // transform or placed text is applied first, as changing tools does.
+        let begun =
+            if kind == PointerKind::Pen && sample.inverted && self.tools.tool != Tool::Eraser {
+                let eraser = Tools {
+                    tool: Tool::Eraser,
+                    ..self.tools.clone()
+                };
+                self.session.begin_stroke(&eraser, point)
+            } else {
+                self.session.begin_stroke(&self.tools, point)
+            };
         match begun {
             Ok(()) => {}
             Err(StrokeRefused::Pending) => {
@@ -1101,6 +1162,7 @@ impl Canvas {
         let before = self.key();
         let point = self.input_point(sample);
         let outcome = self.session.end_stroke(point);
+        self.record_colors();
         self.spare_coverage = Some(live.into_spare());
         match outcome {
             Ok(Outcome::Committed(_)) => {}
@@ -1535,7 +1597,7 @@ mod tests {
                 let _ = to_test.send(rendered);
             });
             canvas.scale = 0.5;
-            canvas.edit(|session| session.set_tool(tool)).unwrap();
+            canvas.set_tool(tool).unwrap();
             canvas.toggle_playback();
             let mut now = Instant::now();
             while canvas.display().width() != 160 {
@@ -1684,13 +1746,16 @@ mod tests {
             [60.0, 160.0],
             [60.0, 40.0],
         ];
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| ugu_session::InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.begin_stroke(point(corners[0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point(corners[0], 0.0))
+                .unwrap();
             let mut time = 0.0;
             for pair in corners.windows(2) {
                 for step in 1..=40 {
@@ -1704,7 +1769,7 @@ mod tests {
         });
         settle(&mut canvas, &renders);
 
-        canvas.session.set_tool(Tool::Wand).unwrap();
+        canvas.set_tool(Tool::Wand).unwrap();
         canvas.click_area([160.0, 100.0]);
         let from_split = canvas
             .session()
@@ -1718,8 +1783,8 @@ mod tests {
         canvas.edit(Session::deselect).unwrap();
         settle(&mut canvas, &renders);
 
-        canvas.session.set_tool(Tool::Fill).unwrap();
-        canvas.session.pen.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
+        canvas.set_tool(Tool::Fill).unwrap();
+        canvas.tools.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
         canvas.click_area([160.0, 100.0]);
         assert_eq!(canvas.notice(), None);
         // Added to the split, not drawn again.
@@ -1766,23 +1831,29 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
             let _ = to_test.send(rendered);
         });
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| ugu_session::InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.begin_stroke(point([40.0, 40.0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point([40.0, 40.0], 0.0))
+                .unwrap();
             for step in 1..=60 {
                 let t = f64::from(step) / 60.0;
                 let at = [40.0 + 200.0 * t, 40.0 + 100.0 * t + (t * 12.0).sin() * 20.0];
                 session.extend_stroke(point(at, f64::from(step) * 4.0));
             }
             session.end_stroke(point([240.0, 140.0], 250.0)).unwrap();
-            session.selection_shape = ugu_session::ShapeKind::Rectangle;
-            session.begin_selection([60.0, 50.0], Combine::Replace);
+            session.begin_selection(
+                ugu_session::ShapeKind::Rectangle,
+                [60.0, 50.0],
+                Combine::Replace,
+            );
             session.extend_selection([180.0, 130.0]);
-            session.end_selection([180.0, 130.0]).unwrap();
+            session.end_selection(&tools, [180.0, 130.0]).unwrap();
         });
         settle(&mut canvas, &renders);
         let before = canvas.display().clone();
@@ -1848,21 +1919,27 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
             let _ = to_test.send(rendered);
         });
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| ugu_session::InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.begin_stroke(point([40.0, 40.0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point([40.0, 40.0], 0.0))
+                .unwrap();
             for step in 1..=60 {
                 let t = f64::from(step) / 60.0;
                 session.extend_stroke(point([40.0 + 200.0 * t, 40.0 + 100.0 * t], t * 250.0));
             }
             session.end_stroke(point([240.0, 140.0], 250.0)).unwrap();
-            session.selection_shape = ugu_session::ShapeKind::Rectangle;
-            session.begin_selection([60.0, 50.0], Combine::Replace);
-            session.end_selection([180.0, 130.0]).unwrap();
+            session.begin_selection(
+                ugu_session::ShapeKind::Rectangle,
+                [60.0, 50.0],
+                Combine::Replace,
+            );
+            session.end_selection(&tools, [180.0, 130.0]).unwrap();
         });
         settle(&mut canvas, &renders);
         let full = |canvas: &super::Canvas| {
@@ -1914,17 +1991,20 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
             let _ = to_test.send(rendered);
         });
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| ugu_session::InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.begin_stroke(point([20.0, 150.0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point([20.0, 150.0], 0.0))
+                .unwrap();
             session.end_stroke(point([300.0, 60.0], 100.0)).unwrap();
-            session.set_tool(Tool::Text).unwrap();
-            session.pen.width = 3.0;
         });
+        canvas.set_tool(Tool::Text).unwrap();
+        canvas.brushes_mut().pen.width = 3.0;
         canvas.set_text(|text, settings| {
             *text = "Ug\n우글".to_owned();
             settings.size = 64.0;
@@ -2005,13 +2085,16 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([200, 120]), move |rendered| {
             let _ = to_test.send(rendered);
         });
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| ugu_session::InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.begin_stroke(point([10.0, 60.0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point([10.0, 60.0], 0.0))
+                .unwrap();
             for step in 1..=60 {
                 let x = 10.0 + 3.0 * f64::from(step);
                 session.extend_stroke(point(
@@ -2020,10 +2103,13 @@ mod tests {
                 ));
             }
             session.end_stroke(point([190.0, 60.0], 250.0)).unwrap();
-            session.selection_shape = ugu_session::ShapeKind::Rectangle;
-            session.begin_selection([50.0, 20.0], Combine::Replace);
+            session.begin_selection(
+                ugu_session::ShapeKind::Rectangle,
+                [50.0, 20.0],
+                Combine::Replace,
+            );
             session.extend_selection([120.0, 100.0]);
-            session.end_selection([120.0, 100.0]).unwrap();
+            session.end_selection(&tools, [120.0, 100.0]).unwrap();
         });
         settle(&mut canvas, &renders);
         let source = canvas.session().current_layer();
@@ -2120,7 +2206,7 @@ mod tests {
             unreachable!()
         };
         assert!(matches!(paint.ops.last(), Some(Op::Erase { .. })));
-        assert_eq!(canvas.session().tool(), Tool::Pen);
+        assert_eq!(canvas.tool(), Tool::Pen);
     }
 
     #[test]
@@ -2130,21 +2216,24 @@ mod tests {
             let _ = to_test.send(rendered);
         });
         let red = ugu_core::ops::Rgba8([200, 30, 30, 255]);
+        canvas.tools.color = red;
+        canvas.brushes_mut().pen.width = 20.0;
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let point = |position, time| InputPoint {
                 position,
                 pressure: None,
                 time,
             };
-            session.pen.color = red;
-            session.pen.width = 20.0;
-            session.begin_stroke(point([20.0, 100.0], 0.0)).unwrap();
+            session
+                .begin_stroke(&tools, point([20.0, 100.0], 0.0))
+                .unwrap();
             session.end_stroke(point([300.0, 100.0], 100.0)).unwrap();
-            session.pen.color = ugu_core::ops::Rgba8([0, 0, 0, 255]);
         });
+        canvas.tools.color = ugu_core::ops::Rgba8([0, 0, 0, 255]);
         settle(&mut canvas, &renders);
         let white = ugu_core::ops::Rgba8([255, 255, 255, 255]);
-        let pen = |canvas: &super::Canvas| canvas.session().pen.color;
+        let pen = |canvas: &super::Canvas| canvas.tools().color;
         let ops = |canvas: &super::Canvas| {
             let layer = canvas.session().current_layer();
             match &canvas.session().document().layer(layer).unwrap().kind {
@@ -2164,15 +2253,13 @@ mod tests {
         assert_eq!(pen(&canvas), red);
         assert_eq!(ops(&canvas), 1, "nothing drawn");
         // Off the canvas, nothing changes.
-        canvas.edit(|session| session.pen.color = white);
+        canvas.tools.color = white;
         canvas.apply(draw(press(400.0, 100.0)));
         canvas.apply(CanvasInput::End(press(400.0, 100.0)));
         assert_eq!(pen(&canvas), white);
 
         // Alt with the selection tool takes away instead.
-        canvas
-            .edit(|session| session.set_tool(Tool::Select))
-            .unwrap();
+        canvas.set_tool(Tool::Select).unwrap();
         canvas.apply(draw(press(150.0, 100.0)));
         assert!(matches!(canvas.interaction, Interaction::Selecting));
         canvas.apply(CanvasInput::Cancel);
@@ -2181,13 +2268,11 @@ mod tests {
         // The eyedropper needs no Alt, and reads the frame shown during
         // playback, drawn smaller.
         canvas.set_modifiers(false, false);
-        canvas
-            .edit(|session| session.set_tool(Tool::Eyedropper))
-            .unwrap();
+        canvas.set_tool(Tool::Eyedropper).unwrap();
         canvas.apply(draw(press(150.0, 100.0)));
         canvas.apply(CanvasInput::End(press(150.0, 100.0)));
         assert_eq!(pen(&canvas), red);
-        canvas.edit(|session| session.pen.color = white);
+        canvas.tools.color = white;
         let mut small = Pixmap::new(160, 100);
         small.data_as_u8_slice_mut()[(50 * 160 + 75) * 4..][..4].copy_from_slice(&[0, 0, 255, 255]);
         canvas.held = Some((Arc::new(small), 2));

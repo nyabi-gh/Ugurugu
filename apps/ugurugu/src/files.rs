@@ -26,7 +26,7 @@ use ugu_core::document::{Document, LayerId, limits};
 use ugu_core::history::StateId;
 use ugu_core::ops::{Affine, AssetId};
 use ugu_core::store::Asset;
-use ugu_session::{Session, ToolSettings};
+use ugu_session::{Session, TextStyle};
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
@@ -238,7 +238,7 @@ struct Mark {
     revision: u64,
     transform: Option<(LayerId, Affine, bool)>,
     /// Where, which layout, and what the text is drawn with.
-    text: Option<(LayerId, [f64; 2], usize, ToolSettings, bool)>,
+    text: Option<(LayerId, [f64; 2], usize, TextStyle)>,
 }
 
 impl Mark {
@@ -253,8 +253,7 @@ impl Mark {
                     placed.layer,
                     placed.at,
                     Arc::as_ptr(&placed.outline) as usize,
-                    session.pen,
-                    session.text.filled,
+                    *session.text_style(),
                 )
             }),
         }
@@ -1248,26 +1247,26 @@ impl Files {
                         let _ = self.to_worker.send(Job::ReadTools(path));
                     }
                     Purpose::ExportTools => {
-                        let session = canvas.session();
-                        let bytes = preset::write(&session.tools(), session.document().wobble);
+                        let wobble = canvas.session().document().wobble;
+                        let bytes = preset::write(canvas.tools(), wobble);
                         let _ = self.to_worker.send(Job::WriteTools { path, bytes });
                     }
                     Purpose::SaveFolder => self.chosen_save_folder = Some(path),
                 }
             }
             FileEvent::ToolsRead(path, read) => {
-                let session = canvas.session();
-                let taken = read.and_then(|bytes| {
-                    preset::read(&bytes, session.tools(), session.document().wobble)
-                });
+                let wobble = canvas.session().document().wobble;
+                let taken =
+                    read.and_then(|bytes| preset::read(&bytes, canvas.tools().clone(), wobble));
                 let failed = |reason: &str| format!("{}: {reason}", tr("preset-import-failed"));
                 match taken {
                     Ok((tools, wobble)) => {
-                        let applied = canvas.edit(|session| {
-                            session.set_tools(tools)?;
-                            let document = session.document();
-                            let (frames, speed) = (document.frames, document.frames_per_second);
-                            session.set_animation(frames, speed, wobble)
+                        let applied = canvas.set_tools(tools).and_then(|()| {
+                            canvas.edit(|session| {
+                                let document = session.document();
+                                let (frames, speed) = (document.frames, document.frames_per_second);
+                                session.set_animation(frames, speed, wobble)
+                            })
                         });
                         match applied {
                             Ok(_) => {
@@ -1948,16 +1947,15 @@ mod tests {
     fn placed_text_is_applied_before_saving() {
         let (mut files, mut canvas, events) = setup();
         let path = folder("placed-text").join("drawing.ugurugu");
-        canvas.edit(|session| {
-            session.set_tool(ugu_session::Tool::Text).unwrap();
-            session.text_content = "Ug".to_owned();
-        });
+        canvas.set_tool(ugu_session::Tool::Text).unwrap();
+        canvas.edit(|session| session.text_content = "Ug".to_owned());
+        let tools = canvas.tools().clone();
         canvas.edit(|session| {
             let outline = std::sync::Arc::new(ugu_core::text::Outline {
                 contours: vec![vec![[0.0, 0.0], [20.0, 0.0], [20.0, 10.0]]],
                 size: [20.0, 10.0],
             });
-            session.place_text([10.0, 10.0], outline).unwrap();
+            session.place_text(&tools, [10.0, 10.0], outline).unwrap();
         });
         assert!(canvas.session().is_dirty());
         files.request(Action::Close, &mut canvas);
@@ -1985,11 +1983,9 @@ mod tests {
         let path = folder("preset").join(format!("mine.{}", preset::EXTENSION));
         let mut wobble = Wobble::classic(6.0);
         wobble.motion.style = MotionStyle::Stepped;
+        canvas.set_tool(Tool::Fill).unwrap();
+        canvas.tools_mut().fill.tolerance = 40;
         canvas.edit(|session| {
-            let mut tools = session.tools();
-            tools.tool = Tool::Fill;
-            tools.fill.tolerance = 40;
-            session.set_tools(tools).unwrap();
             let document = session.document();
             let (frames, speed) = (document.frames, document.frames_per_second);
             session.set_animation(frames, speed, wobble).unwrap();
@@ -2011,13 +2007,13 @@ mod tests {
         files.handle(next(&events), &mut canvas);
         let imported = tr_with("preset-imported", &args_name(file_name(&path)));
         assert_eq!(files.message(), Some(imported.as_str()));
-        let tools = canvas.session().tools();
+        let tools = canvas.tools();
         assert_eq!((tools.tool, tools.fill.tolerance), (Tool::Fill, 40));
         assert_eq!(canvas.session().document().wobble, wobble);
         // The wobble is the document's, so it is undone; the tools are not.
         assert!(canvas.edit(|session| session.undo()).unwrap());
         assert_eq!(canvas.session().document().wobble, before);
-        assert_eq!(canvas.session().tools().tool, Tool::Fill);
+        assert_eq!(canvas.tool(), Tool::Fill);
 
         std::fs::write(&path, b"{}").unwrap();
         files.handle(

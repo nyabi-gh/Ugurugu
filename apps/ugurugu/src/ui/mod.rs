@@ -281,7 +281,7 @@ pub fn quick_access(
 /// The tool rail.
 pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     ui.spacing_mut().item_spacing.y = 2.0;
-    let tool = canvas.session().tool();
+    let tool = canvas.tool();
     for (each, action, glyph, key) in [
         (Tool::Pen, Action::Brush, Glyph::Brush, "tool-brush"),
         (Tool::Eraser, Action::Eraser, Glyph::Eraser, "tool-eraser"),
@@ -298,7 +298,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     ] {
         let shortcut = keys.text(action);
         if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
-            canvas.edit_settled(|session| session.set_tool(each));
+            canvas.choose_tool(each);
         }
     }
 }
@@ -327,7 +327,7 @@ fn slider_row(
 }
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    let tool = canvas.session().tool();
+    let tool = canvas.tool();
     ui.add_space(4.0);
     // A placed image or pasted pixels wait with another tool too, and their
     // resampling is chosen here, pixel art's whole pixels included.
@@ -351,12 +351,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     }
     panels.presets.show(ui, canvas, tool);
     // Read after the presets: choosing one sets its width and stabilizer.
-    let mut settings = match tool {
-        Tool::Eraser => canvas.session().eraser,
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-            canvas.session().pen
-        }
-    };
+    let mut settings = *canvas.brushes().get(tool);
     let before = settings;
     ui.add_space(4.0);
     let size_name = match tool {
@@ -382,7 +377,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     // One setting for the brush and the eraser, as 2.2.13's; a pixel brush
     // is the same width at any pressure.
     if !pixel {
-        let mut uses_pressure = canvas.session().uses_pressure;
+        let mut uses_pressure = canvas.tools().uses_pressure;
         if widgets::check_row(
             ui,
             tr("pen-pressure"),
@@ -392,7 +387,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         .on_hover_text(tr("pen-pressure-tip"))
         .changed()
         {
-            canvas.edit(|session| session.uses_pressure = uses_pressure);
+            canvas.tools_mut().uses_pressure = uses_pressure;
         }
     }
     let mut stabilization = settings.stabilizer * 100.0;
@@ -418,12 +413,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         .on_hover_text(tr("antialiasing-tip"));
     }
     if settings != before {
-        canvas.edit(|session| match tool {
-            Tool::Eraser => session.eraser = settings,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                session.pen = settings
-            }
-        });
+        *canvas.brushes_mut().get_mut(tool) = settings;
     }
 }
 
@@ -431,12 +421,12 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
 /// painting also shows how fills look.
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     widgets::field_label(ui, tr("lasso-mode"));
-    let mut paints = canvas.session().lasso_paints;
+    let mut paints = canvas.tools().lasso_paints;
     ui.horizontal(|ui| {
         ui.radio_value(&mut paints, false, tr("lasso-select"));
         ui.radio_value(&mut paints, true, tr("lasso-paint"));
     });
-    let mut fill = canvas.session().fill;
+    let mut fill = canvas.tools().fill;
     // Pixel mode never blends edges.
     if paints && !canvas.session().pixel_mode() {
         widgets::check_row(
@@ -446,17 +436,16 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             &mut fill.antialias,
         );
     }
-    if paints != canvas.session().lasso_paints || fill != canvas.session().fill {
-        canvas.edit(|session| {
-            session.lasso_paints = paints;
-            session.fill = fill;
-        });
+    if paints != canvas.tools().lasso_paints || fill != canvas.tools().fill {
+        let tools = canvas.tools_mut();
+        tools.lasso_paints = paints;
+        tools.fill = fill;
     }
     ui.add_space(6.0);
     sampling_choice(ui, canvas);
     ui.add_space(6.0);
     widgets::field_label(ui, tr("selection-shape"));
-    let current = canvas.session().selection_shape;
+    let current = canvas.tools().selection_shape;
     for (kind, title, description) in [
         (ShapeKind::Freehand, "shape-freehand", "shape-freehand-tip"),
         (
@@ -467,7 +456,7 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (ShapeKind::Ellipse, "shape-ellipse", "shape-ellipse-tip"),
     ] {
         if shape_option(ui, current == kind, tr(title), tr(description)).clicked() {
-            canvas.edit(|session| session.selection_shape = kind);
+            canvas.tools_mut().selection_shape = kind;
         }
     }
 }
@@ -476,7 +465,7 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
 /// select and paint bucket panels; the bucket also sets how fills look.
 /// The wand shows the comparison too, as it uses it.
 fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
-    let mut fill: FillSettings = canvas.session().fill;
+    let mut fill: FillSettings = canvas.tools().fill;
     widgets::field_label(ui, tr("fill-reference"));
     for (reads, title, description) in [
         (Reads::Current, "reads-current", "reads-current-tip"),
@@ -513,8 +502,8 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
             &mut fill.antialias,
         );
     }
-    if fill != canvas.session().fill {
-        canvas.edit(|session| session.fill = fill);
+    if fill != canvas.tools().fill {
+        canvas.tools_mut().fill = fill;
     }
 }
 
@@ -524,7 +513,7 @@ fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
         return;
     }
     widgets::field_label(ui, tr("transform-method"));
-    let current = canvas.session().transform_sampling;
+    let current = canvas.tools().transform_sampling;
     for (sampling, title, description) in [
         (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
         (Sampling::Nearest, "sampling-pixels", "sampling-pixels-tip"),

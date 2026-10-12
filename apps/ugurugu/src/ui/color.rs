@@ -116,7 +116,7 @@ impl ColorDock {
     }
 
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas) {
-        let color = canvas.session().pen.color;
+        let color = canvas.tools().color;
         self.follow(color);
         let [r, g, b, alpha] = color.0.map(|channel| f32::from(channel) / 255.0);
         let stored = self
@@ -224,7 +224,7 @@ impl ColorDock {
             hsv_to_rgb(hsv).map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
         let picked = Rgba8([r, g, b, (alpha * 255.0).round() as u8]);
         if picked != color {
-            canvas.edit(|session| session.pen.color = picked);
+            canvas.tools_mut().color = picked;
         }
         self.seen = Some(picked);
         if (response.drag_stopped() || response.clicked())
@@ -271,7 +271,7 @@ impl ColorDock {
             if back_response.clicked() {
                 self.previous = Some(picked);
                 self.seen = Some(previous);
-                canvas.edit(|session| session.pen.color = previous);
+                canvas.tools_mut().color = previous;
             }
             ui.vertical(|ui| {
                 let label = ui.label(
@@ -284,7 +284,7 @@ impl ColorDock {
                 {
                     self.previous = Some(picked);
                     self.seen = Some(typed);
-                    canvas.edit(|session| session.pen.color = typed);
+                    canvas.tools_mut().color = typed;
                 }
             });
         });

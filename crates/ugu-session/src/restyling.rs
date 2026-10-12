@@ -1,29 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The eyedropper, and changing the colour and width of what the selection
-//! touches on the current layer.
+//! Changing the colour and width of what the selection touches on the
+//! current layer.
 
 use ugu_core::edit::Outcome;
-use ugu_core::ops::Rgba8;
 use ugu_core::restyle::{self, Style, Touched};
 
 use crate::{FillError, Session};
 
 impl Session {
-    /// Makes the pen colour that of `pixel`, a premultiplied pixel of the
-    /// frame shown; a clear pixel leaves it, as in 2.2.13. Returns whether
-    /// the colour changed.
-    pub fn pick_color(&mut self, pixel: [u8; 4]) -> bool {
-        if pixel[3] == 0 {
-            return false;
-        }
-        let color = Rgba8::from_premultiplied(pixel);
-        let changed = self.pen.color != color;
-        self.pen.color = color;
-        changed
-    }
-
     /// What the selection touches on the current layer, for
     /// `restyle_selected`.
     pub fn touched(&self) -> Result<Touched, FillError> {
