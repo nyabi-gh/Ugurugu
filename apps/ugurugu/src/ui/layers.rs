@@ -44,6 +44,9 @@ pub struct LayerDock {
     /// The layer being dragged in the list.
     dragging: Option<LayerId>,
     thumbnails: HashMap<LayerId, Thumbnail>,
+    /// How tall the buttons and properties under the list were last drawn,
+    /// which the list leaves room for.
+    below: f32,
 }
 
 /// A layer's thumbnail: premultiplied pixels, what they were made from, and
@@ -294,7 +297,7 @@ impl LayerDock {
         let document = canvas.session().document();
         flatten(document, &document.layers, 0, &self.folded, &mut rows);
 
-        let list_height = (ui.available_height() - 210.0).max(ROW * 2.0);
+        let list_height = (ui.available_height() - self.below).max(ROW * 2.0);
         let mut drop = None;
         egui::ScrollArea::vertical()
             .id_salt("layer-list")
@@ -321,6 +324,7 @@ impl LayerDock {
             self.dragging = None;
         }
 
+        let list_end = ui.cursor().top();
         ui.add_space(theme::space::XS);
         self.buttons(ui, canvas, refusal);
         if let Some(text) = refusal.as_deref() {
@@ -328,6 +332,11 @@ impl LayerDock {
         }
         ui.add_space(theme::space::XS);
         self.properties(ui, canvas, current, refusal);
+        let below = ui.cursor().top() - list_end;
+        if below != self.below {
+            self.below = below;
+            ui.ctx().request_repaint();
+        }
     }
 
     /// Draws one row and handles what is done to it; returns a drop target
@@ -385,7 +394,7 @@ impl LayerDock {
         };
 
         // Fold toggle for groups, then the thumbnail, indented by depth.
-        let left = card.left() + 3.0 + 8.0 + row.depth as f32 * INDENT;
+        let left = card.left() + 13.0 + row.depth as f32 * INDENT;
         if let Some(folded) = row.folded {
             let fold =
                 Rect::from_center_size(egui::pos2(left + 2.0, card.center().y), Vec2::splat(14.0));
@@ -538,11 +547,16 @@ impl LayerDock {
             "percent",
             &super::args([("value", format!("{:.0} ", row.opacity * 100.0))]),
         );
-        painter.text(
-            egui::pos2(text_left, card.center().y - 2.0),
-            Align2::LEFT_BOTTOM,
+        let meta = one_line(
+            &painter,
             format!("{percent}  {}", blend_name(row.blend)),
-            FontId::proportional(theme::SMALL),
+            theme::SMALL,
+            theme::muted(),
+            text_right - text_left,
+        );
+        painter.galley(
+            egui::pos2(text_left, card.center().y - 2.0 - meta.size().y),
+            meta,
             theme::muted(),
         );
         let name_pos = egui::pos2(text_left, card.center().y + 1.0);
@@ -605,11 +619,12 @@ impl LayerDock {
             } else {
                 theme::muted()
             };
-            let galley = painter.layout(
+            let galley = one_line(
+                &painter,
                 row.name.clone(),
-                FontId::proportional(theme::BODY),
+                theme::BODY,
                 name_color,
-                (text_right - x).max(10.0),
+                text_right - x,
             );
             painter.galley(egui::pos2(x, name_pos.y), galley, name_color);
         }
@@ -885,6 +900,22 @@ impl LayerDock {
             self.opacity = None;
         }
     }
+}
+
+/// `text` on one line `width` wide at most, cut short with an ellipsis.
+fn one_line(
+    painter: &egui::Painter,
+    text: String,
+    size: f32,
+    color: Color32,
+    width: f32,
+) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text, FontId::proportional(size), color);
+    job.wrap = egui::text::TextWrapping::from_wrap_mode_and_width(
+        egui::TextWrapMode::Truncate,
+        width.max(10.0),
+    );
+    painter.layout_job(job)
 }
 
 /// A glyph followed by a letter, as 2.2.13's "+ G" button.
