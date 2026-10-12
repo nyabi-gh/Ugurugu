@@ -2,7 +2,7 @@
 
 ## 지금 상태
 
-- Ugurugu 3.0(Rust, `apps/`, `crates/`)은 Windows판으로 출시를 기다린다. M0~M6를 마쳤고, 남은 것은 [backlog.md](rust/backlog.md) 1절의 출시 전 일이다.
+- Ugurugu 3.0(Rust, `apps/`, `crates/`)은 Windows판으로 출시를 기다린다. M0~M6를 마쳤고, 출시 전에 한 창 안의 문서 탭을 넣는다(2026-10-12 사용자 결정, [계획](rust/plan-document-tabs.md)). 남은 것은 [backlog.md](rust/backlog.md) 1절.
 - 2.2.13(C++, `src/`)과 웹판(`web/`)은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이고, macOS 3.x는 나중에 따로 한다. C++ 트리는 비교 기준·`.ugu` fixture 생성·번역 원본(`i18n/*.ts`)으로 남는다.
 
 ## 3.0 문서 (`rust/`)
@@ -15,6 +15,7 @@
 | [backlog.md](rust/backlog.md) | 열린 일: 출시 전 할 일, 열린 gate, 미룬 결정, 알려진 한계, 개선 후보 |
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
+| [plan-document-tabs.md](rust/plan-document-tabs.md) | 진행 중인 계획: 한 창 안의 문서 탭(3.0). 끝나면 decisions·evidence로 옮기고 지운다 |
 
 새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다.
 
