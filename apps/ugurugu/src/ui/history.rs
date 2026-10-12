@@ -82,6 +82,9 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
                         Stroke::new(width, stroke),
                         egui::StrokeKind::Inside,
                     );
+                    if response.has_focus() {
+                        crate::widgets::focus_ring(ui.painter(), rect, theme::radius::SMALL);
+                    }
                     let name = tr_with("color-history-swatch", &args([("color", hex(color))]));
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(

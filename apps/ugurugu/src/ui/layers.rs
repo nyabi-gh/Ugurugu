@@ -367,6 +367,15 @@ impl LayerDock {
                 theme::hover(),
             );
         }
+        // The painter is clipped to the row, so the ring goes inside.
+        if response.has_focus() {
+            painter.rect_stroke(
+                card,
+                CornerRadius::same(theme::radius::CONTROL),
+                Stroke::new(1.0, theme::accent_ink()),
+                egui::StrokeKind::Inside,
+            );
+        }
         let dim = |color: Color32| {
             if row.visible {
                 color
@@ -387,6 +396,9 @@ impl LayerDock {
                 Glyph::MoveUp
             };
             icons::paint(&painter, fold, glyph, theme::muted(), 0.0);
+            if fold_response.has_focus() {
+                crate::widgets::focus_ring(&painter, fold, theme::radius::SMALL);
+            }
             fold_response.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Button,
@@ -438,6 +450,9 @@ impl LayerDock {
             (Glyph::EyeClosed, theme::disabled())
         };
         icons::paint(&painter, eye, glyph, ink, 0.0);
+        if eye_response.has_focus() {
+            crate::widgets::focus_ring(&painter, eye, theme::radius::SMALL);
+        }
         eye_response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Checkbox,
@@ -481,6 +496,9 @@ impl LayerDock {
                 },
                 0.0,
             );
+            if wobble_response.has_focus() {
+                crate::widgets::focus_ring(&painter, wobble, theme::radius::SMALL);
+            }
             wobble_response.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::WidgetType::Checkbox,
@@ -931,6 +949,9 @@ fn text_button(
         FontId::proportional(theme::BODY),
         ink,
     );
+    if response.has_focus() {
+        crate::widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+    }
     response.on_hover_text(name)
 }
 

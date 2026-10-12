@@ -577,6 +577,9 @@ fn shape_option(
         font(theme::SMALL),
         theme::muted(),
     );
+    if response.has_focus() {
+        widgets::focus_ring(painter, rect, theme::radius::CONTROL);
+    }
     response
 }
 
@@ -1363,6 +1366,9 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             ink,
             0.0,
         );
+        if play.has_focus() {
+            widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+        }
         play.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, playing, tr("play"))
         });

@@ -268,6 +268,9 @@ impl ColorDock {
                 Stroke::new(3.0, theme::accent_ink()),
                 egui::StrokeKind::Inside,
             );
+            if back_response.has_focus() {
+                crate::widgets::focus_ring(painter, back, theme::radius::CONTROL);
+            }
             if back_response.clicked() {
                 self.previous = Some(picked);
                 self.seen = Some(previous);

@@ -36,13 +36,9 @@ pub fn tool_button(
     };
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(theme::radius::CONTROL), fill);
+    // Outside, as an amber fill would hide a ring in the accent inside it.
     if response.has_focus() {
-        painter.rect_stroke(
-            rect,
-            CornerRadius::same(theme::radius::CONTROL),
-            Stroke::new(1.0, theme::accent_ink()),
-            StrokeKind::Inside,
-        );
+        focus_ring(painter, rect, theme::radius::CONTROL);
     }
     icons::paint(
         painter,
@@ -123,6 +119,9 @@ pub fn icon_button_tip(
         ink,
         0.0,
     );
+    if response.has_focus() {
+        focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+    }
     response.on_hover_text(tip)
 }
 
@@ -154,6 +153,9 @@ pub fn icon_toggle(
         ink,
         0.0,
     );
+    if response.has_focus() {
+        focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+    }
     response.on_hover_text(tip)
 }
 
@@ -187,6 +189,9 @@ pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Res
         galley,
         theme::text(),
     );
+    if response.has_focus() {
+        focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+    }
     response.on_hover_text(tip)
 }
 
