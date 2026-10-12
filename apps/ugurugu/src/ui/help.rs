@@ -15,7 +15,12 @@ const SECTIONS: [(&str, &[&str]); 4] = [
     ),
     (
         "help-files",
-        &["help-files-format", "help-files-import", "help-files-older"],
+        &[
+            "help-files-format",
+            "help-files-tabs",
+            "help-files-import",
+            "help-files-older",
+        ],
     ),
     (
         "help-install",

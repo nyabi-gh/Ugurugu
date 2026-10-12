@@ -455,6 +455,7 @@ help-start-pixel = 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새
 help-start-export = 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다.
 help-files = 작업 파일
 help-files-format = Ugurugu 3은 작업을 .ugurugu 파일로 저장합니다.
+help-files-tabs = 작업마다 캔버스 위의 탭으로 열리고, 파일 탐색기에서 연 작업도 이미 열린 창의 탭으로 열립니다. Ctrl+Tab으로 다음 탭으로 가고 Ctrl+W로 탭을 닫습니다.
 help-files-import = Ugurugu 2.1.0 이후에 저장한 .ugu 파일은 새 작업으로 열리고 .ugurugu로 저장됩니다. 원래 .ugu 파일은 바뀌지 않습니다.
 help-files-older = 그보다 오래된 .ugu와 .wagle·.wobble·.wawa 파일은 Ugurugu 2.2.13에서 열 수 있습니다. 오래된 .ugu는 2.2.13에서 다시 저장하면 여기서 열립니다.
 help-install = 설치와 업데이트

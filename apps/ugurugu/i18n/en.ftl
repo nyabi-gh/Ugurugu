@@ -455,6 +455,7 @@ help-start-pixel = For pixel art, turn on Pixel mode in the Edit menu, or when m
 help-start-export = Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu.
 help-files = Projects
 help-files-format = Ugurugu 3 saves projects as .ugurugu files.
+help-files-tabs = Each project opens in a tab above the canvas, and a project opened from File Explorer opens as a tab of the window already open. Ctrl+Tab moves to the next tab and Ctrl+W closes one.
 help-files-import = Projects saved as .ugu by Ugurugu 2.1.0 or later open as new projects and are saved as .ugurugu. The .ugu file is not changed.
 help-files-older = Older .ugu files and .wagle, .wobble and .wawa files open in Ugurugu 2.2.13. Save older .ugu files there again to open them here.
 help-install = Installing and updates
