@@ -125,7 +125,7 @@ pub fn apply(
 const SIDEBAR: f32 = 156.0;
 const CONTENT: egui::Vec2 = egui::vec2(540.0, 400.0);
 /// Between the list and the tab shown, with a line in the middle.
-const GAP: f32 = 24.0;
+const GAP: f32 = theme::space::XXL;
 /// Between the cards and the scroll bar.
 const GUTTER: i8 = 14;
 
@@ -160,11 +160,11 @@ pub fn show(
             ui.set_width(SIDEBAR + 2.0 * GAP + 1.0 + CONTENT.x);
             ui.label(
                 egui::RichText::new(tr("settings-title"))
-                    .size(theme::BODY + 5.0)
+                    .size(theme::TITLE)
                     .strong()
                     .color(theme::text()),
             );
-            ui.add_space(16.0);
+            ui.add_space(theme::space::XL);
             let mut line = 0.0;
             let body = ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
@@ -189,11 +189,11 @@ pub fn show(
                     ui.set_width(CONTENT.x);
                     ui.label(
                         egui::RichText::new(dialog.tab.title())
-                            .size(theme::BODY + 3.0)
+                            .size(theme::HEADING)
                             .strong()
                             .color(theme::text()),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(theme::space::M);
                     // Shorter in a short window, so the buttons stay on screen.
                     let room = ui.ctx().content_rect().height() - 220.0;
                     let mut height = room.clamp(200.0, CONTENT.y);
@@ -230,11 +230,11 @@ pub fn show(
             });
             ui.painter()
                 .vline(line, body.response.rect.y_range(), widgets::rule());
-            ui.add_space(16.0);
+            ui.add_space(theme::space::XL);
             let y = ui.cursor().top();
             ui.painter()
                 .hline(ui.max_rect().x_range(), y, widgets::rule());
-            ui.add_space(16.0);
+            ui.add_space(theme::space::XL);
             ui.horizontal(|ui| {
                 let restore = widgets::button(
                     ui,
@@ -275,7 +275,11 @@ fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
     });
     let painter = ui.painter();
     if selected || response.hovered() || response.has_focus() {
-        painter.rect_filled(rect, egui::CornerRadius::same(6), theme::hover());
+        painter.rect_filled(
+            rect,
+            egui::CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     if selected {
         let bar = egui::Rect::from_min_size(
@@ -329,7 +333,7 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
         if dialog.picking_accent {
             let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
             let mut color = egui::Color32::from_rgb(r, g, b);
-            ui.add_space(4.0);
+            ui.add_space(theme::space::XS);
             if egui::color_picker::color_picker_color32(
                 ui,
                 &mut color,
@@ -338,7 +342,7 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
                 let [r, g, b, _] = color.to_array();
                 settings.accent = (([r, g, b]) != theme::DEFAULT_ACCENT).then_some([r, g, b]);
             }
-            ui.add_space(8.0);
+            ui.add_space(theme::space::M);
         }
         widgets::setting_row(
             ui,
@@ -405,13 +409,13 @@ fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
     };
     painter.rect(
         rect,
-        egui::CornerRadius::same(6),
+        egui::CornerRadius::same(theme::radius::CONTROL),
         theme::control(),
         egui::Stroke::new(1.0, edge),
         egui::StrokeKind::Inside,
     );
     let chip = egui::Rect::from_min_size(rect.min + egui::vec2(5.0, 5.0), egui::vec2(18.0, 18.0));
-    painter.rect_filled(chip, egui::CornerRadius::same(4), color);
+    painter.rect_filled(chip, egui::CornerRadius::same(theme::radius::SMALL), color);
     let galley = painter.layout_no_wrap(
         hex.clone(),
         egui::FontId::monospace(theme::BODY),
@@ -423,12 +427,7 @@ fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
         theme::text(),
     );
     if response.has_focus() {
-        painter.rect_stroke(
-            rect.expand(2.0),
-            egui::CornerRadius::same(8),
-            egui::Stroke::new(1.0, theme::accent_ink()),
-            egui::StrokeKind::Outside,
-        );
+        widgets::focus_ring(painter, rect, theme::radius::CONTROL);
     }
     if response.clicked() {
         dialog.picking_accent = !dialog.picking_accent;
@@ -485,8 +484,11 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
         );
         egui::Frame::new()
             .fill(theme::panel())
-            .corner_radius(egui::CornerRadius::same(6))
-            .inner_margin(egui::Margin::symmetric(10, 8))
+            .corner_radius(egui::CornerRadius::same(theme::radius::CONTROL))
+            .inner_margin(egui::Margin::symmetric(
+                theme::space::L as i8,
+                theme::space::M as i8,
+            ))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.add(
@@ -501,7 +503,7 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
                     )
                 });
             });
-        ui.add_space(8.0);
+        ui.add_space(theme::space::M);
         let system = widgets::button(
             ui,
             tr("settings-system-folder"),
@@ -511,7 +513,7 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
         if system.clicked() {
             settings.default_save_folder = None;
         }
-        ui.add_space(8.0);
+        ui.add_space(theme::space::M);
     });
 }
 
@@ -597,7 +599,10 @@ fn shortcuts_header(
         egui::TextEdit::singleline(&mut dialog.search)
             .hint_text(tr("settings-shortcuts-search"))
             .desired_width(f32::INFINITY)
-            .margin(egui::Margin::symmetric(8, 6)),
+            .margin(egui::Margin::symmetric(
+                theme::space::M as i8,
+                theme::space::S as i8,
+            )),
     )
     .widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -606,7 +611,7 @@ fn shortcuts_header(
             tr("settings-shortcuts-search"),
         )
     });
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     ui.label(
         egui::RichText::new(tr("settings-shortcuts-hint"))
             .size(theme::SMALL)
@@ -615,7 +620,7 @@ fn shortcuts_header(
     if let Some(refusal) = &dialog.refusal {
         ui.colored_label(theme::accent_ink(), refusal);
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
 }
 
 /// Every action matching the search with its key, a field that waits for a
@@ -715,18 +720,13 @@ fn key_field(ui: &mut egui::Ui, text: &str, capturing: bool, assigned: bool) -> 
     };
     painter.rect(
         rect,
-        egui::CornerRadius::same(6),
+        egui::CornerRadius::same(theme::radius::CONTROL),
         theme::control(),
         edge,
         egui::StrokeKind::Inside,
     );
     if response.has_focus() && !capturing {
-        painter.rect_stroke(
-            rect.expand(2.0),
-            egui::CornerRadius::same(8),
-            egui::Stroke::new(1.0, theme::accent_ink()),
-            egui::StrokeKind::Outside,
-        );
+        widgets::focus_ring(painter, rect, theme::radius::CONTROL);
     }
     let ink = if capturing || assigned {
         theme::text()
@@ -780,15 +780,15 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
         })
         .clone();
     widgets::card(ui, |ui| {
-        ui.add_space(16.0);
+        ui.add_space(theme::space::XL);
         ui.horizontal(|ui| {
             ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(64.0, 64.0)));
-            ui.add_space(10.0);
+            ui.add_space(theme::space::L);
             ui.vertical(|ui| {
-                ui.add_space(8.0);
+                ui.add_space(theme::space::M);
                 ui.label(
                     egui::RichText::new("Ugurugu")
-                        .size(theme::BODY + 9.0)
+                        .size(theme::DISPLAY)
                         .strong()
                         .color(theme::text()),
                 );
@@ -808,14 +808,14 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
                 );
             });
         });
-        ui.add_space(14.0);
+        ui.add_space(theme::space::XL);
         let y = ui.cursor().top();
         ui.painter().hline(
             ui.max_rect().x_range(),
             y,
             egui::Stroke::new(1.0, theme::border().gamma_multiply(0.6)),
         );
-        ui.add_space(10.0);
+        ui.add_space(theme::space::L);
         for credit in [
             tr("settings-credit-development"),
             tr("settings-credit-icon"),
@@ -826,9 +826,9 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
                     .color(theme::muted()),
             );
         }
-        ui.add_space(14.0);
+        ui.add_space(theme::space::XL);
     });
-    ui.add_space(14.0);
+    ui.add_space(theme::space::XL);
     widgets::card(ui, |ui| {
         let gpu = tr_with("settings-gpu", &args([("gpu", crate::logs::gpu())]));
         let copied = dialog.copied.is_some_and(|at| at.elapsed() < COPIED_FOR);

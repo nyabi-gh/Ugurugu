@@ -42,14 +42,14 @@ pub fn show(ctx: &egui::Context, open: &mut bool) {
                 for (heading, paragraphs) in SECTIONS {
                     ui.label(
                         egui::RichText::new(tr(heading))
-                            .size(theme::BODY + 2.0)
+                            .size(theme::HEADING)
                             .strong(),
                     );
                     for paragraph in paragraphs {
                         ui.label(tr(paragraph));
-                        ui.add_space(4.0);
+                        ui.add_space(theme::space::XS);
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(theme::space::M);
                 }
                 ui.label(egui::RichText::new(tr("help-again")).color(theme::muted()));
             });

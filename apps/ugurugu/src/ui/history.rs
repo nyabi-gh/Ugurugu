@@ -26,7 +26,7 @@ pub fn hex(Rgba8([r, g, b, a]): Rgba8) -> String {
 /// A colour over a two-tone check, so that see-through colours show as such.
 pub fn paint_swatch(ui: &Ui, rect: egui::Rect, color: Rgba8) {
     let painter = ui.painter();
-    let radius = CornerRadius::same(3);
+    let radius = CornerRadius::same(theme::radius::SMALL);
     let Rgba8([r, g, b, a]) = color;
     if a < 255 {
         painter.rect_filled(rect, radius, Color32::from_gray(200));
@@ -78,7 +78,7 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
                     };
                     ui.painter().rect_stroke(
                         rect,
-                        CornerRadius::same(3),
+                        CornerRadius::same(theme::radius::SMALL),
                         Stroke::new(width, stroke),
                         egui::StrokeKind::Inside,
                     );

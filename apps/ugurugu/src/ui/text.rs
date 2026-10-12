@@ -30,7 +30,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         tracing::debug!(content = ?content, "text tool content");
         canvas.set_text(|text, _| *text = content);
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
 
     widgets::field_label(ui, tr("text-font"));
     let mut family = canvas.tools().text.family.clone();
@@ -73,7 +73,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     if filled != canvas.tools().text.filled {
         canvas.set_text(|_, settings| settings.filled = filled);
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
 
     let placed = canvas.session().placed_text().is_some();
     ui.horizontal(|ui| {
@@ -90,7 +90,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             canvas.cancel_text();
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     ui.label(
         egui::RichText::new(tr("text-hint"))
             .size(theme::SMALL)

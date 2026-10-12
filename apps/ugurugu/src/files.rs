@@ -967,7 +967,7 @@ impl Files {
                         widgets::whole(ui, &mut size[axis], edges.clone(), false, tr(name));
                     });
                 }
-                ui.add_space(4.0);
+                ui.add_space(theme::space::XS);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     for edge in [16, 32, 64, 128] {
@@ -979,9 +979,9 @@ impl Files {
                         }
                     }
                 });
-                ui.add_space(14.0);
+                ui.add_space(theme::space::XL);
             });
-            ui.add_space(12.0);
+            ui.add_space(theme::space::L);
             widgets::card(ui, |ui| {
                 widgets::switch_row(
                     ui,
@@ -1092,7 +1092,7 @@ impl Files {
                     dialog.keep_transparency = keep;
                 }
             });
-            ui.add_space(10.0);
+            ui.add_space(theme::space::L);
             let estimate = if fits {
                 egui::RichText::new(tr_with(
                     "export-estimate",
@@ -1516,7 +1516,7 @@ impl Files {
             Some(tr("recovery-found")),
             |ui| {
                 widgets::card(ui, |ui| {
-                    ui.add_space(12.0);
+                    ui.add_space(theme::space::L);
                     ui.label(
                         egui::RichText::new(&meta.name)
                             .strong()
@@ -1536,7 +1536,7 @@ impl Files {
                             .wrap(),
                         );
                     }
-                    ui.add_space(12.0);
+                    ui.add_space(theme::space::L);
                 });
                 widgets::dialog_buttons(ui, |ui| {
                     for (choice_here, key, emphasis) in [

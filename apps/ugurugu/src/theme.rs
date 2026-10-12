@@ -254,6 +254,34 @@ pub const BODY: f32 = 12.0;
 /// Field labels and captions; 2.2.13 keeps them at 11 px or more so Hangul
 /// and kana stay legible.
 pub const SMALL: f32 = 11.0;
+/// A heading inside a page, such as a settings page's or a help section's.
+pub const HEADING: f32 = 14.0;
+/// A dialog's title.
+pub const TITLE: f32 = 17.0;
+/// The app's name on the about page.
+pub const DISPLAY: f32 = 21.0;
+
+/// Corner radii. Bars and pills take half their thickness instead.
+pub mod radius {
+    /// Check boxes, thumbnails, swatches and other small marks.
+    pub const SMALL: u8 = 4;
+    /// Buttons, fields, list rows and menu items.
+    pub const CONTROL: u8 = 6;
+    /// Cards, windows and floating panels.
+    pub const SURFACE: u8 = 8;
+}
+
+/// Room between things, on a 4-point grid with 2 and 6 for tight spots.
+pub mod space {
+    pub const XXS: f32 = 2.0;
+    pub const XS: f32 = 4.0;
+    /// egui's room between items.
+    pub const S: f32 = 6.0;
+    pub const M: f32 = 8.0;
+    pub const L: f32 = 12.0;
+    pub const XL: f32 = 16.0;
+    pub const XXL: f32 = 24.0;
+}
 
 /// Sets the font, text sizes and widget style on `ctx`.
 pub fn apply(ctx: &egui::Context) {
@@ -286,12 +314,12 @@ pub fn apply(ctx: &egui::Context) {
             .into();
 
             let spacing = &mut style.spacing;
-            spacing.item_spacing = egui::vec2(6.0, 6.0);
-            spacing.button_padding = egui::vec2(8.0, 3.0);
+            spacing.item_spacing = egui::vec2(space::S, space::S);
+            spacing.button_padding = egui::vec2(space::M, 3.0);
             spacing.interact_size = egui::vec2(40.0, 26.0);
             spacing.indent = 14.0;
-            spacing.menu_margin = egui::Margin::same(6);
-            spacing.window_margin = egui::Margin::same(8);
+            spacing.menu_margin = egui::Margin::same(space::S as i8);
+            spacing.window_margin = egui::Margin::same(space::M as i8);
             spacing.slider_rail_height = 5.0;
             spacing.scroll = egui::style::ScrollStyle {
                 floating: false,
@@ -317,8 +345,8 @@ fn style_colors(style: &mut egui::Style, theme: Theme, colors: &Palette) {
     visuals.panel_fill = colors.panel;
     visuals.window_fill = colors.panel;
     visuals.window_stroke = Stroke::new(1.0, colors.border);
-    visuals.window_corner_radius = CornerRadius::same(8);
-    visuals.menu_corner_radius = CornerRadius::same(6);
+    visuals.window_corner_radius = CornerRadius::same(radius::SURFACE);
+    visuals.menu_corner_radius = CornerRadius::same(radius::CONTROL);
     visuals.extreme_bg_color = colors.base;
     visuals.faint_bg_color = colors.hover;
     visuals.code_bg_color = colors.base;
@@ -333,27 +361,27 @@ fn style_colors(style: &mut egui::Style, theme: Theme, colors: &Palette) {
     visuals.window_shadow = visuals.popup_shadow;
 
     let widgets = &mut visuals.widgets;
-    let radius = CornerRadius::same(6);
+    let corner = CornerRadius::same(radius::CONTROL);
     widgets.noninteractive.bg_fill = colors.panel;
     widgets.noninteractive.weak_bg_fill = colors.panel;
     widgets.noninteractive.bg_stroke = Stroke::new(1.0, colors.border);
     widgets.noninteractive.fg_stroke = Stroke::new(1.0, colors.text);
-    widgets.noninteractive.corner_radius = radius;
+    widgets.noninteractive.corner_radius = corner;
     widgets.inactive.bg_fill = colors.control;
     widgets.inactive.weak_bg_fill = colors.control;
     widgets.inactive.bg_stroke = Stroke::new(1.0, colors.border);
     widgets.inactive.fg_stroke = Stroke::new(1.0, colors.text);
-    widgets.inactive.corner_radius = radius;
+    widgets.inactive.corner_radius = corner;
     widgets.hovered.bg_fill = colors.control_hover;
     widgets.hovered.weak_bg_fill = colors.control_hover;
     widgets.hovered.bg_stroke = Stroke::new(1.0, colors.disabled);
     widgets.hovered.fg_stroke = Stroke::new(1.0, colors.text);
-    widgets.hovered.corner_radius = radius;
+    widgets.hovered.corner_radius = corner;
     widgets.hovered.expansion = 0.0;
     widgets.active.bg_fill = colors.control;
     widgets.active.weak_bg_fill = colors.control;
     widgets.active.fg_stroke = Stroke::new(1.0, colors.text);
-    widgets.active.corner_radius = radius;
+    widgets.active.corner_radius = corner;
     widgets.active.expansion = 0.0;
     style_accent(style, colors);
 }

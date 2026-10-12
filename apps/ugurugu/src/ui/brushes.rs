@@ -202,7 +202,13 @@ impl Presets {
         } else {
             Stroke::new(1.0, theme::border())
         };
-        painter.rect(rect, CornerRadius::same(8), fill, edge, StrokeKind::Inside);
+        painter.rect(
+            rect,
+            CornerRadius::same(theme::radius::SURFACE),
+            fill,
+            edge,
+            StrokeKind::Inside,
+        );
         let texture = self.preview(ui.ctx(), preset, frame);
         let shown = Vec2::new(preview_width.min(width - 8.0), preview_height);
         let image = Rect::from_center_size(

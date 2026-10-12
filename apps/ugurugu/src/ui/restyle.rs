@@ -11,7 +11,7 @@ use ugu_core::store::limits::STROKE_WIDTH;
 use super::Panels;
 use crate::canvas::Canvas;
 use crate::i18n::tr;
-use crate::widgets;
+use crate::{theme, widgets};
 
 pub struct Dialog {
     colorable: bool,
@@ -75,7 +75,7 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
                 widgets::setting_row(ui, true, tr("restyle-color"), None, |ui| {
                     ui.add_enabled_ui(dialog.colorable, |ui| {
                         widgets::switch(ui, &mut dialog.color_on, tr("restyle-color"));
-                        ui.add_space(10.0);
+                        ui.add_space(theme::space::L);
                         let picked = ui
                             .color_edit_button_srgba_unmultiplied(&mut dialog.color)
                             .on_hover_text(tr("restyle-choose-color"));
@@ -87,7 +87,7 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
                 widgets::setting_row(ui, false, tr("restyle-width"), None, |ui| {
                     ui.add_enabled_ui(dialog.sizable, |ui| {
                         widgets::switch(ui, &mut dialog.width_on, tr("restyle-width"));
-                        ui.add_space(10.0);
+                        ui.add_space(theme::space::L);
                         let width = ui.add_sized(
                             [96.0, 26.0],
                             egui::DragValue::new(&mut dialog.width)

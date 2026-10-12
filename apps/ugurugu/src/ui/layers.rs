@@ -321,12 +321,12 @@ impl LayerDock {
             self.dragging = None;
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         self.buttons(ui, canvas, refusal);
         if let Some(text) = refusal.as_deref() {
             ui.colored_label(theme::accent_ink(), text);
         }
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         self.properties(ui, canvas, current, refusal);
     }
 
@@ -350,14 +350,22 @@ impl LayerDock {
         let painter = ui.painter_at(rect);
         let card = rect.shrink2(egui::vec2(4.0, 2.0));
         if selected {
-            painter.rect_filled(card, CornerRadius::same(7), theme::control());
+            painter.rect_filled(
+                card,
+                CornerRadius::same(theme::radius::CONTROL),
+                theme::control(),
+            );
             let bar = Rect::from_center_size(
                 egui::pos2(card.left() + 4.0 + 1.5, card.center().y),
                 egui::vec2(3.0, 20.0),
             );
             painter.rect_filled(bar, CornerRadius::same(2), theme::accent());
         } else if response.hovered() {
-            painter.rect_filled(card, CornerRadius::same(7), theme::hover());
+            painter.rect_filled(
+                card,
+                CornerRadius::same(theme::radius::CONTROL),
+                theme::hover(),
+            );
         }
         let dim = |color: Color32| {
             if row.visible {
@@ -398,7 +406,11 @@ impl LayerDock {
             egui::pos2(left + 12.0, card.center().y - THUMB.y / 2.0),
             THUMB,
         );
-        painter.rect_filled(thumb, CornerRadius::same(4), dim(theme::base()));
+        painter.rect_filled(
+            thumb,
+            CornerRadius::same(theme::radius::SMALL),
+            dim(theme::base()),
+        );
         if let Some(thumbnail) = self.thumbnails.get(&row.id) {
             let [width, height] = thumbnail.size.map(|edge| edge as f32);
             let scale = (thumb.width() / width).min(thumb.height() / height);
@@ -409,7 +421,7 @@ impl LayerDock {
         }
         painter.rect_stroke(
             thumb,
-            CornerRadius::same(4),
+            CornerRadius::same(theme::radius::SMALL),
             Stroke::new(1.0, theme::border()),
             egui::StrokeKind::Inside,
         );
@@ -652,7 +664,7 @@ impl LayerDock {
             }
             Drop::Into(_) => painter.rect_stroke(
                 card,
-                CornerRadius::same(7),
+                CornerRadius::same(theme::radius::CONTROL),
                 Stroke::new(2.0, theme::accent_ink()),
                 egui::StrokeKind::Inside,
             ),
@@ -676,7 +688,7 @@ impl LayerDock {
         let removable = canvas.session().can_remove_layer();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add_space(4.0);
+            ui.add_space(theme::space::XS);
             if widgets::icon_button(ui, Glyph::Add, 16.0, tr("layer-add"), true).clicked() {
                 report(refusal, canvas.edit(Session::add_layer));
                 tracing::info!("layer added");
@@ -891,8 +903,11 @@ fn text_button(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(36.0, 24.0), sense);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
     if enabled && response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), theme::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     let ink = if enabled {
         theme::text()

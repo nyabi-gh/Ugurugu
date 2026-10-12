@@ -317,7 +317,11 @@ fn preview(ui: &mut egui::Ui, name: &str, rectangles: &[([f64; 4], bool)]) {
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, name));
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, egui::CornerRadius::same(4), theme::base());
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(theme::radius::SMALL),
+        theme::base(),
+    );
     let low = [0, 1].map(|axis| {
         rectangles
             .iter()
@@ -393,7 +397,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
             ([x, y, width, height], true),
         ],
     );
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     summary(ui, dialog.current, dialog.size);
     quiet(
         ui,
@@ -503,18 +507,13 @@ fn anchors(ui: &mut egui::Ui, dialog: &mut CanvasSize) {
                 };
                 ui.painter().rect(
                     rect,
-                    egui::CornerRadius::same(5),
+                    egui::CornerRadius::same(theme::radius::CONTROL),
                     fill,
                     egui::Stroke::new(1.0, edge),
                     egui::StrokeKind::Inside,
                 );
                 if response.has_focus() {
-                    ui.painter().rect_stroke(
-                        rect.expand(2.0),
-                        egui::CornerRadius::same(7),
-                        egui::Stroke::new(1.0, theme::accent_ink()),
-                        egui::StrokeKind::Outside,
-                    );
+                    widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
                 }
                 let response = response.on_hover_text(tr(key));
                 response.widget_info(|| {
@@ -543,7 +542,7 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
             ([0.0, 0.0, new_width, new_height], true),
         ],
     );
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     summary(ui, dialog.current, dialog.size);
     let [horizontal, vertical] = dialog.scales();
     quiet(

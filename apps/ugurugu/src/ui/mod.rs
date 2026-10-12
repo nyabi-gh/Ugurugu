@@ -334,12 +334,12 @@ fn slider_row(
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let tool = canvas.tool();
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     // A placed image or pasted pixels wait with another tool too, and their
     // resampling is chosen here, pixel art's whole pixels included.
     if tool != Tool::Select && canvas.session().pending().is_some() {
         sampling_choice(ui, canvas);
-        ui.add_space(6.0);
+        ui.add_space(theme::space::S);
     }
     match tool {
         Tool::Select => return selection_settings(ui, canvas),
@@ -359,7 +359,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     // Read after the presets: choosing one sets its width and stabilizer.
     let mut settings = *canvas.brushes().get(tool);
     let before = settings;
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     let size_name = match tool {
         Tool::Eraser => tr("eraser-size"),
         Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
@@ -447,9 +447,9 @@ fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
         tools.lasso_paints = paints;
         tools.fill = fill;
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     sampling_choice(ui, canvas);
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     widgets::field_label(ui, tr("selection-shape"));
     let current = canvas.tools().selection_shape;
     for (kind, title, description) in [
@@ -482,7 +482,7 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
             fill.reads = reads;
         }
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::S);
     widgets::field_label(ui, tr("fill-comparison"));
     ui.radio_value(&mut fill.by_colour, false, tr("compare-alpha"));
     ui.radio_value(&mut fill.by_colour, true, tr("compare-colour"));
@@ -500,7 +500,7 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
     });
     fill.tolerance = tolerance.round().clamp(0.0, 255.0) as u8;
     if bucket && !canvas.session().pixel_mode() {
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         widgets::check_row(
             ui,
             tr("fill-antialias"),
@@ -554,7 +554,7 @@ fn shape_option(
     };
     painter.rect(
         rect,
-        egui::CornerRadius::same(7),
+        egui::CornerRadius::same(theme::radius::CONTROL),
         fill,
         egui::Stroke::new(1.0, edge),
         egui::StrokeKind::Inside,
@@ -847,8 +847,8 @@ fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
 /// flip, apply and cancel, duplicate, delete and deselect. Hidden while a
 /// shape or the box is dragged.
 pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    const MARGIN: f32 = 8.0;
-    const GAP: f32 = 6.0;
+    const MARGIN: f32 = theme::space::M;
+    const GAP: f32 = theme::space::S;
     let session = canvas.session();
     if session.selection().is_none() || session.lasso().is_some() || canvas.is_dragging() {
         return;
@@ -886,8 +886,8 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
             egui::Frame::new()
                 .fill(theme::panel())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(egui::CornerRadius::same(8))
-                .inner_margin(egui::Margin::same(4))
+                .corner_radius(egui::CornerRadius::same(theme::radius::SURFACE))
+                .inner_margin(egui::Margin::same(theme::space::XS as i8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| action_buttons(ui, canvas, panels, pending));
                 });
@@ -1344,7 +1344,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             (false, false) => theme::control(),
         };
         ui.painter()
-            .rect_filled(rect, egui::CornerRadius::same(7), fill);
+            .rect_filled(rect, egui::CornerRadius::same(theme::radius::CONTROL), fill);
         let (glyph, ink) = if playing {
             (Glyph::Pause, theme::accent_text())
         } else {
@@ -1451,7 +1451,7 @@ fn scrubber(
     let focused = response.has_focus();
     painter.rect(
         track,
-        egui::CornerRadius::same(6),
+        egui::CornerRadius::same(theme::radius::CONTROL),
         theme::status(),
         egui::Stroke::new(
             1.0,
@@ -1473,7 +1473,7 @@ fn scrubber(
     if let Some(hover) = response.hover_pos() {
         painter.rect_filled(
             slot_rect(slot_at(hover.x)),
-            egui::CornerRadius::same(4),
+            egui::CornerRadius::same(theme::radius::SMALL),
             theme::control(),
         );
     }
@@ -1493,7 +1493,11 @@ fn scrubber(
             head.center(),
             egui::vec2(head.width().max(6.0), head.height()),
         );
-        painter.rect_filled(head, egui::CornerRadius::same(4), theme::accent());
+        painter.rect_filled(
+            head,
+            egui::CornerRadius::same(theme::radius::SMALL),
+            theme::accent(),
+        );
     }
     let name = tr_with(
         "scrubber-frame",

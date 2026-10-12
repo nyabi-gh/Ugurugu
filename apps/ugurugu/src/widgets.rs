@@ -35,11 +35,11 @@ pub fn tool_button(
         (Color32::TRANSPARENT, theme::text())
     };
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(7), fill);
+    painter.rect_filled(rect, CornerRadius::same(theme::radius::CONTROL), fill);
     if response.has_focus() {
         painter.rect_stroke(
             rect,
-            CornerRadius::same(7),
+            CornerRadius::same(theme::radius::CONTROL),
             Stroke::new(1.0, theme::accent_ink()),
             StrokeKind::Inside,
         );
@@ -52,6 +52,17 @@ pub fn tool_button(
         0.0,
     );
     response.on_hover_text(with_key(name, shortcut))
+}
+
+/// The ring keyboard focus draws 2 points outside a control whose corners
+/// are `radius`.
+pub fn focus_ring(painter: &egui::Painter, rect: Rect, radius: u8) {
+    painter.rect_stroke(
+        rect.expand(2.0),
+        CornerRadius::same(radius + 2),
+        Stroke::new(1.0, theme::accent_ink()),
+        StrokeKind::Outside,
+    );
 }
 
 /// A tooltip naming the key that does the same, if there is one.
@@ -94,8 +105,11 @@ pub fn icon_button_tip(
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(side), sense);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
     if enabled && response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), theme::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     let ink = if enabled {
         theme::text()
@@ -131,7 +145,8 @@ pub fn icon_toggle(
         (false, true) => (theme::hover(), theme::text()),
         (false, false) => (Color32::TRANSPARENT, theme::text()),
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(theme::radius::CONTROL), fill);
     icons::paint(
         ui.painter(),
         Rect::from_center_size(rect.center(), Vec2::splat(glyph_size)),
@@ -156,8 +171,11 @@ pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Res
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(5), theme::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     let icon = Rect::from_center_size(
         egui::pos2(rect.left() + 6.0 + 8.0, rect.center().y),
@@ -331,7 +349,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
     };
     painter.rect(
         square,
-        CornerRadius::same(4),
+        CornerRadius::same(theme::radius::SMALL),
         fill,
         Stroke::new(1.0, edge),
         StrokeKind::Inside,
@@ -344,12 +362,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
         ));
     }
     if response.has_focus() {
-        painter.rect_stroke(
-            square.expand(2.0),
-            CornerRadius::same(5),
-            Stroke::new(1.0, theme::accent_ink()),
-            StrokeKind::Outside,
-        );
+        focus_ring(painter, square, theme::radius::SMALL);
     }
     if let Some(galley) = galley {
         painter.galley(
@@ -466,18 +479,13 @@ pub fn button(ui: &mut Ui, text: &str, emphasis: Emphasis, enabled: bool) -> Res
     let painter = ui.painter();
     painter.rect(
         rect,
-        CornerRadius::same(6),
+        CornerRadius::same(theme::radius::CONTROL),
         fill,
         Stroke::new(1.0, edge),
         StrokeKind::Inside,
     );
     if response.has_focus() {
-        painter.rect_stroke(
-            rect.expand(2.0),
-            CornerRadius::same(8),
-            Stroke::new(1.0, theme::accent_ink()),
-            StrokeKind::Outside,
-        );
+        focus_ring(painter, rect, theme::radius::CONTROL);
     }
     let text_at = rect.center() - galley.size() / 2.0;
     painter.galley(text_at, galley, ink);
@@ -505,7 +513,7 @@ pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     let painter = ui.painter();
     painter.rect(
         rect,
-        CornerRadius::same(10),
+        CornerRadius::same(rect.height() as u8 / 2),
         track,
         Stroke::new(1.0, edge),
         StrokeKind::Inside,
@@ -513,12 +521,7 @@ pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     let x = egui::lerp((rect.left() + 10.0)..=(rect.right() - 10.0), shift);
     painter.circle_filled(egui::pos2(x, rect.center().y), 6.0, knob);
     if response.has_focus() {
-        painter.rect_stroke(
-            rect.expand(2.0),
-            CornerRadius::same(12),
-            Stroke::new(1.0, theme::accent_ink()),
-            StrokeKind::Outside,
-        );
+        focus_ring(painter, rect, rect.height() as u8 / 2);
     }
     response
 }
@@ -528,7 +531,7 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
         .fill(theme::base())
         .stroke(Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(CornerRadius::same(theme::radius::SURFACE))
         .inner_margin(egui::Margin {
             left: 14,
             right: 20,
@@ -583,7 +586,7 @@ fn row_with<R>(
     control_width: f32,
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    const PADDING: f32 = 12.0;
+    const PADDING: f32 = theme::space::L;
     const CONTROL_HEIGHT: f32 = 28.0;
     let width = ui.available_width();
     let text_width = width - control_width - 16.0;
@@ -643,7 +646,7 @@ fn row_with<R>(
 }
 
 /// Between a dialog's edge and what is in it.
-pub const DIALOG_MARGIN: i8 = 24;
+pub const DIALOG_MARGIN: i8 = theme::space::XXL as i8;
 
 /// A faint line between parts of a dialog or rows of a card.
 pub fn rule() -> Stroke {
@@ -668,17 +671,17 @@ pub fn dialog<R>(
             ui.set_width(width);
             ui.label(
                 egui::RichText::new(title)
-                    .size(theme::BODY + 5.0)
+                    .size(theme::TITLE)
                     .strong()
                     .color(theme::text()),
             );
             if let Some(description) = description {
-                ui.add_space(2.0);
+                ui.add_space(theme::space::XXS);
                 ui.add(
                     egui::Label::new(egui::RichText::new(description).color(theme::muted())).wrap(),
                 );
             }
-            ui.add_space(16.0);
+            ui.add_space(theme::space::XL);
             add(ui)
         })
 }
@@ -686,10 +689,10 @@ pub fn dialog<R>(
 /// The buttons at the foot of a dialog, after a faint line, at the right:
 /// `add` adds them from the right, the one that confirms first.
 pub fn dialog_buttons<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.add_space(16.0);
+    ui.add_space(theme::space::XL);
     let y = ui.cursor().top();
     ui.painter().hline(ui.max_rect().x_range(), y, rule());
-    ui.add_space(16.0);
+    ui.add_space(theme::space::XL);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add)
         .inner
 }
@@ -697,7 +700,7 @@ pub fn dialog_buttons<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// A small heading over a card, with room above it unless it is the first.
 pub fn section(ui: &mut Ui, text: &str, first: bool) {
     if !first {
-        ui.add_space(14.0);
+        ui.add_space(theme::space::XL);
     }
     ui.label(
         egui::RichText::new(text)
@@ -705,11 +708,11 @@ pub fn section(ui: &mut Ui, text: &str, first: bool) {
             .strong()
             .color(theme::muted()),
     );
-    ui.add_space(2.0);
+    ui.add_space(theme::space::XXS);
 }
 
 const MENU_CHECK: f32 = 22.0;
-const MENU_PADDING: f32 = 8.0;
+const MENU_PADDING: f32 = theme::space::M;
 /// Between an item's text and its shortcut.
 const MENU_GAP: f32 = 28.0;
 
@@ -776,7 +779,11 @@ pub fn menu_item(
     });
     let painter = ui.painter();
     if enabled && (response.hovered() || response.has_focus()) {
-        painter.rect_filled(rect, CornerRadius::same(5), theme::hover());
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     if checked == Some(true) {
         let at = |x: f32, y: f32| egui::pos2(rect.left() + PADDING + x, rect.center().y + y);

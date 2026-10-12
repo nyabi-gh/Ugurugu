@@ -234,7 +234,7 @@ impl ColorDock {
             self.previous = Some(from);
         }
 
-        ui.add_space(6.0);
+        ui.add_space(theme::space::S);
         ui.horizontal(|ui| {
             // The current colour over the previous one; the rear one swaps.
             let (pair, _) = ui.allocate_exact_size(egui::vec2(68.0, 58.0), Sense::hover());
@@ -256,14 +256,14 @@ impl ColorDock {
             let painter = ui.painter();
             painter.rect(
                 back,
-                CornerRadius::same(6),
+                CornerRadius::same(theme::radius::CONTROL),
                 rgba(previous),
                 Stroke::new(1.0, theme::border()),
                 egui::StrokeKind::Inside,
             );
             painter.rect(
                 front,
-                CornerRadius::same(6),
+                CornerRadius::same(theme::radius::CONTROL),
                 rgba(picked),
                 Stroke::new(3.0, theme::accent_ink()),
                 egui::StrokeKind::Inside,

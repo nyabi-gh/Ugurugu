@@ -186,7 +186,7 @@ fn area(
         .frame(
             Frame::new()
                 .fill(theme::panel())
-                .inner_margin(Margin::same(8)),
+                .inner_margin(Margin::same(theme::space::M as i8)),
         )
         .show(ui, |ui| {
             // A window too low for the panels scrolls them, so none is out
@@ -366,8 +366,8 @@ pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
                 Frame::new()
                     .fill(theme::panel())
                     .stroke(Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(Margin::same(8))
+                    .corner_radius(CornerRadius::same(theme::radius::SURFACE))
+                    .inner_margin(Margin::same(theme::space::M as i8))
                     .shadow(ui.style().visuals.window_shadow),
             )
             .show(ui.ctx(), |ui| {
@@ -559,7 +559,7 @@ fn finish(ui: &mut Ui, panels: &mut Panels) {
     if let Some(target) = target {
         painter.rect(
             target.show,
-            CornerRadius::same(4),
+            CornerRadius::same(theme::radius::SMALL),
             theme::accent().gamma_multiply(0.18),
             Stroke::new(1.5, theme::accent_ink()),
             StrokeKind::Inside,
@@ -574,7 +574,7 @@ fn finish(ui: &mut Ui, panels: &mut Panels) {
         let rect = Rect::from_min_size(pointer + vec2(14.0, 10.0), galley.size() + vec2(16.0, 8.0));
         painter.rect(
             rect,
-            CornerRadius::same(5),
+            CornerRadius::same(theme::radius::CONTROL),
             theme::control(),
             Stroke::new(1.0, theme::border()),
             StrokeKind::Inside,
@@ -647,7 +647,8 @@ fn tab(ui: &mut Ui, panel: Panel, front: bool) -> Response {
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(theme::radius::CONTROL), fill);
     ui.painter().galley(
         Align2::CENTER_CENTER
             .anchor_size(rect.center(), galley.size())
@@ -664,14 +665,17 @@ fn small_button(ui: &mut Ui, text: &str, name: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(5), theme::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme::radius::CONTROL),
+            theme::hover(),
+        );
     }
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(theme::BODY + 2.0),
+        FontId::proportional(theme::HEADING),
         theme::muted(),
     );
     focus_ring(ui, &response, rect);
@@ -682,7 +686,7 @@ fn focus_ring(ui: &Ui, response: &Response, rect: Rect) {
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(5),
+            CornerRadius::same(theme::radius::CONTROL),
             Stroke::new(1.0, theme::accent_ink()),
             StrokeKind::Inside,
         );
