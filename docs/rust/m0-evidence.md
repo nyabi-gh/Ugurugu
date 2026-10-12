@@ -1328,3 +1328,21 @@ Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="fals
 
 화면(`14-pixel-mode-brushes.png`): 도구 설정에 Pixel Pencil 카드 하나, SIZE 1px, 안티에일리어싱 줄 없음, 제목 `Untitled*`(모드 바꾸기가 실행 취소되는 편집). 같은 회차에서 재생 단계도 다시 통과(펜 놓은 뒤 프레임 28 → 25).
 
+
+## 36. main push의 CI 범위 (2026-10-12, `ci/push-base`)
+
+문서만 바꾼 `70f9454`(docs 2개)를 main에 push하자 CI 12개 작업이 모두 돌았다(실행 38217225548, 19분 41초). 가설은 "Detect changes"의 비교 범위 오류였지만 틀렸다: `ci.yml`이 PR이 아닌 이벤트를 `cpp=web=rust=true`로 두었다(PR #17 설계, 의도된 동작).
+
+그 설계가 받치던 것: `release.yml`·`release-3.yml`은 `wait-for-main-ci.sh`로 태그 커밋의 main CI가 성공했는지만 본다. main은 `cancel-in-progress`라서, push의 직전 커밋(`event.before`)과 비교하면 코드 push A 직후 문서 push B가 올 때 A의 실행이 취소되고 B는 문서만 보고 성공한다. 그러면 A의 코드가 main에서 검사되지 않은 채 B를 릴리스할 수 있다.
+
+바꾼 것: main push는 같은 브랜치에서 CI가 성공한 가장 새 커밋(자기 자신 제외, HEAD의 조상)과 비교한다(Actions API, 작업 권한 `actions: read`). 성공한 실행은 그 기준 이후 모든 경로를 덮으므로, 문서만 바꾼 커밋의 성공도 앞의 코드가 검사를 통과했음을 뜻한다. 그런 커밋이 없거나 API가 실패하면 전부 돈다. `tools/sandbox/*`(로컬 Windows Sandbox 시험, CI 작업이 읽지 않음)는 문서와 같은 묶음에 넣었다(전에는 모르는 경로라 전부).
+
+로컬 시뮬레이션(분류 스크립트를 그대로 뽑아 실제 실행 기록으로):
+
+| 가정한 push | 찾은 기준 | 결과 |
+|---|---|---|
+| `70f9454`(문서) | `d04675f` | 작업 없음(static·translations 외 건너뜀) |
+| `d04675f`(코드) | `cbc8dcd` | rust만 |
+| 성공 기록 없는 브랜치 | 없음 | 전부 |
+
+실제 확인은 이 변경의 main push 실행에서 한다(아래에 적는다).

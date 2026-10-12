@@ -19,12 +19,17 @@ env:
   QT_FORCE_STDERR_LOGGING: 1
 
 jobs:
-  # Pull requests run only the jobs their changes can affect; pushes to main
-  # run everything. Paths no rule recognises run everything too.
+  # Runs only the jobs the changes can affect: a pull request against its base,
+  # a push to main against the newest main commit whose CI succeeded, so a
+  # cancelled or failed run's changes are checked again. Releases rely on this.
+  # Paths no rule recognises, and pushes without such a commit, run everything.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     outputs:
       cpp: ${{ steps.detect.outputs.cpp }}
       web: ${{ steps.detect.outputs.web }}
@@ -39,14 +44,30 @@ jobs:
         shell: bash
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           cpp=false web=false rust=false
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            BASE=
+            passed=$(gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f branch="$GITHUB_REF_NAME" -f event=push -f status=success \
+              -f per_page=100 --jq '.workflow_runs[].head_sha') || passed=
+            for sha in $passed; do
+              if [[ "$sha" != "$GITHUB_SHA" ]] &&
+                  git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+                BASE=$sha
+                break
+              fi
+            done
+            echo "Last successful CI on $GITHUB_REF_NAME: ${BASE:-none}"
+          fi
+          if [[ -z "$BASE" ]]; then
             cpp=true web=true rust=true
           else
             while IFS= read -r path; do
               case "$path" in
-                docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md) ;;
+                docs/*|release-notes/*|README*.md|CONTRIBUTING.md|SECURITY.md|BUILDING.md|tools/sandbox/*) ;;
                 apps/*|crates/*|tools/latency-probe/*|tools/render-bench/*|tools/ugu-doc/*|tools/ime_probe.py|tools/baseline_probe.py|tools/display_scale.py|tools/uia_probe.ps1|tools/native_deps.py|tools/package_*.ps1|tools/third_party_notices.py|Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml|about.toml|.cargo/*)
                   rust=true ;;
                 web/*|tools/check_itchio_package.mjs|tools/wasm_*)
