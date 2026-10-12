@@ -289,14 +289,47 @@ impl Recovering {
     }
 }
 
+/// Where a document is kept and what it goes by: the file side of a tab.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DocumentFile {
+    pub path: Option<PathBuf>,
+    pub id: [u8; 16],
+    /// The name recovered or imported work goes by until it is saved, and
+    /// the file it came from, if any.
+    pub unsaved_name: Option<String>,
+    pub unsaved_from: Option<PathBuf>,
+}
+
+impl DocumentFile {
+    /// A document never saved, with an id of its own.
+    pub fn new() -> Self {
+        Self {
+            path: None,
+            id: new_id(),
+            unsaved_name: None,
+            unsaved_from: None,
+        }
+    }
+
+    /// The file's name without its extension, or what the work goes by
+    /// until it is saved.
+    pub fn display_name(&self) -> String {
+        match self.path.as_deref().and_then(Path::file_stem) {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => self
+                .unsaved_name
+                .clone()
+                .unwrap_or_else(|| tr("untitled").to_owned()),
+        }
+    }
+}
+
 pub struct Files {
     to_worker: Sender<Job>,
     worker: Option<JoinHandle<()>>,
     /// Sends events back to the render thread.
     events: Arc<dyn Fn(FileEvent) + Send + Sync>,
     owner: isize,
-    path: Option<PathBuf>,
-    id: [u8; 16],
     /// Asking whether to save before this action.
     confirm: Option<Action>,
     /// Runs once save `.0` succeeds; `None` until that save starts.
@@ -330,10 +363,6 @@ pub struct Files {
     found: VecDeque<Found>,
     /// Asking about recovered work is waiting for it to be read.
     reading_found: bool,
-    /// The name recovered or imported work goes by until it is saved, and
-    /// the file it came from, if any.
-    unsaved_name: Option<String>,
-    unsaved_from: Option<PathBuf>,
     exporting: Option<Exporting>,
     /// The animation export options asked for, while they are.
     animation_dialog: Option<AnimationDialog>,
@@ -394,8 +423,6 @@ impl Files {
             worker: Some(worker),
             events,
             owner,
-            path: None,
-            id: new_id(),
             confirm: None,
             after_save: None,
             saves_started: 0,
@@ -414,8 +441,6 @@ impl Files {
             recovery: None,
             found: VecDeque::new(),
             reading_found: false,
-            unsaved_name: None,
-            unsaved_from: None,
             exporting: None,
             animation_dialog: None,
             new_document: None,
@@ -502,8 +527,8 @@ impl Files {
     /// Writes the work as saving would, with a pending transform or placed
     /// text in it, leaving them pending.
     fn write_recovery(&mut self, canvas: &mut Canvas) {
-        let name = self.display_name();
-        let path = self.path.clone();
+        let name = canvas.file().display_name();
+        let path = canvas.file().path.clone();
         let Some(recovering) = self.recovery.as_mut() else {
             return;
         };
@@ -526,7 +551,7 @@ impl Files {
         let _ = self.to_worker.send(Job::WriteRecovery {
             folder: recovering.folder.clone(),
             document,
-            id: self.id,
+            id: canvas.file().id,
             meta,
         });
         recovering.writing = true;
@@ -626,19 +651,9 @@ impl Files {
 
     /// The window title: file name, a mark for unsaved changes.
     pub fn title(&self, canvas: &Canvas) -> String {
-        let name = self.display_name();
+        let name = canvas.file().display_name();
         let mark = if canvas.session().is_dirty() { "*" } else { "" };
         format!("{name}{mark} - Ugurugu")
-    }
-
-    fn display_name(&self) -> String {
-        match self.path.as_deref().and_then(Path::file_stem) {
-            Some(name) => name.to_string_lossy().into_owned(),
-            None => self
-                .unsaved_name
-                .clone()
-                .unwrap_or_else(|| tr("untitled").to_owned()),
-        }
     }
 
     /// Starts `action`, first asking about unsaved changes.
@@ -711,10 +726,12 @@ impl Files {
                         .edit(|session| session.select_layer(layer))
                         .expect("nothing is pending in a new document");
                 }
-                self.path = Some(path);
-                self.unsaved_name = None;
-                self.unsaved_from = None;
-                self.id = id;
+                *canvas.file_mut() = DocumentFile {
+                    path: Some(path),
+                    id,
+                    unsaved_name: None,
+                    unsaved_from: None,
+                };
                 self.clear_message();
             }
             // Like 2.2.13's .wawa import: a new document not yet saved,
@@ -727,13 +744,14 @@ impl Files {
                         .edit(|session| session.select_layer(active))
                         .expect("nothing is pending in a new document");
                 }
-                self.path = None;
-                self.unsaved_name = path
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().into_owned());
-                self.id = new_id();
                 self.say(tr_with("legacy-imported", &args_name(file_name(&path))));
-                self.unsaved_from = Some(path);
+                *canvas.file_mut() = DocumentFile {
+                    unsaved_name: path
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned()),
+                    unsaved_from: Some(path),
+                    ..DocumentFile::new()
+                };
             }
         }
     }
@@ -783,14 +801,14 @@ impl Files {
     }
 
     pub fn save(&mut self, canvas: &mut Canvas) {
-        match self.path.clone() {
+        match canvas.file().path.clone() {
             Some(path) => self.start_save(path, canvas),
-            None => self.save_as(),
+            None => self.save_as(canvas),
         }
     }
 
-    pub fn save_as(&mut self) {
-        self.pick_save(Purpose::SaveAs, vec![document_type()]);
+    pub fn save_as(&mut self, canvas: &Canvas) {
+        self.pick_save(canvas.file(), Purpose::SaveAs, vec![document_type()]);
     }
 
     /// Where new documents are first saved and exported, from the settings.
@@ -824,12 +842,12 @@ impl Files {
 
     /// Saves as `file_type` under the document's name, in its folder, or in
     /// the default save folder for a document never saved, as 2.2.13 does.
-    fn pick_save(&mut self, purpose: Purpose, file_types: Vec<FileType>) {
-        let name = format!("{}.{}", self.display_name(), file_types[0].extensions[0]);
-        let folder = self
+    fn pick_save(&mut self, file: &DocumentFile, purpose: Purpose, file_types: Vec<FileType>) {
+        let name = format!("{}.{}", file.display_name(), file_types[0].extensions[0]);
+        let folder = file
             .path
             .as_deref()
-            .or(self.unsaved_from.as_deref())
+            .or(file.unsaved_from.as_deref())
             .and_then(std::path::Path::parent)
             .map(std::path::Path::to_path_buf);
         self.pick(
@@ -883,14 +901,14 @@ impl Files {
     }
 
     /// Asks where to write the tools and wobble as a preset.
-    pub fn export_tools(&mut self) {
-        self.pick_save(Purpose::ExportTools, vec![tools_type()]);
+    pub fn export_tools(&mut self, canvas: &Canvas) {
+        self.pick_save(canvas.file(), Purpose::ExportTools, vec![tools_type()]);
     }
 
     /// Asks where to export the frame shown, one export at a time.
-    pub fn export_image(&mut self) {
+    pub fn export_image(&mut self, canvas: &Canvas) {
         if self.exporting.is_none() {
-            self.pick_save(Purpose::ExportImage, still_types());
+            self.pick_save(canvas.file(), Purpose::ExportImage, still_types());
         }
     }
 
@@ -939,10 +957,7 @@ impl Files {
             },
             true,
         );
-        self.path = None;
-        self.unsaved_name = None;
-        self.unsaved_from = None;
-        self.id = new_id();
+        *canvas.file_mut() = DocumentFile::new();
         self.clear_message();
     }
 
@@ -1142,7 +1157,7 @@ impl Files {
                     Animation::Gif => vec![file_type("type-gif", &["gif"])],
                     Animation::WebP => vec![file_type("type-webp", &["webp"])],
                 };
-                self.pick_save(Purpose::ExportAnimation, types);
+                self.pick_save(canvas.file(), Purpose::ExportAnimation, types);
             }
             Some(false) => self.animation_dialog = None,
             None => {}
@@ -1223,7 +1238,7 @@ impl Files {
             number,
             generation: canvas.generation(),
             document: canvas.snapshot_now(),
-            id: self.id,
+            id: canvas.file().id,
             layer: canvas.session().current_layer(),
             path,
             state: canvas.session().state(),
@@ -1377,7 +1392,7 @@ impl Files {
                         // nor the saved state.
                         if shown {
                             canvas.mark_saved(state);
-                            self.path = Some(path);
+                            canvas.file_mut().path = Some(path);
                         }
                         match after {
                             // What was edited while it saved is not saved.
@@ -1458,14 +1473,16 @@ impl Files {
                                 .edit(|session| session.select_layer(layer))
                                 .expect("nothing is pending in a new document");
                         }
-                        self.path = None;
-                        self.id = id;
-                        self.unsaved_name = Some(if meta.name.ends_with("-recovered") {
-                            meta.name
-                        } else {
-                            format!("{}-recovered", meta.name)
-                        });
-                        self.unsaved_from = meta.path;
+                        *canvas.file_mut() = DocumentFile {
+                            path: None,
+                            id,
+                            unsaved_name: Some(if meta.name.ends_with("-recovered") {
+                                meta.name
+                            } else {
+                                format!("{}-recovered", meta.name)
+                            }),
+                            unsaved_from: meta.path,
+                        };
                         self.say(tr("recovery-done").to_owned());
                         // In this window's folder before the other one goes,
                         // which stays until it is.
@@ -1859,7 +1876,7 @@ mod tests {
         assert_ne!(canvas.session().current_layer(), bottom);
         canvas.edit(|session| session.select_layer(bottom)).unwrap();
         let path = folder("active-layer").join("layers.ugurugu");
-        files.path = Some(path.clone());
+        canvas.file_mut().path = Some(path.clone());
         files.save(&mut canvas);
         files.handle(next(&events), &mut canvas);
         assert!(path.exists());
@@ -1873,16 +1890,16 @@ mod tests {
     #[test]
     fn a_save_that_panics_is_answered_as_failed_and_ends_the_wait() {
         let (mut files, mut canvas, _events) = setup();
-        files.path = Some(std::env::temp_dir().join("ugurugu-never-written.ugurugu"));
+        canvas.file_mut().path = Some(std::env::temp_dir().join("ugurugu-never-written.ugurugu"));
         files.saves_started = 6;
         files.saving = 1;
         let job = Job::Save {
             number: 7,
             generation: canvas.generation(),
             document: canvas.snapshot_now(),
-            id: files.id,
+            id: canvas.file().id,
             layer: canvas.session().current_layer(),
-            path: files.path.clone().unwrap(),
+            path: canvas.file().path.clone().unwrap(),
             state: canvas.session().state(),
         };
         let event = run_answering(job, |_| panic!("a bug in a save")).expect("answered");
@@ -1960,7 +1977,7 @@ mod tests {
         let (mut files, mut canvas, events) = setup();
         let path = folder("snapshot").join("drawing.ugurugu");
         canvas.edit(Session::add_layer).unwrap();
-        files.path = Some(path.clone());
+        canvas.file_mut().path = Some(path.clone());
         files.save(&mut canvas);
         // A save says it is running only once it has taken a while.
         assert_eq!(files.message(), None);
@@ -1992,7 +2009,7 @@ mod tests {
         files.request(Action::New, &mut canvas);
         assert_eq!(files.confirm, Some(Action::New));
         files.confirm = None;
-        files.path = Some(path.clone());
+        canvas.file_mut().path = Some(path.clone());
         files.save(&mut canvas);
         assert!(canvas.session().pending().is_none());
         files.handle(next(&events), &mut canvas);
@@ -2026,7 +2043,7 @@ mod tests {
         files.request(Action::Close, &mut canvas);
         assert_eq!(files.confirm, Some(Action::Close));
         files.confirm = None;
-        files.path = Some(path.clone());
+        canvas.file_mut().path = Some(path.clone());
         files.save(&mut canvas);
         assert!(canvas.session().placed_text().is_none());
         files.handle(next(&events), &mut canvas);
@@ -2151,7 +2168,7 @@ mod tests {
     fn a_failed_save_keeps_the_changes_unsaved_and_says_why() {
         let (mut files, mut canvas, events) = setup();
         canvas.edit(Session::add_layer).unwrap();
-        files.path = Some(
+        canvas.file_mut().path = Some(
             folder("missing")
                 .join("no such folder")
                 .join("drawing.ugurugu"),
@@ -2214,8 +2231,8 @@ mod tests {
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.session().document().frames, 12);
         assert!(!canvas.session().is_dirty());
-        assert_eq!(files.path, Some(good));
-        assert_eq!(files.id, [7; 16]);
+        assert_eq!(canvas.file().path, Some(good));
+        assert_eq!(canvas.file().id, [7; 16]);
     }
 
     #[test]
@@ -2232,15 +2249,15 @@ mod tests {
         assert!(session.is_dirty());
         // "Base", active when 2.2.13 saved it.
         assert_eq!(session.current_layer(), session.document().layers[1].id);
-        assert_eq!(files.path, None);
+        assert_eq!(canvas.file().path, None);
         assert!(files.title(&canvas).starts_with("edit*"));
         assert!(
             files
                 .message()
                 .is_some_and(|text| text.contains("edit.ugu"))
         );
-        assert_ne!(files.id, [0; 16]);
-        assert_eq!(files.unsaved_from, Some(project));
+        assert_ne!(canvas.file().id, [0; 16]);
+        assert_eq!(canvas.file().unsaved_from, Some(project));
 
         let refused = folder.join("procedural.ugu");
         std::fs::copy(fixtures.join("procedural.ugu"), &refused).unwrap();
@@ -2355,7 +2372,7 @@ mod tests {
         );
         assert_eq!(files.export_status().as_deref(), Some(tr("export-running")));
         // Another waits for it: neither a dialog nor a second export.
-        files.export_image();
+        files.export_image(&canvas);
         assert!(!files.busy_dialog);
         files.handle(
             FileEvent::Picked(Purpose::ExportImage, Some(folder.join("other.png"))),

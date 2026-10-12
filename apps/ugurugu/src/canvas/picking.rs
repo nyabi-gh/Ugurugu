@@ -35,7 +35,7 @@ impl Canvas {
     /// or placed text, or the playback frame on screen.
     pub(super) fn pick(&mut self, position: [f64; 2]) {
         let [x, y] = self.to_document(position);
-        let [width, height] = self.session.document().canvas.map(f64::from);
+        let [width, height] = self.tab.session.document().canvas.map(f64::from);
         if !(0.0..width).contains(&x) || !(0.0..height).contains(&y) {
             return;
         }
@@ -56,7 +56,7 @@ impl Canvas {
     /// nothing to edit.
     pub fn touched(&mut self) -> Option<Touched> {
         self.notice = None;
-        match self.session.touched() {
+        match self.tab.session.touched() {
             Ok(touched) if touched.colored + touched.sized > 0 => Some(touched),
             Ok(_) => {
                 self.notice = Some(tr("restyle-nothing").to_owned());

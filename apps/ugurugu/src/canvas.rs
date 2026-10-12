@@ -129,17 +129,18 @@ enum Interaction {
     },
 }
 
-pub struct Canvas {
+/// One open document and how it is shown: what each of the window's tabs
+/// holds.
+struct Tab {
     session: Session,
-    /// The window's tools, for whichever document it shows.
-    tools: Tools,
+    /// Where it is kept and what it goes by.
+    file: crate::files::DocumentFile,
     cache: CacheWorker,
     split: Option<(Key, Split)>,
     /// A pending transform shown on the split's layer.
     preview: Option<transform::Preview>,
     /// Placed text shown on the split's layer.
     text_preview: Option<text::TextPreview>,
-    typesetter: text::Typesetter,
     requested: Option<Key>,
     /// The edited image; empty from playback until the next split.
     display: Pixmap,
@@ -149,6 +150,84 @@ pub struct Canvas {
     /// Playback paused for a stroke or a click, to go on once it is over,
     /// as 2.2.13's.
     resume_playback: bool,
+    /// What the wand and the bucket last read, kept for the next click.
+    reference: Option<Pixmap>,
+    /// Physical pixels per document pixel.
+    scale: f64,
+    /// The document's top-left corner from the area's, in physical pixels.
+    offset: [f64; 2],
+    /// The view's turn, clockwise in degrees, and whether it is mirrored.
+    angle: f64,
+    mirrored: bool,
+    placed: bool,
+    playback: Option<Playback>,
+    /// Tells this document's renders apart from those of the documents
+    /// shown before it.
+    generation: u64,
+    /// The document as last handed to the worker, shared by its jobs.
+    snapshot: Option<(u64, Snapshot)>,
+    /// Small images of paint layers' own pixels, with the revision each
+    /// shows.
+    thumbnails: HashMap<LayerId, (u64, Arc<Pixmap>)>,
+    /// Thumbnails asked for and not yet back.
+    thumbnails_asked: bool,
+}
+
+impl Tab {
+    fn new(document: Document, saved: bool, cache: CacheWorker, generation: u64) -> Self {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        Self {
+            session: Session::new(document, saved),
+            file: crate::files::DocumentFile::new(),
+            cache,
+            split: None,
+            preview: None,
+            text_preview: None,
+            requested: None,
+            display: Pixmap::new(width, height),
+            held: None,
+            resume_playback: false,
+            reference: None,
+            scale: 1.0,
+            offset: [0.0, 0.0],
+            angle: 0.0,
+            mirrored: false,
+            placed: false,
+            playback: None,
+            generation,
+            snapshot: None,
+            thumbnails: HashMap::new(),
+            thumbnails_asked: false,
+        }
+    }
+
+    /// Shows `document` instead, with an empty history, keeping the worker
+    /// and the view's turn.
+    fn reset(&mut self, document: Document, saved: bool, generation: u64) {
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        self.session = Session::new(document, saved);
+        self.generation = generation;
+        self.split = None;
+        self.preview = None;
+        self.text_preview = None;
+        self.requested = None;
+        self.display = Pixmap::new(width, height);
+        self.held = None;
+        self.resume_playback = false;
+        self.playback = None;
+        self.snapshot = None;
+        self.thumbnails.clear();
+        self.thumbnails_asked = false;
+        self.placed = false;
+    }
+}
+
+pub struct Canvas {
+    /// The document shown.
+    tab: Tab,
+    /// The window's tools, for whichever document it shows.
+    tools: Tools,
+    typesetter: text::Typesetter,
     /// Display pixels not yet uploaded.
     upload: Option<PixelRect>,
     /// The size, shrink and origin of the pixels shown when last uploaded.
@@ -159,37 +238,19 @@ pub struct Canvas {
     modifiers: (bool, bool),
     /// The last stroke's coverage, cleared, for the next stroke.
     spare_coverage: Option<Pixmap>,
-    /// What the wand and the bucket last read, kept for the next click.
-    reference: Option<Pixmap>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
     area: Option<[i32; 4]>,
-    /// Physical pixels per document pixel.
-    scale: f64,
     pixels_per_point: f32,
-    /// The document's top-left corner from the area's, in physical pixels.
-    offset: [f64; 2],
-    /// The view's turn, clockwise in degrees, and whether it is mirrored.
-    angle: f64,
-    mirrored: bool,
     /// Whether the pen over the canvas shows its eraser end.
     hover_eraser: bool,
     /// Where the canvas's own pointer last was, in client physical pixels.
     drawn_at: Option<[f64; 2]>,
-    placed: bool,
     sample_count: usize,
     notice: Option<String>,
-    playback: Option<Playback>,
     /// Off in the settings keeps playback from starting.
     animation_allowed: bool,
     /// Counts documents opened, so renders of an earlier one are told apart.
-    generation: u64,
-    /// The document as last handed to the worker, shared by its jobs.
-    snapshot: Option<(u64, Snapshot)>,
-    /// Small images of paint layers' own pixels, with the revision each
-    /// shows.
-    thumbnails: HashMap<LayerId, (u64, Arc<Pixmap>)>,
-    /// Thumbnails asked for and not yet back.
-    thumbnails_asked: bool,
+    generations: u64,
 }
 
 fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
@@ -215,46 +276,37 @@ impl Canvas {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         Self {
             // Nothing to lose until edited, as in 2.2.13.
-            session: Session::new(document, true),
+            tab: Tab::new(document, true, CacheWorker::start(cache_done), 0),
             tools: Tools::default(),
-            cache: CacheWorker::start(cache_done),
-            split: None,
-            preview: None,
-            text_preview: None,
             typesetter: text::Typesetter::default(),
-            requested: None,
-            display: Pixmap::new(width, height),
-            held: None,
-            resume_playback: false,
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             uploaded: None,
             stamp: Stamp::default(),
             interaction: Interaction::Idle,
             modifiers: (false, false),
             spare_coverage: None,
-            reference: None,
             area: None,
-            scale: 1.0,
             pixels_per_point: 1.0,
-            offset: [0.0, 0.0],
-            angle: 0.0,
-            mirrored: false,
             hover_eraser: false,
             drawn_at: None,
-            placed: false,
             sample_count: 0,
             notice: None,
-            playback: None,
             animation_allowed: true,
-            snapshot: None,
-            generation: 0,
-            thumbnails: HashMap::new(),
-            thumbnails_asked: false,
+            generations: 0,
         }
     }
 
+    /// Where the document shown is kept and what it goes by.
+    pub fn file(&self) -> &crate::files::DocumentFile {
+        &self.tab.file
+    }
+
+    pub fn file_mut(&mut self) -> &mut crate::files::DocumentFile {
+        &mut self.tab.file
+    }
+
     pub fn session(&self) -> &Session {
-        &self.session
+        &self.tab.session
     }
 
     /// The tools stay as they are from one document to the next, as in
@@ -286,17 +338,17 @@ impl Canvas {
     /// The brush and eraser the document shown draws with: the pixel ones in
     /// pixel mode.
     pub fn brushes(&self) -> &Brushes {
-        self.tools.brushes(self.session.pixel_mode())
+        self.tools.brushes(self.tab.session.pixel_mode())
     }
 
     pub fn brushes_mut(&mut self) -> &mut Brushes {
-        self.tools.brushes_mut(self.session.pixel_mode())
+        self.tools.brushes_mut(self.tab.session.pixel_mode())
     }
 
     /// Makes `preset` the brush, or with `Tool::Eraser` the eraser, of the
     /// document's mode.
     pub fn choose_preset(&mut self, tool: Tool, preset: &'static ugu_core::brush::Preset) {
-        let pixel_mode = self.session.pixel_mode();
+        let pixel_mode = self.tab.session.pixel_mode();
         self.tools.choose_preset(pixel_mode, tool, preset);
     }
 
@@ -311,24 +363,11 @@ impl Canvas {
     /// Puts `document` in place of the open one, with an empty history;
     /// `saved` when it is on disk as it is.
     pub fn replace(&mut self, document: Document, saved: bool) {
-        let [width, height] = document.canvas.map(|edge| edge as u16);
-        self.session = Session::new(document, saved);
-        self.generation += 1;
-        self.split = None;
-        self.preview = None;
-        self.text_preview = None;
-        self.requested = None;
-        self.display = Pixmap::new(width, height);
-        self.held = None;
-        self.resume_playback = false;
+        self.generations += 1;
+        self.tab.reset(document, saved, self.generations);
         self.interaction = Interaction::Idle;
         self.spare_coverage = None;
-        self.playback = None;
         self.upload_all();
-        self.snapshot = None;
-        self.thumbnails.clear();
-        self.thumbnails_asked = false;
-        self.placed = false;
         if let Some(area) = self.area {
             self.place(area);
         }
@@ -340,7 +379,7 @@ impl Canvas {
     }
 
     pub fn mark_saved(&mut self, state: ugu_core::history::StateId) {
-        self.session.mark_saved(state);
+        self.tab.session.mark_saved(state);
     }
 
     /// Changes the session outside drawing. A stroke being drawn is dropped
@@ -349,18 +388,18 @@ impl Canvas {
         if let Interaction::Drawing { rect, .. } =
             std::mem::replace(&mut self.interaction, Interaction::Idle)
         {
-            self.session.cancel_stroke();
+            self.tab.session.cancel_stroke();
             self.recomposite(rect);
         }
-        let before = self.session.document().canvas;
+        let before = self.tab.session.document().canvas;
         let key = self.key();
-        self.session.use_tools(&self.tools);
-        let result = change(&mut self.session);
+        self.tab.session.use_tools(&self.tools);
+        let result = change(&mut self.tab.session);
         self.record_colors();
-        if self.session.document().canvas != before {
+        if self.tab.session.document().canvas != before {
             // The split is of the canvas before; what it shows stays until
             // the split of the new one arrives.
-            self.split = None;
+            self.tab.split = None;
             self.spare_coverage = None;
             self.fit();
         }
@@ -378,7 +417,7 @@ impl Canvas {
 
     /// Zooms to `scale` around the middle of the canvas area.
     pub fn zoom_to(&mut self, scale: f64) {
-        let notches = (scale / self.scale).ln() / ZOOM_STEP.ln();
+        let notches = (scale / self.tab.scale).ln() / ZOOM_STEP.ln();
         self.zoom_in_place(notches as f32);
     }
 
@@ -401,7 +440,7 @@ impl Canvas {
 
     /// Which document is shown, counting each one that replaced another.
     pub fn generation(&self) -> u64 {
-        self.generation
+        self.tab.generation
     }
 
     pub fn notice(&self) -> Option<&str> {
@@ -410,21 +449,21 @@ impl Canvas {
 
     fn version(&self) -> Version {
         Version {
-            document: self.generation,
-            revision: self.session.revision(),
+            document: self.tab.generation,
+            revision: self.tab.session.revision(),
         }
     }
 
     pub fn scale(&self) -> f64 {
-        self.scale
+        self.tab.scale
     }
 
     fn key(&self) -> Key {
-        let document = self.session.document();
+        let document = self.tab.session.document();
         Key {
             version: self.version(),
-            layer: self.session.current_layer(),
-            frame: frame_in_cycle(self.session.frame(), document.frames),
+            layer: self.tab.session.current_layer(),
+            frame: frame_in_cycle(self.tab.session.frame(), document.frames),
         }
     }
 
@@ -444,15 +483,15 @@ impl Canvas {
     }
 
     fn snapshot(&mut self) -> Snapshot {
-        let revision = self.session.revision();
-        match &self.snapshot {
+        let revision = self.tab.session.revision();
+        match &self.tab.snapshot {
             Some((at, snapshot)) if *at == revision => snapshot.clone(),
             _ => {
                 let snapshot = Snapshot {
-                    document: Arc::new(self.session.document().clone()),
-                    layers: Arc::new(self.session.layer_revisions().clone()),
+                    document: Arc::new(self.tab.session.document().clone()),
+                    layers: Arc::new(self.tab.session.layer_revisions().clone()),
                 };
-                self.snapshot = Some((revision, snapshot.clone()));
+                self.tab.snapshot = Some((revision, snapshot.clone()));
                 snapshot
             }
         }
@@ -460,12 +499,13 @@ impl Canvas {
 
     /// Where renders for export go, after the canvas's own.
     pub fn renders(&self) -> Renders {
-        self.cache.renders()
+        self.tab.cache.renders()
     }
 
     /// The thumbnail of paint layer `id` and the revision it shows.
     pub fn thumbnail(&self, id: LayerId) -> Option<(u64, &Arc<Pixmap>)> {
-        self.thumbnails
+        self.tab
+            .thumbnails
             .get(&id)
             .map(|(revision, pixels)| (*revision, pixels))
     }
@@ -473,16 +513,17 @@ impl Canvas {
     /// Asks for the thumbnails of layers whose pixels changed since theirs
     /// were drawn, unless some are already on their way.
     fn sync_thumbnails(&mut self) {
-        if self.thumbnails_asked || matches!(self.interaction, Interaction::Drawing { .. }) {
+        if self.tab.thumbnails_asked || matches!(self.interaction, Interaction::Drawing { .. }) {
             return;
         }
-        let revisions = self.session.layer_revisions();
+        let revisions = self.tab.session.layer_revisions();
         let mut stale = Vec::new();
         thumbnail_keys(
-            &self.session.document().layers,
+            &self.tab.session.document().layers,
             revisions,
             &mut |id, key| {
                 if self
+                    .tab
                     .thumbnails
                     .get(&id)
                     .is_none_or(|(shown, _)| *shown != key)
@@ -495,38 +536,40 @@ impl Canvas {
             return;
         }
         let snapshot = self.snapshot();
-        self.cache
-            .request_thumbnails(self.generation, stale, snapshot.document);
-        self.thumbnails_asked = true;
+        self.tab
+            .cache
+            .request_thumbnails(self.tab.generation, stale, snapshot.document);
+        self.tab.thumbnails_asked = true;
     }
 
     /// Shows a pending transform as it is now, asks for a new split when the
     /// shown one no longer matches, and for thumbnails that are out of date.
     /// Playback shows whole frames instead of a split.
     pub fn sync(&mut self) {
-        self.session.use_tools(&self.tools);
+        self.tab.session.use_tools(&self.tools);
         self.record_colors();
         self.refresh_preview();
         self.refresh_text_preview();
         self.sync_thumbnails();
-        if self.playback.is_some() {
+        if self.tab.playback.is_some() {
             return;
         }
         let key = self.key();
-        if self.split.as_ref().map(|(shown, _)| *shown) != Some(key) && self.requested != Some(key)
+        if self.tab.split.as_ref().map(|(shown, _)| *shown) != Some(key)
+            && self.tab.requested != Some(key)
         {
-            let budget = Budget::now(self.cache.surface_bytes() as u64);
-            self.cache.set_surface_budget(budget.surfaces);
+            let budget = Budget::now(self.tab.cache.surface_bytes() as u64);
+            self.tab.cache.set_surface_budget(budget.surfaces);
             let snapshot = self.snapshot();
-            self.cache.request(key, snapshot);
-            self.requested = Some(key);
+            self.tab.cache.request(key, snapshot);
+            self.tab.requested = Some(key);
         }
     }
 
     /// Whether renders asked for have not come back yet.
     #[cfg(test)]
     pub fn awaits_renders(&self) -> bool {
-        self.requested.is_some() || self.thumbnails_asked
+        self.tab.requested.is_some() || self.tab.thumbnails_asked
     }
 
     /// Takes a finished render if it is still wanted.
@@ -537,15 +580,15 @@ impl Canvas {
                 split,
                 display,
             } => {
-                if key != self.key() || self.playback.is_some() {
+                if key != self.key() || self.tab.playback.is_some() {
                     return;
                 }
-                self.requested = None;
-                self.held = None;
-                self.display = display;
-                self.split = Some((key, split));
-                self.preview = None;
-                self.text_preview = None;
+                self.tab.requested = None;
+                self.tab.held = None;
+                self.tab.display = display;
+                self.tab.split = Some((key, split));
+                self.tab.preview = None;
+                self.tab.text_preview = None;
                 self.upload_all();
                 self.refresh_preview();
                 self.refresh_text_preview();
@@ -560,7 +603,7 @@ impl Canvas {
                 preview,
                 pixels,
             } => {
-                if let Some(playback) = self.playback.as_mut()
+                if let Some(playback) = self.tab.playback.as_mut()
                     && playback.version == version
                     && playback.preview == preview
                 {
@@ -571,22 +614,23 @@ impl Canvas {
                 document,
                 thumbnails,
             } => {
-                if document != self.generation {
+                if document != self.tab.generation {
                     return;
                 }
-                self.thumbnails_asked = false;
+                self.tab.thumbnails_asked = false;
                 for (id, revision, pixels) in thumbnails {
-                    self.thumbnails.insert(id, (revision, Arc::new(pixels)));
+                    self.tab.thumbnails.insert(id, (revision, Arc::new(pixels)));
                 }
-                let document = self.session.document();
-                self.thumbnails
+                let document = self.tab.session.document();
+                self.tab
+                    .thumbnails
                     .retain(|id, _| document.layer(*id).is_some());
             }
         }
     }
 
     pub fn is_playing(&self) -> bool {
-        self.playback.is_some()
+        self.tab.playback.is_some()
     }
 
     /// Whether the wobble animation may play, from the settings.
@@ -598,7 +642,7 @@ impl Canvas {
     pub fn allow_animation(&mut self, allowed: bool) {
         self.animation_allowed = allowed;
         if !allowed {
-            self.resume_playback = false;
+            self.tab.resume_playback = false;
             if self.is_playing() {
                 self.toggle_playback();
             }
@@ -608,10 +652,10 @@ impl Canvas {
     /// Stops on the frame shown, which stays until the split of it arrives;
     /// false when not playing.
     fn stop_playback(&mut self) -> bool {
-        let Some(playback) = self.playback.take() else {
+        let Some(playback) = self.tab.playback.take() else {
             return false;
         };
-        self.held = Some(playback.shown);
+        self.tab.held = Some(playback.shown);
         self.upload_all();
         true
     }
@@ -620,14 +664,14 @@ impl Canvas {
     /// and plays on once it is over.
     fn pause_playback(&mut self) {
         if self.stop_playback() {
-            self.resume_playback = true;
+            self.tab.resume_playback = true;
         }
     }
 
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
         // Paused for a stroke, it stays stopped.
-        if std::mem::take(&mut self.resume_playback) || self.stop_playback() {
+        if std::mem::take(&mut self.tab.resume_playback) || self.stop_playback() {
             return;
         }
         if !self.animation_allowed {
@@ -641,20 +685,20 @@ impl Canvas {
         // Stopping asks for a split of the frame it stops on. Until then the
         // old one's layer surfaces would only keep the renderer from reusing
         // them for playback.
-        self.split = None;
-        self.requested = None;
+        self.tab.split = None;
+        self.tab.requested = None;
         self.spare_coverage = None;
-        let shown = self.held.take().unwrap_or_else(|| {
-            let display = std::mem::replace(&mut self.display, Pixmap::new(1, 1));
+        let shown = self.tab.held.take().unwrap_or_else(|| {
+            let display = std::mem::replace(&mut self.tab.display, Pixmap::new(1, 1));
             (Arc::new(display), 1)
         });
         tracing::debug!("playback started");
-        self.playback = Some(Playback {
-            next: self.session.frame() + 1,
+        self.tab.playback = Some(Playback {
+            next: self.tab.session.frame() + 1,
             due: Instant::now(),
             frames: HashMap::new(),
             version: self.version(),
-            preview: preview(self.scale),
+            preview: preview(self.tab.scale),
             ahead: 0,
             shown,
             window: None,
@@ -664,29 +708,29 @@ impl Canvas {
     /// Shows the next frame if it is due and rendered, and returns when to
     /// look again; `None` when not playing.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
-        if self.resume_playback && !matches!(self.interaction, Interaction::Drawing { .. }) {
-            self.resume_playback = false;
+        if self.tab.resume_playback && !matches!(self.interaction, Interaction::Drawing { .. }) {
+            self.tab.resume_playback = false;
             self.toggle_playback();
         }
-        let document = self.session.document();
+        let document = self.tab.session.document();
         let (frames, fps) = (document.frames, f64::from(document.frames_per_second));
         let period = Duration::from_secs_f64(1.0 / fps);
         let version = self.version();
-        let preview = preview(self.scale);
+        let preview = preview(self.tab.scale);
         let shrink = preview.shrink;
-        let playback = self.playback.as_ref()?;
+        let playback = self.tab.playback.as_ref()?;
         if playback.version != version || playback.preview != preview || playback.ahead == 0 {
             // The frames held are given back first, so they count as free.
-            self.playback.as_mut()?.frames.clear();
+            self.tab.playback.as_mut()?.frames.clear();
             let (ahead, surfaces) = frames_ahead(document, shrink);
-            self.cache.set_surface_budget(surfaces);
-            let playback = self.playback.as_mut()?;
+            self.tab.cache.set_surface_budget(surfaces);
+            let playback = self.tab.playback.as_mut()?;
             playback.version = version;
             playback.preview = preview;
             playback.ahead = ahead;
             playback.window = None;
         }
-        let playback = self.playback.as_mut()?;
+        let playback = self.tab.playback.as_mut()?;
         let ahead = playback.ahead;
         let cycle = frame_in_cycle(playback.next, frames);
         let covered = playback
@@ -719,11 +763,12 @@ impl Canvas {
                 .collect();
             playback.window = Some(cycle);
             let snapshot = self.snapshot();
-            self.cache
+            self.tab
+                .cache
                 .request_frames(version, &missing, &snapshot, preview);
         }
         if shown {
-            let playback = self.playback.as_ref().expect("playing");
+            let playback = self.tab.playback.as_ref().expect("playing");
             let held: usize = playback
                 .frames
                 .values()
@@ -733,11 +778,11 @@ impl Canvas {
                 frame = cycle,
                 ahead,
                 held_mib = held >> 20,
-                surfaces_mib = self.cache.surface_bytes() >> 20,
+                surfaces_mib = self.tab.cache.surface_bytes() >> 20,
                 "playback frame shown"
             );
             let next = playback.next;
-            if self.session.set_frame(next - 1).is_err() {
+            if self.tab.session.set_frame(next - 1).is_err() {
                 self.notice = Some(tr("restyle-pending").to_owned());
                 self.stop_playback();
                 return None;
@@ -750,21 +795,21 @@ impl Canvas {
     /// Puts what the document was drawn, filled and written with in the
     /// colour history.
     fn record_colors(&mut self) {
-        for color in self.session.take_used_colors() {
+        for color in self.tab.session.take_used_colors() {
             self.tools.colors.record(color);
         }
     }
 
     /// Puts `rect` of the display back together, with the stroke being drawn.
     fn recomposite(&mut self, rect: Option<PixelRect>) {
-        let (Some(rect), Some((_, split))) = (rect, &self.split) else {
+        let (Some(rect), Some((_, split))) = (rect, &self.tab.split) else {
             return;
         };
         let live = match &self.interaction {
             Interaction::Drawing { live, .. } => Some(live.as_ref()),
             _ => None,
         };
-        composite(split, live, rect, &mut self.display);
+        composite(split, live, rect, &mut self.tab.display);
         self.upload = union(self.upload, Some(rect));
     }
 
@@ -787,7 +832,9 @@ impl Canvas {
                 self.sample_count += 1;
                 self.begin_pick(sample.position);
             }
-            CanvasInput::Begin(Gesture::Draw, _, sample) if self.session.pending().is_some() => {
+            CanvasInput::Begin(Gesture::Draw, _, sample)
+                if self.tab.session.pending().is_some() =>
+            {
                 self.sample_count += 1;
                 self.begin_transform_drag(sample.position);
             }
@@ -796,7 +843,8 @@ impl Canvas {
                 self.notice = None;
                 let point = self.to_document(sample.position);
                 let combine = self.combine();
-                self.session
+                self.tab
+                    .session
                     .begin_selection(self.tools.selection_shape, point, combine);
                 self.interaction = Interaction::Selecting;
             }
@@ -819,14 +867,14 @@ impl Canvas {
                 self.sample_count += 1;
                 match &mut self.interaction {
                     Interaction::Panning { last } => {
-                        self.offset[0] += sample.position[0] - last[0];
-                        self.offset[1] += sample.position[1] - last[1];
+                        self.tab.offset[0] += sample.position[0] - last[0];
+                        self.tab.offset[1] += sample.position[1] - last[1];
                         *last = sample.position;
                     }
                     Interaction::Drawing { .. } => self.extend_stroke(&sample),
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
-                        self.session.extend_selection(point);
+                        self.tab.session.extend_selection(point);
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
@@ -844,7 +892,7 @@ impl Canvas {
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
                         let before = self.key();
-                        let ended = self.session.end_selection(&self.tools, point);
+                        let ended = self.tab.session.end_selection(&self.tools, point);
                         self.record_colors();
                         if self.tools.lasso_paints {
                             self.after_fill(before, ended);
@@ -886,23 +934,24 @@ impl Canvas {
     fn cancel_gesture(&mut self) -> bool {
         match std::mem::replace(&mut self.interaction, Interaction::Idle) {
             Interaction::Drawing { rect, .. } => {
-                self.session.cancel_stroke();
+                self.tab.session.cancel_stroke();
                 self.recomposite(rect);
             }
             Interaction::Selecting => {
-                self.session.cancel_selection();
+                self.tab.session.cancel_selection();
             }
             Interaction::Transforming { base, .. } => {
-                self.session.set_transform(base);
+                self.tab.session.set_transform(base);
                 self.refresh_preview();
             }
             Interaction::MovingText { base, .. } => {
                 if let Some(outline) = self
+                    .tab
                     .session
                     .placed_text()
                     .map(|placed| placed.outline.clone())
                 {
-                    let _ = self.session.place_text(&self.tools, base, outline);
+                    let _ = self.tab.session.place_text(&self.tools, base, outline);
                 }
                 self.refresh_text_preview();
             }
@@ -944,6 +993,7 @@ impl Canvas {
         self.pause_playback();
         let read = self.read_reference();
         let reference = self
+            .tab
             .reference
             .as_ref()
             .filter(|_| read)
@@ -951,11 +1001,15 @@ impl Canvas {
         let before = self.key();
         if self.tools.tool == Tool::Wand {
             let combine = self.combine();
-            if let Err(error) = self.session.wand(&self.tools, point, combine, reference) {
+            if let Err(error) = self
+                .tab
+                .session
+                .wand(&self.tools, point, combine, reference)
+            {
                 self.fill_notice(&error);
             }
         } else {
-            let filled = self.session.bucket(&self.tools, point, reference);
+            let filled = self.tab.session.bucket(&self.tools, point, reference);
             self.record_colors();
             self.after_fill(before, filled.map(committed));
         }
@@ -970,19 +1024,19 @@ impl Canvas {
         self.edit(|_| ());
         self.notice = None;
         let before = self.key();
-        let filled = self.session.fill_selection(&self.tools);
+        let filled = self.tab.session.fill_selection(&self.tools);
         self.record_colors();
         self.after_fill(before, filled.map(committed));
     }
 
     /// Draws `reference`'s pixels as the wand and the bucket read them into
-    /// `self.reference`: put together from the split when it shows this
+    /// `self.tab.reference`: put together from the split when it shows this
     /// frame and holds the layers, else drawn by the worker. `false` when
     /// there is nothing to read.
     fn read_reference(&mut self) -> bool {
-        let document = self.session.document();
+        let document = self.tab.session.document();
         let reference = match self.tools.fill.reads {
-            Reads::Current => Reference::Layer(self.session.current_layer()),
+            Reads::Current => Reference::Layer(self.tab.session.current_layer()),
             Reads::Marked => Reference::Marked,
             Reads::Visible => Reference::Visible,
         };
@@ -991,26 +1045,27 @@ impl Canvas {
             return false;
         }
         let [width, height] = document.canvas.map(|edge| edge as u16);
-        let pixels = match self.reference.take() {
+        let pixels = match self.tab.reference.take() {
             Some(pixels) if pixels.width() == width && pixels.height() == height => pixels,
             _ => Pixmap::new(width, height),
         };
         let mut pixels = pixels;
         let key = self.key();
         let threads = std::thread::available_parallelism().map_or(1, usize::from);
-        let from_split = self.split.as_ref().is_some_and(|(shown, split)| {
+        let from_split = self.tab.split.as_ref().is_some_and(|(shown, split)| {
             *shown == key && split.reference(&plan, &mut pixels, threads)
         });
         if from_split {
-            self.reference = Some(pixels);
+            self.tab.reference = Some(pixels);
             return true;
         }
         let document = self.snapshot().document;
-        self.reference = self
-            .cache
-            .renders()
-            .render(document, plan, self.session.frame());
-        self.reference.is_some()
+        self.tab.reference =
+            self.tab
+                .cache
+                .renders()
+                .render(document, plan, self.tab.session.frame());
+        self.tab.reference.is_some()
     }
 
     /// Shows a fill just committed (`Ok(true)`), added to the split's layer
@@ -1022,8 +1077,8 @@ impl Canvas {
             Err(error) => return self.fill_notice(&error),
         }
         let after = self.key();
-        let document = self.session.document();
-        let added = match self.split.as_mut() {
+        let document = self.tab.session.document();
+        let added = match self.tab.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
                 last_fill(document, after.layer).and_then(|(coverage, clip, antialias, color)| {
                     let changed = split.stamp_fill(coverage, clip, antialias, color);
@@ -1039,7 +1094,7 @@ impl Canvas {
     /// Why the current layer cannot be drawn on when it is no paint layer,
     /// in 2.2.13's words.
     fn no_paint_layer(&self) -> &'static str {
-        if self.session.document().layers.is_empty() {
+        if self.tab.session.document().layers.is_empty() {
             tr("draw-no-layer")
         } else {
             tr("draw-on-group")
@@ -1049,8 +1104,9 @@ impl Canvas {
     /// Why the current layer cannot be drawn on when it is not shown: it,
     /// or a group holding it, is hidden.
     fn hidden_layer(&self) -> &'static str {
-        let layer = self.session.current_layer();
+        let layer = self.tab.session.current_layer();
         if self
+            .tab
             .session
             .document()
             .layer(layer)
@@ -1092,9 +1148,9 @@ impl Canvas {
                     tool: Tool::Eraser,
                     ..self.tools.clone()
                 };
-                self.session.begin_stroke(&eraser, point)
+                self.tab.session.begin_stroke(&eraser, point)
             } else {
-                self.session.begin_stroke(&self.tools, point)
+                self.tab.session.begin_stroke(&self.tools, point)
             };
         match begun {
             Ok(()) => {}
@@ -1111,8 +1167,8 @@ impl Canvas {
                 return;
             }
         }
-        let live = self.session.live().expect("a stroke has begun");
-        let document = self.session.document();
+        let live = self.tab.session.live().expect("a stroke has begun");
+        let document = self.tab.session.document();
         let pen = Pen::new(
             &live.template,
             wobble_of(document, live.layer),
@@ -1138,10 +1194,10 @@ impl Canvas {
 
     fn extend_stroke(&mut self, sample: &PointerSample) {
         let point = self.input_point(sample);
-        if !self.session.extend_stroke(point) {
+        if !self.tab.session.extend_stroke(point) {
             return;
         }
-        let points = &self.session.live().expect("drawing").points;
+        let points = &self.tab.session.live().expect("drawing").points;
         let Interaction::Drawing { live, rect } = &mut self.interaction else {
             return;
         };
@@ -1159,7 +1215,7 @@ impl Canvas {
         let started = Instant::now();
         let before = self.key();
         let point = self.input_point(sample);
-        let outcome = self.session.end_stroke(point);
+        let outcome = self.tab.session.end_stroke(point);
         self.record_colors();
         self.spare_coverage = Some(live.into_spare());
         match outcome {
@@ -1176,8 +1232,8 @@ impl Canvas {
             }
         }
         let after = self.key();
-        let document = self.session.document();
-        let added = match self.split.as_mut() {
+        let document = self.tab.session.document();
+        let added = match self.tab.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
                 last_stroke(document, after.layer).and_then(|(stroke, erase, clip)| {
                     let wobble = wobble_of(document, after.layer);
@@ -1198,13 +1254,13 @@ impl Canvas {
 
     fn zoom(&mut self, position: [f64; 2], notches: f32) {
         let anchor = self.to_document(position);
-        let scale = (self.scale * ZOOM_STEP.powf(f64::from(notches)))
+        let scale = (self.tab.scale * ZOOM_STEP.powf(f64::from(notches)))
             .clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
-        self.scale = scale;
+        self.tab.scale = scale;
         // Keep the document point under the pointer where it is.
-        self.offset = [0.0, 0.0];
+        self.tab.offset = [0.0, 0.0];
         let at = self.to_client(anchor);
-        self.offset = std::array::from_fn(|axis| (position[axis] - at[axis]).round());
+        self.tab.offset = std::array::from_fn(|axis| (position[axis] - at[axis]).round());
     }
 
     /// Takes the rest of `ui` and returns the canvas area in client physical
@@ -1228,14 +1284,14 @@ impl Canvas {
     /// when the area grows or shrinks, as a resized or maximized window does.
     fn set_area(&mut self, area: [i32; 4]) {
         if let Some(old) = self.area.replace(area)
-            && self.placed
+            && self.tab.placed
         {
             for axis in 0..2 {
                 let grown = (area[axis + 2] - area[axis]) - (old[axis + 2] - old[axis]);
-                self.offset[axis] += f64::from(grown / 2);
+                self.tab.offset[axis] += f64::from(grown / 2);
             }
         }
-        if !self.placed {
+        if !self.tab.placed {
             self.place(area);
         }
     }
@@ -1243,7 +1299,7 @@ impl Canvas {
     /// 100% if the document fits, otherwise small enough to fit, centred.
     /// A turned view fits the turned document's bounds, as in 2.2.13.
     fn place(&mut self, area: [i32; 4]) {
-        let size = self.session.document().canvas.map(f64::from);
+        let size = self.tab.session.document().canvas.map(f64::from);
         let room = [f64::from(area[2] - area[0]), f64::from(area[3] - area[1])];
         if room[0] <= 0.0 || room[1] <= 0.0 {
             return;
@@ -1251,17 +1307,17 @@ impl Canvas {
         let [cos, sin] = self.turn().map(f64::abs);
         let bounds = [size[0] * cos + size[1] * sin, size[0] * sin + size[1] * cos];
         let fits = (room[0] / bounds[0]).min(room[1] / bounds[1]);
-        self.scale = if fits >= 2.0 && size[0].max(size[1]) <= SMALL_EDGE {
+        self.tab.scale = if fits >= 2.0 && size[0].max(size[1]) <= SMALL_EDGE {
             fits.floor().min(*ZOOM_RANGE.end())
         } else {
             fits.min(1.0)
         };
-        self.offset = [0.0, 0.0];
+        self.tab.offset = [0.0, 0.0];
         let middle = self.to_client(self.middle());
         let origin = [f64::from(area[0]), f64::from(area[1])];
-        self.offset =
+        self.tab.offset =
             std::array::from_fn(|axis| (origin[axis] + room[axis] / 2.0 - middle[axis]).round());
-        self.placed = true;
+        self.tab.placed = true;
     }
 
     /// Marks the whole display for upload, as a new GPU device needs.
@@ -1294,15 +1350,21 @@ impl Canvas {
     /// The pixels shown, how much smaller than the canvas they are, and
     /// where on the canvas they start.
     fn shown(&self) -> (&Pixmap, u32, [u32; 2]) {
-        if let Some((pixels, shrink)) = &self.playback.as_ref().map(|playback| &playback.shown) {
+        if let Some((pixels, shrink)) = &self.tab.playback.as_ref().map(|playback| &playback.shown)
+        {
             return (pixels, *shrink, [0, 0]);
         }
-        if let Some(glance) = self.preview.as_ref().and_then(transform::Preview::glance) {
+        if let Some(glance) = self
+            .tab
+            .preview
+            .as_ref()
+            .and_then(transform::Preview::glance)
+        {
             return (glance.pixels(), glance.shrink(), glance.origin());
         }
-        match &self.held {
+        match &self.tab.held {
             Some((pixels, shrink)) => (pixels, *shrink, [0, 0]),
-            None => (&self.display, 1, [0, 0]),
+            None => (&self.tab.display, 1, [0, 0]),
         }
     }
 
@@ -1559,7 +1621,7 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
             let _ = to_test.send(rendered);
         });
-        canvas.scale = 0.5;
+        canvas.tab.scale = 0.5;
         canvas.toggle_playback();
         canvas.take_upload();
         let mut now = Instant::now();
@@ -1577,7 +1639,7 @@ mod tests {
         assert_eq!(canvas.display().width(), 160);
         assert_eq!(canvas.shown_placement().scale, 1.0);
         canvas.sync();
-        while canvas.split.is_none() {
+        while canvas.tab.split.is_none() {
             let rendered = renders
                 .recv_timeout(Duration::from_secs(10))
                 .expect("the split renders");
@@ -1594,7 +1656,7 @@ mod tests {
             let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
                 let _ = to_test.send(rendered);
             });
-            canvas.scale = 0.5;
+            canvas.tab.scale = 0.5;
             canvas.set_tool(tool).unwrap();
             canvas.toggle_playback();
             let mut now = Instant::now();
@@ -1692,7 +1754,7 @@ mod tests {
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
             let _ = to_test.send(rendered);
         });
-        canvas.scale = 0.5;
+        canvas.tab.scale = 0.5;
         canvas.toggle_playback();
         let mut now = Instant::now();
         let mut play_until = |canvas: &mut super::Canvas, width: u16| {
@@ -1722,7 +1784,7 @@ mod tests {
     /// Waits for the split of the state shown.
     fn settle(canvas: &mut super::Canvas, renders: &std::sync::mpsc::Receiver<Rendered>) {
         canvas.sync();
-        while canvas.split.as_ref().map(|(key, _)| *key) != Some(canvas.key()) {
+        while canvas.tab.split.as_ref().map(|(key, _)| *key) != Some(canvas.key()) {
             let rendered = renders
                 .recv_timeout(Duration::from_secs(10))
                 .expect("the split renders");
@@ -1775,7 +1837,7 @@ mod tests {
             .cloned()
             .expect("the box's inside");
         canvas.edit(Session::deselect).unwrap();
-        canvas.split = None;
+        canvas.tab.split = None;
         canvas.click_area([160.0, 100.0]);
         assert_eq!(canvas.session().selection(), Some(&from_split));
         canvas.edit(Session::deselect).unwrap();
@@ -1787,7 +1849,7 @@ mod tests {
         assert_eq!(canvas.notice(), None);
         // Added to the split, not drawn again.
         assert_eq!(
-            canvas.split.as_ref().map(|(key, _)| *key),
+            canvas.tab.split.as_ref().map(|(key, _)| *key),
             Some(canvas.key())
         );
         let document = canvas.session().document();
@@ -1857,7 +1919,7 @@ mod tests {
         let before = canvas.display().clone();
 
         canvas.begin_transform();
-        assert!(canvas.preview.is_some());
+        assert!(canvas.tab.preview.is_some());
         assert_eq!(canvas.grip_at([120.0, 90.0]), Some(Grip::Move));
         assert_eq!(canvas.grip_at([180.0, 130.0]), Some(Grip::Scale([1, 1])));
         assert_eq!(canvas.grip_at([300.0, 10.0]), Some(Grip::Rotate));
@@ -1879,7 +1941,7 @@ mod tests {
         // Kept, not drawn again.
         assert_ne!(canvas.key(), key);
         assert_eq!(
-            canvas.split.as_ref().map(|(key, _)| *key),
+            canvas.tab.split.as_ref().map(|(key, _)| *key),
             Some(canvas.key())
         );
         let mut full = Pixmap::new(320, 200);
@@ -1957,7 +2019,7 @@ mod tests {
             canvas.drag_transform([150.0, 100.0]);
             canvas.sync();
             canvas.interaction = Interaction::Idle;
-            assert!(canvas.preview.is_some());
+            assert!(canvas.tab.preview.is_some());
             if change == 0 {
                 canvas
                     .edit(|session| session.crop_canvas([-20, 10], [300, 220]))
@@ -1969,7 +2031,7 @@ mod tests {
                     })
                     .unwrap();
             }
-            assert!(canvas.preview.is_none() && canvas.session().pending().is_none());
+            assert!(canvas.tab.preview.is_none() && canvas.session().pending().is_none());
             settle(&mut canvas, &renders);
             let most = max_difference(canvas.display(), &full(&canvas));
             assert!(most <= 2, "shown differs by {most}");
@@ -2025,7 +2087,7 @@ mod tests {
         canvas.drag_text([60.0, 40.0]);
         canvas.interaction = Interaction::Idle;
         canvas.sync();
-        assert!(canvas.text_preview.is_some());
+        assert!(canvas.tab.text_preview.is_some());
         assert_eq!(canvas.session().placed_text().unwrap().at, [60.0, 40.0]);
         assert_ne!(
             canvas.display().data_as_u8_slice(),
@@ -2050,7 +2112,7 @@ mod tests {
         // Kept, not drawn again.
         assert_ne!(canvas.key(), key);
         assert_eq!(
-            canvas.split.as_ref().map(|(key, _)| *key),
+            canvas.tab.split.as_ref().map(|(key, _)| *key),
             Some(canvas.key())
         );
         let most = max_difference(canvas.display(), &full(&canvas));
@@ -2273,7 +2335,7 @@ mod tests {
         canvas.tools.color = white;
         let mut small = Pixmap::new(160, 100);
         small.data_as_u8_slice_mut()[(50 * 160 + 75) * 4..][..4].copy_from_slice(&[0, 0, 255, 255]);
-        canvas.held = Some((Arc::new(small), 2));
+        canvas.tab.held = Some((Arc::new(small), 2));
         canvas.apply(draw(press(151.0, 101.0)));
         canvas.apply(CanvasInput::End(press(151.0, 101.0)));
         assert_eq!(pen(&canvas), ugu_core::ops::Rgba8([0, 0, 255, 255]));

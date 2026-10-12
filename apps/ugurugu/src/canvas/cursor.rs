@@ -41,7 +41,7 @@ impl Canvas {
             _ => return None,
         };
         let tool = self.tools.tool;
-        if self.session.pending().is_some() || tool == Tool::Text {
+        if self.tab.session.pending().is_some() || tool == Tool::Text {
             return None;
         }
         let eraser = self.hover_eraser || tool == Tool::Eraser;
@@ -64,7 +64,7 @@ impl Canvas {
         }
         Some(BrushCursor::Circle {
             centre: position,
-            radius: (f64::from(settings.width) * self.scale / 2.0).max(1.0),
+            radius: (f64::from(settings.width) * self.tab.scale / 2.0).max(1.0),
             eraser,
         })
     }
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn the_cursor_is_as_wide_as_the_stroke_and_dashed_for_erasing() {
         let mut canvas = canvas();
-        let scale = canvas.scale;
+        let scale = canvas.tab.scale;
         let width = f64::from(canvas.brushes().pen.width);
         let Some(BrushCursor::Circle {
             centre,

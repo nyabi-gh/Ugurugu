@@ -53,7 +53,7 @@ impl Preview {
 
 /// The selected part's box: left, top, right, bottom before the transform.
 fn source_box(canvas: &Canvas) -> Option<([f64; 4], Affine)> {
-    let pending = canvas.session.pending()?;
+    let pending = canvas.tab.session.pending()?;
     let [left, top, width, height] = pending.selection.mask().bounds.map(f64::from);
     Some(([left, top, left + width, top + height], pending.transform))
 }
@@ -101,7 +101,7 @@ impl Canvas {
                 |[l, t, r, b], &[x, y]| [l.min(x), t.min(y), r.max(x), b.max(y)],
             ));
         }
-        let [left, top, width, height] = self.session.selection()?.mask().bounds.map(f64::from);
+        let [left, top, width, height] = self.tab.session.selection()?.mask().bounds.map(f64::from);
         Some([left, top, left + width, top + height])
     }
 
@@ -137,7 +137,8 @@ impl Canvas {
     }
 
     pub(super) fn begin_transform_drag(&mut self, position: [f64; 2]) {
-        let (Some(grip), Some(pending)) = (self.grip_at(position), self.session.pending()) else {
+        let (Some(grip), Some(pending)) = (self.grip_at(position), self.tab.session.pending())
+        else {
             return;
         };
         self.interaction = Interaction::Transforming {
@@ -160,7 +161,7 @@ impl Canvas {
             Grip::Move => {
                 let mut by = [point[0] - start[0], point[1] - start[1]];
                 // Whole pixels in pixel mode, so the pixels moved stay pixels.
-                if self.session.pixel_mode() {
+                if self.tab.session.pixel_mode() {
                     by = by.map(f64::round);
                 }
                 base.then(Affine::translation(by[0], by[1]))
@@ -186,7 +187,7 @@ impl Canvas {
         };
         // Shown once per frame by `sync`, with the newest transform: input
         // comes faster than a large selection can be drawn.
-        self.session.set_transform(transform);
+        self.tab.session.set_transform(transform);
     }
 
     /// Starts a transform of the selection (Ctrl+T).
@@ -206,7 +207,7 @@ impl Canvas {
                 &error,
             ));
         }
-        self.session.pending().is_none()
+        self.tab.session.pending().is_none()
     }
 
     /// Applies a pending transform or placed text, as what comes next
@@ -278,12 +279,12 @@ impl Canvas {
     /// that ended, keeping its pixels when it was applied and nothing else
     /// changed the split's layer and frame, and shows a pending one.
     pub(super) fn follow_transform(&mut self, before: Key) {
-        match self.session.take_ended() {
+        match self.tab.session.take_ended() {
             Some(Ended::Applied { revision }) => {
                 let after = self.key();
-                let moving = self.preview.take().map(|preview| preview.moving);
-                let placing = self.text_preview.take().map(|preview| preview.placing);
-                if let Some((key, split)) = &mut self.split
+                let moving = self.tab.preview.take().map(|preview| preview.moving);
+                let placing = self.tab.text_preview.take().map(|preview| preview.placing);
+                if let Some((key, split)) = &mut self.tab.split
                     && (moving.is_some() || placing.is_some())
                 {
                     if let Some(moving) = moving {
@@ -302,12 +303,14 @@ impl Canvas {
                 }
             }
             Some(Ended::Dropped) => {
-                if let (Some(preview), Some((_, split))) = (self.preview.take(), &mut self.split) {
+                if let (Some(preview), Some((_, split))) =
+                    (self.tab.preview.take(), &mut self.tab.split)
+                {
                     let rect = split.end_move(preview.moving, false);
                     self.recomposite(rect);
                 }
                 if let (Some(preview), Some((_, split))) =
-                    (self.text_preview.take(), &mut self.split)
+                    (self.tab.text_preview.take(), &mut self.tab.split)
                 {
                     let rect = split.end_place(preview.placing, false);
                     self.recomposite(rect);
@@ -331,9 +334,9 @@ impl Canvas {
         if (right - left) * (bottom - top) < GLANCE_LEAST {
             return None;
         }
-        let size = self.session.document().canvas;
+        let size = self.tab.session.document().canvas;
         let rect = ugu_render::compose::clamp(self.in_view()?, size)?;
-        let shrink = preview_shrink(self.scale);
+        let shrink = preview_shrink(self.tab.scale);
         let rect = [
             rect[0] / shrink * shrink,
             rect[1] / shrink * shrink,
@@ -350,12 +353,12 @@ impl Canvas {
     pub(super) fn refresh_preview(&mut self) {
         let key = self.key();
         let view = self.glance_view();
-        let Some(pending) = self.session.pending() else {
-            self.preview = None;
+        let Some(pending) = self.tab.session.pending() else {
+            self.tab.preview = None;
             return;
         };
-        let Some((shown, split)) = self.split.as_mut() else {
-            self.preview = None;
+        let Some((shown, split)) = self.tab.split.as_mut() else {
+            self.tab.preview = None;
             return;
         };
         if *shown != key || split.layer != pending.layer {
@@ -363,20 +366,20 @@ impl Canvas {
         }
         let threads =
             std::thread::available_parallelism().map_or(1, |count| count.get().min(8)) as u16;
-        if self.preview.is_none() {
+        if self.tab.preview.is_none() {
             let Some(moving) = split.begin_move(pending.selection.mask(), threads) else {
                 return;
             };
-            self.preview = Some(Preview {
+            self.tab.preview = Some(Preview {
                 moving,
                 shown: None,
                 glance: None,
             });
         }
-        let preview = self.preview.as_mut().expect("made above");
+        let preview = self.tab.preview.as_mut().expect("made above");
         let wanted = (
             pending.transform,
-            self.session.sampling(self.tools.transform_sampling),
+            self.tab.session.sampling(self.tools.transform_sampling),
             pending.keep_source,
         );
         if let Some(view) = view {

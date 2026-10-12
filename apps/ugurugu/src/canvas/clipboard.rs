@@ -63,22 +63,24 @@ impl Canvas {
     /// The current layer's own pixels at this frame: put together from the
     /// split when it shows this state, else drawn by the worker.
     fn layer_pixels(&mut self) -> Option<Pixmap> {
-        let document = self.session.document();
-        let plan = RenderPlan::reference(document, Reference::Layer(self.session.current_layer()));
+        let document = self.tab.session.document();
+        let plan =
+            RenderPlan::reference(document, Reference::Layer(self.tab.session.current_layer()));
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixels = Pixmap::new(width, height);
         let key = self.key();
         let threads = std::thread::available_parallelism().map_or(1, usize::from);
-        let from_split = self.split.as_ref().is_some_and(|(shown, split)| {
+        let from_split = self.tab.split.as_ref().is_some_and(|(shown, split)| {
             *shown == key && split.reference(&plan, &mut pixels, threads)
         });
         if from_split {
             return Some(pixels);
         }
         let document = self.snapshot().document;
-        self.cache
+        self.tab
+            .cache
             .renders()
-            .render(document, plan, self.session.frame())
+            .render(document, plan, self.tab.session.frame())
     }
 
     /// Pastes `clip` as a new layer, ready to move.

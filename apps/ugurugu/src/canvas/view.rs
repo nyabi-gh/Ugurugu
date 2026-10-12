@@ -40,20 +40,20 @@ impl Canvas {
 
     /// The cosine and sine of the view's angle, exactly 1 and 0 upright.
     pub(super) fn turn(&self) -> [f64; 2] {
-        if self.angle == 0.0 {
+        if self.tab.angle == 0.0 {
             return [1.0, 0.0];
         }
-        let radians = self.angle.to_radians();
+        let radians = self.tab.angle.to_radians();
         [radians.cos(), radians.sin()]
     }
 
     /// Physical pixels on screen per document pixel along x and along y.
     fn axes(&self) -> [[f64; 2]; 2] {
         let [cos, sin] = self.turn();
-        let flip = if self.mirrored { -1.0 } else { 1.0 };
+        let flip = if self.tab.mirrored { -1.0 } else { 1.0 };
         [
-            [self.scale * flip * cos, self.scale * flip * sin],
-            [-self.scale * sin, self.scale * cos],
+            [self.tab.scale * flip * cos, self.tab.scale * flip * sin],
+            [-self.tab.scale * sin, self.tab.scale * cos],
         ]
     }
 
@@ -62,7 +62,7 @@ impl Canvas {
         let origin = self.origin();
         let [along_x, along_y] = self.axes();
         std::array::from_fn(|axis| {
-            origin[axis] + self.offset[axis] + (x * along_x[axis] + y * along_y[axis])
+            origin[axis] + self.tab.offset[axis] + (x * along_x[axis] + y * along_y[axis])
         })
     }
 
@@ -70,10 +70,10 @@ impl Canvas {
     pub(super) fn to_document(&self, position: [f64; 2]) -> [f64; 2] {
         let origin = self.origin();
         let [vx, vy] = std::array::from_fn(|axis| {
-            (position[axis] - origin[axis] - self.offset[axis]) / self.scale
+            (position[axis] - origin[axis] - self.tab.offset[axis]) / self.tab.scale
         });
         let [cos, sin] = self.turn();
-        let flip = if self.mirrored { -1.0 } else { 1.0 };
+        let flip = if self.tab.mirrored { -1.0 } else { 1.0 };
         [flip * (cos * vx + sin * vy), cos * vy - sin * vx]
     }
 
@@ -81,12 +81,13 @@ impl Canvas {
     fn pin(&mut self, point: [f64; 2], client: [f64; 2]) {
         let at = self.to_client(point);
         for axis in 0..2 {
-            self.offset[axis] += client[axis] - at[axis];
+            self.tab.offset[axis] += client[axis] - at[axis];
         }
     }
 
     pub(super) fn middle(&self) -> [f64; 2] {
-        self.session
+        self.tab
+            .session
             .document()
             .canvas
             .map(|edge| f64::from(edge) / 2.0)
@@ -94,11 +95,11 @@ impl Canvas {
 
     /// Clockwise on screen, in degrees, in (-180, 180].
     pub fn angle(&self) -> f64 {
-        self.angle
+        self.tab.angle
     }
 
     pub fn is_mirrored(&self) -> bool {
-        self.mirrored
+        self.tab.mirrored
     }
 
     /// Turns the view to `degrees`, keeping the document's middle in place.
@@ -108,13 +109,13 @@ impl Canvas {
         }
         let middle = self.middle();
         let kept = self.to_client(middle);
-        self.angle = normalized(degrees);
+        self.tab.angle = normalized(degrees);
         self.pin(middle, kept);
     }
 
     /// Turns the view by `degrees`, keeping the document's middle in place.
     pub fn turn_by(&mut self, degrees: f64) {
-        self.turn_to(self.angle + degrees);
+        self.turn_to(self.tab.angle + degrees);
     }
 
     /// Flips the view left to right, keeping the document's middle in
@@ -122,21 +123,21 @@ impl Canvas {
     pub fn set_mirrored(&mut self, mirrored: bool) {
         let middle = self.middle();
         let kept = self.to_client(middle);
-        self.mirrored = mirrored;
+        self.tab.mirrored = mirrored;
         self.pin(middle, kept);
     }
 
     pub(super) fn begin_turn_drag(&mut self, position: [f64; 2]) {
         self.interaction = Interaction::Turning {
             start: position[0],
-            angle: self.angle,
+            angle: self.tab.angle,
         };
     }
 
     pub(super) fn begin_zoom_drag(&mut self, position: [f64; 2]) {
         self.interaction = Interaction::Zooming {
             start: position,
-            scale: self.scale,
+            scale: self.tab.scale,
             anchor: self.to_document(position),
         };
     }
@@ -154,7 +155,8 @@ impl Canvas {
                 anchor,
             } => {
                 let doubled = (position[0] - start[0]) / logical / ZOOM_DOUBLING;
-                self.scale = (scale * doubled.exp2()).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
+                self.tab.scale =
+                    (scale * doubled.exp2()).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
                 self.pin(anchor, start);
             }
             _ => {}
@@ -184,9 +186,9 @@ impl Canvas {
         {
             let anchor = self.to_document(last_middle);
             let turned = angle - last_angle;
-            self.scale =
-                (self.scale * apart / last_apart).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
-            self.angle = normalized(self.angle + turned - 360.0 * (turned / 360.0).round());
+            self.tab.scale =
+                (self.tab.scale * apart / last_apart).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
+            self.tab.angle = normalized(self.tab.angle + turned - 360.0 * (turned / 360.0).round());
             self.pin(anchor, middle);
         } else if !matches!(
             self.interaction,
@@ -227,12 +229,12 @@ impl Canvas {
         let origin = self.origin();
         Placement {
             offset: [
-                (origin[0] + self.offset[0]) as f32,
-                (origin[1] + self.offset[1]) as f32,
+                (origin[0] + self.tab.offset[0]) as f32,
+                (origin[1] + self.tab.offset[1]) as f32,
             ],
-            scale: self.scale as f32,
-            angle: self.angle as f32,
-            mirrored: self.mirrored,
+            scale: self.tab.scale as f32,
+            angle: self.tab.angle as f32,
+            mirrored: self.tab.mirrored,
         }
     }
 }
@@ -329,7 +331,7 @@ mod tests {
         let after = canvas.to_client(under);
         assert!((after[0] - pointer[0]).abs() <= 0.5 && (after[1] - pointer[1]).abs() <= 0.5);
 
-        let before = canvas.scale;
+        let before = canvas.tab.scale;
         canvas.apply(CanvasInput::Begin(
             Gesture::Zoom,
             PointerKind::Mouse,
@@ -340,7 +342,7 @@ mod tests {
             pointer[0] + 120.0,
             pointer[1],
         ])));
-        assert!((canvas.scale - before * 2.0).abs() < 1e-9);
+        assert!((canvas.tab.scale - before * 2.0).abs() < 1e-9);
         assert!(close(canvas.to_client(under), pointer));
         canvas.apply(CanvasInput::End(sample([pointer[0] + 120.0, pointer[1]])));
 
@@ -363,7 +365,7 @@ mod tests {
     #[test]
     fn two_fingers_zoom_turn_and_carry_the_point_between_them() {
         let mut canvas = canvas();
-        let scale = canvas.scale;
+        let scale = canvas.tab.scale;
         let pinch = |canvas: &mut Canvas, fingers, fresh| {
             canvas.apply(CanvasInput::Pinch { fingers, fresh });
         };
@@ -371,7 +373,7 @@ mod tests {
         let under = canvas.to_document([150.0, 150.0]);
         // Twice as far apart, turned a quarter clockwise, moved by (40, 30).
         pinch(&mut canvas, [[190.0, 80.0], [190.0, 280.0]], false);
-        assert!((canvas.scale - scale * 2.0).abs() < 1e-9);
+        assert!((canvas.tab.scale - scale * 2.0).abs() < 1e-9);
         assert!((canvas.angle() - 90.0).abs() < 1e-9);
         assert!(close(canvas.to_client(under), [190.0, 180.0]));
         // Across the half turn the angle takes the short way round.
@@ -388,7 +390,7 @@ mod tests {
         canvas.turn_to(90.0);
         canvas.fit();
         // 200 wide and 320 high once turned, in a 400 by 300 area.
-        assert!((canvas.scale - 300.0 / 320.0).abs() < 1e-9);
+        assert!((canvas.tab.scale - 300.0 / 320.0).abs() < 1e-9);
         let middle = canvas.to_client([160.0, 100.0]);
         assert!((middle[0] - 210.0).abs() <= 0.5 && (middle[1] - 170.0).abs() <= 0.5);
         let view = canvas.in_view().unwrap();

@@ -84,7 +84,7 @@ fn unsaved_work_is_written_once_editing_pauses_and_removed_once_saved() {
     files.keep_recovery(&mut canvas, start + recovery::LONGEST * 3);
     assert_eq!(written(&mut files, &mut canvas, &events), [1, 2]);
     // A save that fails keeps the work.
-    files.path = Some(root.0.join("no such folder").join("drawing.ugurugu"));
+    canvas.file_mut().path = Some(root.0.join("no such folder").join("drawing.ugurugu"));
     files.save(&mut canvas);
     files.handle(next(&events), &mut canvas);
     assert!(
@@ -96,7 +96,7 @@ fn unsaved_work_is_written_once_editing_pauses_and_removed_once_saved() {
     files.keep_recovery(&mut canvas, start + recovery::LONGEST * 4);
     assert_eq!(written(&mut files, &mut canvas, &events), [1, 2]);
     // One that succeeds removes it.
-    files.path = Some(root.0.join("drawing.ugurugu"));
+    canvas.file_mut().path = Some(root.0.join("drawing.ugurugu"));
     files.save(&mut canvas);
     files.handle(next(&events), &mut canvas);
     files.keep_recovery(&mut canvas, start + recovery::LONGEST * 4);
@@ -191,13 +191,13 @@ fn work_left_by_a_crash_is_recovered_under_a_new_name() {
     assert_eq!(canvas.session().document().layers.len(), 2);
     assert!(canvas.session().is_dirty());
     assert_eq!(files.title(&canvas), "Cat-recovered* - Ugurugu");
-    assert_eq!(files.id, [3; 16]);
+    assert_eq!(canvas.file().id, [3; 16]);
     // Kept in this window's folder, and then the crashed one is gone.
     assert_eq!(written(&mut files, &mut canvas, &events), [1]);
     written(&mut files, &mut canvas, &events);
     assert!(!crashed.exists());
     // Saving offers the new name, never the old file.
-    assert_eq!(files.display_name(), "Cat-recovered");
+    assert_eq!(canvas.file().display_name(), "Cat-recovered");
     files.end();
 }
 
@@ -281,7 +281,7 @@ fn recovered_work_saved_before_it_is_written_here_goes() {
     files.handle(next(&events), &mut canvas);
     written(&mut files, &mut canvas, &events);
     assert!(crashed.exists());
-    files.path = Some(root.0.join("cat.ugurugu"));
+    canvas.file_mut().path = Some(root.0.join("cat.ugurugu"));
     files.save(&mut canvas);
     files.handle(next(&events), &mut canvas);
     files.keep_recovery(&mut canvas, Instant::now());

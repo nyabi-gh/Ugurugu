@@ -50,7 +50,7 @@ fn edits_made_while_saving_before_closing_are_asked_about_again() {
     let root = Root::new("late-close");
     let (mut files, mut canvas, events) = setup();
     let path = root.0.join("drawing.ugurugu");
-    files.path = Some(path.clone());
+    canvas.file_mut().path = Some(path.clone());
     canvas.edit(Session::add_layer).unwrap();
     save_before(&mut files, &mut canvas, Action::Close);
     canvas.edit(Session::add_layer).unwrap();
@@ -108,7 +108,7 @@ fn edits_made_while_opening_are_asked_about_before_it_is_shown() {
     files.proceed(Action::Replace, &mut canvas);
     assert_eq!(canvas.session().document().canvas, [9, 9]);
     assert!(!canvas.session().is_dirty());
-    assert_eq!(files.path, Some(path.clone()));
+    assert_eq!(canvas.file().path, Some(path.clone()));
 
     // Unedited, it is shown at once.
     let (mut files, mut canvas, events) = setup();
@@ -124,7 +124,7 @@ fn a_late_save_answer_leaves_a_newer_document_alone() {
     let root = Root::new("late-save");
     let (mut files, mut canvas, events) = setup();
     let path = root.0.join("drawing.ugurugu");
-    files.path = Some(path.clone());
+    canvas.file_mut().path = Some(path.clone());
     canvas.edit(Session::add_layer).unwrap();
     files.save(&mut canvas);
     canvas.edit(Session::add_layer).unwrap();
@@ -146,7 +146,7 @@ fn a_late_save_answer_leaves_a_newer_document_alone() {
     files.save(&mut canvas);
     files.start_new(&mut canvas, [5, 5], false);
     files.handle(next(&events), &mut canvas);
-    assert_eq!(files.path, None);
+    assert_eq!(canvas.file().path, None);
     assert_eq!(canvas.session().document().canvas, [5, 5]);
     assert_eq!(layers_in(&path), 4);
     files.end();
@@ -182,7 +182,7 @@ fn a_downloaded_update_waits_for_a_save_to_end_then_asks() {
         });
         output.textures_delta.clear();
     };
-    files.path = Some(root.0.join("drawing.ugurugu"));
+    canvas.file_mut().path = Some(root.0.join("drawing.ugurugu"));
     canvas.edit(Session::add_layer).unwrap();
     files.save(&mut canvas);
     canvas.edit(Session::add_layer).unwrap();

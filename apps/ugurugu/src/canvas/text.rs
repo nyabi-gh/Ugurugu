@@ -97,26 +97,26 @@ impl Canvas {
 
     fn text_outline(&mut self) -> Arc<Outline> {
         self.typesetter
-            .outline(&self.session.text_content, &self.tools.text)
+            .outline(&self.tab.session.text_content, &self.tools.text)
     }
 
     /// Changes the text or how it is set, laying placed text out again.
     pub fn set_text(&mut self, change: impl FnOnce(&mut String, &mut TextSettings)) {
         let text = &mut self.tools.text;
-        change(&mut self.session.text_content, text);
+        change(&mut self.tab.session.text_content, text);
         text.size = text
             .size
             .clamp(*TextSettings::SIZE.start(), *TextSettings::SIZE.end());
-        if self.session.placed_text().is_some() {
+        if self.tab.session.placed_text().is_some() {
             let outline = self.text_outline();
-            self.session.set_text_outline(outline);
+            self.tab.session.set_text_outline(outline);
         }
     }
 
     /// Left, top, right and bottom of placed text in document pixels; text
     /// with nothing typed still has a box to grab.
     pub fn text_box(&self) -> Option<[f64; 4]> {
-        let placed = self.session.placed_text()?;
+        let placed = self.tab.session.placed_text()?;
         let size = f64::from(self.tools.text.size);
         let [width, height] = placed.outline.size;
         let [x, y] = placed.at;
@@ -133,9 +133,9 @@ impl Canvas {
     pub(super) fn press_text(&mut self, position: [f64; 2]) {
         let point = self.to_document(position);
         if let (Some([left, top, right, bottom]), Some(placed)) =
-            (self.text_box(), self.session.placed_text())
+            (self.text_box(), self.tab.session.placed_text())
         {
-            let margin = GRAB_MARGIN * f64::from(self.pixels_per_point) / self.scale;
+            let margin = GRAB_MARGIN * f64::from(self.pixels_per_point) / self.tab.scale;
             if (left - margin..=right + margin).contains(&point[0])
                 && (top - margin..=bottom + margin).contains(&point[1])
             {
@@ -166,6 +166,7 @@ impl Canvas {
             return;
         };
         let Some(outline) = self
+            .tab
             .session
             .placed_text()
             .map(|placed| placed.outline.clone())
@@ -174,12 +175,12 @@ impl Canvas {
         };
         let point = self.to_document(position);
         let at = [base[0] + point[0] - start[0], base[1] + point[1] - start[1]];
-        let _ = self.session.place_text(&self.tools, at, outline);
+        let _ = self.tab.session.place_text(&self.tools, at, outline);
     }
 
     /// Whether no text is left placed.
     pub fn apply_text(&mut self) -> bool {
-        if self.session.placed_text().is_none() {
+        if self.tab.session.placed_text().is_none() {
             return true;
         }
         let started = Instant::now();
@@ -187,7 +188,7 @@ impl Canvas {
             Ok(Outcome::Committed(_)) => {
                 tracing::info!(
                     ms = started.elapsed().as_secs_f64() * 1000.0,
-                    chars = self.session.text_content.chars().count(),
+                    chars = self.tab.session.text_content.chars().count(),
                     "text applied"
                 );
                 None
@@ -199,7 +200,7 @@ impl Canvas {
             }
             Err(error) => Some(super::failed_because(tr("text-failed"), &error)),
         };
-        self.session.placed_text().is_none()
+        self.tab.session.placed_text().is_none()
     }
 
     pub fn cancel_text(&mut self) {
@@ -210,12 +211,12 @@ impl Canvas {
     /// it goes on is here.
     pub(super) fn refresh_text_preview(&mut self) {
         let key = self.key();
-        let Some(placed) = self.session.placed_text() else {
-            self.text_preview = None;
+        let Some(placed) = self.tab.session.placed_text() else {
+            self.tab.text_preview = None;
             return;
         };
-        let Some((shown, split)) = self.split.as_mut() else {
-            self.text_preview = None;
+        let Some((shown, split)) = self.tab.split.as_mut() else {
+            self.tab.text_preview = None;
             return;
         };
         if *shown != key || split.layer != placed.layer {
@@ -224,19 +225,19 @@ impl Canvas {
         let wanted = Shown {
             at: placed.at,
             outline: placed.outline.clone(),
-            style: *self.session.text_style(),
-            selection: self.session.selection().cloned(),
+            style: *self.tab.session.text_style(),
+            selection: self.tab.session.selection().cloned(),
         };
-        if self.text_preview.is_none() {
+        if self.tab.text_preview.is_none() {
             let Some(placing) = split.begin_place() else {
                 return;
             };
-            self.text_preview = Some(TextPreview {
+            self.tab.text_preview = Some(TextPreview {
                 placing,
                 shown: None,
             });
         }
-        let preview = self.text_preview.as_mut().expect("made above");
+        let preview = self.tab.text_preview.as_mut().expect("made above");
         if preview.shown.as_ref() == Some(&wanted) {
             return;
         }
@@ -247,12 +248,12 @@ impl Canvas {
             clip,
             antialias,
             ..
-        }) = self.session.text_drawing()
+        }) = self.tab.session.text_drawing()
         else {
             return;
         };
-        let document = self.session.document();
-        let color = self.session.text_style().color.0;
+        let document = self.tab.session.document();
+        let color = self.tab.session.text_style().color.0;
         let rect = split.show_place(
             &mut preview.placing,
             &mut self.stamp,
