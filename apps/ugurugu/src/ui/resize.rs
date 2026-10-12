@@ -235,26 +235,36 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     let mut close = false;
     let mut apply = false;
     let pixel = canvas.session().pixel_mode();
-    let modal = egui::Modal::new(egui::Id::new("resize dialog")).show(ctx, |ui| {
-        ui.set_width(420.0);
-        let can_apply = match dialog {
-            Dialog::Canvas(dialog) => canvas_form(ui, dialog),
-            Dialog::Image(dialog) => image_form(ui, dialog, pixel),
-        };
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("dialog-cancel")).clicked() {
+    let (title, description) = match dialog {
+        Dialog::Canvas(_) => (tr("canvas-size-title"), tr("canvas-size-description")),
+        Dialog::Image(_) => (tr("image-size-title"), tr("image-size-description")),
+    };
+    let modal = widgets::dialog(
+        ctx,
+        "resize dialog",
+        460.0,
+        title,
+        Some(description),
+        |ui| {
+            let can_apply = match dialog {
+                Dialog::Canvas(dialog) => canvas_form(ui, dialog),
+                Dialog::Image(dialog) => image_form(ui, dialog, pixel),
+            };
+            widgets::dialog_buttons(ui, |ui| {
+                let ok =
+                    widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, can_apply);
+                if widgets::button(ui, tr("dialog-cancel"), widgets::Emphasis::Secondary, true)
+                    .clicked()
+                {
                     close = true;
                 }
-                let ok = ui.add_enabled(can_apply, egui::Button::new(tr("dialog-ok")));
                 let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
                 if ok.clicked() || (enter && can_apply) {
                     apply = true;
                 }
             });
-        });
-    });
+        },
+    );
     if apply {
         let result = match &*dialog {
             Dialog::Canvas(dialog) => {
@@ -274,22 +284,28 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     }
 }
 
-pub(super) fn heading(ui: &mut egui::Ui, title: &str, description: &str) {
-    ui.heading(title);
-    ui.label(egui::RichText::new(description).color(theme::muted()));
-    ui.add_space(6.0);
+fn summary(ui: &mut egui::Ui, from: [u32; 2], to: [u32; 2]) {
+    quiet(
+        ui,
+        &tr_with(
+            "size-change",
+            &args([
+                ("width", from[0].to_string()),
+                ("height", from[1].to_string()),
+                ("new_width", to[0].to_string()),
+                ("new_height", to[1].to_string()),
+            ]),
+        ),
+    );
 }
 
-fn summary(ui: &mut egui::Ui, from: [u32; 2], to: [u32; 2]) {
-    ui.label(tr_with(
-        "size-change",
-        &args([
-            ("width", from[0].to_string()),
-            ("height", from[1].to_string()),
-            ("new_width", to[0].to_string()),
-            ("new_height", to[1].to_string()),
-        ]),
-    ));
+/// A line under the preview, quieter than the settings.
+fn quiet(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .size(theme::SMALL)
+            .color(theme::muted()),
+    );
 }
 
 /// Draws `rectangles` (left, top, width, height, highlighted) scaled to fit
@@ -366,7 +382,6 @@ const ANCHORS: [&str; 9] = [
 
 /// The canvas size form; returns whether it can be applied.
 fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
-    heading(ui, tr("canvas-size-title"), tr("canvas-size-description"));
     let [width, height] = dialog.current.map(f64::from);
     let [new_width, new_height] = dialog.size.map(f64::from);
     let [x, y] = dialog.offset.map(f64::from);
@@ -378,82 +393,125 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
             ([x, y, width, height], true),
         ],
     );
+    ui.add_space(6.0);
     summary(ui, dialog.current, dialog.size);
-    ui.label(tr_with(
-        "canvas-size-offset-summary",
-        &args([("x", x.to_string()), ("y", y.to_string())]),
-    ));
-    ui.label(egui::RichText::new(tr(dialog.hint())).color(theme::muted()));
-    ui.add_space(8.0);
+    quiet(
+        ui,
+        &tr_with(
+            "canvas-size-offset-summary",
+            &args([("x", x.to_string()), ("y", y.to_string())]),
+        ),
+    );
+    quiet(ui, tr(dialog.hint()));
 
-    widgets::field_label(ui, tr("canvas-size-section"));
-    let mut relative = dialog.relative;
-    if widgets::checkbox(ui, &mut relative, tr("canvas-size-relative"))
-        .on_hover_text(tr("canvas-size-relative-tip"))
-        .changed()
-    {
-        dialog.relative = relative;
-    }
+    widgets::section(ui, tr("canvas-size-section"), false);
     let mut size = dialog.size;
-    for (axis, [label, change, name, change_name]) in [
-        [
-            "size-width",
-            "canvas-size-width-change",
-            "canvas-size-width",
-            "canvas-size-width-change-name",
-        ],
-        [
-            "size-height",
-            "canvas-size-height-change",
-            "canvas-size-height",
-            "canvas-size-height-change-name",
-        ],
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let current = i64::from(dialog.current[axis]);
-        let [low, high] = [*EDGE.start(), *EDGE.end()].map(i64::from);
-        if dialog.relative {
-            let mut delta = i64::from(size[axis]) - current;
-            super::form_row(ui, tr(change), |ui| {
-                widgets::whole(
-                    ui,
-                    &mut delta,
-                    low - current..=high - current,
-                    true,
-                    tr(change_name),
-                )
-            });
-            size[axis] = clamp_edge(current + delta);
-        } else {
-            let mut edge = i64::from(size[axis]);
-            super::form_row(ui, tr(label), |ui| {
-                widgets::whole(ui, &mut edge, low..=high, false, tr(name))
-            });
-            size[axis] = clamp_edge(edge);
+    widgets::card(ui, |ui| {
+        let mut relative = dialog.relative;
+        widgets::setting_row(ui, true, tr("canvas-size-relative"), None, |ui| {
+            widgets::switch(ui, &mut relative, tr("canvas-size-relative"))
+                .on_hover_text(tr("canvas-size-relative-tip"));
+        });
+        dialog.relative = relative;
+        for (axis, [label, change, name, change_name]) in [
+            [
+                "size-width",
+                "canvas-size-width-change",
+                "canvas-size-width",
+                "canvas-size-width-change-name",
+            ],
+            [
+                "size-height",
+                "canvas-size-height-change",
+                "canvas-size-height",
+                "canvas-size-height-change-name",
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let current = i64::from(dialog.current[axis]);
+            let [low, high] = [*EDGE.start(), *EDGE.end()].map(i64::from);
+            if dialog.relative {
+                let mut delta = i64::from(size[axis]) - current;
+                widgets::setting_row(ui, false, tr(change), None, |ui| {
+                    widgets::whole(
+                        ui,
+                        &mut delta,
+                        low - current..=high - current,
+                        true,
+                        tr(change_name),
+                    )
+                });
+                size[axis] = clamp_edge(current + delta);
+            } else {
+                let mut edge = i64::from(size[axis]);
+                widgets::setting_row(ui, false, tr(label), None, |ui| {
+                    widgets::whole(ui, &mut edge, low..=high, false, tr(name))
+                });
+                size[axis] = clamp_edge(edge);
+            }
         }
-    }
+    });
     if size != dialog.size {
         dialog.set_size(size);
     }
-    ui.add_space(8.0);
 
-    widgets::field_label(ui, tr("canvas-size-anchor"));
+    widgets::section(ui, tr("canvas-size-anchor"), false);
+    let mut offset = dialog.offset.map(i64::from);
+    widgets::card(ui, |ui| {
+        widgets::setting_row(ui, true, tr("canvas-size-anchor"), None, |ui| {
+            anchors(ui, dialog);
+        });
+        let reach = i64::from(*EDGE.end());
+        for (axis, label, name) in [
+            (0, "canvas-size-offset-x", "canvas-size-offset-x-name"),
+            (1, "canvas-size-offset-y", "canvas-size-offset-y-name"),
+        ] {
+            widgets::setting_row(ui, false, tr(label), None, |ui| {
+                widgets::whole(ui, &mut offset[axis], -reach..=reach, true, tr(name))
+            });
+        }
+    });
+    let offset = offset.map(|value| value as i32);
+    if offset != dialog.offset {
+        dialog.set_offset(offset);
+    }
+    dialog.changes()
+}
+
+/// The nine points the canvas can grow or shrink around, as squares.
+fn anchors(ui: &mut egui::Ui, dialog: &mut CanvasSize) {
     egui::Grid::new("anchor")
         .spacing([4.0, 4.0])
         .show(ui, |ui| {
             for (index, &key) in ANCHORS.iter().enumerate() {
                 let chosen = dialog.anchor == Some(index);
-                let button =
-                    egui::Button::new("")
-                        .min_size(egui::vec2(28.0, 28.0))
-                        .fill(if chosen {
-                            theme::accent()
-                        } else {
-                            theme::base()
-                        });
-                let response = ui.add(button).on_hover_text(tr(key));
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+                let (fill, edge) = if chosen {
+                    (theme::accent(), theme::accent_ink())
+                } else if response.hovered() {
+                    (theme::hover(), theme::disabled())
+                } else {
+                    (theme::control(), theme::border())
+                };
+                ui.painter().rect(
+                    rect,
+                    egui::CornerRadius::same(5),
+                    fill,
+                    egui::Stroke::new(1.0, edge),
+                    egui::StrokeKind::Inside,
+                );
+                if response.has_focus() {
+                    ui.painter().rect_stroke(
+                        rect.expand(2.0),
+                        egui::CornerRadius::same(7),
+                        egui::Stroke::new(1.0, theme::accent_ink()),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                let response = response.on_hover_text(tr(key));
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, tr(key))
                 });
@@ -465,27 +523,11 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
                 }
             }
         });
-    let mut offset = dialog.offset.map(i64::from);
-    let reach = i64::from(*EDGE.end());
-    for (axis, label, name) in [
-        (0, "canvas-size-offset-x", "canvas-size-offset-x-name"),
-        (1, "canvas-size-offset-y", "canvas-size-offset-y-name"),
-    ] {
-        super::form_row(ui, tr(label), |ui| {
-            widgets::whole(ui, &mut offset[axis], -reach..=reach, true, tr(name))
-        });
-    }
-    let offset = offset.map(|value| value as i32);
-    if offset != dialog.offset {
-        dialog.set_offset(offset);
-    }
-    dialog.changes()
 }
 
 /// The image size form; returns whether it can be applied.
 /// In pixel mode it always resamples by whole pixels, so there is no choice.
 fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
-    heading(ui, tr("image-size-title"), tr("image-size-description"));
     let [width, height] = dialog.current.map(f64::from);
     let [new_width, new_height] = dialog.size.map(f64::from);
     preview(
@@ -496,86 +538,108 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
             ([0.0, 0.0, new_width, new_height], true),
         ],
     );
+    ui.add_space(6.0);
     summary(ui, dialog.current, dialog.size);
     let [horizontal, vertical] = dialog.scales();
-    ui.label(tr_with(
-        "image-size-scales",
-        &args([
-            ("horizontal", format!("{horizontal:.1}")),
-            ("vertical", format!("{vertical:.1}")),
-        ]),
-    ));
+    quiet(
+        ui,
+        &tr_with(
+            "image-size-scales",
+            &args([
+                ("horizontal", format!("{horizontal:.1}")),
+                ("vertical", format!("{vertical:.1}")),
+            ]),
+        ),
+    );
     if dialog.distorted() {
-        ui.label(egui::RichText::new(tr("image-size-distorted")).color(theme::muted()));
+        ui.label(
+            egui::RichText::new(tr("image-size-distorted"))
+                .size(theme::SMALL)
+                .color(theme::accent_ink()),
+        );
     }
-    ui.add_space(8.0);
 
-    widgets::field_label(ui, tr("image-size-section"));
-    let ranges = dialog.ranges();
-    for (axis, label, name) in [
-        (0, "size-width", "image-size-width"),
-        (1, "size-height", "image-size-height"),
-    ] {
-        let mut edge = i64::from(dialog.size[axis]);
-        let [low, high] = ranges[axis].map(i64::from);
-        super::form_row(ui, tr(label), |ui| {
-            widgets::whole(ui, &mut edge, low..=high, false, tr(name))
-        });
-        let edge = clamp_edge(edge);
-        if edge != dialog.size[axis] {
-            if axis == 0 {
-                dialog.set_width(edge);
-            } else {
-                dialog.set_height(edge);
+    widgets::section(ui, tr("image-size-section"), false);
+    widgets::card(ui, |ui| {
+        let ranges = dialog.ranges();
+        for (axis, label, name) in [
+            (0, "size-width", "image-size-width"),
+            (1, "size-height", "image-size-height"),
+        ] {
+            let mut edge = i64::from(dialog.size[axis]);
+            let [low, high] = ranges[axis].map(i64::from);
+            widgets::setting_row(ui, axis == 0, tr(label), None, |ui| {
+                widgets::whole(ui, &mut edge, low..=high, false, tr(name))
+            });
+            let edge = clamp_edge(edge);
+            if edge != dialog.size[axis] {
+                if axis == 0 {
+                    dialog.set_width(edge);
+                } else {
+                    dialog.set_height(edge);
+                }
             }
         }
-    }
-    let mut percent = dialog.percent();
-    let [low, high] = dialog.percent_range();
-    let response = super::form_row(ui, tr("image-size-scale"), |ui| {
-        let response = ui.add_sized(
-            [96.0, 26.0],
-            egui::DragValue::new(&mut percent)
-                .range(low..=high)
-                .speed(1.0)
-                .max_decimals(1)
-                .suffix(" %"),
-        );
-        let shown = percent;
-        response.widget_info(|| {
-            let mut info = egui::WidgetInfo::drag_value(true, shown);
-            info.label = Some(tr("image-size-scale").to_owned());
-            info
+        let mut percent = dialog.percent();
+        let [low, high] = dialog.percent_range();
+        let response = widgets::setting_row(ui, false, tr("image-size-scale"), None, |ui| {
+            let response = ui.add_sized(
+                [96.0, 26.0],
+                egui::DragValue::new(&mut percent)
+                    .range(low..=high)
+                    .speed(1.0)
+                    .max_decimals(1)
+                    .suffix(" %"),
+            );
+            let shown = percent;
+            response.widget_info(|| {
+                let mut info = egui::WidgetInfo::drag_value(true, shown);
+                info.label = Some(tr("image-size-scale").to_owned());
+                info
+            });
+            response
         });
-        response
+        if response.on_hover_text(tr("image-size-scale-tip")).changed() {
+            dialog.set_percent(percent);
+        }
+        let resizable = dialog.aspect_resizable();
+        let fixed = (!resizable).then(|| tr("image-size-keep-aspect-fixed"));
+        let mut keep = dialog.keep_aspect;
+        widgets::setting_row(ui, false, tr("image-size-keep-aspect"), fixed, |ui| {
+            ui.add_enabled_ui(resizable, |ui| {
+                widgets::switch(ui, &mut keep, tr("image-size-keep-aspect"))
+            });
+        });
+        if resizable && keep != dialog.keep_aspect {
+            dialog.set_keep_aspect(keep);
+        }
+        if !pixel {
+            widgets::setting_row(ui, false, tr("image-size-sampling"), None, |ui| {
+                let name = |sampling| {
+                    tr(match sampling {
+                        Sampling::Smooth => "sampling-smooth",
+                        Sampling::Nearest => "sampling-pixels",
+                    })
+                };
+                egui::ComboBox::from_id_salt("image sampling")
+                    .selected_text(name(dialog.sampling))
+                    .width(190.0)
+                    .show_ui(ui, |ui| {
+                        for sampling in [Sampling::Smooth, Sampling::Nearest] {
+                            widgets::choice(ui, &mut dialog.sampling, sampling, name(sampling));
+                        }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            true,
+                            tr("image-size-sampling"),
+                        )
+                    });
+            });
+        }
     });
-    if response.on_hover_text(tr("image-size-scale-tip")).changed() {
-        dialog.set_percent(percent);
-    }
-    let resizable = dialog.aspect_resizable();
-    let mut keep = dialog.keep_aspect;
-    let check = ui
-        .add_enabled_ui(resizable, |ui| {
-            widgets::checkbox(ui, &mut keep, tr("image-size-keep-aspect"))
-        })
-        .inner;
-    if !resizable {
-        check.on_disabled_hover_text(tr("image-size-keep-aspect-fixed"));
-    } else if keep != dialog.keep_aspect {
-        dialog.set_keep_aspect(keep);
-    }
-    if !pixel {
-        ui.add_space(8.0);
-        widgets::field_label(ui, tr("image-size-sampling"));
-        ui.horizontal(|ui| {
-            for (sampling, title) in [
-                (Sampling::Smooth, "sampling-smooth"),
-                (Sampling::Nearest, "sampling-pixels"),
-            ] {
-                ui.radio_value(&mut dialog.sampling, sampling, tr(title));
-            }
-        });
-    }
     dialog.size != dialog.current
 }
 

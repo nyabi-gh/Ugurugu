@@ -8,9 +8,10 @@ use ugu_core::ops::Rgba8;
 use ugu_core::restyle::{Style, Touched};
 use ugu_core::store::limits::STROKE_WIDTH;
 
-use super::{Panels, resize};
+use super::Panels;
 use crate::canvas::Canvas;
 use crate::i18n::tr;
+use crate::widgets;
 
 pub struct Dialog {
     colorable: bool,
@@ -63,66 +64,67 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     };
     let mut close = false;
     let mut apply = false;
-    let modal = egui::Modal::new(egui::Id::new("restyle dialog")).show(ctx, |ui| {
-        ui.set_width(340.0);
-        resize::heading(ui, tr("restyle-title"), tr("restyle-description"));
-        egui::Grid::new("restyle fields")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .show(ui, |ui| {
-                ui.add_enabled(
-                    dialog.colorable,
-                    egui::Checkbox::new(&mut dialog.color_on, tr("restyle-color")),
-                );
-                let picked = ui
-                    .add_enabled_ui(dialog.colorable, |ui| {
-                        ui.color_edit_button_srgba_unmultiplied(&mut dialog.color)
-                    })
-                    .inner
-                    .on_hover_text(tr("restyle-choose-color"));
-                if picked.changed() {
-                    dialog.color_on = true;
-                }
-                ui.end_row();
-                ui.add_enabled(
-                    dialog.sizable,
-                    egui::Checkbox::new(&mut dialog.width_on, tr("restyle-width")),
-                );
-                let width = ui.add_enabled(
-                    dialog.sizable,
-                    egui::DragValue::new(&mut dialog.width)
-                        .range(STROKE_WIDTH)
-                        .speed(0.1)
-                        .fixed_decimals(2)
-                        .suffix(" px"),
-                );
-                let shown = f64::from(dialog.width);
-                width.widget_info(|| {
-                    let mut info = egui::WidgetInfo::drag_value(dialog.sizable, shown);
-                    info.label = Some(tr("restyle-width").to_owned());
-                    info
+    let modal = widgets::dialog(
+        ctx,
+        "restyle dialog",
+        400.0,
+        tr("restyle-title"),
+        Some(tr("restyle-description")),
+        |ui| {
+            widgets::card(ui, |ui| {
+                widgets::setting_row(ui, true, tr("restyle-color"), None, |ui| {
+                    ui.add_enabled_ui(dialog.colorable, |ui| {
+                        widgets::switch(ui, &mut dialog.color_on, tr("restyle-color"));
+                        ui.add_space(10.0);
+                        let picked = ui
+                            .color_edit_button_srgba_unmultiplied(&mut dialog.color)
+                            .on_hover_text(tr("restyle-choose-color"));
+                        if picked.changed() {
+                            dialog.color_on = true;
+                        }
+                    });
                 });
-                if width.changed() {
-                    dialog.width_on = true;
-                }
-                ui.end_row();
+                widgets::setting_row(ui, false, tr("restyle-width"), None, |ui| {
+                    ui.add_enabled_ui(dialog.sizable, |ui| {
+                        widgets::switch(ui, &mut dialog.width_on, tr("restyle-width"));
+                        ui.add_space(10.0);
+                        let width = ui.add_sized(
+                            [96.0, 26.0],
+                            egui::DragValue::new(&mut dialog.width)
+                                .range(STROKE_WIDTH)
+                                .speed(0.1)
+                                .fixed_decimals(2)
+                                .suffix(" px"),
+                        );
+                        let shown = f64::from(dialog.width);
+                        width.widget_info(|| {
+                            let mut info = egui::WidgetInfo::drag_value(dialog.sizable, shown);
+                            info.label = Some(tr("restyle-width").to_owned());
+                            info
+                        });
+                        if width.changed() {
+                            dialog.width_on = true;
+                        }
+                    });
+                });
             });
-        let style = dialog.style();
-        let can_apply = style.color.is_some() || style.width.is_some();
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("dialog-cancel")).clicked() {
+            let style = dialog.style();
+            let can_apply = style.color.is_some() || style.width.is_some();
+            widgets::dialog_buttons(ui, |ui| {
+                let ok =
+                    widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, can_apply);
+                if widgets::button(ui, tr("dialog-cancel"), widgets::Emphasis::Secondary, true)
+                    .clicked()
+                {
                     close = true;
                 }
-                let ok = ui.add_enabled(can_apply, egui::Button::new(tr("dialog-ok")));
                 let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
                 if ok.clicked() || (enter && can_apply) {
                     apply = true;
                 }
             });
-        });
-    });
+        },
+    );
     if apply {
         canvas.restyle(dialog.style());
         close = true;

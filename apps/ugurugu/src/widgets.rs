@@ -577,11 +577,7 @@ pub fn setting_row<R>(
     let height = text_height.max(CONTROL_HEIGHT) + 2.0 * PADDING;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     if !first {
-        ui.painter().hline(
-            rect.x_range(),
-            rect.top(),
-            Stroke::new(1.0, theme::border().gamma_multiply(0.6)),
-        );
+        ui.painter().hline(rect.x_range(), rect.top(), rule());
     }
     let text_rect = Rect::from_min_size(
         egui::pos2(rect.left(), rect.center().y - text_height / 2.0),
@@ -617,4 +613,70 @@ pub fn setting_row<R>(
         control,
     )
     .inner
+}
+
+/// Between a dialog's edge and what is in it.
+pub const DIALOG_MARGIN: i8 = 24;
+
+/// A faint line between parts of a dialog or rows of a card.
+pub fn rule() -> Stroke {
+    Stroke::new(1.0, theme::border().gamma_multiply(0.6))
+}
+
+/// A dialog `width` points wide inside its margin: the title, a quieter line
+/// on what it does, then what `add` puts in, which ends with
+/// `dialog_buttons`.
+pub fn dialog<R>(
+    ctx: &egui::Context,
+    id: &str,
+    width: f32,
+    title: &str,
+    description: Option<&str>,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::ModalResponse<R> {
+    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(DIALOG_MARGIN);
+    egui::Modal::new(egui::Id::new(id))
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(theme::BODY + 5.0)
+                    .strong()
+                    .color(theme::text()),
+            );
+            if let Some(description) = description {
+                ui.add_space(2.0);
+                ui.add(
+                    egui::Label::new(egui::RichText::new(description).color(theme::muted())).wrap(),
+                );
+            }
+            ui.add_space(16.0);
+            add(ui)
+        })
+}
+
+/// The buttons at the foot of a dialog, after a faint line, at the right:
+/// `add` adds them from the right, the one that confirms first.
+pub fn dialog_buttons<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.add_space(16.0);
+    let y = ui.cursor().top();
+    ui.painter().hline(ui.max_rect().x_range(), y, rule());
+    ui.add_space(16.0);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add)
+        .inner
+}
+
+/// A small heading over a card, with room above it unless it is the first.
+pub fn section(ui: &mut Ui, text: &str, first: bool) {
+    if !first {
+        ui.add_space(14.0);
+    }
+    ui.label(
+        egui::RichText::new(text)
+            .size(theme::SMALL)
+            .strong()
+            .color(theme::muted()),
+    );
+    ui.add_space(2.0);
 }

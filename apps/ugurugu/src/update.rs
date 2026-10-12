@@ -290,21 +290,26 @@ impl Updates {
         if let Some(update) = &self.offer {
             let version = update.TargetFullRelease.Version.clone();
             let mut answer = None;
-            let modal = egui::Modal::new(egui::Id::new("update offer")).show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                ui.heading(tr("update-available-title"));
-                ui.label(tr_with("update-available", &args([("version", version)])));
-                ui.label(tr("update-ask"));
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("update-install")).clicked() {
-                        answer = Some(true);
-                    }
-                    if ui.button(tr("unsaved-cancel")).clicked() {
-                        answer = Some(false);
-                    }
-                });
-            });
+            let offered = tr_with("update-available", &args([("version", version)]));
+            let modal = crate::widgets::dialog(
+                ctx,
+                "update offer",
+                400.0,
+                tr("update-available-title"),
+                Some(&offered),
+                |ui| {
+                    ui.label(tr("update-ask"));
+                    crate::widgets::dialog_buttons(ui, |ui| {
+                        use crate::widgets::{Emphasis, button};
+                        if button(ui, tr("update-install"), Emphasis::Primary, true).clicked() {
+                            answer = Some(true);
+                        }
+                        if button(ui, tr("unsaved-cancel"), Emphasis::Secondary, true).clicked() {
+                            answer = Some(false);
+                        }
+                    });
+                },
+            );
             if modal.should_close() && answer.is_none() {
                 answer = Some(false);
             }
@@ -320,13 +325,18 @@ impl Updates {
         }
         if let Some((title, text)) = &self.notice {
             let mut close = false;
-            let modal = egui::Modal::new(egui::Id::new("update notice")).show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                ui.heading(title.as_str());
-                ui.label(text.as_str());
-                ui.add_space(6.0);
-                close = ui.button(tr("crash-close")).clicked();
-            });
+            let modal =
+                crate::widgets::dialog(ctx, "update notice", 400.0, title, Some(text), |ui| {
+                    crate::widgets::dialog_buttons(ui, |ui| {
+                        close = crate::widgets::button(
+                            ui,
+                            tr("crash-close"),
+                            crate::widgets::Emphasis::Primary,
+                            true,
+                        )
+                        .clicked();
+                    });
+                });
             if close || modal.should_close() {
                 self.notice = None;
             }

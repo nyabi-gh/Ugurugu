@@ -124,17 +124,10 @@ pub fn apply(
 /// The list of tabs on the left, and the room the tab shown takes.
 const SIDEBAR: f32 = 156.0;
 const CONTENT: egui::Vec2 = egui::vec2(540.0, 400.0);
-/// Between the dialog's edge and what is in it.
-const MARGIN: i8 = 24;
 /// Between the list and the tab shown, with a line in the middle.
 const GAP: f32 = 24.0;
 /// Between the cards and the scroll bar.
 const GUTTER: i8 = 14;
-
-/// A faint line between parts of the dialog.
-fn rule() -> egui::Stroke {
-    egui::Stroke::new(1.0, theme::border().gamma_multiply(0.6))
-}
 
 /// Shows the dialog if open, and takes a default save folder chosen in it.
 /// `typed`: chords egui turns into clipboard events, for a new shortcut.
@@ -160,7 +153,7 @@ pub fn show(
     let before = store.get().clone();
     let mut settings = before.clone();
     let mut close = false;
-    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(MARGIN);
+    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(widgets::DIALOG_MARGIN);
     let modal = egui::Modal::new(egui::Id::new("settings dialog"))
         .frame(frame)
         .show(ctx, |ui| {
@@ -236,10 +229,11 @@ pub fn show(
                 });
             });
             ui.painter()
-                .vline(line, body.response.rect.y_range(), rule());
+                .vline(line, body.response.rect.y_range(), widgets::rule());
             ui.add_space(16.0);
             let y = ui.cursor().top();
-            ui.painter().hline(ui.max_rect().x_range(), y, rule());
+            ui.painter()
+                .hline(ui.max_rect().x_range(), y, widgets::rule());
             ui.add_space(16.0);
             ui.horizontal(|ui| {
                 let restore = widgets::button(
@@ -308,22 +302,8 @@ fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
     response
 }
 
-/// A small heading over a card.
-fn section(ui: &mut egui::Ui, text: &str, first: bool) {
-    if !first {
-        ui.add_space(14.0);
-    }
-    ui.label(
-        egui::RichText::new(text)
-            .size(theme::SMALL)
-            .strong()
-            .color(theme::muted()),
-    );
-    ui.add_space(2.0);
-}
-
 fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
-    section(ui, tr("settings-appearance"), true);
+    widgets::section(ui, tr("settings-appearance"), true);
     widgets::card(ui, |ui| {
         widgets::setting_row(ui, true, tr("settings-theme"), None, |ui| {
             egui::ComboBox::from_id_salt("settings-theme")
@@ -391,7 +371,7 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
         );
     });
 
-    section(ui, tr("settings-updates"), false);
+    widgets::section(ui, tr("settings-updates"), false);
     widgets::card(ui, |ui| {
         widgets::setting_row(ui, true, tr("settings-check-updates"), None, |ui| {
             widgets::switch(

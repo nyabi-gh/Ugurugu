@@ -295,21 +295,25 @@ pub fn tell_about_crashes(ctx: &egui::Context, asking: bool) -> bool {
         return false;
     }
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::new("crashed before")).show(ctx, |ui| {
-        ui.set_max_width(460.0);
-        ui.heading(tr("crash-title"));
-        ui.label(tr("crash-text"));
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.button(tr("crash-open-logs")).clicked() {
-                show_folder();
-                close = true;
-            }
-            if ui.button(tr("crash-close")).clicked() {
-                close = true;
-            }
-        });
-    });
+    let modal = crate::widgets::dialog(
+        ctx,
+        "crashed before",
+        420.0,
+        tr("crash-title"),
+        Some(tr("crash-text")),
+        |ui| {
+            crate::widgets::dialog_buttons(ui, |ui| {
+                use crate::widgets::{Emphasis, button};
+                if button(ui, tr("crash-close"), Emphasis::Primary, true).clicked() {
+                    close = true;
+                }
+                if button(ui, tr("crash-open-logs"), Emphasis::Secondary, true).clicked() {
+                    show_folder();
+                    close = true;
+                }
+            });
+        },
+    );
     if close || modal.should_close() {
         mark_seen(&earlier);
         earlier.clear();

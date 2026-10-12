@@ -34,6 +34,7 @@ use crate::export::{self, Animation, Exporting, Job as ExportJob, Outcome};
 use crate::i18n::{tr, tr_with};
 use crate::recovery::{self, Found, Meta};
 use crate::settings::preset::{self, PresetError};
+use crate::{theme, widgets};
 
 fn args_name(name: String) -> fluent_bundle::FluentArgs<'static> {
     let mut args = fluent_bundle::FluentArgs::new();
@@ -954,43 +955,51 @@ impl Files {
         let edges = i64::from(*limits::CANVAS_EDGE.start())..=i64::from(*limits::CANVAS_EDGE.end());
         let mut chosen = None;
         let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("new document")).show(ctx, |ui| {
-            ui.set_width(360.0);
-            ui.heading(tr("new-title"));
-            ui.add_space(6.0);
-            egui::Grid::new("new document size")
-                .num_columns(2)
-                .spacing([12.0, 6.0])
-                .show(ui, |ui| {
-                    for (axis, name) in [(0, "size-width"), (1, "size-height")] {
-                        ui.label(tr(name));
-                        crate::widgets::whole(ui, &mut size[axis], edges.clone(), false, tr(name));
-                        ui.end_row();
-                    }
-                });
-            ui.add_space(4.0);
+        let modal = widgets::dialog(ctx, "new document", 380.0, tr("new-title"), None, |ui| {
             // Enter presses OK, unless it presses another focused button.
             let mut button_focused = false;
-            ui.horizontal(|ui| {
-                for edge in [16, 32, 64, 128] {
-                    let button = ui.button(format!("{edge} × {edge}"));
-                    button_focused |= button.has_focus();
-                    if button.clicked() {
-                        *size = [edge, edge];
-                    }
+            widgets::card(ui, |ui| {
+                for (index, (axis, name)) in [(0, "size-width"), (1, "size-height")]
+                    .into_iter()
+                    .enumerate()
+                {
+                    widgets::setting_row(ui, index == 0, tr(name), None, |ui| {
+                        widgets::whole(ui, &mut size[axis], edges.clone(), false, tr(name));
+                    });
                 }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for edge in [16, 32, 64, 128] {
+                        let text = format!("{edge} × {edge}");
+                        let button = widgets::button(ui, &text, widgets::Emphasis::Secondary, true);
+                        button_focused |= button.has_focus();
+                        if button.clicked() {
+                            *size = [edge, edge];
+                        }
+                    }
+                });
+                ui.add_space(14.0);
             });
-            ui.add_space(4.0);
-            crate::widgets::checkbox(ui, &mut self.new_pixel, tr("pixel-mode"))
-                .on_hover_text(tr("pixel-mode-tip"));
-            ui.add_space(8.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let back = ui.button(tr("dialog-cancel"));
+            ui.add_space(12.0);
+            widgets::card(ui, |ui| {
+                widgets::setting_row(
+                    ui,
+                    true,
+                    tr("pixel-mode"),
+                    Some(tr("pixel-mode-tip")),
+                    |ui| {
+                        widgets::switch(ui, &mut self.new_pixel, tr("pixel-mode"));
+                    },
+                );
+            });
+            widgets::dialog_buttons(ui, |ui| {
+                let ok = widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, true);
+                let back =
+                    widgets::button(ui, tr("dialog-cancel"), widgets::Emphasis::Secondary, true);
                 button_focused |= back.has_focus();
                 if back.clicked() {
                     cancel = true;
                 }
-                let ok = ui.button(tr("dialog-ok"));
                 let enter =
                     ui.input(|input| input.key_pressed(egui::Key::Enter)) && !button_focused;
                 if ok.clicked() || enter {
@@ -1043,65 +1052,70 @@ impl Files {
             }
         };
         let mut choice = None;
-        let modal = egui::Modal::new(egui::Id::new("animation export")).show(ctx, |ui| {
-            ui.heading(tr(match dialog.format {
-                Animation::Gif => "export-gif-title",
-                Animation::WebP => "export-webp-title",
-            }));
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("export-size"));
-                egui::ComboBox::from_id_salt("gif size")
-                    .selected_text(label(dialog.size))
-                    .show_ui(ui, |ui| {
-                        for index in 0..sizes.len() {
-                            crate::widgets::choice(ui, &mut dialog.size, index, label(index));
-                        }
-                    })
-                    .response
-                    .widget_info(|| {
-                        let mut info = egui::WidgetInfo::labeled(
-                            egui::WidgetType::ComboBox,
-                            true,
-                            tr("export-size"),
-                        );
-                        info.current_text_value = Some(label(dialog.size));
-                        info
+        let title = tr(match dialog.format {
+            Animation::Gif => "export-gif-title",
+            Animation::WebP => "export-webp-title",
+        });
+        let modal = widgets::dialog(ctx, "animation export", 420.0, title, None, |ui| {
+            widgets::card(ui, |ui| {
+                widgets::setting_row(ui, true, tr("export-size"), None, |ui| {
+                    egui::ComboBox::from_id_salt("gif size")
+                        .selected_text(label(dialog.size))
+                        .width(190.0)
+                        .show_ui(ui, |ui| {
+                            for index in 0..sizes.len() {
+                                widgets::choice(ui, &mut dialog.size, index, label(index));
+                            }
+                        })
+                        .response
+                        .widget_info(|| {
+                            let mut info = egui::WidgetInfo::labeled(
+                                egui::WidgetType::ComboBox,
+                                true,
+                                tr("export-size"),
+                            );
+                            info.current_text_value = Some(label(dialog.size));
+                            info
+                        });
+                });
+                let opaque = (!transparent).then(|| tr("export-opaque-background"));
+                widgets::setting_row(ui, false, tr("export-keep-transparency"), opaque, |ui| {
+                    let mut keep = transparent && dialog.keep_transparency;
+                    ui.add_enabled_ui(transparent, |ui| {
+                        widgets::switch(ui, &mut keep, tr("export-keep-transparency"))
                     });
+                    if transparent {
+                        dialog.keep_transparency = keep;
+                    }
+                });
             });
-            let mut keep = transparent && dialog.keep_transparency;
-            let checkbox = ui.add_enabled(
-                transparent,
-                egui::Checkbox::new(&mut keep, tr("export-keep-transparency")),
-            );
-            if transparent {
-                dialog.keep_transparency = keep;
-            } else {
-                checkbox.on_disabled_hover_text(tr("export-opaque-background"));
-            }
-            ui.label(if fits {
-                tr_with(
+            ui.add_space(10.0);
+            let estimate = if fits {
+                egui::RichText::new(tr_with(
                     "export-estimate",
                     &crate::i18n::args([
                         ("frames", document.frames.to_string()),
                         ("mebibytes", mebibytes.clone()),
                     ]),
-                )
+                ))
+                .color(theme::muted())
             } else {
-                tr_with(
+                egui::RichText::new(tr_with(
                     "export-over-budget",
                     &crate::i18n::args([("mebibytes", mebibytes.clone())]),
-                )
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(fits, egui::Button::new(tr("export-confirm")))
+                ))
+                .color(theme::accent_ink())
+            };
+            ui.add(egui::Label::new(estimate.size(theme::SMALL)).wrap());
+            widgets::dialog_buttons(ui, |ui| {
+                if widgets::button(ui, tr("export-confirm"), widgets::Emphasis::Primary, fits)
                     .clicked()
                 {
                     choice = Some(true);
                 }
-                if ui.button(tr("export-cancel")).clicked() {
+                if widgets::button(ui, tr("export-cancel"), widgets::Emphasis::Secondary, true)
+                    .clicked()
+                {
                     choice = Some(false);
                 }
             });
@@ -1491,28 +1505,61 @@ impl Files {
         let time = ugu_win::clock::local_text(meta.time).unwrap_or_default();
         let [width, height] = meta.canvas;
         let mut choice = None;
-        let modal = egui::Modal::new(egui::Id::new("recovery")).show(ctx, |ui| {
-            ui.heading(tr("recovery-title"));
-            ui.label(tr("recovery-found"));
-            ui.add_space(6.0);
-            ui.strong(&meta.name);
-            ui.label(format!("{time} · {width} × {height}"));
-            if let Some(path) = &meta.path {
-                ui.label(path.display().to_string());
-            }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                for (choice_here, key) in [
-                    (Answer::Recover, "recovery-recover"),
-                    (Answer::Discard, "recovery-discard"),
-                    (Answer::Later, "recovery-later"),
-                ] {
-                    if ui.button(tr(key)).clicked() {
-                        choice = Some(choice_here);
+        let modal = widgets::dialog(
+            ctx,
+            "recovery",
+            420.0,
+            tr("recovery-title"),
+            Some(tr("recovery-found")),
+            |ui| {
+                widgets::card(ui, |ui| {
+                    ui.add_space(12.0);
+                    ui.label(
+                        egui::RichText::new(&meta.name)
+                            .strong()
+                            .color(theme::text()),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!("{time} · {width} × {height}"))
+                            .color(theme::muted()),
+                    );
+                    if let Some(path) = &meta.path {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(path.display().to_string())
+                                    .size(theme::SMALL)
+                                    .color(theme::muted()),
+                            )
+                            .wrap(),
+                        );
                     }
-                }
-            });
-        });
+                    ui.add_space(12.0);
+                });
+                widgets::dialog_buttons(ui, |ui| {
+                    for (choice_here, key, emphasis) in [
+                        (
+                            Answer::Recover,
+                            "recovery-recover",
+                            widgets::Emphasis::Primary,
+                        ),
+                        (
+                            Answer::Discard,
+                            "recovery-discard",
+                            widgets::Emphasis::Secondary,
+                        ),
+                        (
+                            Answer::Later,
+                            "recovery-later",
+                            widgets::Emphasis::Secondary,
+                        ),
+                    ] {
+                        if widgets::button(ui, tr(key), emphasis, true).clicked() {
+                            choice = Some(choice_here);
+                        }
+                    }
+                });
+            },
+        );
         if modal.should_close() && choice.is_none() {
             choice = Some(Answer::Later);
         }
@@ -1537,34 +1584,49 @@ impl Files {
         };
         let mut choice = None;
         let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("unsaved changes")).show(ctx, |ui| {
-            ui.heading(tr("unsaved-title"));
-            ui.label(tr("unsaved-text"));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let save = ui.button(tr("unsaved-save"));
-                let discard = ui.button(tr("unsaved-discard"));
-                let back = ui.button(tr("unsaved-cancel"));
-                // As 2.2.13: S and N press the buttons, and Enter presses
-                // Save, the default, unless another button has the focus.
-                let (s, n, enter) = ui.input_mut(|input| {
-                    let none = egui::Modifiers::NONE;
-                    (
-                        input.consume_key(none, egui::Key::S),
-                        input.consume_key(none, egui::Key::N),
-                        input.key_pressed(egui::Key::Enter),
-                    )
+        let modal = widgets::dialog(
+            ctx,
+            "unsaved changes",
+            400.0,
+            tr("unsaved-title"),
+            Some(tr("unsaved-text")),
+            |ui| {
+                widgets::dialog_buttons(ui, |ui| {
+                    let save =
+                        widgets::button(ui, tr("unsaved-save"), widgets::Emphasis::Primary, true);
+                    let discard = widgets::button(
+                        ui,
+                        tr("unsaved-discard"),
+                        widgets::Emphasis::Secondary,
+                        true,
+                    );
+                    let back = widgets::button(
+                        ui,
+                        tr("unsaved-cancel"),
+                        widgets::Emphasis::Secondary,
+                        true,
+                    );
+                    // As 2.2.13: S and N press the buttons, and Enter presses
+                    // Save, the default, unless another button has the focus.
+                    let (s, n, enter) = ui.input_mut(|input| {
+                        let none = egui::Modifiers::NONE;
+                        (
+                            input.consume_key(none, egui::Key::S),
+                            input.consume_key(none, egui::Key::N),
+                            input.key_pressed(egui::Key::Enter),
+                        )
+                    });
+                    let elsewhere = !(discard.has_focus() || back.has_focus() || save.has_focus());
+                    if save.clicked() || s || (enter && elsewhere) {
+                        choice = Some(true);
+                    } else if discard.clicked() || n {
+                        choice = Some(false);
+                    } else if back.clicked() {
+                        cancel = true;
+                    }
                 });
-                let elsewhere = !(discard.has_focus() || back.has_focus() || save.has_focus());
-                if save.clicked() || s || (enter && elsewhere) {
-                    choice = Some(true);
-                } else if discard.clicked() || n {
-                    choice = Some(false);
-                } else if back.clicked() {
-                    cancel = true;
-                }
-            });
-        });
+            },
+        );
         if cancel || modal.should_close() {
             self.confirm = None;
             self.forget(action);
