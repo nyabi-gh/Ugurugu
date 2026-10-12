@@ -17,7 +17,7 @@ use ugu_core::edit::{EditError, Outcome};
 use ugu_core::history::Group;
 use ugu_core::ops::Rgba8;
 use ugu_core::selection::Selection;
-use ugu_core::store::{Brush, Stroke, limits};
+use ugu_core::store::{Brush, BrushEngine, Stroke, limits};
 use ugu_core::text::{self, Outline};
 
 use crate::transforming::Ended;
@@ -86,6 +86,19 @@ pub struct TextDrawing {
     pub antialias: bool,
 }
 
+/// What letters are outlined with: an even line whatever brush is chosen,
+/// so an airbrush or a spray still draws letters (2.2.13 drew them with the
+/// brush itself); pixel art's pencil in pixel mode.
+fn letter_brush(brush: &Brush) -> Brush {
+    if brush.engine == BrushEngine::Pixel {
+        *brush
+    } else {
+        ugu_core::brush::find("monoline")
+            .expect("the monoline preset")
+            .brush
+    }
+}
+
 impl Session {
     pub fn placed_text(&self) -> Option<&Placed> {
         self.placed.as_ref()
@@ -145,7 +158,7 @@ impl Session {
                 .clamp(*limits::STROKE_WIDTH.start(), *limits::STROKE_WIDTH.end()),
             brush: Brush {
                 antialias: style.pen.antialias,
-                ..style.pen.preset.brush
+                ..letter_brush(&style.pen.preset.brush)
             },
             seed: 0,
         };

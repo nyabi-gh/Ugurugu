@@ -3,7 +3,7 @@
 
 //! The text tool's settings, as 2.2.13's text panel: the text, its font and
 //! size, whether the letters are filled, and placing or cancelling it. The
-//! letters take the brush's colour, width and look.
+//! letters take the brush's colour and width, outlined with an even line.
 
 use ugu_session::TextSettings;
 

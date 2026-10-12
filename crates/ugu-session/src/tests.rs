@@ -1479,6 +1479,35 @@ fn placed_text_is_applied_as_one_step_in_the_pen_colour() {
 }
 
 #[test]
+fn letters_are_outlined_with_an_even_line_whatever_brush_is_chosen() {
+    let mut session = session();
+    let mut tools = Tools::default();
+    tools.plain.pen.preset = ugu_core::brush::find("soft-airbrush").unwrap();
+    tools.plain.pen.width = 9.0;
+    tools.color = Rgba8([200, 10, 10, 255]);
+    set_tool(&mut session, &mut tools, Tool::Text).unwrap();
+    session
+        .place_text(&tools, [30.0, 40.0], boxed_text())
+        .unwrap();
+    let monoline = ugu_core::brush::find("monoline").unwrap().brush;
+    let drawing = session.text_drawing().unwrap();
+    for stroke in &drawing.strokes {
+        assert_eq!(
+            ugu_core::store::Brush {
+                antialias: monoline.antialias,
+                ..stroke.brush
+            },
+            monoline
+        );
+        // The brush's colour and width still.
+        assert_eq!(
+            (stroke.color, stroke.width),
+            (Rgba8([200, 10, 10, 255]), 9.0)
+        );
+    }
+}
+
+#[test]
 fn filled_text_fills_under_its_outlines_and_keeps_inside_the_selection() {
     let mut session = session();
     let mut tools = Tools::default();
