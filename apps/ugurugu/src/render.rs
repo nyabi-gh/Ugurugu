@@ -46,6 +46,8 @@ pub enum ToRender {
     Clipboard(Box<ClipboardEvent>),
     /// The user asked to close the window; unsaved changes come first.
     CloseRequested,
+    /// Another start of the app handed over a document to open in a tab.
+    Open(std::path::PathBuf),
 }
 
 /// How long to sleep when nothing is scheduled; any message wakes it earlier.
@@ -560,6 +562,11 @@ impl RenderThread {
         match message {
             ToRender::CloseRequested => {
                 self.files.request(Action::Close, &mut self.canvas);
+                self.needs_frame = true;
+            }
+            ToRender::Open(path) => {
+                tracing::info!("opening a document handed over by another start");
+                self.files.open_path(path, &mut self.canvas);
                 self.needs_frame = true;
             }
             ToRender::Clipboard(event) => {

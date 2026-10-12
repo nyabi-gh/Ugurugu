@@ -353,8 +353,8 @@ pub struct Files {
     /// Saves started, and how many of them have not ended.
     saves_started: u64,
     saving: u32,
-    /// Whether a document is being read to open.
-    opening: bool,
+    /// How many documents are being read to open.
+    opening: u32,
     /// Tabs whose changes were dropped while closing the window, by
     /// generation, not to be asked about again.
     discarded: Vec<u64>,
@@ -443,7 +443,7 @@ impl Files {
             after_save: None,
             saves_started: 0,
             saving: 0,
-            opening: false,
+            opening: 0,
             discarded: Vec::new(),
             busy_dialog: false,
             default_save_folder: None,
@@ -769,7 +769,7 @@ impl Files {
     /// Whether a save, a file dialog or opening a document is under way,
     /// which what replaces or closes the document waits for.
     fn busy(&self) -> bool {
-        self.saving > 0 || self.busy_dialog || self.opening
+        self.saving > 0 || self.busy_dialog || self.opening > 0
     }
 
     /// Drops what was to run after the save asked for.
@@ -826,6 +826,13 @@ impl Files {
 
     /// Shows a document read.
     fn show_opened(&mut self, path: PathBuf, opened: Opened, canvas: &mut Canvas) {
+        // Asked for twice, as by two starts, before the first was read.
+        if matches!(opened, Opened::Document(..))
+            && let Some(index) = canvas.tab_with_path(&path)
+        {
+            canvas.show_tab(index);
+            return;
+        }
         match opened {
             Opened::Document(document, id, layer) => {
                 Self::show_document(canvas, *document, true);
@@ -900,8 +907,6 @@ impl Files {
         self.updates.ask(ctx, asking);
     }
 
-    /// Opens `path` without a dialog, as for a file given at start. Edits
-    /// made while it is read are asked about before it is shown.
     /// Reads the document at `path` into a tab, or shows the tab it is open
     /// in already.
     pub fn open_path(&mut self, path: PathBuf, canvas: &mut Canvas) {
@@ -909,7 +914,7 @@ impl Files {
             canvas.show_tab(index);
             return;
         }
-        self.opening = true;
+        self.opening += 1;
         self.say_if_slow(tr_with("file-opening", &args_name(file_name(&path))));
         let _ = self.to_worker.send(Job::Open(path));
     }
@@ -1432,7 +1437,7 @@ impl Files {
                 Err(error) => self.fail(format!("{}: {error}", tr("preset-export-failed"))),
             },
             FileEvent::Opened(path, result) => {
-                self.opening = false;
+                self.opening -= 1;
                 match result {
                     Ok(opened) => self.show_opened(path, opened, canvas),
                     Err(error) => self.fail(format!("{}: {error}", path.display())),
@@ -1997,6 +2002,7 @@ mod tests {
 
         let (mut other, mut reopened, _) = setup();
         let opened = open(&path).unwrap();
+        other.opening = 1;
         other.handle(FileEvent::Opened(path, Ok(opened)), &mut reopened);
         assert_eq!(reopened.session().current_layer(), bottom);
     }
@@ -2395,6 +2401,25 @@ mod tests {
         assert!(!canvas.session().is_dirty());
         assert_eq!(canvas.file().path, Some(good));
         assert_eq!(canvas.file().id, [7; 16]);
+    }
+
+    #[test]
+    fn a_document_asked_for_twice_while_read_opens_one_tab() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("twice");
+        let path = folder.join("twice.ugurugu");
+        let document = Files::new_canvas();
+        ugu_io::save::save(&document, [3; 16], &path, &ugu_win::file::replace_file).unwrap();
+        canvas.edit(|session| session.add_layer()).unwrap();
+
+        files.open_path(path.clone(), &mut canvas);
+        files.open_path(path.clone(), &mut canvas);
+        files.handle(next(&events), &mut canvas);
+        assert!(files.busy());
+        files.handle(next(&events), &mut canvas);
+        assert!(!files.busy());
+        assert_eq!(canvas.tab_count(), 2);
+        assert_eq!(canvas.file().path, Some(path));
     }
 
     #[test]

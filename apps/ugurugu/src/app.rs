@@ -12,6 +12,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 
 use egui_winit::accesskit_winit;
+use ugu_win::instance::{DocumentReceiver, StartLock};
 use ugu_win::pointer::PointerInput;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -23,6 +24,27 @@ use crate::render::{
     EarlyGpu, EarlyInstance, EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink,
 };
 use crate::settings::Store;
+
+/// Every window's class, which later starts look for to hand a document to.
+pub const WINDOW_CLASS: &str = "Ugurugu 3";
+/// Taken by starts with a document; see [`ugu_win::instance`].
+pub const START_LOCK: &str = r"Local\Ugurugu 3 start";
+
+/// Which windows a start may hand its document to: those of the same
+/// executable with the same settings and recovery folders, so that test runs
+/// and the installed app keep apart.
+pub fn instance_key() -> String {
+    let path = |path: Option<std::path::PathBuf>| {
+        path.map(|path| path.display().to_string())
+            .unwrap_or_default()
+    };
+    [
+        path(std::env::current_exe().ok()),
+        path(crate::settings::default_path()),
+        path(crate::recovery::default_root()),
+    ]
+    .join("\n")
+}
 
 pub enum UiEvent {
     /// The render thread ended, with the error that ended it if any.
@@ -51,12 +73,17 @@ pub struct App {
     early_gpu: Option<EarlyGpu>,
     /// Handed to the render thread, which shows and changes them.
     settings: Option<Store>,
+    /// The document named on the command line, opened by the first window.
+    document: Option<std::path::PathBuf>,
+    /// Released once the window takes documents from later starts.
+    start_lock: Option<StartLock>,
 }
 
 struct Session {
-    // Dropped in this order, the reverse of installing: the pointer subclass
-    // (comctl32) sits on top of AccessKit's, which replaces the window
-    // procedure directly, and both go before the window.
+    // Dropped in this order, the reverse of installing: the document and
+    // pointer subclasses (comctl32) sit on top of AccessKit's, which replaces
+    // the window procedure directly, and all go before the window.
+    _documents: DocumentReceiver,
     pointer: PointerInput,
     /// UI Automation provider; it must live on the thread that owns the
     /// window, so egui's tree updates are sent here from the render thread.
@@ -71,6 +98,8 @@ impl App {
         proxy: EventLoopProxy<UiEvent>,
         early: (EarlyInstance, EarlyGpu),
         settings: Store,
+        document: Option<std::path::PathBuf>,
+        start_lock: Option<StartLock>,
     ) -> Self {
         Self {
             proxy,
@@ -79,6 +108,8 @@ impl App {
             early_instance: Some(early.0),
             early_gpu: Some(early.1),
             settings: Some(settings),
+            document,
+            start_lock,
         }
     }
 
@@ -103,12 +134,14 @@ impl Session {
         proxy: EventLoopProxy<UiEvent>,
         early_gpu: Option<EarlyGpu>,
         settings: Store,
+        open_at_start: Option<std::path::PathBuf>,
     ) -> Result<Self, String> {
         use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
         // Resource 1, put in by build.rs.
         let icon = winit::window::Icon::from_resource(1, None).ok();
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
+            .with_class_name(WINDOW_CLASS)
             .with_window_icon(icon.clone())
             .with_taskbar_icon(icon)
             .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 1000.0))
@@ -156,7 +189,18 @@ impl Session {
         let (to_render, messages) = mpsc::channel();
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
-        let open_at_start = std::env::args_os().nth(1).map(document_argument);
+        let to_open = to_render.clone();
+        let open = move |path| {
+            let taken = to_open.send(ToRender::Open(path)).is_ok();
+            if taken {
+                // SAFETY: the receiver calls this on the window's thread.
+                unsafe { ugu_win::instance::bring_to_front(hwnd) };
+            }
+            taken
+        };
+        // SAFETY: as for the pointer subclass above.
+        let documents = unsafe { DocumentReceiver::install(hwnd, &instance_key(), open) }
+            .map_err(|error| format!("cannot receive documents from later starts: {error}"))?;
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -182,6 +226,7 @@ impl Session {
             .map_err(|error| format!("cannot start the render thread: {error}"))?;
 
         Ok(Self {
+            _documents: documents,
             pointer,
             accessibility,
             window,
@@ -211,8 +256,12 @@ impl ApplicationHandler<UiEvent> for App {
             self.proxy.clone(),
             self.early_gpu.take(),
             settings,
+            self.document.take(),
         ) {
-            Ok(session) => self.session = Some(session),
+            Ok(session) => {
+                self.session = Some(session);
+                self.start_lock = None;
+            }
             Err(error) => {
                 self.fatal_error = Some(error);
                 event_loop.exit();
@@ -291,7 +340,7 @@ impl ApplicationHandler<UiEvent> for App {
 /// The document named on the command line as an absolute path in Windows's
 /// own form: the shell, which starts the file dialogs in the document's
 /// folder, reads neither `/` nor a relative path.
-fn document_argument(argument: std::ffi::OsString) -> std::path::PathBuf {
+pub fn document_argument(argument: std::ffi::OsString) -> std::path::PathBuf {
     let path = std::path::PathBuf::from(argument);
     std::path::absolute(&path).unwrap_or(path)
 }

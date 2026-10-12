@@ -335,7 +335,7 @@ fn parse_rgb(text: &str) -> Option<[u8; 3]> {
 
 /// Where the settings live: `UGURUGU_SETTINGS_PATH`, else the roaming
 /// profile. `None` when Windows names no such folder.
-fn default_path() -> Option<PathBuf> {
+pub fn default_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("UGURUGU_SETTINGS_PATH") {
         return Some(PathBuf::from(path));
     }

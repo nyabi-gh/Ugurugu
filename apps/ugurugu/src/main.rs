@@ -40,10 +40,22 @@ fn main() -> ExitCode {
             ugu_win::association::unregister(ugu_win::association::CLASSES)
         })
         .run();
+    let document = std::env::args_os().nth(1).map(app::document_argument);
+    // Held until this start's window can take documents itself.
+    let start_lock = match &document {
+        Some(document) => {
+            let lock = ugu_win::instance::StartLock::take(app::START_LOCK);
+            if ugu_win::instance::hand_over(app::WINDOW_CLASS, &app::instance_key(), document) {
+                return ExitCode::SUCCESS;
+            }
+            lock
+        }
+        None => None,
+    };
     let _logging = logs::start();
     tracing::debug!("starting");
 
-    match run() {
+    match run(document, start_lock) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(error, "exiting after a fatal error");
@@ -60,7 +72,10 @@ fn associate() {
     }
 }
 
-fn run() -> Result<(), String> {
+fn run(
+    document: Option<std::path::PathBuf>,
+    start_lock: Option<ugu_win::instance::StartLock>,
+) -> Result<(), String> {
     let early_gpu = render::open_gpu_early();
     let settings = settings::Store::load();
     i18n::choose(settings.get().language);
@@ -69,7 +84,13 @@ fn run() -> Result<(), String> {
     let event_loop = EventLoop::<app::UiEvent>::with_user_event()
         .build()
         .map_err(|error| format!("cannot create the event loop: {error}"))?;
-    let mut app = app::App::new(event_loop.create_proxy(), early_gpu, settings);
+    let mut app = app::App::new(
+        event_loop.create_proxy(),
+        early_gpu,
+        settings,
+        document,
+        start_lock,
+    );
     event_loop
         .run_app(&mut app)
         .map_err(|error| format!("event loop failed: {error}"))?;

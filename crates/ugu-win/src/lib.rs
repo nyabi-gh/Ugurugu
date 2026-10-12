@@ -10,6 +10,7 @@ pub mod crash;
 pub mod dialog;
 pub mod file;
 pub mod folder;
+pub mod instance;
 pub mod locale;
 pub mod memory;
 pub mod pointer;
