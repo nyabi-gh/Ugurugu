@@ -529,7 +529,12 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .fill(theme::base())
         .stroke(Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(8))
-        .inner_margin(egui::Margin::symmetric(20, 0))
+        .inner_margin(egui::Margin {
+            left: 14,
+            right: 20,
+            top: 0,
+            bottom: 0,
+        })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui)
