@@ -179,6 +179,23 @@ fn tab_goes_round_every_control_and_each_has_a_name() {
 }
 
 #[test]
+fn tab_crosses_the_status_bar_left_to_right() {
+    let mut window = Window::new();
+    window.tab_to_label(tr("canvas-zoom"));
+    let mut lefts = Vec::new();
+    for _ in 0..8 {
+        let id = window.ctx.memory(|memory| memory.focused()).unwrap();
+        lefts.push(window.ctx.read_response(id).unwrap().rect.left());
+        if window.label().starts_with(tr("fit")) {
+            break;
+        }
+        window.key(NONE, Key::Tab);
+    }
+    assert!(window.label().starts_with(tr("fit")), "{}", window.label());
+    assert!(lefts.is_sorted(), "{lefts:?}");
+}
+
+#[test]
 fn the_menus_open_from_the_keyboard() {
     let mut window = Window::new();
     window.key(NONE, Key::F10);

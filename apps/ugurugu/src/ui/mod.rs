@@ -741,26 +741,9 @@ fn view_turn(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         let name = tr(action.label());
         (name, widgets::with_key(name, &keys.text(action)))
     };
-    let (name, tip) = named(Action::Mirror);
-    if widgets::icon_toggle(
-        ui,
-        Glyph::MirrorHorizontal,
-        16.0,
-        name,
-        &tip,
-        canvas.is_mirrored(),
-    )
-    .clicked()
-    {
-        canvas.set_mirrored(!canvas.is_mirrored());
-    }
-    let (name, tip) = named(Action::ResetTurn);
-    if widgets::icon_button_tip(ui, Glyph::Rotate, 16.0, name, &tip, true).clicked() {
-        canvas.turn_to(0.0);
-    }
-    let (name, tip) = named(Action::TurnRight);
-    if widgets::icon_button_tip(ui, Glyph::Redo, 16.0, name, &tip, true).clicked() {
-        canvas.turn_by(crate::canvas::TURN_STEP);
+    let (name, tip) = named(Action::TurnLeft);
+    if widgets::icon_button_tip(ui, Glyph::Undo, 16.0, name, &tip, true).clicked() {
+        canvas.turn_by(-crate::canvas::TURN_STEP);
     }
     let mut degrees = canvas.angle() as f32;
     let field = widgets::number(
@@ -776,9 +759,72 @@ fn view_turn(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     if field.changed() {
         canvas.turn_to(f64::from(degrees));
     }
-    let (name, tip) = named(Action::TurnLeft);
-    if widgets::icon_button_tip(ui, Glyph::Undo, 16.0, name, &tip, true).clicked() {
-        canvas.turn_by(-crate::canvas::TURN_STEP);
+    let (name, tip) = named(Action::TurnRight);
+    if widgets::icon_button_tip(ui, Glyph::Redo, 16.0, name, &tip, true).clicked() {
+        canvas.turn_by(crate::canvas::TURN_STEP);
+    }
+    let (name, tip) = named(Action::ResetTurn);
+    if widgets::icon_button_tip(ui, Glyph::Rotate, 16.0, name, &tip, true).clicked() {
+        canvas.turn_to(0.0);
+    }
+    let (name, tip) = named(Action::Mirror);
+    if widgets::icon_toggle(
+        ui,
+        Glyph::MirrorHorizontal,
+        16.0,
+        name,
+        &tip,
+        canvas.is_mirrored(),
+    )
+    .clicked()
+    {
+        canvas.set_mirrored(!canvas.is_mirrored());
+    }
+}
+
+/// The pointer's place, zoom, turn and fit at the right of the status bar,
+/// left to right.
+fn view_controls(ui: &mut egui::Ui, canvas: &mut Canvas, pointer: Option<[f64; 2]>, keys: &Keymap) {
+    let text = pointer.map_or_else(String::new, |[x, y]| {
+        tr_with(
+            "status-pointer",
+            &args([("x", format!("{x:.0}")), ("y", format!("{y:.0}"))]),
+        )
+    });
+    ui.add_sized(
+        [150.0, 20.0],
+        egui::Label::new(egui::RichText::new(text).color(theme::muted())),
+    );
+    let scale = canvas.scale();
+    let (low, high) = (
+        *ZOOM_RANGE.start() as f32 * 100.0,
+        *ZOOM_RANGE.end() as f32 * 100.0,
+    );
+    // Logarithmic, so every step reads as the same change in size.
+    let mut position = (scale.ln() as f32 - low.ln() + 100f32.ln()) / ((high / low).ln());
+    let slider = widgets::slider(ui, &mut position, 0.0..=1.0, tr("canvas-zoom"), 96.0);
+    if slider.changed() {
+        let percent = low * (high / low).powf(position);
+        canvas.zoom_to(f64::from(percent) / 100.0);
+    }
+    let mut percent = (canvas.scale() * 100.0) as f32;
+    let field = widgets::number(
+        ui,
+        &mut percent,
+        low..=high,
+        "%",
+        0,
+        72.0,
+        tr("canvas-zoom-percent"),
+    )
+    .on_hover_text(tr("canvas-zoom-percent"));
+    if field.changed() {
+        canvas.zoom_to(f64::from(percent) / 100.0);
+    }
+    view_turn(ui, canvas, keys);
+    let fit = widgets::text_icon_button(ui, Glyph::FitView, tr("fit"), tr("fit-tip"));
+    if fit.clicked() {
+        canvas.fit();
     }
 }
 
@@ -1559,48 +1605,27 @@ pub fn status_bar(
             Some((text, false)) => ui.colored_label(theme::muted(), text),
             None => ui.colored_label(theme::muted(), tr("status-ready")),
         };
+        // The view controls sit at the right end but are made left to right,
+        // so that Tab goes through them in the order they are seen; their
+        // width is the one measured last frame.
+        let width_id = ui.id().with("view controls width");
+        let width = ui
+            .data(|data| data.get_temp::<f32>(width_id))
+            .unwrap_or(0.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let fit = widgets::text_icon_button(ui, Glyph::FitView, tr("fit"), tr("fit-tip"));
-            if fit.clicked() {
-                canvas.fit();
+            let size = egui::vec2(width, ui.available_height());
+            let layout = egui::Layout::left_to_right(egui::Align::Center);
+            let used = ui
+                .allocate_ui_with_layout(size, layout, |ui| {
+                    view_controls(ui, canvas, pointer, keys)
+                })
+                .response
+                .rect
+                .width();
+            if (used - width).abs() > 0.5 {
+                ui.data_mut(|data| data.insert_temp(width_id, used));
+                ui.ctx().request_discard("status bar width");
             }
-            view_turn(ui, canvas, keys);
-            let scale = canvas.scale();
-            let mut percent = (scale * 100.0) as f32;
-            let (low, high) = (
-                *ZOOM_RANGE.start() as f32 * 100.0,
-                *ZOOM_RANGE.end() as f32 * 100.0,
-            );
-            let field = widgets::number(
-                ui,
-                &mut percent,
-                low..=high,
-                "%",
-                0,
-                72.0,
-                tr("canvas-zoom-percent"),
-            )
-            .on_hover_text(tr("canvas-zoom-percent"));
-            if field.changed() {
-                canvas.zoom_to(f64::from(percent) / 100.0);
-            }
-            // Logarithmic, so every step reads as the same change in size.
-            let mut position = (scale.ln() as f32 - low.ln() + 100f32.ln()) / ((high / low).ln());
-            let slider = widgets::slider(ui, &mut position, 0.0..=1.0, tr("canvas-zoom"), 96.0);
-            if slider.changed() {
-                let percent = low * (high / low).powf(position);
-                canvas.zoom_to(f64::from(percent) / 100.0);
-            }
-            let text = pointer.map_or_else(String::new, |[x, y]| {
-                tr_with(
-                    "status-pointer",
-                    &args([("x", format!("{x:.0}")), ("y", format!("{y:.0}"))]),
-                )
-            });
-            ui.add_sized(
-                [150.0, 20.0],
-                egui::Label::new(egui::RichText::new(text).color(theme::muted())),
-            );
         });
     });
     cancel
