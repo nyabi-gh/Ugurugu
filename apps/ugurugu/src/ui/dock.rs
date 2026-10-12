@@ -18,7 +18,7 @@ use super::Panels;
 use crate::canvas::Canvas;
 use crate::i18n::{args, tr, tr_with};
 use crate::layout::{FLOATING_MIN, FLOATING_SIZE, Group, Layout, Panel, Place, Side, WIDTHS};
-use crate::theme;
+use crate::{theme, widgets};
 
 /// What docking keeps between frames.
 #[derive(Default)]
@@ -508,7 +508,7 @@ fn move_menu(ui: &mut Ui, panels: &mut Panels, holder: Holder, moved: &[Panel]) 
         Holder::Area { side, .. } => Some(side),
         Holder::Floating => None,
     };
-    for (key, place, here) in [
+    let moves = [
         (
             "dock-move-left",
             Place::End(Side::Left),
@@ -520,8 +520,13 @@ fn move_menu(ui: &mut Ui, panels: &mut Panels, holder: Holder, moved: &[Panel]) 
             side == Some(Side::Right),
         ),
         ("dock-float", Place::Float(middle.into()), side.is_none()),
-    ] {
-        if !here && ui.button(tr(key)).clicked() {
+    ];
+    let width = moves
+        .iter()
+        .map(|(key, ..)| widgets::menu_item_width(ui, tr(key), ""))
+        .fold(widgets::MENU_WIDTH, f32::max);
+    for (key, place, here) in moves {
+        if !here && widgets::menu_item(ui, width, tr(key), "", None, true).clicked() {
             panels.docks.chosen = Some((moved.to_vec(), place));
             // Chosen with Space or Enter too, which egui does not close on.
             ui.close();

@@ -47,11 +47,11 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
     let current = canvas.tools().color;
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let clear = ui.add_enabled(
+            let clear = crate::widgets::button(
+                ui,
+                tr("color-history-clear"),
+                crate::widgets::Emphasis::Secondary,
                 !colors.is_empty(),
-                egui::Button::new(
-                    egui::RichText::new(tr("color-history-clear")).size(theme::SMALL),
-                ),
             );
             if clear.clicked() {
                 canvas.tools_mut().colors.clear();

@@ -89,7 +89,7 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
                         widgets::switch(ui, &mut dialog.width_on, tr("restyle-width"));
                         ui.add_space(theme::space::L);
                         let width = ui.add_sized(
-                            [96.0, 26.0],
+                            [96.0, theme::CONTROL_HEIGHT],
                             egui::DragValue::new(&mut dialog.width)
                                 .range(STROKE_WIDTH)
                                 .speed(0.1)

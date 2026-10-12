@@ -293,7 +293,7 @@ pub fn number(
             widgets.active.weak_bg_fill = theme::base();
             widgets.active.bg_fill = theme::base();
             ui.add_sized(
-                [width, 26.0],
+                [width, theme::CONTROL_HEIGHT],
                 egui::DragValue::new(value)
                     .range(range)
                     .suffix(suffix)
@@ -312,8 +312,8 @@ pub fn number(
     response
 }
 
-/// A square check box, amber with a dark tick when checked, followed by
-/// `text` if there is any.
+/// A square check box with a tick and an edge in the accent when checked,
+/// followed by `text` if there is any.
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
     let galley = (!text.is_empty()).then(|| {
         ui.painter().layout_no_wrap(
@@ -343,7 +343,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
     );
     let painter = ui.painter();
     let (fill, edge) = match (*checked, response.hovered()) {
-        (true, _) => (theme::accent(), theme::accent_ink()),
+        (true, _) => (theme::control(), theme::accent_ink()),
         (false, true) => (theme::control(), theme::disabled()),
         (false, false) => (theme::base(), theme::border()),
     };
@@ -358,7 +358,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
         let at = |x: f32, y: f32| square.min + egui::vec2(x, y);
         painter.add(egui::Shape::line(
             vec![at(4.0, 8.4), at(7.0, 11.4), at(12.2, 5.2)],
-            Stroke::new(2.0, theme::accent_text()),
+            Stroke::new(2.0, theme::accent_ink()),
         ));
     }
     if response.has_focus() {
@@ -377,17 +377,13 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
     response
 }
 
-/// A caption on the left and a check box on the right, as 2.2.13's option
-/// rows.
+/// A caption on the left and a switch on the right, as 2.2.13's option rows
+/// with the settings' switch.
 pub fn check_row(ui: &mut Ui, label: &str, name: &str, checked: &mut bool) -> Response {
     ui.horizontal(|ui| {
         field_label(ui, label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let response = checkbox(ui, checked, "");
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *checked, name)
-            });
-            response
+            switch(ui, checked, name)
         })
         .inner
     })
@@ -403,7 +399,7 @@ pub fn whole(
     name: &str,
 ) -> egui::Response {
     let response = ui.add_sized(
-        [96.0, 26.0],
+        [96.0, theme::CONTROL_HEIGHT],
         egui::DragValue::new(value)
             .range(range)
             .speed(1.0)
@@ -425,17 +421,95 @@ pub fn whole(
     response
 }
 
-/// An item of a drop-down list that closes the list when chosen. egui closes
-/// a popup only on a pointer click, and left it open after Space or Enter.
-pub fn choice<T: PartialEq>(
+/// An item of a drop-down list, drawn as a menu item checked while it is
+/// the current one, that closes the list when chosen. egui closes a popup
+/// only on a pointer click, and left it open after Space or Enter.
+pub fn choice<T: PartialEq>(ui: &mut Ui, current: &mut T, value: T, text: &str) -> Response {
+    let width = menu_item_width(ui, text, "").max(ui.available_width());
+    let mut response = menu_item(ui, width, text, "", Some(*current == value), true);
+    if response.clicked() {
+        if *current != value {
+            *current = value;
+            response.mark_changed();
+        }
+        ui.close();
+    }
+    response
+}
+
+/// One of a few choices side by side in a well, `columns` to a row: the
+/// chosen one raised with an edge in the accent, as the brush tiles and
+/// shape options are. Changed when another is chosen.
+pub fn segmented<T: PartialEq + Copy>(
     ui: &mut Ui,
     current: &mut T,
-    value: T,
-    text: impl Into<egui::WidgetText>,
+    options: &[(T, &str)],
+    columns: usize,
 ) -> Response {
-    let response = ui.selectable_value(current, value, text);
-    if response.clicked() {
-        ui.close();
+    const INSET: f32 = 2.0;
+    const SEGMENT: f32 = theme::CONTROL_HEIGHT - 2.0 * INSET;
+    let columns = columns.clamp(1, options.len().max(1));
+    let rows = options.len().div_ceil(columns);
+    let width = ui.available_width();
+    let height = rows as f32 * (SEGMENT + INSET) + INSET;
+    let (rect, mut response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    let painter = ui.painter().clone();
+    painter.rect(
+        rect,
+        CornerRadius::same(theme::radius::CONTROL),
+        theme::base(),
+        Stroke::new(1.0, theme::border()),
+        StrokeKind::Inside,
+    );
+    let cell = (width - INSET - columns as f32 * INSET) / columns as f32;
+    let enabled = ui.is_enabled();
+    for (index, &(value, text)) in options.iter().enumerate() {
+        let (row, column) = (index / columns, index % columns);
+        let segment = Rect::from_min_size(
+            rect.min
+                + egui::vec2(
+                    INSET + column as f32 * (cell + INSET),
+                    INSET + row as f32 * (SEGMENT + INSET),
+                ),
+            egui::vec2(cell, SEGMENT),
+        );
+        let each = ui.interact(segment, response.id.with(index), Sense::click());
+        let selected = *current == value;
+        each.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, text)
+        });
+        if each.clicked() && !selected {
+            *current = value;
+            response.mark_changed();
+        }
+        let ink = match (enabled, selected) {
+            (false, _) => theme::disabled(),
+            (true, true) => theme::text(),
+            (true, false) => theme::muted(),
+        };
+        let radius = CornerRadius::same(theme::radius::CONTROL - INSET as u8);
+        if selected {
+            let edge = if enabled {
+                theme::accent_ink()
+            } else {
+                theme::border()
+            };
+            painter.rect(
+                segment,
+                radius,
+                theme::control(),
+                Stroke::new(1.0, edge),
+                StrokeKind::Inside,
+            );
+        } else if each.hovered() {
+            painter.rect_filled(segment, radius, theme::hover());
+        }
+        if each.has_focus() {
+            focus_ring(&painter, segment, theme::radius::SMALL);
+        }
+        let galley =
+            painter.layout_no_wrap(text.to_owned(), FontId::proportional(theme::BODY), ink);
+        painter.galley(segment.center() - galley.size() / 2.0, galley, ink);
     }
     response
 }
@@ -456,7 +530,7 @@ pub fn button(ui: &mut Ui, text: &str, emphasis: Emphasis, enabled: bool) -> Res
         FontId::proportional(theme::BODY),
         Color32::PLACEHOLDER,
     );
-    let size = egui::vec2((galley.size().x + 28.0).max(72.0), 28.0);
+    let size = egui::vec2((galley.size().x + 28.0).max(72.0), theme::CONTROL_HEIGHT);
     let sense = if enabled {
         Sense::click()
     } else {
@@ -587,7 +661,6 @@ fn row_with<R>(
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     const PADDING: f32 = theme::space::L;
-    const CONTROL_HEIGHT: f32 = 28.0;
     let width = ui.available_width();
     let text_width = width - control_width - 16.0;
     // Measured as the labels below lay them out, to centre them.
@@ -604,7 +677,7 @@ fn row_with<R>(
     };
     let text_height = measure(title, theme::BODY)
         + description.map_or(0.0, |description| 2.0 + measure(description, theme::SMALL));
-    let height = text_height.max(CONTROL_HEIGHT) + 2.0 * PADDING;
+    let height = text_height.max(theme::CONTROL_HEIGHT) + 2.0 * PADDING;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     if !first {
         ui.painter().hline(rect.x_range(), rect.top(), rule());
@@ -770,7 +843,7 @@ pub fn menu_item(
     } else {
         Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, theme::CONTROL_HEIGHT), sense);
     response.widget_info(|| match checked {
         Some(on) => {
             egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, text)
@@ -799,4 +872,58 @@ pub fn menu_item(
         painter.galley(at, key, theme::muted());
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs one frame of `add` with `events`, returning what it returned.
+    fn frame<R>(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        mut add: impl FnMut(&mut Ui) -> R,
+    ) -> R {
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut result = None;
+        let mut output = ctx.run_ui(input, |ui| result = Some(add(ui)));
+        // No renderer takes the font atlas.
+        output.textures_delta.clear();
+        result.unwrap()
+    }
+
+    fn press(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_segment_on_a_later_row_is_chosen_where_it_is_drawn() {
+        let ctx = egui::Context::default();
+        let options = [(1, "one"), (2, "two"), (3, "three")];
+        let mut current = 1;
+        let show = |ui: &mut Ui, current: &mut i32| {
+            ui.set_width(200.0);
+            segmented(ui, current, &options, 2)
+        };
+        let well = frame(&ctx, Vec::new(), |ui| show(ui, &mut current)).rect;
+        assert_eq!(well.height(), 2.0 * theme::CONTROL_HEIGHT - 2.0);
+        // The third choice is first on the second row.
+        let at = egui::pos2(well.left() + well.width() / 4.0, well.bottom() - 6.0);
+        frame(
+            &ctx,
+            vec![egui::Event::PointerMoved(at), press(at, true)],
+            |ui| show(ui, &mut current),
+        );
+        let changed = frame(&ctx, vec![press(at, false)], |ui| show(ui, &mut current)).changed();
+        assert!(changed);
+        assert_eq!(current, 3);
+    }
 }

@@ -588,7 +588,7 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
         let [low, high] = dialog.percent_range();
         let response = widgets::setting_row(ui, false, tr("image-size-scale"), None, |ui| {
             let response = ui.add_sized(
-                [96.0, 26.0],
+                [96.0, theme::CONTROL_HEIGHT],
                 egui::DragValue::new(&mut percent)
                     .range(low..=high)
                     .speed(1.0)

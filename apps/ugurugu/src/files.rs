@@ -1064,7 +1064,7 @@ impl Files {
                         .width(190.0)
                         .show_ui(ui, |ui| {
                             for index in 0..sizes.len() {
-                                widgets::choice(ui, &mut dialog.size, index, label(index));
+                                widgets::choice(ui, &mut dialog.size, index, &label(index));
                             }
                         })
                         .response

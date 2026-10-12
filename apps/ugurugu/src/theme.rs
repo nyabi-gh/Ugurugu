@@ -261,6 +261,9 @@ pub const TITLE: f32 = 17.0;
 /// The app's name on the about page.
 pub const DISPLAY: f32 = 21.0;
 
+/// How tall buttons, fields, drop-down lists and menu items are.
+pub const CONTROL_HEIGHT: f32 = 28.0;
+
 /// Corner radii. Bars and pills take half their thickness instead.
 pub mod radius {
     /// Check boxes, thumbnails, swatches and other small marks.
@@ -316,7 +319,7 @@ pub fn apply(ctx: &egui::Context) {
             let spacing = &mut style.spacing;
             spacing.item_spacing = egui::vec2(space::S, space::S);
             spacing.button_padding = egui::vec2(space::M, 3.0);
-            spacing.interact_size = egui::vec2(40.0, 26.0);
+            spacing.interact_size = egui::vec2(40.0, CONTROL_HEIGHT);
             spacing.indent = 14.0;
             spacing.menu_margin = egui::Margin::same(space::S as i8);
             spacing.window_margin = egui::Margin::same(space::M as i8);

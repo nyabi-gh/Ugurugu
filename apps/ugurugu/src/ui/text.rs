@@ -45,7 +45,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             widgets::choice(ui, &mut family, None, tr("text-font-default"));
             for name in canvas.font_families().to_vec() {
                 let chosen = Some(name.clone());
-                widgets::choice(ui, &mut family, chosen, name);
+                widgets::choice(ui, &mut family, chosen, &name);
             }
         });
     if family != canvas.tools().text.family {
@@ -77,16 +77,11 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
 
     let placed = canvas.session().placed_text().is_some();
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(placed, egui::Button::new(tr("text-place")))
-            .clicked()
-        {
+        let secondary = widgets::Emphasis::Secondary;
+        if widgets::button(ui, tr("text-place"), secondary, placed).clicked() {
             canvas.apply_text();
         }
-        if ui
-            .add_enabled(placed, egui::Button::new(tr("text-cancel")))
-            .clicked()
-        {
+        if widgets::button(ui, tr("text-cancel"), secondary, placed).clicked() {
             canvas.cancel_text();
         }
     });

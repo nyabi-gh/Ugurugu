@@ -428,10 +428,12 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     widgets::field_label(ui, tr("lasso-mode"));
     let mut paints = canvas.tools().lasso_paints;
-    ui.horizontal(|ui| {
-        ui.radio_value(&mut paints, false, tr("lasso-select"));
-        ui.radio_value(&mut paints, true, tr("lasso-paint"));
-    });
+    widgets::segmented(
+        ui,
+        &mut paints,
+        &[(false, tr("lasso-select")), (true, tr("lasso-paint"))],
+        2,
+    );
     let mut fill = canvas.tools().fill;
     // Pixel mode never blends edges.
     if paints && !canvas.session().pixel_mode() {
@@ -484,8 +486,12 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
     }
     ui.add_space(theme::space::S);
     widgets::field_label(ui, tr("fill-comparison"));
-    ui.radio_value(&mut fill.by_colour, false, tr("compare-alpha"));
-    ui.radio_value(&mut fill.by_colour, true, tr("compare-colour"));
+    widgets::segmented(
+        ui,
+        &mut fill.by_colour,
+        &[(false, tr("compare-alpha")), (true, tr("compare-colour"))],
+        2,
+    );
     let mut tolerance = f32::from(fill.tolerance);
     ui.add_enabled_ui(fill.by_colour, |ui| {
         slider_row(
@@ -524,11 +530,7 @@ fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
         (Sampling::Smooth, "sampling-smooth", "sampling-smooth-tip"),
         (Sampling::Nearest, "sampling-pixels", "sampling-pixels-tip"),
     ] {
-        if ui
-            .radio(current == sampling, tr(title))
-            .on_hover_text(tr(description))
-            .clicked()
-        {
+        if shape_option(ui, current == sampling, tr(title), tr(description)).clicked() {
             canvas.set_transform_sampling(sampling);
         }
     }
@@ -1097,9 +1099,13 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     };
     if on_layer {
         let overridden = matches!(layer_wobble, Some(Some(_)));
-        let follow = ui
-            .add_enabled(overridden, egui::Button::new(tr("wobble-follow")))
-            .on_hover_text(tr("wobble-follow-tip"));
+        let follow = widgets::button(
+            ui,
+            tr("wobble-follow"),
+            widgets::Emphasis::Secondary,
+            overridden,
+        )
+        .on_hover_text(tr("wobble-follow-tip"));
         if follow.clicked() {
             panels.report(canvas.edit(|session| {
                 session.update_layer(current, "Follow drawing settings", |layer| {
@@ -1545,7 +1551,13 @@ pub fn status_bar(
             // No spinner: it asks for a frame every frame, which kept the
             // render thread drawing throughout an export.
             ui.label(export);
-            cancel = ui.button(tr("export-cancel")).clicked();
+            cancel = widgets::text_icon_button(
+                ui,
+                Glyph::Cancel,
+                tr("export-cancel"),
+                tr("export-cancel"),
+            )
+            .clicked();
             ui.separator();
         }
         match message {

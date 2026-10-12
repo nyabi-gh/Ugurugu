@@ -20,7 +20,7 @@ use vello_cpu::Pixmap;
 
 use crate::canvas::Canvas;
 use crate::i18n::tr;
-use crate::theme;
+use crate::{theme, widgets};
 
 const CATEGORIES: [Category; 5] = [
     Category::Pen,
@@ -91,7 +91,7 @@ impl Presets {
                 let shown = self.category.unwrap_or(current.category);
                 // As many equal tabs a row as fit their names, so the tabs
                 // never widen the panel.
-                let gap = 4.0;
+                let gap = 2.0;
                 let widest = CATEGORIES
                     .iter()
                     .map(|&category| {
@@ -110,22 +110,15 @@ impl Presets {
                     .fold(0.0, f32::max)
                     + ui.spacing().button_padding.x * 2.0;
                 let available = ui.available_width();
-                let columns = (((available + gap) / (widest + gap)).floor() as usize)
+                let columns = (((available - gap) / (widest + gap)).floor() as usize)
                     .clamp(1, CATEGORIES.len());
-                let width = (available - gap * (columns - 1) as f32) / columns as f32;
-                for row in CATEGORIES.chunks(columns) {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        for &category in row {
-                            let tab = egui::Button::selectable(
-                                shown == category,
-                                category_name(category),
-                            );
-                            if ui.add_sized([width, 22.0], tab).clicked() {
-                                self.category = Some(category);
-                            }
-                        }
-                    });
+                let tabs: Vec<_> = CATEGORIES
+                    .iter()
+                    .map(|&category| (category, category_name(category)))
+                    .collect();
+                let mut picked = shown;
+                if widgets::segmented(ui, &mut picked, &tabs, columns).changed() {
+                    self.category = Some(picked);
                 }
                 BRUSHES
                     .iter()
