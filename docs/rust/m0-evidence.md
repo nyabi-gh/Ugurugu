@@ -1232,6 +1232,8 @@ Windows Sandbox(게스트 10.0.26100), 네트워크 켬(2.2.13 Setup이 `vcredis
 | Check for updates offline | pass | 'Could not check for updates. Network error: … (os error 11001)' |
 | Uninstall | pass | 남음: `Local\Ugurugu Data`(7 files), `Roaming\Ugurugu`(1 file) |
 
+**6회차** (같은 빌드): 위 8단계에 "Install and run as a standard user"를 더해 9단계 모두 pass: "installed in C:\Users\ugutest\AppData\Local\Ugurugu3, ran ('Ugurugu') and uninstalled as standard user ugutest (not in Administrators)". 계정은 Sandbox 안에서 만들고(`New-LocalUser`, 무작위 비밀번호) Sandbox와 함께 사라진다.
+
 Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="false"`. `ugurugu.exe`에는 `requestedExecutionLevel`이 없다(기본 asInvoker).
 
 ## 30. M6-9·M6-10 합성 펜·터치 (2026-10-12, `rust/m6`)

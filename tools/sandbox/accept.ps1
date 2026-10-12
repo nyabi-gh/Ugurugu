@@ -227,6 +227,42 @@ Step 'Uninstall' {
     'app, shortcuts, association and Apps entry removed', "kept: $(if ($kept) { $kept -join ', ' } else { 'nothing' })"
 }
 
+# The Sandbox logs on as an administrator; this runs the installer and the
+# app as a standard user made for the run, which goes with the Sandbox.
+Step 'Install and run as a standard user' {
+    $name = 'ugutest'
+    $password = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ }) + '!a1'
+    $secure = ConvertTo-SecureString $password -AsPlainText -Force
+    New-LocalUser -Name $name -Password $secure -AccountNeverExpires | Out-Null
+    $credential = New-Object Management.Automation.PSCredential ".\$name", $secure
+    $members = @(Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object Name)
+    if ($members -match "\\$name$") {
+        throw "$name is an administrator"
+    }
+    $setup = Join-Path $in 'install\Ugurugu-Windows-x64-Setup.exe'
+    $installer = Start-Process -FilePath $setup -ArgumentList '--silent' -Credential $credential -LoadUserProfile -WorkingDirectory $env:SystemRoot -PassThru -Wait
+    if ($installer.ExitCode -ne 0) {
+        throw "Setup as $name exited with code $($installer.ExitCode)"
+    }
+    $root = "C:\Users\$name\AppData\Local\Ugurugu3"
+    $userApp = Join-Path $root 'current\ugurugu.exe'
+    Start-Sleep -Seconds 5
+    Get-AppProcess $root | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    if (-not (Test-Path $userApp)) {
+        throw "No app in $root"
+    }
+    $started = Start-Process -FilePath $userApp -Credential $credential -LoadUserProfile -WorkingDirectory $env:SystemRoot -PassThru
+    $process = Wait-Window 90 $root
+    $caption = $process.MainWindowTitle
+    Stop-Process -Id $process.Id -Force
+    $uninstaller = Start-Process -FilePath (Join-Path $root 'Update.exe') -ArgumentList @('uninstall', '--silent') -Credential $credential -LoadUserProfile -WorkingDirectory $env:SystemRoot -PassThru -Wait
+    $gone = -not (Test-Path $userApp)
+    if ($uninstaller.ExitCode -ne 0 -or -not $gone) {
+        throw "Uninstall as $name exited with code $($uninstaller.ExitCode), app gone $gone"
+    }
+    "installed in $root, ran ('$caption') and uninstalled as standard user $name (not in Administrators)"
+}
+
 if (Test-Path $logs) {
     Copy-Item -Recurse $logs (Join-Path $out 'logs')
 }
