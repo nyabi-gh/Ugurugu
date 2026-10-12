@@ -166,7 +166,7 @@ if(WIN32)
     # finding the VC redist directory in the environment and silently skips
     # it otherwise, which shipped releases without MSVCP140_1.dll. The
     # Velopack installer owns the prerequisite instead (--framework
-    # vcredist145-x64 in release.yml), which installs the official
+    # vcredist145-x64 in the 2.x releases), which installs the official
     # redistributable when missing and keeps it serviced by Windows Update
     # instead of shipping loose runtime DLLs.
     set(UGURUGU_DEPLOY_RUNTIME_OPTIONS NO_COMPILER_RUNTIME)

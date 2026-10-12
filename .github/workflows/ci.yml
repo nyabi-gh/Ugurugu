@@ -120,28 +120,18 @@ jobs:
       - name: Test download badge aggregation
         run: node --test .github/scripts/update-download-badge.test.js
 
+      # The same checks release-3.yml makes on a tag, found before tagging.
       - name: Check release metadata
         shell: bash
         run: |
-          version=$(sed -nE 's/project\(Ugurugu VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid project version: $version"
-            exit 1
-          fi
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "Release tag $GITHUB_REF_NAME does not match project version $version"
+          version=$(sed -nE '/^\[workspace\.package\]/,/^\[/ s/^version = "([^"]+)"/\1/p' Cargo.toml)
+          if [[ ! "$version" =~ ^3\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid 3.x workspace version: $version"
             exit 1
           fi
           notes="release-notes/$version.en.md"
           if [[ ! -s "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
             echo "Missing or empty release notes: $notes"
-            exit 1
-          fi
-          shopt -s nullglob
-          notes=(release-notes/"$version".*.md)
-          if [[ ${#notes[@]} -ne 1 ]]; then
-            echo "Expected only English release notes for version $version"
-            printf 'Found: %s\n' "${notes[@]}"
             exit 1
           fi
 
@@ -450,6 +440,8 @@ jobs:
           cmake --build --preset linux-debug
           --target ugurugu_tidy
 
+  # The Windows desktop app in its debug build and its distribution build,
+  # whose installed package is smoke-tested too.
   build:
     name: ${{ matrix.name }}
     needs: changes
@@ -459,69 +451,12 @@ jobs:
       matrix:
         include:
           - name: Windows Debug
-            os: windows-2025
             preset: windows-debug
-            qt-host: windows
-            qt-arch: win64_msvc2022_64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
-        with:
-          version: '${{ env.QT_VERSION }}'
-          aqtsource: '${{ env.AQT_SOURCE }}'
-          host: '${{ matrix.qt-host }}'
-          target: desktop
-          arch: '${{ matrix.qt-arch }}'
-          modules: qtshadertools qtimageformats
-          cache: true
-
-      - name: Configure
-        run: >-
-          cmake --preset ${{ matrix.preset }}
-          -DUGURUGU_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
-
-      - name: Test
-        run: ctest --preset ${{ matrix.preset }} --parallel --output-on-failure
-
-      - name: Test diagnostics
-        if: failure() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Get-Content "out/build/${{ matrix.preset }}/Testing/Temporary/LastTest.log" -ErrorAction SilentlyContinue
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $env:PATH = "$env:QT_ROOT_DIR\bin;$env:PATH"
-          $testExecutable = Get-ChildItem `
-            "out/build/${{ matrix.preset }}" `
-            -Recurse `
-            -Filter ugurugu_tests.exe |
-            Select-Object -First 1
-          if ($testExecutable) {
-            & $testExecutable.FullName 2>&1
-            "direct run exit code: $LASTEXITCODE"
-          }
-
-  package:
-    name: ${{ matrix.name }}
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
+            package: false
           - name: Windows package
-            os: windows-2025
             preset: windows-distribution
-            qt-host: windows
-            qt-arch: win64_msvc2022_64
-            smoke: windows
-    runs-on: ${{ matrix.os }}
+            package: true
+    runs-on: windows-2025
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -531,9 +466,9 @@ jobs:
         with:
           version: '${{ env.QT_VERSION }}'
           aqtsource: '${{ env.AQT_SOURCE }}'
-          host: '${{ matrix.qt-host }}'
+          host: windows
           target: desktop
-          arch: '${{ matrix.qt-arch }}'
+          arch: win64_msvc2022_64
           modules: qtshadertools qtimageformats
           cache: true
 
@@ -549,14 +484,13 @@ jobs:
         run: ctest --preset ${{ matrix.preset }} --parallel --output-on-failure
 
       - name: Test installed Windows package
-        if: matrix.smoke == 'windows'
-        shell: pwsh
+        if: matrix.package
         run: >-
           cmake --build --preset ${{ matrix.preset }}
           --config Release --target ugurugu_package_smoke_test
 
       - name: Test diagnostics
-        if: failure() && runner.os == 'Windows'
+        if: failure()
         shell: pwsh
         run: |
           Get-Content "out/build/${{ matrix.preset }}/Testing/Temporary/LastTest.log" -ErrorAction SilentlyContinue
@@ -633,7 +567,7 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, package, rust]
+    needs: [changes, static, translations, web, wasm, fuzz, tidy, build, rust]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -647,7 +581,6 @@ jobs:
           FUZZ_RESULT: ${{ needs.fuzz.result }}
           TIDY_RESULT: ${{ needs.tidy.result }}
           BUILD_RESULT: ${{ needs.build.result }}
-          PACKAGE_RESULT: ${{ needs.package.result }}
           RUST_RESULT: ${{ needs.rust.result }}
         run: |
           failed=0
@@ -657,7 +590,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD PACKAGE RUST; do
+          for check in STATIC TRANSLATIONS WEB WASM FUZZ TIDY BUILD RUST; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

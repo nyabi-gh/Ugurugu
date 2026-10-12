@@ -1,7 +1,7 @@
 name: Release 3
 
-# The Rust 3.x Windows app. 2.x releases (C++, Windows and macOS) stay in
-# release.yml, which v3 tags do not start.
+# The Rust 3.x Windows app. 2.x (C++) is not released any more; macOS gets a
+# new release workflow when 3.x supports it.
 on:
   push:
     tags:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Waits for the main-branch CI run of SOURCE_COMMIT and fails unless it
-# succeeded. Both release workflows publish only commits CI passed on main.
+# succeeded, so a release publishes only a commit CI passed on main.
 set -eo pipefail
 
 maximum_attempts=160
