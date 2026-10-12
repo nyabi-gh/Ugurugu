@@ -276,7 +276,7 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
 
 pub(super) fn heading(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.heading(title);
-    ui.label(egui::RichText::new(description).color(theme::MUTED));
+    ui.label(egui::RichText::new(description).color(theme::muted()));
     ui.add_space(6.0);
 }
 
@@ -301,7 +301,7 @@ fn preview(ui: &mut egui::Ui, name: &str, rectangles: &[([f64; 4], bool)]) {
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, name));
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, egui::CornerRadius::same(4), theme::BASE);
+    painter.rect_filled(rect, egui::CornerRadius::same(4), theme::base());
     let low = [0, 1].map(|axis| {
         rectangles
             .iter()
@@ -337,15 +337,15 @@ fn preview(ui: &mut egui::Ui, name: &str, rectangles: &[([f64; 4], bool)]) {
                 shape,
                 egui::CornerRadius::ZERO,
                 theme::accent().gamma_multiply(0.25),
-                egui::Stroke::new(1.5, theme::accent()),
+                egui::Stroke::new(1.5, theme::accent_ink()),
                 egui::StrokeKind::Inside,
             );
         } else {
             painter.rect(
                 shape,
                 egui::CornerRadius::ZERO,
-                theme::CONTROL,
-                egui::Stroke::new(1.0, theme::BORDER),
+                theme::control(),
+                egui::Stroke::new(1.0, theme::border()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -383,7 +383,7 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         "canvas-size-offset-summary",
         &args([("x", x.to_string()), ("y", y.to_string())]),
     ));
-    ui.label(egui::RichText::new(tr(dialog.hint())).color(theme::MUTED));
+    ui.label(egui::RichText::new(tr(dialog.hint())).color(theme::muted()));
     ui.add_space(8.0);
 
     widgets::field_label(ui, tr("canvas-size-section"));
@@ -445,9 +445,14 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         .show(ui, |ui| {
             for (index, &key) in ANCHORS.iter().enumerate() {
                 let chosen = dialog.anchor == Some(index);
-                let button = egui::Button::new("")
-                    .min_size(egui::vec2(28.0, 28.0))
-                    .fill(if chosen { theme::accent() } else { theme::BASE });
+                let button =
+                    egui::Button::new("")
+                        .min_size(egui::vec2(28.0, 28.0))
+                        .fill(if chosen {
+                            theme::accent()
+                        } else {
+                            theme::base()
+                        });
                 let response = ui.add(button).on_hover_text(tr(key));
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, tr(key))
@@ -501,7 +506,7 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
         ]),
     ));
     if dialog.distorted() {
-        ui.label(egui::RichText::new(tr("image-size-distorted")).color(theme::MUTED));
+        ui.label(egui::RichText::new(tr("image-size-distorted")).color(theme::muted()));
     }
     ui.add_space(8.0);
 

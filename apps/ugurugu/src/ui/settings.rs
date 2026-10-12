@@ -61,6 +61,14 @@ pub struct Dialog {
     refusal: Option<String>,
 }
 
+fn theme_name(mode: theme::Mode) -> &'static str {
+    tr(match mode {
+        theme::Mode::Dark => "settings-theme-dark",
+        theme::Mode::Light => "settings-theme-light",
+        theme::Mode::System => "settings-theme-system",
+    })
+}
+
 fn language_name(language: Language) -> &'static str {
     match language {
         Language::System => tr("settings-language-system"),
@@ -97,6 +105,7 @@ pub fn apply(
     keys: &mut Keymap,
 ) {
     theme::set_accent(ctx, settings.accent);
+    theme::set_mode(ctx, settings.theme);
     canvas.allow_animation(settings.wobble_animation);
     files.set_default_save_folder(settings.default_save_folder.clone());
     files.set_export_edge(settings.export_edge);
@@ -216,6 +225,25 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
                 });
             ui.end_row();
 
+            widgets::field_label(ui, tr("settings-theme"));
+            egui::ComboBox::from_id_salt("settings-theme")
+                .selected_text(theme_name(settings.theme))
+                .width(160.0)
+                .show_ui(ui, |ui| {
+                    for mode in theme::Mode::ALL {
+                        widgets::choice(ui, &mut settings.theme, mode, theme_name(mode));
+                    }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        true,
+                        tr("settings-theme"),
+                    )
+                });
+            ui.end_row();
+
             widgets::field_label(ui, tr("settings-theme-color"));
             let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
             let color = egui::Color32::from_rgb(r, g, b);
@@ -250,7 +278,7 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
         }
     }
     ui.add_space(6.0);
-    ui.label(egui::RichText::new(tr("settings-restart")).color(theme::MUTED));
+    ui.label(egui::RichText::new(tr("settings-restart")).color(theme::muted()));
     ui.add_space(10.0);
     widgets::checkbox(
         ui,
@@ -261,7 +289,7 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
 
 fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
     let label = widgets::field_label(ui, tr("settings-default-folder"));
-    ui.label(egui::RichText::new(tr("settings-default-folder-hint")).color(theme::MUTED));
+    ui.label(egui::RichText::new(tr("settings-default-folder-hint")).color(theme::muted()));
     ui.add_space(4.0);
     // The configured folder, or what "system default" means; checking that
     // the folder still exists is left to the dialogs.
@@ -372,7 +400,7 @@ fn shortcuts(
                 });
         }
     }
-    ui.label(egui::RichText::new(tr("settings-shortcuts-hint")).color(theme::MUTED));
+    ui.label(egui::RichText::new(tr("settings-shortcuts-hint")).color(theme::muted()));
     ui.add_space(4.0);
     let keys = Keymap::new(&settings.shortcuts);
     egui::ScrollArea::vertical()
@@ -390,7 +418,7 @@ fn shortcuts(
                 });
         });
     if let Some(refusal) = &dialog.refusal {
-        ui.colored_label(theme::accent(), refusal);
+        ui.colored_label(theme::accent_ink(), refusal);
     }
 }
 

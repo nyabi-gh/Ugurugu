@@ -324,7 +324,7 @@ impl LayerDock {
         ui.add_space(4.0);
         self.buttons(ui, canvas, refusal);
         if let Some(text) = refusal.as_deref() {
-            ui.colored_label(theme::accent(), text);
+            ui.colored_label(theme::accent_ink(), text);
         }
         ui.add_space(4.0);
         self.properties(ui, canvas, current, refusal);
@@ -350,14 +350,14 @@ impl LayerDock {
         let painter = ui.painter_at(rect);
         let card = rect.shrink2(egui::vec2(4.0, 2.0));
         if selected {
-            painter.rect_filled(card, CornerRadius::same(7), theme::CONTROL);
+            painter.rect_filled(card, CornerRadius::same(7), theme::control());
             let bar = Rect::from_center_size(
                 egui::pos2(card.left() + 4.0 + 1.5, card.center().y),
                 egui::vec2(3.0, 20.0),
             );
             painter.rect_filled(bar, CornerRadius::same(2), theme::accent());
         } else if response.hovered() {
-            painter.rect_filled(card, CornerRadius::same(7), theme::HOVER);
+            painter.rect_filled(card, CornerRadius::same(7), theme::hover());
         }
         let dim = |color: Color32| {
             if row.visible {
@@ -378,7 +378,7 @@ impl LayerDock {
             } else {
                 Glyph::MoveUp
             };
-            icons::paint(&painter, fold, glyph, theme::MUTED, 0.0);
+            icons::paint(&painter, fold, glyph, theme::muted(), 0.0);
             fold_response.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Button,
@@ -398,7 +398,7 @@ impl LayerDock {
             egui::pos2(left + 12.0, card.center().y - THUMB.y / 2.0),
             THUMB,
         );
-        painter.rect_filled(thumb, CornerRadius::same(4), dim(theme::BASE));
+        painter.rect_filled(thumb, CornerRadius::same(4), dim(theme::base()));
         if let Some(thumbnail) = self.thumbnails.get(&row.id) {
             let [width, height] = thumbnail.size.map(|edge| edge as f32);
             let scale = (thumb.width() / width).min(thumb.height() / height);
@@ -410,7 +410,7 @@ impl LayerDock {
         painter.rect_stroke(
             thumb,
             CornerRadius::same(4),
-            Stroke::new(1.0, theme::BORDER),
+            Stroke::new(1.0, theme::border()),
             egui::StrokeKind::Inside,
         );
 
@@ -421,9 +421,9 @@ impl LayerDock {
         );
         let eye_response = ui.interact(eye.expand(3.0), response.id.with("eye"), Sense::click());
         let (glyph, ink) = if row.visible {
-            (Glyph::EyeOpen, theme::MUTED)
+            (Glyph::EyeOpen, theme::muted())
         } else {
-            (Glyph::EyeClosed, theme::DISABLED)
+            (Glyph::EyeClosed, theme::disabled())
         };
         icons::paint(&painter, eye, glyph, ink, 0.0);
         eye_response.widget_info(|| {
@@ -463,9 +463,9 @@ impl LayerDock {
                 wobble,
                 Glyph::Wobble,
                 if wobbles {
-                    theme::accent()
+                    theme::accent_ink()
                 } else {
-                    theme::DISABLED
+                    theme::disabled()
                 },
                 0.0,
             );
@@ -513,7 +513,7 @@ impl LayerDock {
             Align2::LEFT_BOTTOM,
             format!("{percent}  {}", blend_name(row.blend)),
             FontId::proportional(theme::SMALL),
-            theme::MUTED,
+            theme::muted(),
         );
         let name_pos = egui::pos2(text_left, card.center().y + 1.0);
         let renaming = self.renaming.as_ref().is_some_and(|(id, _)| *id == row.id);
@@ -564,16 +564,16 @@ impl LayerDock {
                 let galley = painter.layout_no_wrap(
                     badge.to_owned(),
                     FontId::proportional(theme::BODY),
-                    theme::accent(),
+                    theme::accent_ink(),
                 );
                 let width = galley.size().x;
-                painter.galley(egui::pos2(x, name_pos.y), galley, theme::accent());
+                painter.galley(egui::pos2(x, name_pos.y), galley, theme::accent_ink());
                 x += width + 5.0;
             }
             let name_color = if row.visible {
-                theme::TEXT
+                theme::text()
             } else {
-                theme::MUTED
+                theme::muted()
             };
             let galley = painter.layout(
                 row.name.clone(),
@@ -653,7 +653,7 @@ impl LayerDock {
             Drop::Into(_) => painter.rect_stroke(
                 card,
                 CornerRadius::same(7),
-                Stroke::new(2.0, theme::accent()),
+                Stroke::new(2.0, theme::accent_ink()),
                 egui::StrokeKind::Inside,
             ),
         };
@@ -892,12 +892,12 @@ fn text_button(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
     if enabled && response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), theme::HOVER);
+            .rect_filled(rect, CornerRadius::same(7), theme::hover());
     }
     let ink = if enabled {
-        theme::TEXT
+        theme::text()
     } else {
-        theme::DISABLED
+        theme::disabled()
     };
     icons::paint(
         ui.painter(),

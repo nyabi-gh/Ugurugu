@@ -72,6 +72,8 @@ pub struct Settings {
     pub language: Language,
     /// The interface accent, `None` for the default amber.
     pub accent: Option<[u8; 3]>,
+    /// Dark, light or as Windows is.
+    pub theme: crate::theme::Mode,
     /// Off stops the canvas from playing the wobble.
     pub wobble_animation: bool,
     /// The grid over the document's pixels when enlarged enough.
@@ -100,6 +102,7 @@ impl Default for Settings {
         Self {
             language: Language::System,
             accent: None,
+            theme: crate::theme::Mode::default(),
             wobble_animation: true,
             pixel_grid: true,
             default_save_folder: None,
@@ -172,6 +175,12 @@ impl Settings {
                 None => tracing::warn!(text, "the accent in the settings is not #rrggbb"),
             }
         }
+        if let Some(code) = take(&mut object, "theme", string) {
+            match crate::theme::Mode::from_code(&code) {
+                Some(theme) => settings.theme = theme,
+                None => tracing::warn!(code, "unknown theme in the settings"),
+            }
+        }
         if let Some(on) = take(&mut object, "wobbleAnimation", Value::as_bool) {
             settings.wobble_animation = on;
         }
@@ -237,6 +246,9 @@ impl Settings {
                 "accent".to_owned(),
                 format!("#{r:02x}{g:02x}{b:02x}").into(),
             );
+        }
+        if self.theme != crate::theme::Mode::default() {
+            object.insert("theme".to_owned(), self.theme.code().into());
         }
         object.insert("wobbleAnimation".to_owned(), self.wobble_animation.into());
         object.insert("pixelGrid".to_owned(), self.pixel_grid.into());
@@ -595,6 +607,7 @@ mod tests {
         Settings {
             language: Language::Korean,
             accent: Some([0x12, 0xab, 0xef]),
+            theme: crate::theme::Mode::Light,
             wobble_animation: false,
             pixel_grid: false,
             default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),

@@ -51,11 +51,12 @@ fn category_name(category: Category) -> &'static str {
 pub struct Presets {
     /// The brush category shown; `None` follows the current brush.
     category: Option<Category>,
-    /// Preview frames by preset and frame, for `scale` pixels per point and
-    /// pen pressure on or off.
+    /// Preview frames by preset and frame, for `scale` pixels per point,
+    /// pen pressure on or off and strokes in `ink`, the theme's text.
     previews: HashMap<(&'static str, u32), egui::TextureHandle>,
     scale: f32,
     pressure: bool,
+    ink: egui::Color32,
     renderer: Option<DocumentRenderer>,
 }
 
@@ -63,10 +64,12 @@ impl Presets {
     pub fn show(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, tool: Tool) {
         let scale = ui.ctx().pixels_per_point();
         let pressure = canvas.tools().uses_pressure;
-        if scale != self.scale || pressure != self.pressure {
+        let ink = theme::text();
+        if scale != self.scale || pressure != self.pressure || ink != self.ink {
             self.previews.clear();
             self.scale = scale;
             self.pressure = pressure;
+            self.ink = ink;
         }
         let current = match tool {
             Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
@@ -190,14 +193,14 @@ impl Presets {
         };
         let painter = ui.painter();
         let fill = if selected || hovered {
-            theme::HOVER
+            theme::hover()
         } else {
-            theme::BASE
+            theme::base()
         };
         let edge = if selected || response.has_focus() {
-            Stroke::new(1.5, theme::accent())
+            Stroke::new(1.5, theme::accent_ink())
         } else {
-            Stroke::new(1.0, theme::BORDER)
+            Stroke::new(1.0, theme::border())
         };
         painter.rect(rect, CornerRadius::same(8), fill, edge, StrokeKind::Inside);
         let texture = self.preview(ui.ctx(), preset, frame);
@@ -208,7 +211,11 @@ impl Presets {
         );
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(texture.id(), image, uv, Color32::WHITE);
-        let ink = if selected { theme::TEXT } else { theme::MUTED };
+        let ink = if selected {
+            theme::text()
+        } else {
+            theme::muted()
+        };
         let font = FontId::proportional(theme::SMALL);
         let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), font, ink);
         job.wrap.max_width = width - 12.0;
@@ -273,7 +280,7 @@ fn preview_document(size: [f32; 2], scale: f32) -> Document {
 }
 
 fn text_color(alpha: u8) -> Rgba8 {
-    let [r, g, b, _] = theme::TEXT.to_array();
+    let [r, g, b, _] = theme::text().to_array();
     Rgba8([r, g, b, alpha])
 }
 

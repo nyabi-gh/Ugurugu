@@ -70,11 +70,11 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
                         ui.allocate_exact_size(egui::Vec2::splat(SWATCH), Sense::click());
                     paint_swatch(ui, rect, color);
                     let (width, stroke) = if color == current {
-                        (2.0, theme::accent())
+                        (2.0, theme::accent_ink())
                     } else if response.hovered() {
-                        (1.0, theme::TEXT)
+                        (1.0, theme::text())
                     } else {
-                        (1.0, theme::BORDER)
+                        (1.0, theme::border())
                     };
                     ui.painter().rect_stroke(
                         rect,

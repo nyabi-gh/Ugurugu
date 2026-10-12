@@ -390,6 +390,10 @@ settings-title | ugurugu::SettingsDialog | Settings
 settings-general | ugurugu::SettingsDialog | General
 settings-language | ugurugu::SettingsDialog | Language
 settings-language-system | ugurugu::SettingsDialog | System default
+settings-theme | - | Theme | 테마 | テーマ
+settings-theme-dark | - | Dark | 어둡게 | ダーク
+settings-theme-light | - | Light | 밝게 | ライト
+settings-theme-system | - | Same as Windows | Windows 설정과 같게 | Windowsの設定に合わせる
 settings-theme-color | ugurugu::SettingsDialog | Theme color
 settings-restart | ugurugu::SettingsDialog | Restart Ugurugu to apply language changes.
 settings-drawing | ugurugu::SettingsDialog | Drawing

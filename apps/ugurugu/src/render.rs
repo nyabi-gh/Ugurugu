@@ -22,7 +22,7 @@ use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 use crate::cache::Rendered;
-use crate::canvas::{self, Canvas};
+use crate::canvas::Canvas;
 use crate::clipboard::{Clipboard, ClipboardEvent};
 use crate::files::{Action, FileEvent, Files};
 use crate::ime_probe::ImeProbe;
@@ -264,7 +264,8 @@ impl Display {
             presenter.format(),
             egui_wgpu::RendererOptions::default(),
         );
-        let canvas_view = DocumentView::new(&gpu.device, presenter.format(), canvas::WORKSPACE);
+        let canvas_view =
+            DocumentView::new(&gpu.device, presenter.format(), crate::theme::workspace());
         let ants = Ants::new(&gpu.device, presenter.format());
         Ok(Self {
             gpu,
@@ -695,6 +696,13 @@ impl RenderThread {
     fn frame(&mut self) {
         let started = Instant::now();
         let input = self.egui_state.take_egui_input(&self.window);
+        // Before the frame, so what is painted by hand matches egui's style;
+        // the theme follows the settings and, if asked, Windows.
+        if crate::theme::follow(&self.egui_ctx) {
+            self.display
+                .canvas_view
+                .set_workspace(crate::theme::workspace());
+        }
         let typed = std::mem::take(&mut self.clipboard_chords);
         let Self {
             display,

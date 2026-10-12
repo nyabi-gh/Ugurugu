@@ -201,6 +201,13 @@ struct Staging {
 impl DocumentView {
     /// `format` is the target's format; `workspace`, opaque straight RGBA, is
     /// shown around the document.
+    /// Shows `workspace`, opaque straight RGBA, around the document from the
+    /// next draw.
+    pub fn set_workspace(&mut self, workspace: [u8; 4]) {
+        self.workspace = workspace.map(|value| f32::from(value) / 255.0);
+        self.uploaded = None;
+    }
+
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, workspace: [u8; 4]) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("document view"),

@@ -343,7 +343,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
             ui.label(
                 egui::RichText::new(tr("eyedropper-hint"))
                     .size(theme::SMALL)
-                    .color(theme::MUTED),
+                    .color(theme::muted()),
             );
             return;
         }
@@ -542,9 +542,9 @@ fn shape_option(
     });
     let painter = ui.painter();
     let (fill, edge) = match (selected, response.hovered()) {
-        (true, _) => (theme::CONTROL, theme::accent()),
-        (false, true) => (theme::HOVER, theme::BORDER),
-        (false, false) => (egui::Color32::TRANSPARENT, theme::BORDER),
+        (true, _) => (theme::control(), theme::accent_ink()),
+        (false, true) => (theme::hover(), theme::border()),
+        (false, false) => (egui::Color32::TRANSPARENT, theme::border()),
     };
     painter.rect(
         rect,
@@ -560,14 +560,14 @@ fn shape_option(
         egui::Align2::LEFT_TOP,
         title,
         font(theme::BODY),
-        theme::TEXT,
+        theme::text(),
     );
     painter.text(
         at(25.0),
         egui::Align2::LEFT_TOP,
         description,
         font(theme::SMALL),
-        theme::MUTED,
+        theme::muted(),
     );
     response
 }
@@ -706,7 +706,7 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
     for side in corners.windows(2) {
         painter.extend(egui::Shape::dashed_line(
             side,
-            egui::Stroke::new(1.0, theme::accent()),
+            egui::Stroke::new(1.0, theme::accent_ink()),
             4.0,
             3.0,
         ));
@@ -721,7 +721,7 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
         egui::Align2::LEFT_TOP,
         hint,
         egui::FontId::proportional(theme::SMALL),
-        theme::MUTED,
+        theme::muted(),
     );
 }
 
@@ -795,7 +795,7 @@ fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
     let painter = ui.painter();
     painter.add(egui::Shape::closed_line(
         points[..4].to_vec(),
-        egui::Stroke::new(1.0, theme::accent()),
+        egui::Stroke::new(1.0, theme::accent_ink()),
     ));
     for point in points {
         painter.rect(
@@ -878,8 +878,8 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
         .fixed_pos(egui::pos2(x, y))
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
-                .fill(theme::PANEL)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::panel())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
@@ -1297,7 +1297,7 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
         .collect();
     ui.painter().add(egui::Shape::line(
         points,
-        egui::Stroke::new(2.0, theme::accent()),
+        egui::Stroke::new(2.0, theme::accent_ink()),
     ));
     response
 }
@@ -1334,15 +1334,15 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
         let fill = match (playing, play.hovered()) {
             (true, true) => theme::accent_pressed(),
             (true, false) => theme::accent(),
-            (false, true) => theme::HOVER,
-            (false, false) => theme::CONTROL,
+            (false, true) => theme::hover(),
+            (false, false) => theme::control(),
         };
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(7), fill);
         let (glyph, ink) = if playing {
             (Glyph::Pause, theme::accent_text())
         } else {
-            (Glyph::Play, theme::TEXT)
+            (Glyph::Play, theme::text())
         };
         icons::paint(
             ui.painter(),
@@ -1377,7 +1377,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             }
             canvas.edit_settled(|session| session.set_frame(frame as i64 - 1));
         }
-        ui.label(egui::RichText::new("/").color(theme::MUTED));
+        ui.label(egui::RichText::new("/").color(theme::muted()));
         let (mut count, mut speed) = panels.animation.unwrap_or((frames as f32, fps));
         let (low, high) = (*limits::FRAMES.start() as f32, *limits::FRAMES.end() as f32);
         let count_field =
@@ -1397,7 +1397,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
         ui.label(
             egui::RichText::new(tr("fps"))
                 .size(theme::SMALL)
-                .color(theme::MUTED),
+                .color(theme::muted()),
         );
         let (low, high) = (
             *limits::FRAMES_PER_SECOND.start(),
@@ -1446,13 +1446,13 @@ fn scrubber(
     painter.rect(
         track,
         egui::CornerRadius::same(6),
-        theme::STATUS,
+        theme::status(),
         egui::Stroke::new(
             1.0,
             if focused {
-                theme::accent()
+                theme::accent_ink()
             } else {
-                theme::BORDER
+                theme::border()
             },
         ),
         egui::StrokeKind::Inside,
@@ -1468,11 +1468,11 @@ fn scrubber(
         painter.rect_filled(
             slot_rect(slot_at(hover.x)),
             egui::CornerRadius::same(4),
-            theme::CONTROL,
+            theme::control(),
         );
     }
     for index in 0..frames {
-        painter.circle_filled(slot_rect(index).center(), 1.4, theme::DISABLED);
+        painter.circle_filled(slot_rect(index).center(), 1.4, theme::disabled());
     }
     let head = slot_rect(current);
     if playing {
@@ -1528,7 +1528,7 @@ pub fn status_bar(
     let mut cancel = false;
     ui.horizontal(|ui| {
         if let Some(lasting) = lasting {
-            ui.colored_label(theme::accent(), lasting);
+            ui.colored_label(theme::accent_ink(), lasting);
             ui.separator();
         }
         if let Some(export) = export {
@@ -1539,9 +1539,9 @@ pub fn status_bar(
             ui.separator();
         }
         match message {
-            Some((text, true)) => ui.colored_label(theme::accent(), text),
-            Some((text, false)) => ui.colored_label(theme::MUTED, text),
-            None => ui.colored_label(theme::MUTED, tr("status-ready")),
+            Some((text, true)) => ui.colored_label(theme::accent_ink(), text),
+            Some((text, false)) => ui.colored_label(theme::muted(), text),
+            None => ui.colored_label(theme::muted(), tr("status-ready")),
         };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let fit = widgets::text_icon_button(ui, Glyph::FitView, tr("fit"), tr("fit-tip"));
@@ -1583,7 +1583,7 @@ pub fn status_bar(
             });
             ui.add_sized(
                 [150.0, 20.0],
-                egui::Label::new(egui::RichText::new(text).color(theme::MUTED)),
+                egui::Label::new(egui::RichText::new(text).color(theme::muted())),
             );
         });
     });

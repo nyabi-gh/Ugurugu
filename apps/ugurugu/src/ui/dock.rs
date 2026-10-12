@@ -161,7 +161,7 @@ fn area(
             .exact_size(EDGE)
             .frame(
                 Frame::new()
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(Margin::symmetric(3, 8)),
             )
             .show(ui, |ui| {
@@ -185,7 +185,7 @@ fn area(
         .size_range(WIDTHS)
         .frame(
             Frame::new()
-                .fill(theme::PANEL)
+                .fill(theme::panel())
                 .inner_margin(Margin::same(8)),
         )
         .show(ui, |ui| {
@@ -364,8 +364,8 @@ pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
             .min_size(FLOATING_MIN)
             .frame(
                 Frame::new()
-                    .fill(theme::PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::same(8))
                     .shadow(ui.style().visuals.window_shadow),
@@ -444,7 +444,7 @@ fn group_ui(
                 ui.label(
                     egui::RichText::new(title(front))
                         .size(theme::SMALL)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -561,7 +561,7 @@ fn finish(ui: &mut Ui, panels: &mut Panels) {
             target.show,
             CornerRadius::same(4),
             theme::accent().gamma_multiply(0.18),
-            Stroke::new(1.5, theme::accent()),
+            Stroke::new(1.5, theme::accent_ink()),
             StrokeKind::Inside,
         );
     }
@@ -569,17 +569,17 @@ fn finish(ui: &mut Ui, panels: &mut Panels) {
         let galley = painter.layout_no_wrap(
             title(drag.panels[0]).to_owned(),
             FontId::proportional(theme::SMALL),
-            theme::TEXT,
+            theme::text(),
         );
         let rect = Rect::from_min_size(pointer + vec2(14.0, 10.0), galley.size() + vec2(16.0, 8.0));
         painter.rect(
             rect,
             CornerRadius::same(5),
-            theme::CONTROL,
-            Stroke::new(1.0, theme::BORDER),
+            theme::control(),
+            Stroke::new(1.0, theme::border()),
             StrokeKind::Inside,
         );
-        painter.galley(rect.min + vec2(8.0, 4.0), galley, theme::TEXT);
+        painter.galley(rect.min + vec2(8.0, 4.0), galley, theme::text());
     }
     if ctx.input(|input| input.pointer.primary_down()) {
         return;
@@ -612,9 +612,9 @@ fn handle(ui: &mut Ui, front: Panel) -> Response {
     let name = tr_with("dock-handle", &args([("panel", title(front).to_owned())]));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     let ink = if response.hovered() || response.dragged() {
-        theme::TEXT
+        theme::text()
     } else {
-        theme::MUTED
+        theme::muted()
     };
     for dx in [-3.0, 3.0] {
         for dy in [-3.0, 3.0] {
@@ -631,7 +631,7 @@ fn handle(ui: &mut Ui, front: Panel) -> Response {
 /// A panel's tab in a group of several.
 fn tab(ui: &mut Ui, panel: Panel, front: bool) -> Response {
     let name = title(panel);
-    let ink = if front { theme::TEXT } else { theme::MUTED };
+    let ink = if front { theme::text() } else { theme::muted() };
     let galley =
         ui.painter()
             .layout_no_wrap(name.to_owned(), FontId::proportional(theme::SMALL), ink);
@@ -641,9 +641,9 @@ fn tab(ui: &mut Ui, panel: Panel, front: bool) -> Response {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, front, name)
     });
     let fill = if front {
-        theme::CONTROL
+        theme::control()
     } else if response.hovered() {
-        theme::HOVER
+        theme::hover()
     } else {
         Color32::TRANSPARENT
     };
@@ -665,14 +665,14 @@ fn small_button(ui: &mut Ui, text: &str, name: &str) -> Response {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(5), theme::HOVER);
+            .rect_filled(rect, CornerRadius::same(5), theme::hover());
     }
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
         text,
         FontId::proportional(theme::BODY + 2.0),
-        theme::MUTED,
+        theme::muted(),
     );
     focus_ring(ui, &response, rect);
     response.on_hover_text(name)
@@ -683,7 +683,7 @@ fn focus_ring(ui: &Ui, response: &Response, rect: Rect) {
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(5),
-            Stroke::new(1.0, theme::accent()),
+            Stroke::new(1.0, theme::accent_ink()),
             StrokeKind::Inside,
         );
     }

@@ -51,7 +51,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool) {
                     }
                     ui.add_space(8.0);
                 }
-                ui.label(egui::RichText::new(tr("help-again")).color(theme::MUTED));
+                ui.label(egui::RichText::new(tr("help-again")).color(theme::muted()));
             });
         });
 }

@@ -258,14 +258,14 @@ impl ColorDock {
                 back,
                 CornerRadius::same(6),
                 rgba(previous),
-                Stroke::new(1.0, theme::BORDER),
+                Stroke::new(1.0, theme::border()),
                 egui::StrokeKind::Inside,
             );
             painter.rect(
                 front,
                 CornerRadius::same(6),
                 rgba(picked),
-                Stroke::new(3.0, theme::accent()),
+                Stroke::new(3.0, theme::accent_ink()),
                 egui::StrokeKind::Inside,
             );
             if back_response.clicked() {
@@ -277,7 +277,7 @@ impl ColorDock {
                 let label = ui.label(
                     egui::RichText::new(tr("color-current"))
                         .size(theme::SMALL)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
                 if let Some(typed) = self.hex_field(ui, picked, label.id)
                     && typed != picked

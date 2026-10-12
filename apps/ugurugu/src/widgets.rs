@@ -30,9 +30,9 @@ pub fn tool_button(
         };
         (fill, theme::accent_text())
     } else if response.hovered() {
-        (theme::HOVER, theme::TEXT)
+        (theme::hover(), theme::text())
     } else {
-        (Color32::TRANSPARENT, theme::TEXT)
+        (Color32::TRANSPARENT, theme::text())
     };
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(7), fill);
@@ -40,7 +40,7 @@ pub fn tool_button(
         painter.rect_stroke(
             rect,
             CornerRadius::same(7),
-            Stroke::new(1.0, theme::accent()),
+            Stroke::new(1.0, theme::accent_ink()),
             StrokeKind::Inside,
         );
     }
@@ -95,12 +95,12 @@ pub fn icon_button_tip(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
     if enabled && response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), theme::HOVER);
+            .rect_filled(rect, CornerRadius::same(7), theme::hover());
     }
     let ink = if enabled {
-        theme::TEXT
+        theme::text()
     } else {
-        theme::DISABLED
+        theme::disabled()
     };
     icons::paint(
         ui.painter(),
@@ -128,8 +128,8 @@ pub fn icon_toggle(
     let (fill, ink) = match (checked, response.hovered()) {
         (true, true) => (theme::accent_pressed(), theme::accent_text()),
         (true, false) => (theme::accent(), theme::accent_text()),
-        (false, true) => (theme::HOVER, theme::TEXT),
-        (false, false) => (Color32::TRANSPARENT, theme::TEXT),
+        (false, true) => (theme::hover(), theme::text()),
+        (false, false) => (Color32::TRANSPARENT, theme::text()),
     };
     ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
     icons::paint(
@@ -148,7 +148,7 @@ pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Res
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
         FontId::proportional(theme::BODY),
-        theme::TEXT,
+        theme::text(),
     );
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(6.0 + 16.0 + 4.0 + galley.size().x + 6.0, 24.0),
@@ -157,17 +157,17 @@ pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Res
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(5), theme::HOVER);
+            .rect_filled(rect, CornerRadius::same(5), theme::hover());
     }
     let icon = Rect::from_center_size(
         egui::pos2(rect.left() + 6.0 + 8.0, rect.center().y),
         Vec2::splat(16.0),
     );
-    icons::paint(ui.painter(), icon, glyph, theme::TEXT, 0.0);
+    icons::paint(ui.painter(), icon, glyph, theme::text(), 0.0);
     ui.painter().galley(
         egui::pos2(icon.right() + 4.0, rect.center().y - galley.size().y / 2.0),
         galley,
-        theme::TEXT,
+        theme::text(),
     );
     response.on_hover_text(tip)
 }
@@ -177,7 +177,7 @@ pub fn field_label(ui: &mut Ui, text: &str) -> Response {
     ui.label(
         egui::RichText::new(text)
             .size(theme::SMALL)
-            .color(theme::MUTED),
+            .color(theme::muted()),
     )
 }
 
@@ -229,20 +229,24 @@ pub fn slider(
         egui::pos2(left, rect.center().y - 2.5),
         egui::pos2(left + span, rect.center().y + 2.5),
     );
-    painter.rect_filled(groove, CornerRadius::same(2), theme::BORDER);
+    painter.rect_filled(groove, CornerRadius::same(2), theme::border());
     let filled = Rect::from_min_max(groove.min, egui::pos2(x, groove.max.y));
     painter.rect_filled(filled, CornerRadius::same(2), theme::accent());
     let hot = response.hovered() || response.dragged();
     painter.circle(
         egui::pos2(x, rect.center().y),
         handle,
-        if hot { theme::accent() } else { theme::TEXT },
+        if hot {
+            theme::accent_ink()
+        } else {
+            theme::text()
+        },
         Stroke::new(
             2.0,
             if response.has_focus() {
-                theme::accent()
+                theme::accent_ink()
             } else {
-                theme::CHROME
+                theme::chrome()
             },
         ),
     );
@@ -264,12 +268,12 @@ pub fn number(
     let response = ui
         .scope(|ui| {
             let widgets = &mut ui.visuals_mut().widgets;
-            widgets.inactive.weak_bg_fill = theme::BASE;
-            widgets.inactive.bg_fill = theme::BASE;
-            widgets.hovered.weak_bg_fill = theme::CONTROL;
-            widgets.hovered.bg_fill = theme::CONTROL;
-            widgets.active.weak_bg_fill = theme::BASE;
-            widgets.active.bg_fill = theme::BASE;
+            widgets.inactive.weak_bg_fill = theme::base();
+            widgets.inactive.bg_fill = theme::base();
+            widgets.hovered.weak_bg_fill = theme::control();
+            widgets.hovered.bg_fill = theme::control();
+            widgets.active.weak_bg_fill = theme::base();
+            widgets.active.bg_fill = theme::base();
             ui.add_sized(
                 [width, 26.0],
                 egui::DragValue::new(value)
@@ -297,7 +301,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
         ui.painter().layout_no_wrap(
             text.to_owned(),
             FontId::proportional(theme::BODY),
-            theme::TEXT,
+            theme::text(),
         )
     });
     let width = 16.0 + galley.as_ref().map_or(0.0, |galley| 6.0 + galley.size().x);
@@ -321,9 +325,9 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
     );
     let painter = ui.painter();
     let (fill, edge) = match (*checked, response.hovered()) {
-        (true, _) => (theme::accent(), theme::accent()),
-        (false, true) => (theme::CONTROL, theme::DISABLED),
-        (false, false) => (theme::BASE, theme::BORDER),
+        (true, _) => (theme::accent(), theme::accent_ink()),
+        (false, true) => (theme::control(), theme::disabled()),
+        (false, false) => (theme::base(), theme::border()),
     };
     painter.rect(
         square,
@@ -343,7 +347,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
         painter.rect_stroke(
             square.expand(2.0),
             CornerRadius::same(5),
-            Stroke::new(1.0, theme::accent()),
+            Stroke::new(1.0, theme::accent_ink()),
             StrokeKind::Outside,
         );
     }
@@ -354,7 +358,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
                 rect.center().y - galley.size().y / 2.0,
             ),
             galley,
-            theme::TEXT,
+            theme::text(),
         );
     }
     response

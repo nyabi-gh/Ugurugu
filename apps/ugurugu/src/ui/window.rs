@@ -74,18 +74,18 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
             .inner_margin(egui::Margin::symmetric(x, y))
     };
     egui::Panel::top("menu")
-        .frame(bar(theme::CHROME, 6, 2))
+        .frame(bar(theme::chrome(), 6, 2))
         .show_separator_line(false)
         .show(ui, |ui| {
             super::menu_bar(ui, canvas, files, clipboard, panels)
         });
     egui::Panel::top("quick access")
-        .frame(bar(theme::CHROME, 10, 5))
+        .frame(bar(theme::chrome(), 10, 5))
         .show(ui, |ui| {
             super::quick_access(ui, canvas, files, clipboard, panels)
         });
     egui::Panel::bottom("status")
-        .frame(bar(theme::STATUS, 8, 2))
+        .frame(bar(theme::status(), 8, 2))
         .show_separator_line(false)
         .show(ui, |ui| {
             // What failed first, then what was refused; the slow display is
@@ -126,14 +126,14 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     egui::Panel::left("tool rail")
         .resizable(false)
         .exact_size(48.0)
-        .frame(bar(theme::CHROME, 4, 8))
+        .frame(bar(theme::chrome(), 4, 8))
         .show(ui, |ui| super::rail(ui, canvas, &panels.keys));
     super::dock_areas(ui, canvas, panels, probe);
     if panels.layout.animation_bar {
         egui::Panel::bottom("animation bar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::CHROME)
+                    .fill(theme::chrome())
                     .inner_margin(egui::Margin {
                         left: 12,
                         right: 14,

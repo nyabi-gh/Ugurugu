@@ -94,6 +94,6 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     ui.label(
         egui::RichText::new(tr("text-hint"))
             .size(theme::SMALL)
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
 }

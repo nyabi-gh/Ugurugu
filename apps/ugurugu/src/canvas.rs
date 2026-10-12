@@ -48,8 +48,6 @@ pub use cursor::BrushCursor;
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
-/// Shown around the document, opaque straight RGBA.
-pub const WORKSPACE: [u8; 4] = [0x2A, 0x2C, 0x30, 255];
 const ZOOM_STEP: f64 = 1.25;
 /// Up to 6400%, which fits 16×16 pixel art to a window (2.2.13: 1600%).
 pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=64.0;
