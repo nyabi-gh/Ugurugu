@@ -159,7 +159,9 @@ pub fn show(
                 ui.set_width(SIDEBAR);
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for tab in Tab::ALL {
-                    if sidebar_item(ui, tab.title(), dialog.tab == tab).clicked() {
+                    let item = sidebar_item(ui, tab.title(), dialog.tab == tab);
+                    if item.clicked() {
+                        item.request_focus();
                         dialog.tab = tab;
                         dialog.picking_accent = false;
                         dialog.capturing = None;
@@ -239,7 +241,7 @@ fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, text)
     });
     let painter = ui.painter();
-    if selected || response.hovered() {
+    if selected || response.hovered() || response.has_focus() {
         painter.rect_filled(rect, egui::CornerRadius::same(6), theme::hover());
     }
     if selected {
@@ -249,15 +251,7 @@ fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
         );
         painter.rect_filled(bar, egui::CornerRadius::same(2), theme::accent_ink());
     }
-    if response.has_focus() {
-        painter.rect_stroke(
-            rect,
-            egui::CornerRadius::same(6),
-            egui::Stroke::new(1.0, theme::accent_ink()),
-            egui::StrokeKind::Inside,
-        );
-    }
-    let ink = if selected {
+    let ink = if selected || response.has_focus() {
         theme::text()
     } else {
         theme::muted()
@@ -327,13 +321,9 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
             }
             ui.add_space(8.0);
         }
-    });
-
-    section(ui, tr("settings-language"), false);
-    widgets::card(ui, |ui| {
         widgets::setting_row(
             ui,
-            true,
+            false,
             tr("settings-language"),
             Some(tr("settings-restart")),
             |ui| {

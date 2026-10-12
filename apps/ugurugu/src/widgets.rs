@@ -437,10 +437,11 @@ pub enum Emphasis {
 
 /// A text button, 28 points tall, in the dialogs' style.
 pub fn button(ui: &mut Ui, text: &str, emphasis: Emphasis, enabled: bool) -> Response {
+    // Drawn in whatever colour the state below gives it.
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
         FontId::proportional(theme::BODY),
-        theme::text(),
+        Color32::PLACEHOLDER,
     );
     let size = egui::vec2((galley.size().x + 28.0).max(72.0), 28.0);
     let sense = if enabled {
@@ -528,7 +529,7 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .fill(theme::base())
         .stroke(Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(8))
-        .inner_margin(egui::Margin::symmetric(14, 6))
+        .inner_margin(egui::Margin::symmetric(16, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui)
@@ -539,9 +540,10 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// The width a settings row keeps for its control.
 pub const ROW_CONTROL: f32 = 210.0;
 
-/// One setting: its name and, quieter under it, what it does, with
-/// `control` at the right. A thin line parts it from the row before unless
-/// it is the first.
+/// One setting: its name and, quieter under it, what it does, in a column
+/// on the left, and `control` at the right in a column of its own, both
+/// centred on the row. A thin line parts it from the row before unless it
+/// is the first.
 pub fn setting_row<R>(
     ui: &mut Ui,
     first: bool,
@@ -549,40 +551,65 @@ pub fn setting_row<R>(
     description: Option<&str>,
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    if !first {
-        let y = ui.cursor().top();
-        let x = ui.max_rect().x_range();
-        ui.painter()
-            .hline(x, y, Stroke::new(1.0, theme::border().gamma_multiply(0.6)));
-    }
+    const PADDING: f32 = 12.0;
+    const CONTROL_HEIGHT: f32 = 28.0;
     let width = ui.available_width();
-    ui.horizontal(|ui| {
-        ui.set_min_height(44.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(width - ROW_CONTROL - 12.0, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(title).color(theme::text()));
-                if let Some(description) = description {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(description)
-                                .size(theme::SMALL)
-                                .color(theme::muted()),
-                        )
-                        .wrap(),
-                    );
-                }
-                ui.add_space(8.0);
-            },
+    let text_width = width - ROW_CONTROL - 16.0;
+    // Measured as the labels below lay them out, to centre them.
+    let measure = |text: &str, size: f32| {
+        ui.painter()
+            .layout(
+                text.to_owned(),
+                FontId::proportional(size),
+                Color32::PLACEHOLDER,
+                text_width,
+            )
+            .size()
+            .y
+    };
+    let text_height = measure(title, theme::BODY)
+        + description.map_or(0.0, |description| 2.0 + measure(description, theme::SMALL));
+    let height = text_height.max(CONTROL_HEIGHT) + 2.0 * PADDING;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    if !first {
+        ui.painter().hline(
+            rect.x_range(),
+            rect.top(),
+            Stroke::new(1.0, theme::border().gamma_multiply(0.6)),
         );
-        ui.allocate_ui_with_layout(
-            egui::vec2(ROW_CONTROL, 44.0),
-            egui::Layout::right_to_left(egui::Align::Center),
-            control,
-        )
-        .inner
-    })
+    }
+    let text_rect = Rect::from_min_size(
+        egui::pos2(rect.left(), rect.center().y - text_height / 2.0),
+        egui::vec2(text_width, text_height),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(text_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+        |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.add(egui::Label::new(egui::RichText::new(title).color(theme::text())).wrap());
+            if let Some(description) = description {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(description)
+                            .size(theme::SMALL)
+                            .color(theme::muted()),
+                    )
+                    .wrap(),
+                );
+            }
+        },
+    );
+    let control_rect = Rect::from_min_max(
+        egui::pos2(rect.right() - ROW_CONTROL, rect.top()),
+        rect.right_bottom(),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(control_rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        control,
+    )
     .inner
 }
