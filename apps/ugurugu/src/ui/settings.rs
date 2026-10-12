@@ -124,6 +124,17 @@ pub fn apply(
 /// The list of tabs on the left, and the room the tab shown takes.
 const SIDEBAR: f32 = 156.0;
 const CONTENT: egui::Vec2 = egui::vec2(540.0, 400.0);
+/// Between the dialog's edge and what is in it.
+const MARGIN: i8 = 24;
+/// Between the list and the tab shown, with a line in the middle.
+const GAP: f32 = 24.0;
+/// Between the cards and the scroll bar.
+const GUTTER: i8 = 14;
+
+/// A faint line between parts of the dialog.
+fn rule() -> egui::Stroke {
+    egui::Stroke::new(1.0, theme::border().gamma_multiply(0.6))
+}
 
 /// Shows the dialog if open, and takes a default save folder chosen in it.
 /// `typed`: chords egui turns into clipboard events, for a new shortcut.
@@ -149,85 +160,109 @@ pub fn show(
     let before = store.get().clone();
     let mut settings = before.clone();
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::new("settings dialog")).show(ctx, |ui| {
-        ui.set_width(SIDEBAR + 16.0 + CONTENT.x);
-        ui.label(
-            egui::RichText::new(tr("settings-title"))
-                .size(theme::BODY + 5.0)
-                .strong()
-                .color(theme::text()),
-        );
-        ui.add_space(10.0);
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(SIDEBAR);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for tab in Tab::ALL {
-                    let item = sidebar_item(ui, tab.title(), dialog.tab == tab);
-                    if item.clicked() {
-                        item.request_focus();
-                        dialog.tab = tab;
-                        dialog.picking_accent = false;
-                        dialog.capturing = None;
-                        dialog.refusal = None;
-                    }
-                }
-            });
-            ui.add_space(16.0);
-            ui.vertical(|ui| {
-                ui.set_width(CONTENT.x);
-                ui.label(
-                    egui::RichText::new(dialog.tab.title())
-                        .size(theme::BODY + 3.0)
-                        .strong()
-                        .color(theme::text()),
-                );
-                ui.add_space(8.0);
-                let mut height = CONTENT.y;
-                if dialog.tab == Tab::Shortcuts {
-                    let top = ui.cursor().top();
-                    shortcuts_header(ui, dialog, canvas, &mut settings, typed);
-                    height -= ui.cursor().top() - top;
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt(("settings tab", dialog.tab))
-                    .max_height(height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.set_min_height(height);
-                        match dialog.tab {
-                            Tab::General => general(ui, dialog, &mut settings),
-                            Tab::Drawing => drawing(ui, &mut settings),
-                            Tab::Files => save_folder(ui, files, &mut settings),
-                            Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings),
-                            Tab::About => about(ui, dialog),
-                        }
-                    });
-            });
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            let restore = widgets::button(
-                ui,
-                tr("settings-restore-defaults"),
-                widgets::Emphasis::Secondary,
-                true,
+    let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(MARGIN);
+    let modal = egui::Modal::new(egui::Id::new("settings dialog"))
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.set_width(SIDEBAR + 2.0 * GAP + 1.0 + CONTENT.x);
+            ui.label(
+                egui::RichText::new(tr("settings-title"))
+                    .size(theme::BODY + 5.0)
+                    .strong()
+                    .color(theme::text()),
             );
-            if restore.clicked() {
-                settings = settings.restored();
-                dialog.picking_accent = false;
-                dialog.capturing = None;
-                dialog.refusal = None;
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::button(ui, tr("settings-close"), widgets::Emphasis::Primary, true)
-                    .clicked()
-                {
-                    close = true;
+            ui.add_space(16.0);
+            let mut line = 0.0;
+            let body = ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(SIDEBAR);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for tab in Tab::ALL {
+                        let item = sidebar_item(ui, tab.title(), dialog.tab == tab);
+                        if item.clicked() {
+                            item.request_focus();
+                            dialog.tab = tab;
+                            dialog.picking_accent = false;
+                            dialog.capturing = None;
+                            dialog.refusal = None;
+                        }
+                    }
+                });
+                ui.add_space(GAP);
+                line = ui.cursor().left();
+                ui.add_space(1.0);
+                ui.add_space(GAP);
+                ui.vertical(|ui| {
+                    ui.set_width(CONTENT.x);
+                    ui.label(
+                        egui::RichText::new(dialog.tab.title())
+                            .size(theme::BODY + 3.0)
+                            .strong()
+                            .color(theme::text()),
+                    );
+                    ui.add_space(8.0);
+                    // Shorter in a short window, so the buttons stay on screen.
+                    let room = ui.ctx().content_rect().height() - 220.0;
+                    let mut height = room.clamp(200.0, CONTENT.y);
+                    if dialog.tab == Tab::Shortcuts {
+                        let top = ui.cursor().top();
+                        ui.scope(|ui| {
+                            ui.set_max_width(CONTENT.x - f32::from(GUTTER));
+                            shortcuts_header(ui, dialog, canvas, &mut settings, typed);
+                        });
+                        height -= ui.cursor().top() - top;
+                    }
+                    egui::ScrollArea::vertical()
+                        .id_salt(("settings tab", dialog.tab))
+                        .max_height(height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_height(height);
+                            egui::Frame::new()
+                                .inner_margin(egui::Margin {
+                                    left: 0,
+                                    right: GUTTER,
+                                    top: 0,
+                                    bottom: 4,
+                                })
+                                .show(ui, |ui| match dialog.tab {
+                                    Tab::General => general(ui, dialog, &mut settings),
+                                    Tab::Drawing => drawing(ui, &mut settings),
+                                    Tab::Files => save_folder(ui, files, &mut settings),
+                                    Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings),
+                                    Tab::About => about(ui, dialog),
+                                });
+                        });
+                });
+            });
+            ui.painter()
+                .vline(line, body.response.rect.y_range(), rule());
+            ui.add_space(16.0);
+            let y = ui.cursor().top();
+            ui.painter().hline(ui.max_rect().x_range(), y, rule());
+            ui.add_space(16.0);
+            ui.horizontal(|ui| {
+                let restore = widgets::button(
+                    ui,
+                    tr("settings-restore-defaults"),
+                    widgets::Emphasis::Secondary,
+                    true,
+                );
+                if restore.clicked() {
+                    settings = settings.restored();
+                    dialog.picking_accent = false;
+                    dialog.capturing = None;
+                    dialog.refusal = None;
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::button(ui, tr("settings-close"), widgets::Emphasis::Primary, true)
+                        .clicked()
+                    {
+                        close = true;
+                    }
+                });
             });
         });
-    });
     if settings != before {
         store.change(|kept| *kept = settings);
         apply(ctx, store.get(), canvas, files, &mut panels.keys);
