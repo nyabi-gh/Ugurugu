@@ -1165,3 +1165,25 @@ M6-2 앱 확인(24절)에서 이 PC의 앱 기본 작업자 23개가 8개보다 
 | JPEG, EXIF 90° | 189MiB | 4277ms / 1986MiB | 2413~2545ms / 965MiB |
 
 전: 파일 전체를 읽고(`std::fs::read`), 원래 크기로 돌리고, RGBA8로 바꾼 뒤 줄였다. 후: 1MiB 버퍼로 읽으며 디코드하고, 행 띠마다 RGBA로 바꾸며 줄이고, 줄인 뒤 돌린다. 8KiB 버퍼는 1MiB보다 0.15~0.25초 느렸다. BMP는 메모리에서 디코드하던 것보다 0.8초 느려졌다(파일 읽기가 디코드와 섞임). 남은 최대는 디코드한 그림 하나(디코더 예산 1GiB 안).
+
+## 28. M6-7 Windows Sandbox 깨끗한 설치 (2026-10-12, `rust/m6`)
+
+호스트: 이 PC(Windows 11 Pro 10.0.26300), `0549c57` Release 빌드, vpk 1.2.161. `tools/sandbox/prepare.ps1`이 같은 exe를 3.0.0(설치본)과 3.0.1(로컬 피드)로 묶었다. 둘 다 Setup 23,119,744바이트, full nupkg 15,554,432바이트. 시험 문서는 `ugu-doc fixture 1`(1024×1024, 획 300개, 161,986바이트). Sandbox 게스트는 Windows 10.0.26100, `.wsb`는 네트워크와 vGPU를 끄고 `accept.ps1`을 로그온 때 실행한다.
+
+**1회차** (원본 `accept.ps1`): 설치·실행·한글 경로 연결 열기·업데이트·제거 통과, 오프라인 확인 FAIL("You cannot call a method on a null-valued expression."). 앱 로그에는 `WARN ugurugu::update: update check failed error="Network error: Http error: io: 알려진 호스트가 없습니다. (os error 11001)"`가 있어 앱은 맞게 실패했다. 스크립트가 안내 창을 찾으며 UIA 요소를 훑을 때 이름 없는 요소의 `Current.Name`(null)에 `StartsWith`를 불렀다(앞 단계는 이름 없는 요소에 닿기 전에 찾던 요소를 만난 것으로 본다. 가설). 또 vGPU를 껐는데도 실행 단계가 고른 어댑터는 `NVIDIA GeForce RTX 5080 (DiscreteGpu, Dx12)`였다.
+
+**고침:** `Find-Element`가 이름을 `[string]`으로 넘긴다. 실행 단계가 `Win32_VideoController`를 기록하고, `UGURUGU_ADAPTER=warp`로 다시 실행해 WARP 어댑터 이름을 확인하는 단계를 더했다.
+
+**2회차** (고친 `accept.ps1`, 새 작업 폴더): 7단계 모두 통과.
+
+| 단계 | 결과 | 기록 |
+|---|---|---|
+| Install 3.0.0 | pass | `C:\Users\WDAGUtilityAccount\AppData\Local\Ugurugu3`, files `LICENSE.txt, sq.version, THIRD_PARTY_NOTICES.txt, ugurugu.exe`, Apps entry 'Ugurugu 3', 바로 가기 둘 |
+| Run | pass | display adapters: NVIDIA GeForce RTX 5080, Intel(R) Graphics, Microsoft Remote Display Adapter; 선택 RTX 5080 (DiscreteGpu, Dx12) |
+| Run on WARP | pass | 선택 Microsoft Basic Render Driver (Cpu, Dx12) |
+| Open by association from a Korean path | pass | 제목 '새 그림 - Ugurugu', `document opened ms=1.4182 ok=true` |
+| Update to 3.0.1 with unsaved changes | pass | 질문 → 취소 → 앱 유지 → 업데이트 확인으로 다시 질문 → 저장 안 함 → 3.0.1로 다시 시작. 로그: 피드에서 3.0.0 → 3.0.1 발견, nupkg 복사 33ms, 복구 기록 후 `Update.exe` 실행 |
+| Check for updates offline | pass | 안내 'Could not check for updates. Network error: Http error: io: 알려진 호스트가 없습니다. (os error 11001)' |
+| Uninstall | pass | 앱·바로 가기·연결·앱 목록 항목 제거. 남음: `AppData\Local\Ugurugu`(로그 6개), `AppData\Roaming\Ugurugu`(파일 1개) |
+
+로그 6개 중 WARN은 오프라인 확인 하나, ERROR·panic 기록 없음. Sandbox가 `<VGpu>Disable</VGpu>`에도 호스트 GPU를 보여 주는 원인(이 Sandbox 판이 설정을 무시하는지, 다른 설정이 필요한지)은 확인하지 않았다(가설). GPU가 정말 없을 때의 자연 WARP 경로는 CI smoke(windows-2025)가 확인한다.

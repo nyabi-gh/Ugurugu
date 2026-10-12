@@ -8,7 +8,7 @@ The clean-install acceptance of 3.0, run inside Windows Sandbox (M6-7).
 .DESCRIPTION
 Started at logon by the .wsb that prepare.ps1 writes, with C:\m6-7\in
 (packages, feed, document; read-only) and C:\m6-7\out (results) mapped.
-The Sandbox has no network and no GPU. Each step is recorded in
+The Sandbox has no network. Each step is recorded in
 C:\m6-7\out\results.md as it ends, and the app's logs are copied there.
 Dialog buttons are pressed through UI Automation by their English names.
 Runs in Windows PowerShell 5.1, which has the .NET UI Automation client.
@@ -102,7 +102,8 @@ function Find-Element($Process, [scriptblock] $Match, [int] $Seconds = 30, [stri
         $window = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
         $all = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
         foreach ($element in $all) {
-            if (& $Match $element.Current.Name) {
+            # Elements without a label have a null name.
+            if (& $Match ([string] $element.Current.Name)) {
                 return $element
             }
         }
@@ -152,12 +153,13 @@ Step 'Install 3.0.0' {
     "version $version in $installRoot", "files: $($files -join ', ')", "Apps entry '$name'", 'shortcuts on the desktop and in Start'
 }
 
-Step 'Run without a GPU' {
+function Start-AndClose {
+    $before = @(Log-Lines 'selected GPU adapter').Count
     $started = Start-Process -FilePath $app -PassThru
     # Kept, so the exit code can be read once it ends.
     [void]$started.Handle
     $process = Wait-Window
-    $adapter = Wait-Until { Log-Lines 'selected GPU adapter' | Select-Object -Last 1 } 60 'the adapter in the log'
+    $adapter = Wait-Until { $lines = @(Log-Lines 'selected GPU adapter'); if ($lines.Count -gt $before) { $lines[-1] } } 60 'the adapter in the log'
     $title = $process.MainWindowTitle
     Close-App $process
     $started.WaitForExit()
@@ -165,6 +167,26 @@ Step 'Run without a GPU' {
         throw "Exit code $($started.ExitCode)"
     }
     "title '$title'", $adapter
+}
+
+# The Sandbox may still share the host GPU although the .wsb disables it.
+Step 'Run' {
+    $controllers = @(Get-CimInstance Win32_VideoController | ForEach-Object Name)
+    "display adapters: $($controllers -join ', ')"
+    Start-AndClose
+}
+
+Step 'Run on WARP' {
+    $env:UGURUGU_ADAPTER = 'warp'
+    try {
+        $result = Start-AndClose
+    } finally {
+        Remove-Item Env:UGURUGU_ADAPTER
+    }
+    if ($result[-1] -notmatch 'Basic Render Driver|Cpu') {
+        throw "Not WARP: $($result[-1])"
+    }
+    $result
 }
 
 Step 'Open by association from a Korean path' {

@@ -8,8 +8,8 @@ Prepares the clean-install acceptance run of 3.0 in Windows Sandbox (M6-7).
 .DESCRIPTION
 Packs the executable twice, as 3.0.0 to install and as 3.0.1 in a local
 update feed, makes a document to open, and writes a .wsb that maps them
-read-only into a Sandbox with no network and no GPU (so the app draws with
-WARP) and runs accept.ps1 there at logon. The results come back in
+read-only into a Sandbox with no network and the vGPU disabled, and runs
+accept.ps1 there at logon. The results come back in
 <Work>\out\results.md. Nothing on this PC is installed or registered.
 
 .EXAMPLE
