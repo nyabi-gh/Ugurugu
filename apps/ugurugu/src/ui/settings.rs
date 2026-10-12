@@ -165,7 +165,7 @@ pub fn show(
                     .strong()
                     .color(theme::text()),
             );
-            ui.add_space(theme::space::XL);
+            widgets::space_after(ui, theme::space::XL);
             let mut line = 0.0;
             let body = ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
@@ -182,10 +182,10 @@ pub fn show(
                         }
                     }
                 });
-                ui.add_space(GAP);
-                line = ui.cursor().left();
-                ui.add_space(1.0);
-                ui.add_space(GAP);
+                // egui's room after the list counts toward the gap.
+                ui.add_space(GAP - ui.spacing().item_spacing.x);
+                line = ui.cursor().left() + 0.5;
+                ui.add_space(1.0 + GAP);
                 ui.vertical(|ui| {
                     ui.set_width(CONTENT.x);
                     ui.label(
@@ -231,11 +231,7 @@ pub fn show(
             });
             ui.painter()
                 .vline(line, body.response.rect.y_range(), widgets::rule());
-            ui.add_space(theme::space::XL);
-            let y = ui.cursor().top();
-            ui.painter()
-                .hline(ui.max_rect().x_range(), y, widgets::rule());
-            ui.add_space(theme::space::XL);
+            widgets::divider(ui, theme::space::XL);
             ui.horizontal(|ui| {
                 let restore = widgets::button(
                     ui,
@@ -343,7 +339,8 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
                 let [r, g, b, _] = color.to_array();
                 settings.accent = (([r, g, b]) != theme::DEFAULT_ACCENT).then_some([r, g, b]);
             }
-            ui.add_space(theme::space::M);
+            // As much room as over it; the next row takes back egui's.
+            ui.add_space(ui.spacing().item_spacing.y + theme::space::XS);
         }
         widgets::setting_row(
             ui,
@@ -523,7 +520,7 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
         if system.clicked() {
             settings.default_save_folder = None;
         }
-        ui.add_space(theme::space::M);
+        widgets::space_after(ui, theme::space::L);
     });
 }
 
@@ -818,14 +815,7 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
                 );
             });
         });
-        ui.add_space(theme::space::XL);
-        let y = ui.cursor().top();
-        ui.painter().hline(
-            ui.max_rect().x_range(),
-            y,
-            egui::Stroke::new(1.0, theme::border().gamma_multiply(0.6)),
-        );
-        ui.add_space(theme::space::L);
+        widgets::divider(ui, theme::space::L);
         for credit in [
             tr("settings-credit-development"),
             tr("settings-credit-icon"),
@@ -836,7 +826,7 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
                     .color(theme::muted()),
             );
         }
-        ui.add_space(theme::space::XL);
+        widgets::space_after(ui, theme::space::XL);
     });
     ui.add_space(theme::space::XL);
     widgets::card(ui, |ui| {

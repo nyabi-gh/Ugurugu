@@ -979,7 +979,7 @@ impl Files {
                         }
                     }
                 });
-                ui.add_space(theme::space::XL);
+                widgets::space_after(ui, theme::space::L);
             });
             ui.add_space(theme::space::L);
             widgets::card(ui, |ui| {
@@ -1536,7 +1536,7 @@ impl Files {
                             .wrap(),
                         );
                     }
-                    ui.add_space(theme::space::L);
+                    widgets::space_after(ui, theme::space::L);
                 });
                 widgets::dialog_buttons(ui, |ui| {
                     for (choice_here, key, emphasis) in [

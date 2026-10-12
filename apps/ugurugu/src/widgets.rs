@@ -721,6 +721,11 @@ fn row_with<R>(
     let text_height = measure(title, theme::BODY)
         + description.map_or(0.0, |description| 2.0 + measure(description, theme::SMALL));
     let height = text_height.max(theme::CONTROL_HEIGHT) + 2.0 * PADDING;
+    if !first {
+        // Up against the row before, or egui's room after it would widen
+        // the room under that row's text and not over it.
+        ui.add_space(-ui.spacing().item_spacing.y);
+    }
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     if !first {
         ui.painter().hline(rect.x_range(), rect.top(), rule());
@@ -797,7 +802,7 @@ pub fn dialog<R>(
                     egui::Label::new(egui::RichText::new(description).color(theme::muted())).wrap(),
                 );
             }
-            ui.add_space(theme::space::XL);
+            space_after(ui, theme::space::XL);
             add(ui)
         })
 }
@@ -805,18 +810,31 @@ pub fn dialog<R>(
 /// The buttons at the foot of a dialog, after a faint line, at the right:
 /// `add` adds them from the right, the one that confirms first.
 pub fn dialog_buttons<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.add_space(theme::space::XL);
-    let y = ui.cursor().top();
-    ui.painter().hline(ui.max_rect().x_range(), y, rule());
-    ui.add_space(theme::space::XL);
+    divider(ui, theme::space::XL);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add)
         .inner
+}
+
+/// `amount` points of room under the widget just added: egui leaves some
+/// after every widget, and an end of a card or a line under a widget would
+/// otherwise have that much more room than the start over it.
+pub fn space_after(ui: &mut Ui, amount: f32) {
+    ui.add_space(amount - ui.spacing().item_spacing.y);
+}
+
+/// A faint line across `ui` with `gap` points on either side of it, after
+/// a widget: egui's room after that widget counts toward the gap above.
+pub fn divider(ui: &mut Ui, gap: f32) {
+    space_after(ui, gap);
+    let y = ui.cursor().top();
+    ui.painter().hline(ui.max_rect().x_range(), y, rule());
+    ui.add_space(gap);
 }
 
 /// A small heading over a card, with room above it unless it is the first.
 pub fn section(ui: &mut Ui, text: &str, first: bool) {
     if !first {
-        ui.add_space(theme::space::XL);
+        space_after(ui, theme::space::XL);
     }
     ui.label(
         egui::RichText::new(text)
@@ -945,6 +963,37 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    #[test]
+    fn settings_rows_meet_so_each_is_centred_between_its_lines() {
+        let ctx = egui::Context::default();
+        let show = |ui: &mut Ui| {
+            ui.set_width(400.0);
+            card(ui, |ui| {
+                [true, false, false].map(|first| {
+                    setting_row(ui, first, "name", Some("what it does"), |ui| {
+                        ui.label("control");
+                        ui.max_rect()
+                    })
+                })
+            })
+        };
+        frame(&ctx, Vec::new(), show);
+        let rows = frame(&ctx, Vec::new(), show);
+        assert_eq!(rows[1].top(), rows[0].bottom());
+        assert_eq!(rows[2].top(), rows[1].bottom());
+    }
+
+    #[test]
+    fn a_divider_has_as_much_room_over_it_as_under_it() {
+        let ctx = egui::Context::default();
+        let (over, under) = frame(&ctx, Vec::new(), |ui| {
+            let over = ui.label("over").rect;
+            divider(ui, theme::space::XL);
+            (over, ui.label("under").rect)
+        });
+        assert_eq!(under.top() - over.bottom(), 2.0 * theme::space::XL);
     }
 
     #[test]
