@@ -1825,6 +1825,7 @@ fn pixel_mode_is_one_step_and_the_tools_follow_it() {
     session.fill.antialias = true;
     session.transform_sampling = Sampling::Smooth;
     assert_eq!(session.pen.preset.brush.engine, BrushEngine::Line);
+    let (pen, eraser) = (session.pen.preset.id, session.eraser.preset.id);
     session.set_pixel_mode(true).unwrap();
     assert!(session.pixel_mode());
     assert_eq!(session.pen.preset.brush.engine, BrushEngine::Pixel);
@@ -1842,12 +1843,16 @@ fn pixel_mode_is_one_step_and_the_tools_follow_it() {
             .all(|(_, _, antialias, _)| !antialias)
     );
 
-    // Undone, the mode goes; the tools stay as they are.
+    // Undone, the mode goes, and the brushes and fill edges it replaced come
+    // back once the window follows it.
     session.undo().unwrap();
     session.undo().unwrap();
     assert!(!session.pixel_mode());
     assert_eq!(session.sampling(), Sampling::Smooth);
-    assert_eq!(session.pen.preset.brush.engine, BrushEngine::Pixel);
+    session.follow_pixel_mode();
+    assert_eq!(session.pen.preset.id, pen);
+    assert_eq!(session.eraser.preset.id, eraser);
+    assert!(session.fill.antialias);
     session.redo().unwrap();
     assert!(session.pixel_mode());
 
@@ -1859,6 +1864,32 @@ fn pixel_mode_is_one_step_and_the_tools_follow_it() {
         session.live().unwrap().template.brush.engine,
         BrushEngine::Pixel
     );
+}
+
+#[test]
+fn a_new_document_out_of_pixel_mode_gets_the_brushes_back() {
+    let mut pixel = session();
+    let pen = pixel.pen.preset.id;
+    pixel.set_pixel_mode(true).unwrap();
+    pixel.fill.antialias = false;
+
+    // As a new document takes the tools over.
+    let mut plain = Session::new(Document::new([64, 64]), true);
+    plain.set_tools(pixel.tools()).unwrap();
+    assert_eq!(plain.pen.preset.brush.engine, BrushEngine::Pixel);
+    plain.follow_pixel_mode();
+    assert_eq!(plain.pen.preset.id, pen);
+    assert_ne!(plain.eraser.preset.brush.engine, BrushEngine::Pixel);
+    assert!(plain.fill.antialias);
+
+    // A pixel brush chosen out of pixel mode is the user's and stays.
+    let pencil = ugu_core::brush::BRUSHES
+        .iter()
+        .find(|preset| preset.brush.engine == BrushEngine::Pixel)
+        .unwrap();
+    plain.choose_preset(Tool::Pen, pencil);
+    plain.follow_pixel_mode();
+    assert_eq!(plain.pen.preset.id, pencil.id);
 }
 
 #[test]

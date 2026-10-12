@@ -9,7 +9,9 @@ use serde_json::{Map, Value, json};
 use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::STROKE_WIDTH;
-use ugu_session::{ColorHistory, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools};
+use ugu_session::{
+    BeforePixel, ColorHistory, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools,
+};
 
 const TOOLS: [(Tool, &str); 7] = [
     (Tool::Pen, "brush"),
@@ -202,6 +204,15 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
     }
     tools.remembered.remove(pen.id);
     tools.remembered.remove(eraser.id);
+    if let Some(before) = object(value, "beforePixel") {
+        let mut fill_antialias = tools.fill.antialias;
+        boolean(before, "fillAntialias", &mut fill_antialias);
+        tools.before_pixel = Some(BeforePixel {
+            pen: preset(before.get("brush"), &brush::BRUSHES, tools.pen.preset),
+            eraser: preset(before.get("eraser"), &brush::ERASERS, tools.eraser.preset),
+            fill_antialias,
+        });
+    }
 
     if let Some(selection) = object(value, "selection") {
         named(selection, "shape", &SHAPES, &mut tools.selection_shape);
@@ -263,7 +274,7 @@ pub(super) fn to_json(tools: &Tools) -> Value {
     }
     text.insert("size".to_owned(), tools.text.size.into());
     text.insert("filled".to_owned(), tools.text.filled.into());
-    json!({
+    let mut value = json!({
         "tool": name(&TOOLS, tools.tool),
         "brush": {
             "preset": tools.pen.preset.id,
@@ -288,7 +299,18 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "antialias": tools.fill.antialias,
         },
         "text": text,
-    })
+    });
+    if let (Some(before), Some(object)) = (tools.before_pixel, value.as_object_mut()) {
+        object.insert(
+            "beforePixel".to_owned(),
+            json!({
+                "brush": before.pen.id,
+                "eraser": before.eraser.id,
+                "fillAntialias": before.fill_antialias,
+            }),
+        );
+    }
+    value
 }
 
 pub(super) fn parse_history(value: &Value) -> ColorHistory {
@@ -346,6 +368,11 @@ mod tests {
         tools.fill.reads = Reads::Visible;
         tools.fill.by_colour = true;
         tools.fill.tolerance = 7;
+        tools.before_pixel = Some(BeforePixel {
+            pen: &brush::BRUSHES[0],
+            eraser: &brush::ERASERS[1],
+            fill_antialias: false,
+        });
         tools.fill.antialias = false;
         tools.text = TextSettings {
             family: Some("Malgun Gothic".to_owned()),

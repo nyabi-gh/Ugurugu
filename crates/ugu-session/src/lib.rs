@@ -52,6 +52,15 @@ pub enum Tool {
     Eyedropper,
 }
 
+/// The brush, eraser and fill edges that pixel mode replaced, put back when
+/// it goes off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeforePixel {
+    pub pen: &'static Preset,
+    pub eraser: &'static Preset,
+    pub fill_antialias: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolSettings {
     /// Ignored by the eraser.
@@ -159,6 +168,7 @@ pub struct Session {
     /// The width and stabilizer each preset not in use had when another was
     /// chosen.
     remembered: HashMap<&'static str, (f32, f32)>,
+    before_pixel: Option<BeforePixel>,
     live: Option<LiveStroke>,
     /// The selection tool's shape.
     pub selection_shape: ShapeKind,
@@ -197,6 +207,7 @@ impl Session {
             pen: ToolSettings::PEN,
             eraser: ToolSettings::ERASER,
             remembered: HashMap::new(),
+            before_pixel: None,
             live: None,
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
@@ -695,11 +706,29 @@ impl Session {
     }
 
     /// In pixel mode, a brush or eraser that is not a pixel one becomes the
-    /// pixel pencil or eraser; called when the mode may have changed, by
-    /// undo and redo or another document too.
+    /// pixel pencil or eraser; out of it, the ones it replaced come back.
+    /// Called when the mode may have changed, by undo and redo or another
+    /// document too.
     pub fn follow_pixel_mode(&mut self) {
+        let pixel = |preset: &Preset| preset.brush.engine == BrushEngine::Pixel;
         if !self.pixel_mode() {
+            if let Some(before) = self.before_pixel.take() {
+                if pixel(self.pen.preset) {
+                    self.choose_preset(Tool::Pen, before.pen);
+                }
+                if pixel(self.eraser.preset) {
+                    self.choose_preset(Tool::Eraser, before.eraser);
+                }
+                self.fill.antialias = before.fill_antialias;
+            }
             return;
+        }
+        if self.before_pixel.is_none() && !(pixel(self.pen.preset) && pixel(self.eraser.preset)) {
+            self.before_pixel = Some(BeforePixel {
+                pen: self.pen.preset,
+                eraser: self.eraser.preset,
+                fill_antialias: self.fill.antialias,
+            });
         }
         for (tool, presets) in [
             (Tool::Pen, &brush::BRUSHES[..]),

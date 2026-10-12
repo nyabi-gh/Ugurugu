@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use ugu_core::edit::EditError;
 use ugu_core::ops::{Rgba8, Sampling};
 
-use crate::{FillSettings, Session, ShapeKind, TextSettings, Tool, ToolSettings};
+use crate::{BeforePixel, FillSettings, Session, ShapeKind, TextSettings, Tool, ToolSettings};
 
 /// The colours strokes, fills and text were made with, newest first and each
 /// once, as 2.2.13's colour history.
@@ -57,6 +57,8 @@ pub struct Tools {
     pub eraser: ToolSettings,
     /// Width and stabilizer of the presets not in use, by preset id.
     pub remembered: HashMap<&'static str, (f32, f32)>,
+    /// What pixel mode replaced, while it is on.
+    pub before_pixel: Option<BeforePixel>,
     pub selection_shape: ShapeKind,
     pub lasso_paints: bool,
     pub uses_pressure: bool,
@@ -74,6 +76,7 @@ impl Default for Tools {
             pen: ToolSettings::PEN,
             eraser: ToolSettings::ERASER,
             remembered: HashMap::new(),
+            before_pixel: None,
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
             uses_pressure: true,
@@ -93,6 +96,7 @@ impl Session {
             pen: self.pen,
             eraser: self.eraser,
             remembered: self.remembered.clone(),
+            before_pixel: self.before_pixel,
             selection_shape: self.selection_shape,
             lasso_paints: self.lasso_paints,
             uses_pressure: self.uses_pressure,
@@ -112,6 +116,7 @@ impl Session {
             pen,
             eraser,
             remembered,
+            before_pixel,
             selection_shape,
             lasso_paints,
             uses_pressure,
@@ -124,6 +129,7 @@ impl Session {
         self.pen = pen;
         self.eraser = eraser;
         self.remembered = remembered;
+        self.before_pixel = before_pixel;
         self.selection_shape = selection_shape;
         self.lasso_paints = lasso_paints;
         self.uses_pressure = uses_pressure;
