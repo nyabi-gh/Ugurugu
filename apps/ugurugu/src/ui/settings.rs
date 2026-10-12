@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The settings dialog, as 2.2.13's: tabs for general, drawing, files,
-//! shortcuts and about, each change applied and kept at once, and a button
-//! that restores the defaults. 2.2.13's choice of wobbling while a stroke is
+//! The settings dialog: 2.2.13's tabs for general, drawing, files,
+//! shortcuts and about, listed on the left, with each tab's settings in
+//! cards on the right; each change is applied and kept at once, and a button
+//! restores the defaults. 2.2.13's choice of wobbling while a stroke is
 //! drawn is left out because 3.0 stops playback for a stroke.
 
 use crate::canvas::Canvas;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
+use crate::icons::Glyph;
 use crate::settings::{Language, Settings, Store};
 use crate::shortcuts::{Action, Chord, Keymap};
 use crate::theme;
@@ -16,7 +18,7 @@ use crate::widgets;
 
 use super::{Panels, actions, args};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tab {
     #[default]
     General,
@@ -59,6 +61,8 @@ pub struct Dialog {
     refocus: Option<Action>,
     /// Why the last key was refused.
     refusal: Option<String>,
+    /// What the shortcut list is narrowed to.
+    search: String,
 }
 
 fn theme_name(mode: theme::Mode) -> &'static str {
@@ -113,6 +117,10 @@ pub fn apply(
     *keys = Keymap::new(&settings.shortcuts);
 }
 
+/// The list of tabs on the left, and the room the tab shown takes.
+const SIDEBAR: f32 = 156.0;
+const CONTENT: egui::Vec2 = egui::vec2(540.0, 400.0);
+
 /// Shows the dialog if open, and takes a default save folder chosen in it.
 /// `typed`: chords egui turns into clipboard events, for a new shortcut.
 pub fn show(
@@ -138,50 +146,77 @@ pub fn show(
     let mut settings = before.clone();
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("settings dialog")).show(ctx, |ui| {
-        ui.set_width(460.0);
-        ui.heading(tr("settings-title"));
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if ui
-                    .selectable_label(dialog.tab == tab, tab.title())
-                    .clicked()
-                {
-                    dialog.tab = tab;
-                    dialog.picking_accent = false;
-                    dialog.capturing = None;
+        ui.set_width(SIDEBAR + 16.0 + CONTENT.x);
+        ui.label(
+            egui::RichText::new(tr("settings-title"))
+                .size(theme::BODY + 5.0)
+                .strong()
+                .color(theme::text()),
+        );
+        ui.add_space(10.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(SIDEBAR);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for tab in Tab::ALL {
+                    if sidebar_item(ui, tab.title(), dialog.tab == tab).clicked() {
+                        dialog.tab = tab;
+                        dialog.picking_accent = false;
+                        dialog.capturing = None;
+                        dialog.refusal = None;
+                    }
                 }
-            }
-        });
-        ui.separator();
-        ui.allocate_ui(egui::vec2(ui.available_width(), 220.0), |ui| {
-            ui.set_min_height(220.0);
-            match dialog.tab {
-                Tab::General => general(ui, dialog, &mut settings),
-                Tab::Drawing => {
-                    widgets::checkbox(
-                        ui,
-                        &mut settings.wobble_animation,
-                        tr("settings-wobble-animation"),
-                    );
-                    widgets::checkbox(ui, &mut settings.pixel_grid, tr("settings-pixel-grid"))
-                        .on_hover_text(tr("settings-pixel-grid-tip"));
+            });
+            ui.add_space(16.0);
+            ui.vertical(|ui| {
+                ui.set_width(CONTENT.x);
+                ui.label(
+                    egui::RichText::new(dialog.tab.title())
+                        .size(theme::BODY + 3.0)
+                        .strong()
+                        .color(theme::text()),
+                );
+                ui.add_space(8.0);
+                let mut height = CONTENT.y;
+                if dialog.tab == Tab::Shortcuts {
+                    let top = ui.cursor().top();
+                    shortcuts_header(ui, dialog, canvas, &mut settings, typed);
+                    height -= ui.cursor().top() - top;
                 }
-                Tab::Files => save_folder(ui, files, &mut settings),
-                Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings, typed),
-                Tab::About => about(ui),
-            }
+                egui::ScrollArea::vertical()
+                    .id_salt(("settings tab", dialog.tab))
+                    .max_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_height(height);
+                        match dialog.tab {
+                            Tab::General => general(ui, dialog, &mut settings),
+                            Tab::Drawing => drawing(ui, &mut settings),
+                            Tab::Files => save_folder(ui, files, &mut settings),
+                            Tab::Shortcuts => shortcuts(ui, dialog, canvas, &mut settings),
+                            Tab::About => about(ui),
+                        }
+                    });
+            });
         });
-        ui.separator();
+        ui.add_space(12.0);
         ui.horizontal(|ui| {
-            if ui.button(tr("settings-restore-defaults")).clicked() {
+            let restore = widgets::button(
+                ui,
+                tr("settings-restore-defaults"),
+                widgets::Emphasis::Secondary,
+                true,
+            );
+            if restore.clicked() {
                 settings = settings.restored();
                 dialog.picking_accent = false;
                 dialog.capturing = None;
                 dialog.refusal = None;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("settings-close")).clicked() {
+                if widgets::button(ui, tr("settings-close"), widgets::Emphasis::Primary, true)
+                    .clicked()
+                {
                     close = true;
                 }
             });
@@ -196,39 +231,71 @@ pub fn show(
     }
 }
 
-fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
-    egui::Grid::new("settings general")
-        .num_columns(2)
-        .spacing([18.0, 10.0])
-        .show(ui, |ui| {
-            widgets::field_label(ui, tr("settings-language"));
-            egui::ComboBox::from_id_salt("settings language")
-                .selected_text(language_name(settings.language))
-                .width(180.0)
-                .show_ui(ui, |ui| {
-                    for language in Language::ALL {
-                        widgets::choice(
-                            ui,
-                            &mut settings.language,
-                            language,
-                            language_name(language),
-                        );
-                    }
-                })
-                .response
-                .widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::ComboBox,
-                        true,
-                        tr("settings-language"),
-                    )
-                });
-            ui.end_row();
+/// A tab in the list on the left: a bar in the accent and a raised fill
+/// mark the one shown.
+fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(SIDEBAR, 32.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, text)
+    });
+    let painter = ui.painter();
+    if selected || response.hovered() {
+        painter.rect_filled(rect, egui::CornerRadius::same(6), theme::hover());
+    }
+    if selected {
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), rect.top() + 8.0),
+            egui::vec2(3.0, rect.height() - 16.0),
+        );
+        painter.rect_filled(bar, egui::CornerRadius::same(2), theme::accent_ink());
+    }
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect,
+            egui::CornerRadius::same(6),
+            egui::Stroke::new(1.0, theme::accent_ink()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let ink = if selected {
+        theme::text()
+    } else {
+        theme::muted()
+    };
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(theme::BODY),
+        ink,
+    );
+    painter.galley(
+        egui::pos2(rect.left() + 14.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    response
+}
 
-            widgets::field_label(ui, tr("settings-theme"));
+/// A small heading over a card.
+fn section(ui: &mut egui::Ui, text: &str, first: bool) {
+    if !first {
+        ui.add_space(14.0);
+    }
+    ui.label(
+        egui::RichText::new(text)
+            .size(theme::SMALL)
+            .strong()
+            .color(theme::muted()),
+    );
+    ui.add_space(2.0);
+}
+
+fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
+    section(ui, tr("settings-appearance"), true);
+    widgets::card(ui, |ui| {
+        widgets::setting_row(ui, true, tr("settings-theme"), None, |ui| {
             egui::ComboBox::from_id_salt("settings-theme")
                 .selected_text(theme_name(settings.theme))
-                .width(160.0)
+                .width(190.0)
                 .show_ui(ui, |ui| {
                     for mode in theme::Mode::ALL {
                         widgets::choice(ui, &mut settings.theme, mode, theme_name(mode));
@@ -242,55 +309,144 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
                         tr("settings-theme"),
                     )
                 });
-            ui.end_row();
-
-            widgets::field_label(ui, tr("settings-theme-color"));
-            let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
-            let color = egui::Color32::from_rgb(r, g, b);
-            let hex = format!("#{r:02x}{g:02x}{b:02x}");
-            let button = ui.add(
-                egui::Button::new(egui::RichText::new(&hex).color(theme::accent_text()))
-                    .fill(color)
-                    .min_size(egui::vec2(120.0, 26.0)),
-            );
-            button.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    true,
-                    format!("{} {hex}", tr("settings-theme-color")),
-                )
-            });
-            if button.clicked() {
-                dialog.picking_accent = !dialog.picking_accent;
-            }
-            ui.end_row();
         });
-    if dialog.picking_accent {
-        let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
-        let mut color = egui::Color32::from_rgb(r, g, b);
-        if egui::color_picker::color_picker_color32(
-            ui,
-            &mut color,
-            egui::color_picker::Alpha::Opaque,
-        ) {
-            let [r, g, b, _] = color.to_array();
-            settings.accent = (([r, g, b]) != theme::DEFAULT_ACCENT).then_some([r, g, b]);
+        widgets::setting_row(ui, false, tr("settings-theme-color"), None, |ui| {
+            accent_swatch(ui, dialog, settings);
+        });
+        if dialog.picking_accent {
+            let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
+            let mut color = egui::Color32::from_rgb(r, g, b);
+            ui.add_space(4.0);
+            if egui::color_picker::color_picker_color32(
+                ui,
+                &mut color,
+                egui::color_picker::Alpha::Opaque,
+            ) {
+                let [r, g, b, _] = color.to_array();
+                settings.accent = (([r, g, b]) != theme::DEFAULT_ACCENT).then_some([r, g, b]);
+            }
+            ui.add_space(8.0);
         }
-    }
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new(tr("settings-restart")).color(theme::muted()));
-    ui.add_space(10.0);
-    widgets::checkbox(
-        ui,
-        &mut settings.check_updates,
-        tr("settings-check-updates"),
+    });
+
+    section(ui, tr("settings-language"), false);
+    widgets::card(ui, |ui| {
+        widgets::setting_row(
+            ui,
+            true,
+            tr("settings-language"),
+            Some(tr("settings-restart")),
+            |ui| {
+                egui::ComboBox::from_id_salt("settings language")
+                    .selected_text(language_name(settings.language))
+                    .width(190.0)
+                    .show_ui(ui, |ui| {
+                        for language in Language::ALL {
+                            widgets::choice(
+                                ui,
+                                &mut settings.language,
+                                language,
+                                language_name(language),
+                            );
+                        }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            true,
+                            tr("settings-language"),
+                        )
+                    });
+            },
+        );
+    });
+
+    section(ui, tr("settings-updates"), false);
+    widgets::card(ui, |ui| {
+        widgets::setting_row(ui, true, tr("settings-check-updates"), None, |ui| {
+            widgets::switch(
+                ui,
+                &mut settings.check_updates,
+                tr("settings-check-updates"),
+            );
+        });
+    });
+}
+
+/// The accent as a swatch with its hex code, opening the picker.
+fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
+    let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
+    let color = egui::Color32::from_rgb(r, g, b);
+    let hex = format!("#{r:02X}{g:02X}{b:02X}");
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(120.0, 28.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!("{} {hex}", tr("settings-theme-color")),
+        )
+    });
+    let painter = ui.painter();
+    let edge = if response.hovered() || dialog.picking_accent {
+        theme::disabled()
+    } else {
+        theme::border()
+    };
+    painter.rect(
+        rect,
+        egui::CornerRadius::same(6),
+        theme::control(),
+        egui::Stroke::new(1.0, edge),
+        egui::StrokeKind::Inside,
     );
+    let chip = egui::Rect::from_min_size(rect.min + egui::vec2(5.0, 5.0), egui::vec2(18.0, 18.0));
+    painter.rect_filled(chip, egui::CornerRadius::same(4), color);
+    let galley = painter.layout_no_wrap(
+        hex.clone(),
+        egui::FontId::monospace(theme::BODY),
+        theme::text(),
+    );
+    painter.galley(
+        egui::pos2(chip.right() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::text(),
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(1.0, theme::accent_ink()),
+            egui::StrokeKind::Outside,
+        );
+    }
+    if response.clicked() {
+        dialog.picking_accent = !dialog.picking_accent;
+    }
+}
+
+fn drawing(ui: &mut egui::Ui, settings: &mut Settings) {
+    widgets::card(ui, |ui| {
+        widgets::setting_row(ui, true, tr("settings-wobble-animation"), None, |ui| {
+            widgets::switch(
+                ui,
+                &mut settings.wobble_animation,
+                tr("settings-wobble-animation"),
+            );
+        });
+        widgets::setting_row(
+            ui,
+            false,
+            tr("settings-pixel-grid"),
+            Some(tr("settings-pixel-grid-tip")),
+            |ui| {
+                widgets::switch(ui, &mut settings.pixel_grid, tr("settings-pixel-grid"));
+            },
+        );
+    });
 }
 
 fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
-    let label = widgets::field_label(ui, tr("settings-default-folder"));
-    ui.label(egui::RichText::new(tr("settings-default-folder-hint")).color(theme::muted()));
-    ui.add_space(4.0);
     // The configured folder, or what "system default" means; checking that
     // the folder still exists is left to the dialogs.
     let shown = settings
@@ -299,27 +455,54 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
         .or_else(ugu_win::folder::documents)
         .map(|folder| folder.display().to_string())
         .unwrap_or_default();
-    ui.horizontal(|ui| {
-        let mut text = shown.as_str();
-        ui.add(
-            egui::TextEdit::singleline(&mut text)
-                .desired_width(ui.available_width() - 90.0)
-                .interactive(true),
-        )
-        .labelled_by(label.id);
-        if ui.button(tr("settings-choose")).clicked() {
-            files.choose_save_folder();
-        }
-    });
-    if ui
-        .add_enabled(
+    widgets::card(ui, |ui| {
+        widgets::setting_row(
+            ui,
+            true,
+            tr("settings-default-folder"),
+            Some(tr("settings-default-folder-hint")),
+            |ui| {
+                let choose = widgets::button(
+                    ui,
+                    tr("settings-choose"),
+                    widgets::Emphasis::Secondary,
+                    true,
+                );
+                if choose.clicked() {
+                    files.choose_save_folder();
+                }
+            },
+        );
+        egui::Frame::new()
+            .fill(theme::panel())
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::Label::new(egui::RichText::new(&shown).monospace().color(theme::text()))
+                        .wrap(),
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        true,
+                        format!("{}: {shown}", tr("settings-default-folder")),
+                    )
+                });
+            });
+        ui.add_space(8.0);
+        let system = widgets::button(
+            ui,
+            tr("settings-system-folder"),
+            widgets::Emphasis::Secondary,
             settings.default_save_folder.is_some(),
-            egui::Button::new(tr("settings-system-folder")),
-        )
-        .clicked()
-    {
-        settings.default_save_folder = None;
-    }
+        );
+        if system.clicked() {
+            settings.default_save_folder = None;
+        }
+        ui.add_space(8.0);
+    });
 }
 
 /// What was pressed while a new key is awaited.
@@ -371,9 +554,9 @@ fn pressed(ctx: &egui::Context, typed: &[Chord]) -> Option<Pressed> {
     found
 }
 
-/// Every action with its key, a button that waits for a new key, and one
-/// that clears it, as 2.2.13's shortcut tab.
-fn shortcuts(
+/// Above the list: takes the key awaited, and holds the search field, the
+/// hint and why the last key was refused.
+fn shortcuts_header(
     ui: &mut egui::Ui,
     dialog: &mut Dialog,
     canvas: &Canvas,
@@ -400,30 +583,63 @@ fn shortcuts(
                 });
         }
     }
-    ui.label(egui::RichText::new(tr("settings-shortcuts-hint")).color(theme::muted()));
+    ui.add(
+        egui::TextEdit::singleline(&mut dialog.search)
+            .hint_text(tr("settings-shortcuts-search"))
+            .desired_width(f32::INFINITY)
+            .margin(egui::Margin::symmetric(8, 6)),
+    )
+    .widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::TextEdit,
+            true,
+            tr("settings-shortcuts-search"),
+        )
+    });
     ui.add_space(4.0);
-    let keys = Keymap::new(&settings.shortcuts);
-    egui::ScrollArea::vertical()
-        .max_height(170.0)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            egui::Grid::new("settings shortcuts")
-                .num_columns(3)
-                .spacing([12.0, 4.0])
-                .show(ui, |ui| {
-                    for &action in Action::ALL {
-                        shortcut_row(ui, dialog, canvas, settings, &keys, action);
-                        ui.end_row();
-                    }
-                });
-        });
+    ui.label(
+        egui::RichText::new(tr("settings-shortcuts-hint"))
+            .size(theme::SMALL)
+            .color(theme::muted()),
+    );
     if let Some(refusal) = &dialog.refusal {
         ui.colored_label(theme::accent_ink(), refusal);
     }
+    ui.add_space(6.0);
+}
+
+/// Every action matching the search with its key, a field that waits for a
+/// new key, and a button that clears it, as 2.2.13's shortcut tab.
+fn shortcuts(ui: &mut egui::Ui, dialog: &mut Dialog, canvas: &Canvas, settings: &mut Settings) {
+    let keys = Keymap::new(&settings.shortcuts);
+    let query = dialog.search.trim().to_lowercase();
+    let shown: Vec<Action> = Action::ALL
+        .iter()
+        .copied()
+        .filter(|&action| {
+            query.is_empty()
+                || actions::label(action, canvas)
+                    .to_lowercase()
+                    .contains(&query)
+                || keys
+                    .key(action)
+                    .is_some_and(|key| key.text().to_lowercase().contains(&query))
+        })
+        .collect();
+    if shown.is_empty() {
+        ui.label(egui::RichText::new(tr("settings-shortcuts-no-match")).color(theme::muted()));
+        return;
+    }
+    widgets::card(ui, |ui| {
+        for (index, &action) in shown.iter().enumerate() {
+            shortcut_row(ui, index == 0, dialog, canvas, settings, &keys, action);
+        }
+    });
 }
 
 fn shortcut_row(
     ui: &mut egui::Ui,
+    first: bool,
     dialog: &mut Dialog,
     canvas: &Canvas,
     settings: &mut Settings,
@@ -431,7 +647,6 @@ fn shortcut_row(
     action: Action,
 ) {
     let name = actions::label(action, canvas);
-    widgets::field_label(ui, name);
     let capturing = dialog.capturing == Some(action);
     let key = keys.key(action);
     let text = match key {
@@ -439,31 +654,31 @@ fn shortcut_row(
         Some(key) => key.text(),
         None => tr("settings-shortcut-none").to_owned(),
     };
-    let button =
-        ui.add(egui::Button::selectable(capturing, &text).min_size(egui::vec2(170.0, 0.0)));
-    button.widget_info(|| {
+    let (field, clear) = widgets::setting_row(ui, first, name, None, |ui| {
+        let clear = widgets::icon_button_tip(
+            ui,
+            Glyph::Cancel,
+            12.0,
+            &format!("{name}: {}", tr("settings-shortcut-clear")),
+            tr("settings-shortcut-clear"),
+            key.is_some(),
+        );
+        let field = key_field(ui, &text, capturing, key.is_some());
+        (field, clear)
+    });
+    field.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{name}: {text}"))
     });
     if dialog.refocus == Some(action) {
         dialog.refocus = None;
-        button.request_focus();
+        field.request_focus();
     }
-    if button.clicked() {
+    if field.clicked() {
         dialog.capturing = (!capturing).then_some(action);
         dialog.refusal = None;
     }
-    let clear = ui
-        .add_enabled(key.is_some(), egui::Button::new("×"))
-        .on_hover_text(tr("settings-shortcut-clear"));
-    clear.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            key.is_some(),
-            format!("{name}: {}", tr("settings-shortcut-clear")),
-        )
-    });
     // egui does not scroll to a widget Tab moves the focus to.
-    for response in [&button, &clear] {
+    for response in [&field, &clear] {
         if response.gained_focus() {
             response.scroll_to_me(None);
         }
@@ -476,34 +691,122 @@ fn shortcut_row(
     }
 }
 
-fn about(ui: &mut egui::Ui) {
-    ui.label(
-        egui::RichText::new("Ugurugu")
-            .size(theme::BODY + 4.0)
-            .strong(),
+/// The key of an action as a field to click: outlined in the accent while
+/// it waits for a new key, muted when there is none.
+fn key_field(ui: &mut egui::Ui, text: &str, capturing: bool, assigned: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(160.0, 28.0), egui::Sense::click());
+    let painter = ui.painter();
+    let edge = if capturing {
+        egui::Stroke::new(1.5, theme::accent_ink())
+    } else if response.hovered() {
+        egui::Stroke::new(1.0, theme::disabled())
+    } else {
+        egui::Stroke::new(1.0, theme::border())
+    };
+    painter.rect(
+        rect,
+        egui::CornerRadius::same(6),
+        theme::control(),
+        edge,
+        egui::StrokeKind::Inside,
     );
-    ui.label(tr_with(
-        "settings-version",
-        &args([("version", env!("CARGO_PKG_VERSION").to_owned())]),
-    ));
-    ui.label(tr_with(
-        "settings-build",
-        &args([("commit", crate::logs::COMMIT.to_owned())]),
-    ));
-    ui.label(tr("settings-credit-development"));
-    ui.label(tr("settings-credit-icon"));
-    ui.add_space(8.0);
-    ui.label(tr_with(
-        "settings-gpu",
-        &args([("gpu", crate::logs::gpu())]),
-    ));
-    ui.horizontal(|ui| {
-        if ui.button(tr("settings-open-logs")).clicked() {
-            crate::logs::show_folder();
+    if response.has_focus() && !capturing {
+        painter.rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(1.0, theme::accent_ink()),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let ink = if capturing || assigned {
+        theme::text()
+    } else {
+        theme::muted()
+    };
+    let font = if assigned && !capturing {
+        egui::FontId::monospace(theme::BODY)
+    } else {
+        egui::FontId::proportional(theme::BODY)
+    };
+    let galley = painter.layout_no_wrap(text.to_owned(), font, ink);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
+    response
+}
+
+fn about(ui: &mut egui::Ui) {
+    widgets::card(ui, |ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new("Ugurugu")
+                .size(theme::BODY + 8.0)
+                .strong()
+                .color(theme::text()),
+        );
+        ui.label(
+            egui::RichText::new(tr_with(
+                "settings-version",
+                &args([("version", env!("CARGO_PKG_VERSION").to_owned())]),
+            ))
+            .color(theme::text()),
+        );
+        ui.label(
+            egui::RichText::new(tr_with(
+                "settings-build",
+                &args([("commit", crate::logs::COMMIT.to_owned())]),
+            ))
+            .size(theme::SMALL)
+            .color(theme::muted()),
+        );
+        ui.add_space(8.0);
+        for credit in [
+            tr("settings-credit-development"),
+            tr("settings-credit-icon"),
+        ] {
+            ui.label(
+                egui::RichText::new(credit)
+                    .size(theme::SMALL)
+                    .color(theme::muted()),
+            );
         }
-        if ui.button(tr("settings-copy-diagnostics")).clicked() {
-            ui.ctx().copy_text(crate::logs::summary());
-        }
+        ui.add_space(10.0);
+    });
+    ui.add_space(14.0);
+    widgets::card(ui, |ui| {
+        ui.add_space(10.0);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(tr_with(
+                    "settings-gpu",
+                    &args([("gpu", crate::logs::gpu())]),
+                ))
+                .color(theme::text()),
+            )
+            .wrap(),
+        );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if widgets::button(
+                ui,
+                tr("settings-open-logs"),
+                widgets::Emphasis::Secondary,
+                true,
+            )
+            .clicked()
+            {
+                crate::logs::show_folder();
+            }
+            if widgets::button(
+                ui,
+                tr("settings-copy-diagnostics"),
+                widgets::Emphasis::Secondary,
+                true,
+            )
+            .clicked()
+            {
+                ui.ctx().copy_text(crate::logs::summary());
+            }
+        });
+        ui.add_space(10.0);
     });
 }
 

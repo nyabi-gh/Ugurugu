@@ -262,6 +262,12 @@ pub fn quick_access(
         if let Some(action) = chosen {
             actions::run(action, canvas, files, clipboard, panels);
         }
+        let tip = widgets::with_key(tr("settings-title"), &panels.keys.text(Action::Settings));
+        if widgets::icon_button_tip(ui, Glyph::Settings, 22.0, tr("settings-title"), &tip, true)
+            .clicked()
+        {
+            actions::run(Action::Settings, canvas, files, clipboard, panels);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let session = canvas.session();
             let (can_undo, can_redo) = (

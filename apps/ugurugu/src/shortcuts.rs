@@ -116,6 +116,7 @@ impl Chord {
         text.push_str(match self.key {
             Key::Plus => "+",
             Key::Minus => "-",
+            Key::Comma => ",",
             Key::Equals => "=",
             Key::Escape => "Esc",
             key => key.name(),
@@ -296,7 +297,7 @@ actions! {
     ApplyTransform "applySelectionTransform" "transform-apply" [plain(Key::Enter)] [];
     CancelTransform "cancelSelectionTransform" "transform-cancel" [] [];
     Escape "escapeCanvas" "escape-canvas" [plain(Key::Escape)] [];
-    Settings "settings" "edit-settings" [] [];
+    Settings "settings" "edit-settings" [ctrl(Key::Comma)] [];
     ZoomIn "zoomIn" "view-zoom-in" [ctrl(Key::Plus)] [ctrl(Key::Equals)];
     ZoomOut "zoomOut" "view-zoom-out" [ctrl(Key::Minus)] [];
     ActualPixels "actualSize" "view-actual-pixels" [ctrl(Key::Num1)] [];
@@ -484,6 +485,13 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_settings_key_is_written_and_read_as_ctrl_comma() {
+        let key = Shortcuts::default().key(Action::Settings).unwrap();
+        assert_eq!(key.text(), "Ctrl+,");
+        assert_eq!(Chord::parse(&key.text()), Some(key));
+    }
 
     #[test]
     fn alt_alone_goes_to_the_menus_and_anything_between_cancels_it() {

@@ -426,3 +426,163 @@ pub fn choice<T: PartialEq>(
     }
     response
 }
+
+/// How much a button stands out: the one that ends a dialog is filled with
+/// the accent, the others sit on the panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Emphasis {
+    Primary,
+    Secondary,
+}
+
+/// A text button, 28 points tall, in the dialogs' style.
+pub fn button(ui: &mut Ui, text: &str, emphasis: Emphasis, enabled: bool) -> Response {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        FontId::proportional(theme::BODY),
+        theme::text(),
+    );
+    let size = egui::vec2((galley.size().x + 28.0).max(72.0), 28.0);
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
+    let hovered = enabled && response.hovered();
+    let (fill, edge, ink) = match emphasis {
+        _ if !enabled => (theme::control(), theme::border(), theme::disabled()),
+        Emphasis::Primary if hovered => (
+            theme::accent_pressed(),
+            theme::accent_pressed(),
+            theme::accent_text(),
+        ),
+        Emphasis::Primary => (theme::accent(), theme::accent(), theme::accent_text()),
+        Emphasis::Secondary if hovered => (theme::hover(), theme::disabled(), theme::text()),
+        Emphasis::Secondary => (theme::control(), theme::border(), theme::text()),
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(6),
+        fill,
+        Stroke::new(1.0, edge),
+        StrokeKind::Inside,
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(2.0),
+            CornerRadius::same(8),
+            Stroke::new(1.0, theme::accent_ink()),
+            StrokeKind::Outside,
+        );
+    }
+    let text_at = rect.center() - galley.size() / 2.0;
+    painter.galley(text_at, galley, ink);
+    response
+}
+
+/// An on-off switch named `name` for screen readers; the row beside it
+/// says what it turns on.
+pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
+    let (rect, mut response) = ui.allocate_exact_size(egui::vec2(36.0, 20.0), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, name));
+    let shift = ui.ctx().animate_bool(response.id, *on);
+    let (track, edge, knob) = if *on {
+        (theme::accent(), theme::accent_ink(), theme::accent_text())
+    } else if response.hovered() {
+        (theme::control(), theme::disabled(), theme::text())
+    } else {
+        (theme::base(), theme::border(), theme::muted())
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(10),
+        track,
+        Stroke::new(1.0, edge),
+        StrokeKind::Inside,
+    );
+    let x = egui::lerp((rect.left() + 10.0)..=(rect.right() - 10.0), shift);
+    painter.circle_filled(egui::pos2(x, rect.center().y), 6.0, knob);
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(2.0),
+            CornerRadius::same(12),
+            Stroke::new(1.0, theme::accent_ink()),
+            StrokeKind::Outside,
+        );
+    }
+    response
+}
+
+/// A group of settings on a raised surface.
+pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(theme::base())
+        .stroke(Stroke::new(1.0, theme::border()))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(14, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
+}
+
+/// The width a settings row keeps for its control.
+pub const ROW_CONTROL: f32 = 210.0;
+
+/// One setting: its name and, quieter under it, what it does, with
+/// `control` at the right. A thin line parts it from the row before unless
+/// it is the first.
+pub fn setting_row<R>(
+    ui: &mut Ui,
+    first: bool,
+    title: &str,
+    description: Option<&str>,
+    control: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    if !first {
+        let y = ui.cursor().top();
+        let x = ui.max_rect().x_range();
+        ui.painter()
+            .hline(x, y, Stroke::new(1.0, theme::border().gamma_multiply(0.6)));
+    }
+    let width = ui.available_width();
+    ui.horizontal(|ui| {
+        ui.set_min_height(44.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width - ROW_CONTROL - 12.0, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(title).color(theme::text()));
+                if let Some(description) = description {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(description)
+                                .size(theme::SMALL)
+                                .color(theme::muted()),
+                        )
+                        .wrap(),
+                    );
+                }
+                ui.add_space(8.0);
+            },
+        );
+        ui.allocate_ui_with_layout(
+            egui::vec2(ROW_CONTROL, 44.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            control,
+        )
+        .inner
+    })
+    .inner
+}

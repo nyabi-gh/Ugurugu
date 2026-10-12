@@ -41,6 +41,7 @@ pub enum Glyph {
     Deselect = 29,
     Confirm = 30,
     Cancel = 31,
+    Settings = 32,
 }
 
 type Points = Vec<[f64; 2]>;
@@ -233,6 +234,20 @@ fn shapes(glyph: Glyph) -> Shapes {
                     })
                     .collect(),
             );
+        }
+        Glyph::Settings => {
+            // Eight teeth around a hole.
+            let mut outline: Points = Vec::new();
+            for tooth in 0..8 {
+                let middle = f64::from(tooth) * 45.0;
+                for (offset, radius) in [(-15.0, 6.4), (-8.0, 8.8), (8.0, 8.8), (15.0, 6.4)] {
+                    let [x, y] = direction(middle + offset);
+                    outline.push([12.0 + x * radius, 12.0 + y * radius]);
+                }
+            }
+            outline.push(outline[0]);
+            lines.push(outline);
+            lines.push(circle([12.0, 12.0], 2.8, 16));
         }
         Glyph::Panels => {
             lines.push(vec![
