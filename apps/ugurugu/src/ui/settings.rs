@@ -390,44 +390,9 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
 fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
     let [r, g, b] = settings.accent.unwrap_or(theme::DEFAULT_ACCENT);
     let color = egui::Color32::from_rgb(r, g, b);
-    let hex = format!("#{r:02X}{g:02X}{b:02X}");
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(120.0, 28.0), egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            true,
-            format!("{} {hex}", tr("settings-theme-color")),
-        )
-    });
-    let painter = ui.painter();
-    let edge = if response.hovered() || dialog.picking_accent {
-        theme::disabled()
-    } else {
-        theme::border()
-    };
-    painter.rect(
-        rect,
-        egui::CornerRadius::same(theme::radius::CONTROL),
-        theme::control(),
-        egui::Stroke::new(1.0, edge),
-        egui::StrokeKind::Inside,
-    );
-    let chip = egui::Rect::from_min_size(rect.min + egui::vec2(5.0, 5.0), egui::vec2(18.0, 18.0));
-    painter.rect_filled(chip, egui::CornerRadius::same(theme::radius::SMALL), color);
-    let galley = painter.layout_no_wrap(
-        hex.clone(),
-        egui::FontId::monospace(theme::BODY),
-        theme::text(),
-    );
-    painter.galley(
-        egui::pos2(chip.right() + 8.0, rect.center().y - galley.size().y / 2.0),
-        galley,
-        theme::text(),
-    );
-    if response.has_focus() {
-        widgets::focus_ring(painter, rect, theme::radius::CONTROL);
-    }
-    if response.clicked() {
+    let swatch =
+        widgets::color_swatch(ui, color, tr("settings-theme-color"), dialog.picking_accent);
+    if swatch.clicked() {
         dialog.picking_accent = !dialog.picking_accent;
     }
 }

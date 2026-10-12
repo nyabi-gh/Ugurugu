@@ -19,6 +19,8 @@ pub struct Dialog {
     color_on: bool,
     /// Straight RGBA.
     color: [u8; 4],
+    /// Whether the colour picker is open under the colour row.
+    picking: bool,
     width_on: bool,
     width: f32,
 }
@@ -33,6 +35,7 @@ impl Dialog {
             sizable,
             color_on: colorable && touched.color.is_some(),
             color: touched.color.map_or([0, 0, 0, 255], |color| color.0),
+            picking: false,
             width_on: sizable && touched.width.is_some(),
             width: touched.width.unwrap_or(6.0),
         }
@@ -76,14 +79,34 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
                     ui.add_enabled_ui(dialog.colorable, |ui| {
                         widgets::switch(ui, &mut dialog.color_on, tr("restyle-color"));
                         ui.add_space(theme::space::L);
-                        let picked = ui
-                            .color_edit_button_srgba_unmultiplied(&mut dialog.color)
-                            .on_hover_text(tr("restyle-choose-color"));
-                        if picked.changed() {
-                            dialog.color_on = true;
+                        let [r, g, b, a] = dialog.color;
+                        let swatch = widgets::color_swatch(
+                            ui,
+                            egui::Color32::from_rgba_unmultiplied(r, g, b, a),
+                            tr("restyle-color"),
+                            dialog.picking,
+                        )
+                        .on_hover_text(tr("restyle-choose-color"));
+                        if swatch.clicked() {
+                            dialog.picking = !dialog.picking;
                         }
                     });
                 });
+                if dialog.picking && dialog.colorable {
+                    let [r, g, b, a] = dialog.color;
+                    let mut color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                    ui.add_space(theme::space::XS);
+                    if egui::color_picker::color_picker_color32(
+                        ui,
+                        &mut color,
+                        egui::color_picker::Alpha::OnlyBlend,
+                    ) {
+                        dialog.color = color.to_srgba_unmultiplied();
+                        dialog.color_on = true;
+                    }
+                    // As much room as over it; the next row takes back egui's.
+                    ui.add_space(ui.spacing().item_spacing.y + theme::space::XS);
+                }
                 widgets::setting_row(ui, false, tr("restyle-width"), None, |ui| {
                     ui.add_enabled_ui(dialog.sizable, |ui| {
                         widgets::switch(ui, &mut dialog.width_on, tr("restyle-width"));

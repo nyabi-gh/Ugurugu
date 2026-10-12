@@ -61,6 +61,67 @@ pub fn focus_ring(painter: &egui::Painter, rect: Rect, radius: u8) {
     );
 }
 
+/// A colour chip and its hex code in a control-sized box, which opens a
+/// picker shown by the caller while `open`; the alpha is written only when
+/// not opaque.
+pub fn color_swatch(ui: &mut Ui, color: Color32, label: &str, open: bool) -> Response {
+    let hex = hex_code(color);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(120.0, theme::CONTROL_HEIGHT), Sense::click());
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{label} {hex}"))
+    });
+    let painter = ui.painter();
+    let edge = if enabled && (response.hovered() || open) {
+        theme::disabled()
+    } else {
+        theme::border()
+    };
+    painter.rect(
+        rect,
+        CornerRadius::same(theme::radius::CONTROL),
+        theme::control(),
+        Stroke::new(1.0, edge),
+        StrokeKind::Inside,
+    );
+    let chip = Rect::from_center_size(
+        egui::pos2(rect.left() + 14.0, rect.center().y),
+        egui::vec2(18.0, 18.0),
+    );
+    let chip_color = if enabled {
+        color
+    } else {
+        color.gamma_multiply(0.4)
+    };
+    painter.rect_filled(chip, CornerRadius::same(theme::radius::SMALL), chip_color);
+    let ink = if enabled {
+        theme::text()
+    } else {
+        theme::disabled()
+    };
+    let galley = painter.layout_no_wrap(hex, egui::FontId::monospace(theme::BODY), ink);
+    painter.galley(
+        egui::pos2(chip.right() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    if response.has_focus() {
+        focus_ring(painter, rect, theme::radius::CONTROL);
+    }
+    response
+}
+
+/// `#RRGGBB`, or `#RRGGBBAA` when not opaque.
+fn hex_code(color: Color32) -> String {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    if a == u8::MAX {
+        format!("#{r:02X}{g:02X}{b:02X}")
+    } else {
+        format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
+    }
+}
+
 /// A tooltip naming the key that does the same, if there is one.
 pub fn with_key(tip: &str, key: &str) -> String {
     if key.is_empty() {
@@ -938,6 +999,15 @@ pub fn menu_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_colour_code_names_the_alpha_only_when_translucent() {
+        assert_eq!(hex_code(Color32::from_rgb(255, 201, 74)), "#FFC94A");
+        assert_eq!(
+            hex_code(Color32::from_rgba_unmultiplied(16, 32, 48, 128)),
+            "#10203080"
+        );
+    }
 
     /// Runs one frame of `add` with `events`, returning what it returned.
     fn frame<R>(
