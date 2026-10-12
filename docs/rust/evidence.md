@@ -821,7 +821,9 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 | 창이 떠 있을 때 이미 연 파일 | 32 ms에 코드 0으로 끝남, 창 1개 그대로 |
 | 복구 경로가 다른 실행 | 넘기지 않고 제 창을 엶(창 2개) |
 
-단위 시험: `ugu_win::instance::tests`(같은 키에만 감, 받는 쪽이 없으면 `false`, 뮤텍스 차례), `files::tests::a_document_asked_for_twice_while_read_opens_one_tab`(읽는 동안 같은 파일을 두 번 받으면 탭 하나, 둘 다 답할 때까지 바쁨).
+단일 실행으로 바꾼 뒤(2026-10-13, 호스트, 1회): 파일 없이 3개를 함께 실행하면 창 1개(2개는 끝남), 창이 있을 때 파일 없이 실행하면 20 ms에 코드 0으로 끝나고 창 1개, 로그 파일은 창의 것 하나뿐(넘기고 끝나는 실행은 로그를 만들지 않음).
+
+단위 시험: `ugu_win::instance::tests`(같은 키에만 감, 파일 없는 실행도 감, 받는 쪽이 없으면 `false`, 뮤텍스 차례), `files::tests::a_document_asked_for_twice_while_read_opens_one_tab`(읽는 동안 같은 파일을 두 번 받으면 탭 하나, 둘 다 답할 때까지 바쁨).
 
 **남은 것:** 창이 앞으로 나오는지(`AllowSetForegroundWindow`·`SetForegroundWindow`)와 최소화된 창 복원은 화면을 봐야 하므로 Sandbox에서 본다. 관리자 권한 창에는 UIPI로 넘기지 못하고 새 창이 뜬다(가설, 시험 안 함).
 
