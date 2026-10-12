@@ -10,6 +10,7 @@
 //! worker for a new split and keeps showing the old one until it arrives.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -171,6 +172,9 @@ struct Tab {
     thumbnails: HashMap<LayerId, (u64, Arc<Pixmap>)>,
     /// Thumbnails asked for and not yet back.
     thumbnails_asked: bool,
+    /// The canvas area when another tab was last shown instead, to move a
+    /// placed view by as much as the area has changed since.
+    left_area: Option<[i32; 4]>,
 }
 
 impl Tab {
@@ -198,6 +202,7 @@ impl Tab {
             snapshot: None,
             thumbnails: HashMap::new(),
             thumbnails_asked: false,
+            left_area: None,
         }
     }
 
@@ -222,9 +227,32 @@ impl Tab {
     }
 }
 
+/// What the tab bar shows of a tab.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabInfo {
+    pub name: String,
+    /// Whether it has changes not saved.
+    pub dirty: bool,
+}
+
+impl TabInfo {
+    fn of(tab: &Tab) -> Self {
+        Self {
+            name: tab.file.display_name(),
+            dirty: tab.session.is_dirty(),
+        }
+    }
+}
+
 pub struct Canvas {
     /// The document shown.
     tab: Tab,
+    /// The other tabs, in order, without the one shown.
+    others: Vec<Tab>,
+    /// Where the tab shown is in the order.
+    position: usize,
+    /// Gets each tab's finished cache renders, on its worker thread.
+    cache_done: Arc<dyn Fn(Rendered) + Send + Sync>,
     /// The window's tools, for whichever document it shows.
     tools: Tools,
     typesetter: text::Typesetter,
@@ -253,6 +281,12 @@ pub struct Canvas {
     generations: u64,
 }
 
+/// A cache worker handing its renders to `done`.
+fn worker(done: &Arc<dyn Fn(Rendered) + Send + Sync>) -> CacheWorker {
+    let done = done.clone();
+    CacheWorker::start(move |rendered| done(rendered))
+}
+
 fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
     match (a, b) {
         (Some(a), Some(b)) => Some([
@@ -272,11 +306,15 @@ fn millis(ticks: Ticks) -> f64 {
 
 impl Canvas {
     /// `cache_done` gets each finished cache render, on the worker thread.
-    pub fn new(document: Document, cache_done: impl Fn(Rendered) + Send + 'static) -> Self {
+    pub fn new(document: Document, cache_done: impl Fn(Rendered) + Send + Sync + 'static) -> Self {
         let [width, height] = document.canvas.map(|edge| edge as u16);
+        let cache_done: Arc<dyn Fn(Rendered) + Send + Sync> = Arc::new(cache_done);
         Self {
             // Nothing to lose until edited, as in 2.2.13.
-            tab: Tab::new(document, true, CacheWorker::start(cache_done), 0),
+            tab: Tab::new(document, true, worker(&cache_done), 0),
+            others: Vec::new(),
+            position: 0,
+            cache_done,
             tools: Tools::default(),
             typesetter: text::Typesetter::default(),
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
@@ -370,6 +408,212 @@ impl Canvas {
         self.upload_all();
         if let Some(area) = self.area {
             self.place(area);
+        }
+    }
+
+    pub fn tab_count(&self) -> usize {
+        self.others.len() + 1
+    }
+
+    /// Where the tab shown is in the order.
+    pub fn tab_position(&self) -> usize {
+        self.position
+    }
+
+    /// Each tab's name and whether it has unsaved changes, in order.
+    pub fn tab_infos(&self) -> Vec<TabInfo> {
+        let mut infos: Vec<TabInfo> = self.others.iter().map(TabInfo::of).collect();
+        infos.insert(self.position, TabInfo::of(&self.tab));
+        infos
+    }
+
+    /// The tab at `index` in the order.
+    fn tab_at(&self, index: usize) -> &Tab {
+        match index.cmp(&self.position) {
+            std::cmp::Ordering::Equal => &self.tab,
+            std::cmp::Ordering::Less => &self.others[index],
+            std::cmp::Ordering::Greater => &self.others[index - 1],
+        }
+    }
+
+    /// Whether the tab shown holds nothing to keep: never saved or named,
+    /// and with no changes. Opening a document takes its place.
+    pub fn is_pristine(&self) -> bool {
+        let file = &self.tab.file;
+        file.path.is_none() && file.unsaved_name.is_none() && !self.tab.session.is_dirty()
+    }
+
+    /// Opens `document` in a new tab after the one shown and shows it;
+    /// `saved` when it is on disk as it is.
+    pub fn open_tab(&mut self, document: Document, saved: bool) {
+        self.generations += 1;
+        let tab = Tab::new(document, saved, worker(&self.cache_done), self.generations);
+        self.leave_tab();
+        let left = std::mem::replace(&mut self.tab, tab);
+        self.others.insert(self.position, left);
+        self.position += 1;
+        self.enter_tab();
+    }
+
+    /// Shows the tab at `index` in the order.
+    pub fn show_tab(&mut self, index: usize) {
+        if index == self.position || index >= self.tab_count() {
+            return;
+        }
+        self.leave_tab();
+        let (taken, back) = if index < self.position {
+            (index, self.position - 1)
+        } else {
+            (index - 1, self.position)
+        };
+        let shown = self.others.remove(taken);
+        let left = std::mem::replace(&mut self.tab, shown);
+        self.others.insert(back, left);
+        self.position = index;
+        self.enter_tab();
+    }
+
+    /// Closes the tab at `index`, dropping its changes. Closing the last
+    /// leaves `empty` in it, as a window starts.
+    pub fn close_tab(&mut self, index: usize, empty: Document) {
+        if index >= self.tab_count() {
+            return;
+        }
+        if index != self.position {
+            let taken = if index < self.position {
+                self.position -= 1;
+                index
+            } else {
+                index - 1
+            };
+            self.others.remove(taken);
+            return;
+        }
+        if self.others.is_empty() {
+            self.replace(empty, true);
+            self.tab.file = crate::files::DocumentFile::new();
+            return;
+        }
+        if let Interaction::Drawing { .. } =
+            std::mem::replace(&mut self.interaction, Interaction::Idle)
+        {
+            self.tab.session.cancel_stroke();
+        }
+        // The one after it, or before it when it is the last.
+        let next = self.position.min(self.others.len() - 1);
+        let shown = self.others.remove(next);
+        drop(std::mem::replace(&mut self.tab, shown));
+        self.position = next;
+        self.enter_tab();
+    }
+
+    /// Moves the tab at `from` to `to` in the order.
+    pub fn move_tab(&mut self, from: usize, to: usize) {
+        let count = self.tab_count();
+        if from >= count || to >= count || from == to {
+            return;
+        }
+        let mut order: Vec<usize> = (0..count).collect();
+        let moved = order.remove(from);
+        order.insert(to, moved);
+        let position = self.position;
+        let mut old: Vec<Option<Tab>> = std::mem::take(&mut self.others)
+            .into_iter()
+            .map(Some)
+            .collect();
+        self.others = order
+            .iter()
+            .filter(|&&index| index != position)
+            .map(|&index| {
+                let slot = if index < position { index } else { index - 1 };
+                old[slot].take().expect("each tab once")
+            })
+            .collect();
+        self.position = order
+            .iter()
+            .position(|&index| index == position)
+            .expect("the tab shown is in the order");
+    }
+
+    /// Each open document's generation, in tab order.
+    pub fn tab_generations(&self) -> Vec<u64> {
+        (0..self.tab_count())
+            .map(|index| self.tab_at(index).generation)
+            .collect()
+    }
+
+    /// Where the tab showing the file at `path` is, if one does.
+    pub fn tab_with_path(&self, path: &Path) -> Option<usize> {
+        let same = |kept: &Path| {
+            kept == path
+                || std::fs::canonicalize(kept)
+                    .ok()
+                    .zip(std::fs::canonicalize(path).ok())
+                    .is_some_and(|(a, b)| a == b)
+        };
+        (0..self.tab_count())
+            .find(|&index| self.tab_at(index).file.path.as_deref().is_some_and(same))
+    }
+
+    /// The first tab, in order, with unsaved changes and not in `skipped`
+    /// (by generation).
+    pub fn dirty_tab(&self, skipped: &[u64]) -> Option<usize> {
+        (0..self.tab_count()).find(|&index| {
+            let tab = self.tab_at(index);
+            tab.session.is_dirty() && !skipped.contains(&tab.generation)
+        })
+    }
+
+    /// Records that document `generation`, not shown, was saved to `path`
+    /// as it was at `state`.
+    pub fn mark_saved_hidden(
+        &mut self,
+        generation: u64,
+        state: ugu_core::history::StateId,
+        path: PathBuf,
+    ) {
+        if let Some(tab) = self
+            .others
+            .iter_mut()
+            .find(|tab| tab.generation == generation)
+        {
+            tab.session.mark_saved(state);
+            tab.file.path = Some(path);
+        }
+    }
+
+    /// Ends what the tab shown is doing before another is shown: a pending
+    /// transform or placed text is applied, as changing tools does, and
+    /// playback stops.
+    fn leave_tab(&mut self) {
+        if let Err(error) = self.edit(Session::settle) {
+            tracing::warn!(?error, "what was pending could not be applied");
+        }
+        self.interaction = Interaction::Idle;
+        self.tab.playback = None;
+        self.tab.resume_playback = false;
+        self.tab.left_area = self.area;
+    }
+
+    /// Shows the tab just made current: its pixels are uploaded again and
+    /// what was asked of the worker while it was hidden is asked again.
+    fn enter_tab(&mut self) {
+        self.interaction = Interaction::Idle;
+        self.spare_coverage = None;
+        self.tab.requested = None;
+        self.tab.thumbnails_asked = false;
+        self.upload_all();
+        if let Some(area) = self.area {
+            match self.tab.left_area.take() {
+                Some(old) if self.tab.placed => {
+                    for axis in 0..2 {
+                        let grown = (area[axis + 2] - area[axis]) - (old[axis + 2] - old[axis]);
+                        self.tab.offset[axis] += f64::from(grown / 2);
+                    }
+                }
+                _ if !self.tab.placed => self.place(area),
+                _ => {}
+            }
         }
     }
 
@@ -1575,6 +1819,68 @@ pub(crate) fn is_point_limit(error: &EditError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each tab's width, in order.
+    fn widths(canvas: &Canvas) -> Vec<u32> {
+        (0..canvas.tab_count())
+            .map(|index| canvas.tab_at(index).session.document().canvas[0])
+            .collect()
+    }
+
+    #[test]
+    fn tabs_keep_their_documents_and_changes_apart() {
+        let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
+        canvas.open_tab(Document::new([32, 16]), true);
+        assert_eq!((canvas.tab_count(), canvas.tab_position()), (2, 1));
+        assert_eq!(canvas.session().document().canvas, [32, 16]);
+        canvas.edit(Session::add_layer).unwrap();
+        let edited = canvas.generation();
+        canvas.show_tab(0);
+        assert_eq!(canvas.session().document().canvas, [64, 64]);
+        assert!(!canvas.session().is_dirty());
+        assert_ne!(canvas.generation(), edited);
+        assert_eq!(canvas.dirty_tab(&[]), Some(1));
+        assert_eq!(canvas.dirty_tab(&[edited]), None);
+        assert_eq!(canvas.tab_generations()[1], edited);
+        canvas.show_tab(1);
+        assert!(canvas.session().is_dirty());
+        assert_eq!(canvas.session().document().layers.len(), 2);
+    }
+
+    #[test]
+    fn moving_and_closing_tabs_keeps_the_order_and_the_one_shown() {
+        let mut canvas = Canvas::new(Document::new([10, 10]), |_| {});
+        canvas.open_tab(Document::new([20, 20]), true);
+        canvas.open_tab(Document::new([30, 30]), true);
+        assert_eq!(widths(&canvas), [10, 20, 30]);
+        canvas.move_tab(2, 0);
+        assert_eq!(
+            (widths(&canvas), canvas.tab_position()),
+            (vec![30, 10, 20], 0)
+        );
+        canvas.move_tab(1, 2);
+        assert_eq!(
+            (widths(&canvas), canvas.tab_position()),
+            (vec![30, 20, 10], 0)
+        );
+        canvas.show_tab(2);
+        canvas.move_tab(0, 1);
+        assert_eq!(
+            (widths(&canvas), canvas.tab_position()),
+            (vec![20, 30, 10], 2)
+        );
+        // Closing one not shown keeps the one shown.
+        canvas.close_tab(0, Document::new([1, 1]));
+        assert_eq!((widths(&canvas), canvas.tab_position()), (vec![30, 10], 1));
+        // Closing the last one shows the one before it.
+        canvas.close_tab(1, Document::new([1, 1]));
+        assert_eq!((widths(&canvas), canvas.tab_position()), (vec![30], 0));
+        assert_eq!(canvas.session().document().canvas, [30, 30]);
+        // And closing the only one leaves an empty document.
+        canvas.close_tab(0, Document::new([5, 5]));
+        assert_eq!(widths(&canvas), [5]);
+        assert!(canvas.is_pristine());
+    }
 
     #[test]
     fn playback_frames_keep_a_pixel_for_every_screen_pixel() {

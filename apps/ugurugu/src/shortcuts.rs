@@ -276,6 +276,7 @@ actions! {
     Export "exportPng" "file-export-frame" [ctrl_shift(Key::E)] [];
     ExportGif "exportGif" "export-gif" [ctrl(Key::E)] [];
     ExportWebP "exportWebP" "export-webp" [] [];
+    CloseTab "closeTab" "file-close-tab" [ctrl(Key::W)] [ctrl(Key::F4)];
     Quit "quit" "file-quit" [ctrl(Key::Q)] [];
     Undo "undo" "edit-undo" [ctrl(Key::Z)] [alt(Key::Backspace)];
     Redo "redo" "edit-redo" [ctrl(Key::Y)] [ctrl_shift(Key::Z)];
@@ -318,6 +319,8 @@ actions! {
     Eyedropper "eyedropper" "tool-eyedropper" [plain(Key::I)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];
+    NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];
+    PreviousTab "previousTab" "window-previous-tab" [ctrl_shift(Key::Tab)] [ctrl(Key::PageUp)];
     AnimationBar "showTimeline" "window-animation-bar" [ctrl_shift(Key::T)] [];
     ToolSettings "toolSettings" "tool-settings" [] [];
     WobbleDock "wobbleDock" "wobble-dock" [] [];

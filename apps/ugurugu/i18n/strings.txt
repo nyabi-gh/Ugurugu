@@ -17,6 +17,7 @@ file-export-image | ugurugu::MainWindow | Export &image…
 file-insert-image | ugurugu::MainWindow | Insert &image…
 insert-image-failed | ugurugu::MainWindow | Could not insert image
 image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
+file-close-tab | - | Close tab | 탭 닫기 | タブを閉じる
 file-quit | ugurugu::MainWindow | &Quit
 export-running | ugurugu::MainWindow | Rendering image…
 export-animation-running | ugurugu::MainWindow | Rendering animation…
@@ -78,6 +79,8 @@ view-mirror | ugurugu::MainWindow | Flip canvas horizontally
 view-mirror-tip | ugurugu::MainWindow | Temporarily flip the canvas horizontally
 canvas-rotation | ugurugu::MainWindow | Canvas rotation angle
 view-animate | ugurugu::MainWindow | &Animate preview
+window-next-tab | - | Next tab | 다음 탭 | 次のタブ
+window-previous-tab | - | Previous tab | 이전 탭 | 前のタブ
 window-animation-bar | ugurugu::MainWindow | Show &animation bar
 window-reset-layout | ugurugu::MainWindow | Reset panel layout
 tool-brush | ugurugu::MainWindow | Brush

@@ -58,6 +58,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     } = parts;
     let mut canvas_area = [0; 4];
     let mut ants = None;
+    panels.follow_document(canvas);
     panels.focus.begin(ui.ctx());
     // Before the widgets run, so focus is what the key was pressed in.
     super::shortcuts(ui.ctx(), canvas, files, clipboard, panels, typed);
@@ -143,6 +144,17 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
             )
             .show(ui, |ui| super::animation_bar(ui, canvas, panels));
     }
+    egui::Panel::top("document tabs")
+        .exact_size(super::tabs::HEIGHT)
+        .frame(bar(
+            theme::chrome(),
+            theme::space::XS as i8,
+            theme::space::XS as i8,
+        ))
+        .show_separator_line(false)
+        .show(ui, |ui| super::tabs::tab_bar(ui, canvas, files, panels));
+    // The tab shown may have changed.
+    panels.follow_document(canvas);
     // No panel fill: the canvas is drawn under egui.
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE)

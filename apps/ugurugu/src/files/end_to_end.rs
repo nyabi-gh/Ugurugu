@@ -144,7 +144,7 @@ fn draw_move_save_reopen_and_export() {
     assert!(!canvas.session().is_dirty());
 
     let mut reopened = Canvas::new(Document::new([16, 16]), |_| {});
-    files.open_path(folder.join("drawing.ugurugu"), &reopened);
+    files.open_path(folder.join("drawing.ugurugu"), &mut reopened);
     files.handle(file_event(), &mut reopened);
     assert!(reopened.session().document() == &document);
 

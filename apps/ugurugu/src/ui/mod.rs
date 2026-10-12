@@ -19,6 +19,7 @@ mod layers;
 mod resize;
 mod restyle;
 mod settings;
+mod tabs;
 mod text;
 mod window;
 
@@ -78,9 +79,28 @@ pub struct Panels {
     focus: focus::Return,
     /// The menu titles' ids, from the last frame.
     menus: [Option<egui::Id>; actions::MENUS.len()],
+    /// The generation of the document the panels last showed.
+    document: u64,
+    /// The document tab being dragged, by where it is now.
+    tab_drag: Option<usize>,
 }
 
 impl Panels {
+    /// Drops edits under way in the panels when another document is shown:
+    /// another tab, or one made, opened or recovered.
+    pub fn follow_document(&mut self, canvas: &Canvas) {
+        let shown = canvas.generation();
+        if shown == self.document {
+            return;
+        }
+        self.layers.switch_document(self.document, shown);
+        self.layers.keep_documents(&canvas.tab_generations());
+        self.document = shown;
+        self.animation = None;
+        self.wobble = None;
+        self.refusal = None;
+    }
+
     /// Puts `layout` in place of the one shown.
     pub fn set_layout(&mut self, layout: Layout) {
         self.layout = layout;

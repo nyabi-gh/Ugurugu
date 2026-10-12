@@ -284,20 +284,27 @@ fn a_colour_can_be_typed() {
 fn unsaved_changes_are_answered_from_the_keyboard() {
     let mut window = Window::new();
     let _ = window.canvas.edit(Session::add_layer);
-    window.key(Modifiers::COMMAND, Key::N);
+    window.key(Modifiers::COMMAND, Key::W);
     assert!(window.dialog());
     window.key(NONE, Key::Escape);
     assert!(!window.dialog());
     assert_eq!(window.canvas.session().document().layers.len(), 2);
-    window.key(Modifiers::COMMAND, Key::N);
-    // N is "Don't save", as in 2.2.13; then the new document's size.
+    window.key(Modifiers::COMMAND, Key::W);
+    // N is "Don't save", as in 2.2.13; the last tab closed leaves an empty
+    // document.
     window.key(NONE, Key::N);
+    window.frame(Vec::new());
+    assert!(!window.dialog());
+    assert_eq!(window.canvas.session().document().layers.len(), 1);
+    assert!(window.canvas.is_pristine());
+    // A new document asks only its size, and Enter takes it.
+    window.key(Modifiers::COMMAND, Key::N);
     window.frame(Vec::new());
     assert_eq!(window.label(), tr("size-width"));
     window.key(NONE, Key::Enter);
     window.frame(Vec::new());
     assert!(!window.dialog());
-    assert_eq!(window.canvas.session().document().layers.len(), 1);
+    assert_eq!(window.canvas.tab_count(), 1);
 }
 
 #[test]
@@ -347,4 +354,19 @@ fn a_new_document_s_size_is_chosen_from_the_keyboard() {
     window.frame(Vec::new());
     assert!(!window.dialog());
     assert_eq!(window.canvas.session().document().canvas, [30, 32]);
+}
+
+#[test]
+fn control_tab_goes_through_the_tabs() {
+    let mut window = Window::new();
+    window
+        .canvas
+        .open_tab(ugu_core::document::Document::new([8, 8]), true);
+    assert_eq!(window.canvas.tab_position(), 1);
+    window.key(Modifiers::COMMAND, Key::Tab);
+    assert_eq!(window.canvas.tab_position(), 0);
+    window.key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab);
+    assert_eq!(window.canvas.tab_position(), 1);
+    window.key(Modifiers::COMMAND, Key::PageDown);
+    assert_eq!(window.canvas.tab_position(), 0);
 }

@@ -383,7 +383,7 @@ impl RenderThread {
             &mut render.panels,
         );
         if let Some(path) = open_at_start {
-            render.files.open_path(path, &render.canvas);
+            render.files.open_path(path, &mut render.canvas);
         }
         Ok(render)
     }

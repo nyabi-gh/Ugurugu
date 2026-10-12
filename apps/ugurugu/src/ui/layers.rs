@@ -47,6 +47,8 @@ pub struct LayerDock {
     /// How tall the buttons and properties under the list were last drawn,
     /// which the list leaves room for.
     below: f32,
+    /// Other documents' folded groups, by generation, while another is shown.
+    folded_elsewhere: HashMap<u64, HashSet<LayerId>>,
 }
 
 /// A layer's thumbnail: premultiplied pixels, what they were made from, and
@@ -270,6 +272,27 @@ impl LayerDock {
                 }
             }
         }
+    }
+
+    /// Drops what was under way in document `from`'s list and keeps its
+    /// folded groups for when it is shown again, as `to` is now. Layer ids
+    /// are a document's own, so nothing else carries over.
+    pub fn switch_document(&mut self, from: u64, to: u64) {
+        let folded = std::mem::take(&mut self.folded);
+        if !folded.is_empty() {
+            self.folded_elsewhere.insert(from, folded);
+        }
+        self.folded = self.folded_elsewhere.remove(&to).unwrap_or_default();
+        self.renaming = None;
+        self.opacity = None;
+        self.dragging = None;
+        self.thumbnails.clear();
+    }
+
+    /// Forgets the folded groups of documents no longer open.
+    pub fn keep_documents(&mut self, open: &[u64]) {
+        self.folded_elsewhere
+            .retain(|generation, _| open.contains(generation));
     }
 
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {

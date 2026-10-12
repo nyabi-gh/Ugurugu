@@ -26,7 +26,7 @@ use ugu_core::document::{Document, LayerId, limits};
 use ugu_core::history::StateId;
 use ugu_core::ops::{Affine, AssetId};
 use ugu_core::store::Asset;
-use ugu_session::{Session, TextStyle};
+use ugu_session::TextStyle;
 use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
@@ -182,8 +182,8 @@ pub enum Action {
     Recover,
     /// Installs the downloaded update, which closes the window.
     Update,
-    /// Shows the document read while the one shown was edited.
-    Replace,
+    /// Closes the tab shown.
+    CloseTab,
 }
 
 enum Job {
@@ -236,6 +236,8 @@ enum Job {
 /// pending outside it, which changes without a new revision.
 #[derive(Clone, Debug, PartialEq)]
 struct Mark {
+    /// Which of the window's documents.
+    generation: u64,
     revision: u64,
     transform: Option<(LayerId, Affine, bool)>,
     /// Where, which layout, and what the text is drawn with.
@@ -243,8 +245,10 @@ struct Mark {
 }
 
 impl Mark {
-    fn of(session: &Session) -> Self {
+    fn of(canvas: &Canvas) -> Self {
+        let session = canvas.session();
         Self {
+            generation: canvas.generation(),
             revision: session.revision(),
             transform: session
                 .pending()
@@ -337,11 +341,11 @@ pub struct Files {
     /// Saves started, and how many of them have not ended.
     saves_started: u64,
     saving: u32,
-    /// The document being read to open, and how the work shown was then.
-    opening: Option<(u64, Mark)>,
-    /// A document read while the one shown was edited, waiting for the
-    /// question about unsaved changes.
-    opened: Option<(PathBuf, Opened)>,
+    /// Whether a document is being read to open.
+    opening: bool,
+    /// Tabs whose changes were dropped while closing the window, by
+    /// generation, not to be asked about again.
+    discarded: Vec<u64>,
     busy_dialog: bool,
     /// The default save folder from the settings, `None` for Documents.
     default_save_folder: Option<PathBuf>,
@@ -427,8 +431,8 @@ impl Files {
             after_save: None,
             saves_started: 0,
             saving: 0,
-            opening: None,
-            opened: None,
+            opening: false,
+            discarded: Vec::new(),
             busy_dialog: false,
             default_save_folder: None,
             chosen_save_folder: None,
@@ -500,7 +504,7 @@ impl Files {
             }
             return;
         }
-        let mark = Mark::of(session);
+        let mark = Mark::of(canvas);
         if recovering.written.as_ref() == Some(&mark) {
             recovering.unwritten = None;
             return;
@@ -532,7 +536,7 @@ impl Files {
         let Some(recovering) = self.recovery.as_mut() else {
             return;
         };
-        let mark = Mark::of(canvas.session());
+        let mark = Mark::of(canvas);
         let document = match canvas.session().settled_document() {
             Ok(Some(document)) => Arc::new(document),
             Ok(None) => canvas.snapshot_now(),
@@ -661,17 +665,41 @@ impl Files {
         if self.busy() {
             return;
         }
-        if canvas.session().is_dirty() {
+        match action {
+            // Nothing open closes: what is made or read goes in a tab.
+            Action::New | Action::Open | Action::Recover => self.proceed(action, canvas),
+            Action::Close | Action::Update => {
+                self.discarded.clear();
+                self.close_next(action, canvas);
+            }
+            Action::CloseTab if canvas.session().is_dirty() => self.confirm = Some(action),
+            Action::CloseTab => self.proceed(action, canvas),
+        }
+    }
+
+    /// Shows the next tab with unsaved changes and asks about them, or does
+    /// `action` once none is left.
+    fn close_next(&mut self, action: Action, canvas: &mut Canvas) {
+        if let Some(index) = canvas.dirty_tab(&self.discarded) {
+            canvas.show_tab(index);
             self.confirm = Some(action);
+            return;
+        }
+        self.discarded.clear();
+        if action == Action::Update {
+            match self.updates.apply() {
+                Ok(()) => self.close = true,
+                Err(error) => tracing::warn!(error, "the update cannot be installed"),
+            }
         } else {
-            self.proceed(action, canvas);
+            self.close = true;
         }
     }
 
     /// Whether a save, a file dialog or opening a document is under way,
     /// which what replaces or closes the document waits for.
     fn busy(&self) -> bool {
-        self.saving > 0 || self.busy_dialog || self.opening.is_some()
+        self.saving > 0 || self.busy_dialog || self.opening
     }
 
     /// Drops what was to run after the save asked for.
@@ -681,10 +709,10 @@ impl Files {
         }
     }
 
-    /// Drops what `action` was to show once it is not taken.
+    /// Drops what `action` had under way once it is not taken.
     fn forget(&mut self, action: Action) {
-        if action == Action::Replace {
-            self.opened = None;
+        if matches!(action, Action::Close | Action::Update) {
+            self.discarded.clear();
         }
     }
 
@@ -697,22 +725,31 @@ impl Files {
                 self.new_pixel = canvas.session().pixel_mode();
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open(open_type())),
-            Action::Close => self.close = true,
+            // Asked about, saved or dropped: on to the next tab.
+            Action::Close | Action::Update => {
+                self.discarded.push(canvas.generation());
+                self.close_next(action, canvas);
+            }
+            Action::CloseTab => {
+                canvas.close_tab(canvas.tab_position(), Self::new_canvas());
+                self.clear_message();
+            }
             Action::Recover => {
                 if let Some(found) = self.found.pop_front() {
                     self.reading_found = true;
                     let _ = self.to_worker.send(Job::ReadRecovery(Box::new(found)));
                 }
             }
-            Action::Update => match self.updates.apply() {
-                Ok(()) => self.close = true,
-                Err(error) => tracing::warn!(error, "the update cannot be installed"),
-            },
-            Action::Replace => {
-                if let Some((path, opened)) = self.opened.take() {
-                    self.show_opened(path, opened, canvas);
-                }
-            }
+        }
+    }
+
+    /// Puts `document` in a tab of its own, or in place of the tab shown
+    /// when that holds nothing to keep; `saved` when it is on disk as it is.
+    fn show_document(canvas: &mut Canvas, document: Document, saved: bool) {
+        if canvas.is_pristine() {
+            canvas.replace(document, saved);
+        } else {
+            canvas.open_tab(document, saved);
         }
     }
 
@@ -720,7 +757,7 @@ impl Files {
     fn show_opened(&mut self, path: PathBuf, opened: Opened, canvas: &mut Canvas) {
         match opened {
             Opened::Document(document, id, layer) => {
-                canvas.replace(*document, true);
+                Self::show_document(canvas, *document, true);
                 if let Some(layer) = layer {
                     canvas
                         .edit(|session| session.select_layer(layer))
@@ -738,7 +775,7 @@ impl Files {
             // named after the file, saved as .ugurugu next to it.
             Opened::Imported(imported) => {
                 let ugu_io::legacy::Imported { document, active } = *imported;
-                canvas.replace(document, false);
+                Self::show_document(canvas, document, false);
                 if let Some(active) = active {
                     canvas
                         .edit(|session| session.select_layer(active))
@@ -794,8 +831,14 @@ impl Files {
 
     /// Opens `path` without a dialog, as for a file given at start. Edits
     /// made while it is read are asked about before it is shown.
-    pub fn open_path(&mut self, path: PathBuf, canvas: &Canvas) {
-        self.opening = Some((canvas.generation(), Mark::of(canvas.session())));
+    /// Reads the document at `path` into a tab, or shows the tab it is open
+    /// in already.
+    pub fn open_path(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        if let Some(index) = canvas.tab_with_path(&path) {
+            canvas.show_tab(index);
+            return;
+        }
+        self.opening = true;
         self.say_if_slow(tr_with("file-opening", &args_name(file_name(&path))));
         let _ = self.to_worker.send(Job::Open(path));
     }
@@ -950,7 +993,8 @@ impl Files {
     /// Starts a new document of `size`, in pixel mode or not.
     fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
         // Clean until edited, as the document at start.
-        canvas.replace(
+        Self::show_document(
+            canvas,
             Document {
                 pixel,
                 ..Document::new(size)
@@ -1317,17 +1361,8 @@ impl Files {
                 Err(error) => self.fail(format!("{}: {error}", tr("preset-export-failed"))),
             },
             FileEvent::Opened(path, result) => {
-                let edited = self.opening.take().is_some_and(|(generation, mark)| {
-                    generation != canvas.generation() || mark != Mark::of(canvas.session())
-                }) && canvas.session().is_dirty();
+                self.opening = false;
                 match result {
-                    // Unsaved changes were asked about before it was read,
-                    // not about these.
-                    Ok(opened) if edited => {
-                        self.clear_message();
-                        self.opened = Some((path, opened));
-                        self.confirm = Some(Action::Replace);
-                    }
                     Ok(opened) => self.show_opened(path, opened, canvas),
                     Err(error) => self.fail(format!("{}: {error}", path.display())),
                 }
@@ -1388,11 +1423,12 @@ impl Files {
                 match result {
                     Ok(()) => {
                         self.say(tr_with("file-saved", &args_name(file_name(&path))));
-                        // A document no longer shown keeps neither the path
-                        // nor the saved state.
+                        // A tab not shown keeps them too; a tab closed is gone.
                         if shown {
                             canvas.mark_saved(state);
                             canvas.file_mut().path = Some(path);
+                        } else {
+                            canvas.mark_saved_hidden(document, state, path);
                         }
                         match after {
                             // What was edited while it saved is not saved.
@@ -1920,6 +1956,51 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_window_asks_about_each_unsaved_tab_in_turn() {
+        let (mut files, mut canvas, _events) = setup();
+        canvas.edit(Session::add_layer).unwrap();
+        canvas.open_tab(Document::new([8, 8]), true);
+        canvas.open_tab(Document::new([9, 9]), true);
+        canvas.edit(Session::add_layer).unwrap();
+        canvas.show_tab(1);
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::Close));
+        assert_eq!(canvas.tab_position(), 0);
+        // Cancel stops, and asking again starts over.
+        files.confirm = None;
+        files.forget(Action::Close);
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(canvas.tab_position(), 0);
+        // Don't Save goes on to the next unsaved tab, then closes.
+        files.confirm = None;
+        files.proceed(Action::Close, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::Close));
+        assert_eq!(canvas.tab_position(), 2);
+        assert!(!files.should_close());
+        files.confirm = None;
+        files.proceed(Action::Close, &mut canvas);
+        assert!(files.should_close());
+    }
+
+    #[test]
+    fn closing_a_tab_asks_only_about_it() {
+        let (mut files, mut canvas, _events) = setup();
+        canvas.edit(Session::add_layer).unwrap();
+        canvas.open_tab(Document::new([8, 8]), true);
+        files.request(Action::CloseTab, &mut canvas);
+        assert_eq!(files.confirm, None);
+        assert_eq!(canvas.tab_count(), 1);
+        assert!(canvas.session().is_dirty());
+        files.request(Action::CloseTab, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::CloseTab));
+        files.confirm = None;
+        files.proceed(Action::CloseTab, &mut canvas);
+        // The last tab closed leaves an empty document, as at the start.
+        assert!(canvas.is_pristine());
+        assert_eq!(canvas.session().document().canvas, NEW_CANVAS);
+    }
+
+    #[test]
     fn a_new_document_closes_without_asking_until_edited() {
         let (mut files, mut canvas, _events) = setup();
         assert_eq!(
@@ -1930,15 +2011,18 @@ mod tests {
         assert!(files.should_close());
         files.close = false;
         canvas.edit(Session::add_layer).unwrap();
-        files.request(Action::New, &mut canvas);
-        assert_eq!(files.confirm, Some(Action::New));
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::Close));
         files.confirm = None;
-        files.proceed(Action::New, &mut canvas);
-        // Its size is asked for, starting from the document's.
+        // A new document asks nothing: it opens beside the edited one, its
+        // size asked for starting from the document's.
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.confirm, None);
         assert_eq!(files.new_document, Some([1024, 768]));
         files.start_new(&mut canvas, [64, 48], false);
         assert!(!canvas.session().is_dirty());
         assert_eq!(canvas.session().document().canvas, [64, 48]);
+        assert_eq!(canvas.tab_count(), 2);
     }
 
     fn next(events: &Receiver<FileEvent>) -> FileEvent {
@@ -1998,16 +2082,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_transform_is_applied_before_saving_and_asked_about_before_replacing() {
+    fn a_pending_transform_is_applied_before_saving_and_asked_about_before_closing() {
         let (mut files, mut canvas, events) = setup();
         let path = folder("pending").join("drawing.ugurugu");
         canvas.edit(Session::select_all).unwrap();
         canvas.begin_transform();
         canvas.edit(|session| session.set_transform(ugu_core::ops::Affine::translation(10.0, 0.0)));
         assert!(canvas.session().is_dirty());
-        // New, open and close ask first.
-        files.request(Action::New, &mut canvas);
-        assert_eq!(files.confirm, Some(Action::New));
+        // Closing asks first.
+        files.request(Action::CloseTab, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::CloseTab));
         files.confirm = None;
         canvas.file_mut().path = Some(path.clone());
         files.save(&mut canvas);
@@ -2222,12 +2306,12 @@ mod tests {
         )
         .unwrap();
 
-        files.open_path(airbrush_file, &canvas);
+        files.open_path(airbrush_file, &mut canvas);
         files.handle(next(&events), &mut canvas);
         assert!(files.message().is_none());
         assert_eq!(canvas.session().document().store.strokes.len(), 1);
 
-        files.open_path(good.clone(), &canvas);
+        files.open_path(good.clone(), &mut canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.session().document().frames, 12);
         assert!(!canvas.session().is_dirty());
@@ -2242,7 +2326,7 @@ mod tests {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ugu13");
         let project = folder.join("edit.ugu");
         std::fs::copy(fixtures.join("edit.ugu"), &project).unwrap();
-        files.open_path(project.clone(), &canvas);
+        files.open_path(project.clone(), &mut canvas);
         files.handle(next(&events), &mut canvas);
         let session = canvas.session();
         assert_eq!(session.document().canvas, [300, 225]);
@@ -2261,7 +2345,7 @@ mod tests {
 
         let refused = folder.join("procedural.ugu");
         std::fs::copy(fixtures.join("procedural.ugu"), &refused).unwrap();
-        files.open_path(refused, &canvas);
+        files.open_path(refused, &mut canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.session().document().canvas, [300, 225]);
         assert!(

@@ -35,6 +35,7 @@ pub const FILE: &[Entry] = &[
     Do(A::ExportGif),
     Do(A::ExportWebP),
     Gap,
+    Do(A::CloseTab),
     Do(A::Quit),
 ];
 
@@ -95,6 +96,9 @@ pub const TOOLS: &[Entry] = &[
 
 /// Also behind the quick access Panels button.
 pub const WINDOW: &[Entry] = &[
+    Do(A::NextTab),
+    Do(A::PreviousTab),
+    Gap,
     Do(A::AnimationBar),
     Gap,
     Do(A::ToolSettings),
@@ -174,6 +178,7 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         A::CancelTransform => pending,
         // As 2.2.13: without the animation there is nothing to animate.
         A::Animate | A::ExportGif | A::ExportWebP => canvas.animation_allowed(),
+        A::NextTab | A::PreviousTab => canvas.tab_count() > 1,
         _ => true,
     }
 }
@@ -295,6 +300,12 @@ pub fn run(
         A::ExportWebP => files.export_animation(canvas, Animation::WebP),
         A::ImportTools => files.import_tools(),
         A::ExportTools => files.export_tools(canvas),
+        A::CloseTab => files.request(files::Action::CloseTab, canvas),
+        A::NextTab => canvas.show_tab((canvas.tab_position() + 1) % canvas.tab_count()),
+        A::PreviousTab => {
+            let count = canvas.tab_count();
+            canvas.show_tab((canvas.tab_position() + count - 1) % count);
+        }
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool("undo", canvas.edit(Session::undo)),
         A::Redo => report_bool("redo", canvas.edit(Session::redo)),

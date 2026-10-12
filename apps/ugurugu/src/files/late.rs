@@ -72,7 +72,7 @@ fn edits_made_while_saving_before_closing_are_asked_about_again() {
 }
 
 #[test]
-fn edits_made_while_opening_are_asked_about_before_it_is_shown() {
+fn a_document_read_while_the_shown_one_is_edited_opens_beside_it() {
     let root = Root::new("late-open");
     let path = root.0.join("other.ugurugu");
     ugu_io::save::save(
@@ -83,38 +83,31 @@ fn edits_made_while_opening_are_asked_about_before_it_is_shown() {
     )
     .unwrap();
     let (mut files, mut canvas, events) = setup();
-    files.open_path(path.clone(), &canvas);
+    files.open_path(path.clone(), &mut canvas);
     canvas.edit(Session::add_layer).unwrap();
-    // Nothing else replaces the document while it is read.
+    // Nothing else starts while it is read.
     files.request(Action::New, &mut canvas);
+    assert!(files.new_document.is_none());
+    files.handle(next(&events), &mut canvas);
     assert_eq!(files.confirm, None);
-    files.handle(next(&events), &mut canvas);
-    assert_eq!(files.confirm, Some(Action::Replace));
-    assert_eq!(canvas.session().document().canvas, [8, 8]);
-    assert_eq!(canvas.session().document().layers.len(), 2);
-
-    // Cancel keeps the edits and drops what was read.
-    files.confirm = None;
-    files.forget(Action::Replace);
-    assert!(files.opened.is_none());
-    assert_eq!(canvas.session().document().layers.len(), 2);
-
-    // Don't Save shows it.
-    files.open_path(path.clone(), &canvas);
-    canvas.edit(Session::add_layer).unwrap();
-    files.handle(next(&events), &mut canvas);
-    assert_eq!(files.confirm, Some(Action::Replace));
-    files.confirm = None;
-    files.proceed(Action::Replace, &mut canvas);
+    assert_eq!((canvas.tab_count(), canvas.tab_position()), (2, 1));
     assert_eq!(canvas.session().document().canvas, [9, 9]);
     assert!(!canvas.session().is_dirty());
     assert_eq!(canvas.file().path, Some(path.clone()));
+    // The edited one waits in its tab as it was.
+    assert!(canvas.tab_infos()[0].dirty);
 
-    // Unedited, it is shown at once.
+    // Opening it again shows its tab without reading it.
+    canvas.show_tab(0);
+    files.open_path(path.clone(), &mut canvas);
+    assert!(!files.busy());
+    assert_eq!(canvas.tab_position(), 1);
+
+    // A window holding nothing yet shows it in place of the empty document.
     let (mut files, mut canvas, events) = setup();
-    files.open_path(path, &canvas);
+    files.open_path(path, &mut canvas);
     files.handle(next(&events), &mut canvas);
-    assert_eq!(files.confirm, None);
+    assert_eq!(canvas.tab_count(), 1);
     assert_eq!(canvas.session().document().canvas, [9, 9]);
     files.end();
 }
@@ -139,8 +132,8 @@ fn a_late_save_answer_leaves_a_newer_document_alone() {
     files.request(Action::New, &mut canvas);
     assert!(files.new_document.is_some());
 
-    // A save still running when the document is replaced anyway, as by the
-    // new document's size being chosen, keeps to its own document.
+    // A save still running when another tab is shown, as a new document's,
+    // is recorded on its own tab.
     files.new_document = None;
     canvas.edit(Session::add_layer).unwrap();
     files.save(&mut canvas);
@@ -149,6 +142,8 @@ fn a_late_save_answer_leaves_a_newer_document_alone() {
     assert_eq!(canvas.file().path, None);
     assert_eq!(canvas.session().document().canvas, [5, 5]);
     assert_eq!(layers_in(&path), 4);
+    let saved = &canvas.tab_infos()[0];
+    assert_eq!((saved.name.as_str(), saved.dirty), ("drawing", false));
     files.end();
 }
 
