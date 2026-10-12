@@ -177,9 +177,10 @@ fn a_downloaded_update_waits_for_a_save_to_end_then_asks() {
     let (mut files, mut canvas, events) = setup();
     let ctx = egui::Context::default();
     let ask = |files: &mut Files, canvas: &mut Canvas| {
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             files.ask_update(ui.ctx(), false, canvas);
         });
+        output.textures_delta.clear();
     };
     files.path = Some(root.0.join("drawing.ugurugu"));
     canvas.edit(Session::add_layer).unwrap();

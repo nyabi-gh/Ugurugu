@@ -226,7 +226,7 @@ mod tests {
                     ..Default::default()
                 };
                 let mut area = [0; 4];
-                let output = ctx.run_ui(input, |ui| {
+                let mut output = ctx.run_ui(input, |ui| {
                     area = window(
                         ui,
                         Parts {
@@ -243,6 +243,7 @@ mod tests {
                     )
                     .canvas_area;
                 });
+                output.textures_delta.clear();
                 (output, area)
             };
             let (mut output, mut area) = frame(Vec::new());
