@@ -373,13 +373,14 @@ fn general(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &mut Settings) {
 
     widgets::section(ui, tr("settings-updates"), false);
     widgets::card(ui, |ui| {
-        widgets::setting_row(ui, true, tr("settings-check-updates"), None, |ui| {
-            widgets::switch(
-                ui,
-                &mut settings.check_updates,
-                tr("settings-check-updates"),
-            );
-        });
+        widgets::switch_row(
+            ui,
+            true,
+            tr("settings-check-updates"),
+            None,
+            &mut settings.check_updates,
+            true,
+        );
     });
 }
 
@@ -436,21 +437,21 @@ fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
 
 fn drawing(ui: &mut egui::Ui, settings: &mut Settings) {
     widgets::card(ui, |ui| {
-        widgets::setting_row(ui, true, tr("settings-wobble-animation"), None, |ui| {
-            widgets::switch(
-                ui,
-                &mut settings.wobble_animation,
-                tr("settings-wobble-animation"),
-            );
-        });
-        widgets::setting_row(
+        widgets::switch_row(
+            ui,
+            true,
+            tr("settings-wobble-animation"),
+            None,
+            &mut settings.wobble_animation,
+            true,
+        );
+        widgets::switch_row(
             ui,
             false,
             tr("settings-pixel-grid"),
             Some(tr("settings-pixel-grid-tip")),
-            |ui| {
-                widgets::switch(ui, &mut settings.pixel_grid, tr("settings-pixel-grid"));
-            },
+            &mut settings.pixel_grid,
+            true,
         );
     });
 }

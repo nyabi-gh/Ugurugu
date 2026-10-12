@@ -967,6 +967,7 @@ impl Files {
                         widgets::whole(ui, &mut size[axis], edges.clone(), false, tr(name));
                     });
                 }
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     for edge in [16, 32, 64, 128] {
@@ -982,14 +983,13 @@ impl Files {
             });
             ui.add_space(12.0);
             widgets::card(ui, |ui| {
-                widgets::setting_row(
+                widgets::switch_row(
                     ui,
                     true,
                     tr("pixel-mode"),
                     Some(tr("pixel-mode-tip")),
-                    |ui| {
-                        widgets::switch(ui, &mut self.new_pixel, tr("pixel-mode"));
-                    },
+                    &mut self.new_pixel,
+                    true,
                 );
             });
             widgets::dialog_buttons(ui, |ui| {
@@ -1079,15 +1079,18 @@ impl Files {
                         });
                 });
                 let opaque = (!transparent).then(|| tr("export-opaque-background"));
-                widgets::setting_row(ui, false, tr("export-keep-transparency"), opaque, |ui| {
-                    let mut keep = transparent && dialog.keep_transparency;
-                    ui.add_enabled_ui(transparent, |ui| {
-                        widgets::switch(ui, &mut keep, tr("export-keep-transparency"))
-                    });
-                    if transparent {
-                        dialog.keep_transparency = keep;
-                    }
-                });
+                let mut keep = transparent && dialog.keep_transparency;
+                widgets::switch_row(
+                    ui,
+                    false,
+                    tr("export-keep-transparency"),
+                    opaque,
+                    &mut keep,
+                    transparent,
+                );
+                if transparent {
+                    dialog.keep_transparency = keep;
+                }
             });
             ui.add_space(10.0);
             let estimate = if fits {

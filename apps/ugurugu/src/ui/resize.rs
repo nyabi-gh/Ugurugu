@@ -408,10 +408,15 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
     let mut size = dialog.size;
     widgets::card(ui, |ui| {
         let mut relative = dialog.relative;
-        widgets::setting_row(ui, true, tr("canvas-size-relative"), None, |ui| {
-            widgets::switch(ui, &mut relative, tr("canvas-size-relative"))
-                .on_hover_text(tr("canvas-size-relative-tip"));
-        });
+        widgets::switch_row(
+            ui,
+            true,
+            tr("canvas-size-relative"),
+            None,
+            &mut relative,
+            true,
+        )
+        .on_hover_text(tr("canvas-size-relative-tip"));
         dialog.relative = relative;
         for (axis, [label, change, name, change_name]) in [
             [
@@ -605,11 +610,14 @@ fn image_form(ui: &mut egui::Ui, dialog: &mut ImageSize, pixel: bool) -> bool {
         let resizable = dialog.aspect_resizable();
         let fixed = (!resizable).then(|| tr("image-size-keep-aspect-fixed"));
         let mut keep = dialog.keep_aspect;
-        widgets::setting_row(ui, false, tr("image-size-keep-aspect"), fixed, |ui| {
-            ui.add_enabled_ui(resizable, |ui| {
-                widgets::switch(ui, &mut keep, tr("image-size-keep-aspect"))
-            });
-        });
+        widgets::switch_row(
+            ui,
+            false,
+            tr("image-size-keep-aspect"),
+            fixed,
+            &mut keep,
+            resizable,
+        );
         if resizable && keep != dialog.keep_aspect {
             dialog.set_keep_aspect(keep);
         }

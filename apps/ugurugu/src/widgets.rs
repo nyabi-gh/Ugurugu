@@ -556,10 +556,37 @@ pub fn setting_row<R>(
     description: Option<&str>,
     control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
+    row_with(ui, first, title, description, ROW_CONTROL, control)
+}
+
+/// A setting turned on or off by a switch alone, which leaves the name and
+/// what it does the rest of the row.
+pub fn switch_row(
+    ui: &mut Ui,
+    first: bool,
+    title: &str,
+    description: Option<&str>,
+    on: &mut bool,
+    enabled: bool,
+) -> Response {
+    row_with(ui, first, title, description, 40.0, |ui| {
+        ui.add_enabled_ui(enabled, |ui| switch(ui, on, title)).inner
+    })
+}
+
+/// A settings row whose control takes `control_width` at the right.
+fn row_with<R>(
+    ui: &mut Ui,
+    first: bool,
+    title: &str,
+    description: Option<&str>,
+    control_width: f32,
+    control: impl FnOnce(&mut Ui) -> R,
+) -> R {
     const PADDING: f32 = 12.0;
     const CONTROL_HEIGHT: f32 = 28.0;
     let width = ui.available_width();
-    let text_width = width - ROW_CONTROL - 16.0;
+    let text_width = width - control_width - 16.0;
     // Measured as the labels below lay them out, to centre them.
     let measure = |text: &str, size: f32| {
         ui.painter()
@@ -603,7 +630,7 @@ pub fn setting_row<R>(
         },
     );
     let control_rect = Rect::from_min_max(
-        egui::pos2(rect.right() - ROW_CONTROL, rect.top()),
+        egui::pos2(rect.right() - control_width, rect.top()),
         rect.right_bottom(),
     );
     ui.scope_builder(
