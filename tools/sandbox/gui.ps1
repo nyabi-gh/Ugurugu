@@ -12,8 +12,13 @@ mapped. Keys and the mouse go to the front window, so this runs only in the
 Sandbox, where the app is the only window. Checks: the notice about an
 unexpected close, the exe and window icons, the help window, turning and
 flipping the view, the eyedropper's cursor, the docks of a short window,
-the save dialog's added extension, the
-transform box's cursors and no blank frame when pressing during playback.
+the save dialog's added extension, the transform box's cursors, no blank
+frame when pressing during playback, a tab keeping its drawing while
+another is shown, every tab coming back after a crash, Tab moving the
+keyboard focus, and a file opened from outside going to the open window as
+a tab.
+"Screen set" photographs every panel, menu and dialog in Korean and English
+for reviewing the look; the names it presses come from the .ftl files.
 in\only.txt, from prepare.ps1 -Only, limits the run to the steps it names.
 The screenshots are of the Sandbox's screen.
 Runs in Windows PowerShell 5.1.
@@ -49,6 +54,9 @@ public static class Native
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
     [DllImport("user32.dll")] public static extern IntPtr LoadCursor(IntPtr instance, IntPtr name);
@@ -119,6 +127,13 @@ public static class Native
         for (int i = 0; i < bytes.Length; i += 4)
             if (bytes[i] + bytes[i + 1] + bytes[i + 2] < 3 * 96) dark++;
         return dark;
+    }
+
+    public static int DarkIn(int x, int y, int w, int h)
+    {
+        using (var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            return Dark(bitmap, graphics, x, y);
     }
 
     // Counts of dark pixels in the rectangle while playing: before, then
@@ -210,8 +225,19 @@ function Save-Screen([string] $Name) {
     Split-Path -Leaf $file
 }
 
-function Start-App([int] $Width = 1600, [int] $Height = 1000) {
-    $env:UGURUGU_LANGUAGE = 'en'
+# The interface's words in $Language, by key, from its .ftl file.
+function Read-Words([string] $Language) {
+    $words = @{}
+    foreach ($line in [IO.File]::ReadAllLines((Join-Path $in "$Language.ftl"), [Text.Encoding]::UTF8)) {
+        if ($line -match '^([a-z0-9-]+) = (.*)$') {
+            $words[$Matches[1]] = $Matches[2]
+        }
+    }
+    $words
+}
+
+function Start-App([int] $Width = 1600, [int] $Height = 1000, [string] $Language = 'en') {
+    $env:UGURUGU_LANGUAGE = $Language
     $env:UGURUGU_SETTINGS_PATH = Join-Path $env:TEMP 'gui-settings.json'
     $env:UGURUGU_RECOVERY_PATH = Join-Path $env:TEMP 'gui-recovery'
     $env:UGURUGU_LOG_PATH = $logs
@@ -222,7 +248,8 @@ function Start-App([int] $Width = 1600, [int] $Height = 1000) {
     $process = Wait-Window
     [void][Native]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 50, 50, $Width, $Height, 4)
     [Native]::Front($process.MainWindowHandle)
-    [void](Get-Value $process 'Canvas zoom percentage')
+    # Read when the window is ready, by its name in $Language.
+    [void](Get-Value $process (Read-Words $Language)['canvas-zoom-percent'])
     Start-Sleep -Seconds 1
     $process
 }
@@ -601,6 +628,230 @@ Step 'Pixel mode from the Edit menu' {
     Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $detail = "before: ink $($before[0]), pixel $($before[1]); on: ink $($on[0]), pixel $($on[1]), tabs $tabs, fill edge choice $fillEdge; undone: tabs $($after[0]), pixel $($after[1]); $shot"
     if (-not $before[0] -or $on[0] -or -not $on[1] -or $tabs -or $fillEdge -or -not $after[0]) {
+        throw $detail
+    }
+    $detail
+}
+
+# Presses the control whose name starts with the words for $Key, without a
+# trailing ellipsis: menu items carry their shortcut after the label.
+function Invoke-Word($Process, $Words, [string] $Key) {
+    Invoke-Named $Process ($Words[$Key].TrimEnd([char]0x2026)) -Prefix
+}
+
+# Draws a stroke across the middle of the document.
+function Draw-Stroke($Process) {
+    $paper = Find-Paper $Process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $Process 'b'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.5)), ($paper.Left + [int]($w * 0.8))),
+        @(($paper.Top + [int]($h * 0.6)), ($paper.Top + [int]($h * 0.3)), ($paper.Top + [int]($h * 0.6))))
+    $paper
+}
+
+Step 'Screen set' {
+    $taken = @()
+    $missed = @()
+    foreach ($language in @('ko', 'en')) {
+        $words = Read-Words $language
+        # Each shot starts from a fresh window, so one that fails leaves
+        # nothing open for the next.
+        $shots = [ordered]@{
+            'main' = { param($p) }
+            'menu-file' = { param($p) Invoke-Word $p $words 'menu-file' }
+            'menu-edit' = { param($p) Invoke-Word $p $words 'menu-edit' }
+            'menu-view' = { param($p) Invoke-Word $p $words 'menu-view' }
+            'menu-tools' = { param($p) Invoke-Word $p $words 'menu-tools' }
+            'menu-window' = { param($p) Invoke-Word $p $words 'menu-window' }
+            'menu-help' = { param($p) Invoke-Word $p $words 'menu-help' }
+            'tool-eraser' = { param($p) Send-Keys $p 'e' }
+            'tool-select' = { param($p) Send-Keys $p 'l' }
+            'tool-wand' = { param($p) Send-Keys $p 'w' }
+            'tool-fill' = { param($p) Send-Keys $p 'g' }
+            'tool-text' = { param($p) Send-Keys $p 't' }
+            'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
+            'pixel-mode' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'pixel-mode' }
+            'settings-general' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings' }
+            'settings-drawing' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-drawing' }
+            'settings-files' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-files' }
+            'settings-shortcuts' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-settings'; Invoke-Word $p $words 'settings-shortcuts' }
+            'settings-about' = { param($p) Invoke-Word $p $words 'menu-help'; Invoke-Word $p $words 'help-about' }
+            'new-document' = { param($p) Send-Keys $p '^n' }
+            'image-size' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-image-size' }
+            'canvas-size' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-canvas-size' }
+            'export-gif' = { param($p) Invoke-Word $p $words 'menu-file'; Invoke-Word $p $words 'export-gif' }
+            'export-webp' = { param($p) Invoke-Word $p $words 'menu-file'; Invoke-Word $p $words 'export-webp' }
+            'check-updates' = { param($p) Invoke-Word $p $words 'menu-help'; Invoke-Word $p $words 'help-check-updates'; Start-Sleep -Seconds 2 }
+            'help' = { param($p) Send-Keys $p '{F1}'; Start-Sleep -Seconds 1 }
+            'unsaved-changes' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^w' }
+            'transform-box' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^a'; Send-Keys $p '^t' }
+            'restyle' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^a'; Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'restyle-selected' }
+            'text-placed' = {
+                param($p)
+                $paper = Find-Paper $p
+                Send-Keys $p 't'
+                [Native]::Drag(@(($paper.Left + 80), ($paper.Left + 80)), @(($paper.Top + 80), ($paper.Top + 80)))
+            }
+        }
+        foreach ($shot in $shots.GetEnumerator()) {
+            Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+            Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+            try {
+                $process = Start-App -Language $language
+                & $shot.Value $process
+                Start-Sleep -Milliseconds 700
+                $taken += Save-Screen "$language-$($shot.Key)"
+            } catch {
+                $missed += "$language-$($shot.Key): $($_.Exception.Message)"
+            }
+            Stop-Apps
+            Start-Sleep -Milliseconds 500
+        }
+        # Work left by a window closed by force is offered back at the next
+        # start.
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+        try {
+            $process = Start-App -Language $language
+            [void](Draw-Stroke $process)
+            Start-Sleep -Seconds 5
+            Stop-Apps
+            Start-Sleep -Seconds 1
+            $process = Start-App -Language $language
+            [void](Find-Element $process { param($n) $n -eq $words['recovery-title'] } 20 'the recovery notice')
+            $taken += Save-Screen "$language-recovery"
+        } catch {
+            $missed += "$language-recovery: $($_.Exception.Message)"
+        }
+        Stop-Apps
+    }
+    if ($missed) {
+        throw "missed $($missed.Count): $($missed -join ' // '); took $($taken.Count)"
+    }
+    "took $($taken.Count): $($taken -join ', ')"
+}
+
+Step 'Every tab comes back after a crash' {
+    $recovery = Join-Path $env:TEMP 'gui-recovery'
+    Stop-Apps
+    Remove-Item -Recurse -Force $recovery -ErrorAction SilentlyContinue
+    $process = Start-App
+    [void](Draw-Stroke $process)
+    # A second tab, at the size offered, with a stroke of its own.
+    Send-Keys $process '^n'
+    Send-Keys $process '{ENTER}'
+    Start-Sleep -Seconds 1
+    [void](Draw-Stroke $process)
+    # Written 3 s after editing pauses, the tab not shown too.
+    Start-Sleep -Seconds 6
+    $written = @(Get-ChildItem -Path $recovery -Recurse -Filter '*.ugurugu' |
+        ForEach-Object { Split-Path -Leaf $_.DirectoryName } | Sort-Object -Unique)
+    Stop-Process -Id $process.Id -Force
+    Start-Sleep -Seconds 1
+    $crashed = @(Get-ChildItem $recovery -Directory | ForEach-Object { $_.Name })
+    $again = Start-App
+    # Each document is asked about in turn.
+    foreach ($document in 1..2) {
+        Press $again 'Recover' 20
+        Start-Sleep -Seconds 1
+    }
+    # Written again here 3 s after.
+    Start-Sleep -Seconds 6
+    $own = @(Get-ChildItem $recovery -Directory | Where-Object { $_.Name -notin $crashed })
+    $tabs = @(foreach ($folder in $own) {
+            Get-ChildItem $folder.FullName -Directory | Where-Object { Get-ChildItem $_.FullName -Filter '*.ugurugu' }
+        })
+    $left = @(Get-ChildItem $recovery -Directory | Where-Object { $_.Name -in $crashed }).Count
+    $shot = Save-Screen 'tabs-recovered'
+    Stop-Apps
+    $detail = "written before the crash: $($written -join ', '); recovered and written again: $($tabs.Count); crashed folders left: $left; $shot"
+    if ($written.Count -ne 2 -or $tabs.Count -ne 2 -or $left -ne 0) {
+        throw $detail
+    }
+    $detail
+}
+
+Step 'A tab keeps its drawing while another is shown' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Draw-Stroke $process
+    Start-Sleep -Seconds 1
+    $area = @($paper.Left, $paper.Top, ($paper.Right - $paper.Left), ($paper.Bottom - $paper.Top))
+    $drawn = [Native]::DarkIn($area[0], $area[1], $area[2], $area[3])
+    Send-Keys $process '^n'
+    Send-Keys $process '{ENTER}'
+    Start-Sleep -Seconds 1
+    $empty = [Native]::DarkIn($area[0], $area[1], $area[2], $area[3])
+    Send-Keys $process '^+{TAB}'
+    Start-Sleep -Seconds 1
+    $back = [Native]::DarkIn($area[0], $area[1], $area[2], $area[3])
+    $shot = Save-Screen 'tab-back'
+    Stop-Apps
+    $detail = "dark pixels: drawn $drawn, new tab $empty, back $back; $shot"
+    # The new tab's canvas may be another size, with the dark surround in
+    # the area, so it only has to look different.
+    if ($drawn -lt 100 -or $empty -eq $drawn -or [Math]::Abs($back - $drawn) * 50 -gt $drawn) {
+        throw $detail
+    }
+    $detail
+}
+
+Step 'Tab moves the keyboard focus through the controls' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $walks = @()
+    foreach ($place in @('main', 'settings')) {
+        if ($place -eq 'settings') {
+            Send-Keys $process '^,'
+            Start-Sleep -Seconds 1
+        }
+        # Send-Keys taps Alt to take the front, which puts the focus on the
+        # menu bar; Escape leaves it there, and settings, which Escape would
+        # close, are in front already. Then Tab alone is sent.
+        if ($place -eq 'main') {
+            Send-Keys $process '{ESC}'
+        }
+        $names = @()
+        foreach ($press in 1..14) {
+            [Windows.Forms.SendKeys]::SendWait('{TAB}')
+            Start-Sleep -Milliseconds 300
+            $names += [string][Windows.Automation.AutomationElement]::FocusedElement.Current.Name
+        }
+        $walks += [pscustomobject]@{ Place = $place; Names = $names }
+    }
+    $shot = Save-Screen 'tab-focus'
+    Stop-Apps
+    $detail = ($walks | ForEach-Object { "$($_.Place): $($_.Names -join ' > ')" }) -join ' // '
+    foreach ($walk in $walks) {
+        if (@($walk.Names | Where-Object { $_ } | Sort-Object -Unique).Count -lt 5) {
+            throw "focus stays put; $detail; $shot"
+        }
+    }
+    "$detail; $shot"
+}
+
+Step 'A file opened from outside becomes a tab of the open window' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $document = Join-Path $env:TEMP 'handed.ugurugu'
+    & (Join-Path $in 'ugu-doc.exe') fixture 1 $document | Out-Null
+    $process = Start-App
+    [void][Native]::ShowWindow($process.MainWindowHandle, 6)
+    Start-Sleep -Seconds 1
+    $launch = Start-Process -FilePath $app -ArgumentList "`"$document`"" -PassThru
+    $exited = $launch.WaitForExit(10000)
+    Start-Sleep -Seconds 1
+    $windows = @(Get-AppProcess).Count
+    $restored = -not [Native]::IsIconic($process.MainWindowHandle)
+    $front = [Native]::GetForegroundWindow() -eq $process.MainWindowHandle
+    $tab = [bool](Find-Element $process { param($n) $n -like 'handed*' } 15 'the new tab')
+    $shot = Save-Screen 'handed-over'
+    Stop-Apps
+    $detail = "launcher exited: $exited (code $(if ($exited) { $launch.ExitCode })); windows: $windows; restored: $restored; in front: $front; tab: $tab; $shot"
+    if (-not $exited -or $launch.ExitCode -ne 0 -or $windows -ne 1 -or -not $restored -or -not $front -or -not $tab) {
         throw $detail
     }
     $detail

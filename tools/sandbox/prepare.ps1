@@ -63,6 +63,7 @@ if ($Scenario -in 'accept', 'alongside') {
 
 if ($Scenario -in 'pointer', 'gui') {
     Copy-Item $Executable, $UguDoc $in
+    Copy-Item (Join-Path $root 'apps/ugurugu/i18n/*.ftl') $in
     if ($Only) {
         Set-Content -Path (Join-Path $in 'only.txt') -Value $Only -Encoding utf8
     }
