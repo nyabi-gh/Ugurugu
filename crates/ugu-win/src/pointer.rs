@@ -220,12 +220,14 @@ unsafe extern "system" fn subclass_proc(
             unsafe { shared.read_frames(hwnd, pointer_id) }
         }
         WM_POINTERLEAVE => {
+            tracing::trace!(pointer_id, "pointer left");
             shared.push(PointerEvent::Leave {
                 pointer: PointerId(pointer_id),
             });
             true
         }
         WM_POINTERCAPTURECHANGED => {
+            tracing::trace!(pointer_id, "pointer capture lost");
             shared.forget(pointer_id);
             shared.push(PointerEvent::CaptureLost {
                 pointer: PointerId(pointer_id),
@@ -325,6 +327,19 @@ impl Shared {
         };
         if info.pointerFlags & POINTER_FLAG_CANCELED != 0 {
             self.forget(pointer_id);
+        }
+        for sample in &samples {
+            tracing::trace!(
+                pointer_id,
+                ?kind,
+                flags = format_args!("{:#x}", info.pointerFlags),
+                buttons = ?sample.buttons,
+                contact = sample.in_contact,
+                pressure = ?sample.pressure,
+                inverted = sample.inverted,
+                frame = sample.frame_id,
+                "pointer sample"
+            );
         }
         if !samples.is_empty() {
             self.push(PointerEvent::Samples {

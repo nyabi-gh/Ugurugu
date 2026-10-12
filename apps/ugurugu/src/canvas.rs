@@ -1916,6 +1916,32 @@ mod tests {
         }
     }
 
+    // Synthetic pen input cannot carry the eraser end (Windows drops the pen
+    // flags it is injected with), so this is where it is checked.
+    #[test]
+    fn a_pens_eraser_end_erases_whatever_tool_is_chosen() {
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), |_| {});
+        let eraser_end = |x, y| PointerSample {
+            pressure: Some(0.5),
+            inverted: true,
+            ..press(x, y)
+        };
+        canvas.apply(CanvasInput::Begin(
+            Gesture::Draw,
+            PointerKind::Pen,
+            eraser_end(20.0, 100.0),
+        ));
+        canvas.apply(CanvasInput::Extend(eraser_end(150.0, 100.0)));
+        canvas.apply(CanvasInput::End(eraser_end(300.0, 100.0)));
+        let layer = canvas.session().current_layer();
+        let LayerKind::Paint(paint) = &canvas.session().document().layer(layer).unwrap().kind
+        else {
+            unreachable!()
+        };
+        assert!(matches!(paint.ops.last(), Some(Op::Erase { .. })));
+        assert_eq!(canvas.session().tool(), Tool::Pen);
+    }
+
     #[test]
     fn the_eyedropper_picks_what_is_shown_and_alt_picks_only_with_painting_tools() {
         let (to_test, renders) = std::sync::mpsc::channel();

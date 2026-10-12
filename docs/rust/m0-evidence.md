@@ -1233,3 +1233,33 @@ Windows Sandbox(게스트 10.0.26100), 네트워크 켬(2.2.13 Setup이 `vcredis
 | Uninstall | pass | 남음: `Local\Ugurugu Data`(7 files), `Roaming\Ugurugu`(1 file) |
 
 Setup 매니페스트: `requestedExecutionLevel level="asInvoker" uiAccess="false"`. `ugurugu.exe`에는 `requestedExecutionLevel`이 없다(기본 asInvoker).
+
+## 30. M6-9·M6-10 합성 펜·터치 (2026-10-12, `rust/m6`)
+
+**데스크톱 시도(중단):** 사용자 데스크톱에서 Python 도구(`InjectSyntheticPointerInput`, PT_PEN)로 앱(설정·복구·로그 격리, 창 (200,150) 1600×1000)에 획을 넣었다. 프레임마다 `GetForegroundWindow() == 앱`과 `GetAncestor(WindowFromPoint) == 앱`을 확인했는데도 첫 실행은 첫 획이 앱에 남지 않고 "앱이 앞이 아님"으로 멈췄고, 두 번째 실행은 획 도중 앞 창이 'Claude'(Chrome_WidgetWin_1, pid 6964)가 됐다. 펜 프레임이 다른 창으로 갔을 수 있어 멈추고 도구를 지웠다. 원인은 확인하지 않았다(가설: 아래 ②처럼 다른 창이 앞을 가져갔거나 좌표·대상 판정이 다름).
+
+**Sandbox 1~8회차** (`tools/sandbox/pointer.ps1`, PowerShell 5.1 + C# `Add-Type`):
+
+- 1회차: 시험 스크립트의 대소문자 무관 변수 충돌(`$script:down`이 `$DOWN` 상수를, `$condition`이 `Wait-Until`의 `$Condition`을 덮음)로 결과 무효. 그래도 펜이 앱에 들어감을 확인.
+- 2회차: 터치 4단계 통과(팬, 핀치 64.94→129.88%, 회전 0→90°, 한 손가락 획 없음). 펜 barrel·hover·창 밖 해제 통과. 압력 획이 없고 "지우개 획"이 일반 획으로 남음(마지막 압력 0.684 = 지우개 단계에서 보낸 700/1024).
+- 3회차: 프레임에 `frameId`(주입마다 +1)와 QPC `PerformanceCount`를 넣자 압력 획이 0.062~1.000으로 정확히 남음. 앞 회차는 두 값이 0이라 앱이 샘플마다 `Ticks::now()`를 써(`ugu-win` `sample_time`) 한 메시지 안의 기록 순서가 뒤집히고 `(time, frame_id)` 키가 걸러진 것으로 본다.
+- 4회차(trace): 지우개 단계 샘플이 모두 `inverted=false`, 새 포인터 ID(2→3), DOWN 압력 0.
+- 5~7회차: 첫 획이 때때로 사라지고 잠시 앞 창을 잃음. 7회차 화면 기록에서 Sandbox 로그온 몇 초 뒤 뜨는 `C:\Windows\system32\rgnupdt.exe` 창이 캔버스를 덮고 앞을 가져간 것을 확인. 첫 획 뒤 `settings written`이 찍힌 것도 그 무렵. 같은 회차에 앞 창이 앱 프로세스의 다른 최상위 창 핸들로 보고됨 → 판정을 프로세스 기준으로 바꿈.
+- 7·8회차: 같은 지우개 프레임(`penFlags` 0x6, 압력 700)을 시험 프로세스의 WinForms 창에 주입하면 `WM_POINTERDOWN`/`UPDATE`에서 `GetPointerPenInfo`가 `penFlags` 0x0. Windows가 합성 펜 플래그를 넘기지 않는다.
+- 8회차(`rgnupdt` 종료 후 시작, UI가 그려진 뒤): 아래 표.
+
+| Step | Result | Detail |
+|---|---|---|
+| Pressure from 64 to 1024 of 1024 | pass | points 61, pressure 0.062..1.000, first 0.062, last 1.000 |
+| Eraser end erases | FAIL(합성 한계) | paint, pressure 0.050..0.684 |
+| Barrel held does not draw | pass | no stroke |
+| Hover does not draw | pass | no stroke |
+| Released outside the window | pass | up at x 1750, window ends at 1650; points 41, pressure 0.586 |
+| Many samples at once | pass | 2000 samples in 1999 ms (1000/s); points 1478 |
+| Eraser flags in a plain window | pass(기록) | frames 21, pen flags first 0x0, last 0x0 (sent 0x6) |
+| Two-finger pan | pass | zoom 64.94 → 64.94, turn 0 → 0 |
+| Pinch to twice the distance | pass | zoom 64.94 → 129.88 |
+| Turn by a quarter | pass | turn 0 → 90 |
+| One finger does not draw | pass | no stroke |
+
+점 1478개는 보낸 정수 좌표 중 바로 앞과 다른 것의 수(1478)와 같다. 지우개 끝은 단위 시험 `a_pens_eraser_end_erases_whatever_tool_is_chosen`이 확인한다(시험 498 → 499).

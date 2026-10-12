@@ -104,9 +104,10 @@ pub use actions::shortcuts;
 use dock::{areas as dock_areas, floating as dock_floating};
 pub use window::{Parts, Shown, window};
 
-fn report_bool(result: Result<bool, EditError>) {
-    if let Err(error) = result {
-        tracing::warn!(%error, "undo or redo failed");
+fn report_bool(step: &'static str, result: Result<bool, EditError>) {
+    match result {
+        Ok(done) => tracing::debug!(step, done, "history step"),
+        Err(error) => tracing::warn!(%error, step, "undo or redo failed"),
     }
 }
 
@@ -268,10 +269,10 @@ pub fn quick_access(
                 session.redo_label().is_some(),
             );
             if widgets::icon_button(ui, Glyph::Redo, 22.0, tr("edit-redo"), can_redo).clicked() {
-                report_bool(canvas.edit(Session::redo));
+                report_bool("redo", canvas.edit(Session::redo));
             }
             if widgets::icon_button(ui, Glyph::Undo, 22.0, tr("edit-undo"), can_undo).clicked() {
-                report_bool(canvas.edit(Session::undo));
+                report_bool("undo", canvas.edit(Session::undo));
             }
         });
     });

@@ -46,6 +46,9 @@
 //!   gets a heat map of each frame's differences.
 //! - `ugu-doc import <file.ugu> <out.ugurugu>`: imports a 2.2.13 project, saves
 //!   it and prints how long importing took.
+//! - `ugu-doc strokes <file.ugurugu>`: one line per stroke drawn or erased, in
+//!   order: its points' extent and pressure, to check what synthetic pen
+//!   input drew.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -58,7 +61,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -76,6 +79,7 @@ fn main() -> ExitCode {
             _ => Err(USAGE.to_owned()),
         },
         ["info", file] => info(Path::new(file)),
+        ["strokes", file] => strokes(Path::new(file)),
         ["bench", file] => bench(Path::new(file), 10),
         ["bench", file, rounds] => rounds
             .parse()
@@ -195,6 +199,53 @@ fn info(path: &Path) -> Result<(), String> {
     );
     tree(&document.layers, 1);
     Ok(())
+}
+
+fn strokes(path: &Path) -> Result<(), String> {
+    let document = open(path)?;
+    let mut ops = Vec::new();
+    paint_ops(&document.layers, &mut ops);
+    for (layer, op) in ops {
+        let (kind, id) = match op {
+            Op::Paint { stroke, .. } => ("paint", stroke),
+            Op::Erase { stroke, .. } => ("erase", stroke),
+            _ => continue,
+        };
+        let stroke = &document.store.strokes[id];
+        let points = &stroke.points;
+        let extent = |value: fn(&Point) -> f32| {
+            points
+                .iter()
+                .map(value)
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), v| {
+                    (low.min(v), high.max(v))
+                })
+        };
+        let (x0, x1) = extent(|point| point.x);
+        let (y0, y1) = extent(|point| point.y);
+        let (p0, p1) = extent(|point| point.pressure);
+        println!(
+            "\"{layer}\" {kind} {:?} width {} points {} x {x0:.1}..{x1:.1} y {y0:.1}..{y1:.1} pressure {p0:.3}..{p1:.3} first {:.3} last {:.3}",
+            stroke.brush.engine,
+            stroke.width,
+            points.len(),
+            points.first().map_or(0.0, |point| point.pressure),
+            points.last().map_or(0.0, |point| point.pressure),
+        );
+    }
+    Ok(())
+}
+
+/// Every paint layer's operations with the layer's name, bottom layer first.
+fn paint_ops<'a>(layers: &'a [Layer], out: &mut Vec<(&'a str, &'a Op)>) {
+    for layer in layers {
+        match &layer.kind {
+            LayerKind::Paint(paint) => {
+                out.extend(paint.ops.iter().map(|op| (layer.name.as_str(), op)))
+            }
+            LayerKind::Group(group) => paint_ops(&group.children, out),
+        }
+    }
 }
 
 /// One line per layer, top first, indented by depth.
