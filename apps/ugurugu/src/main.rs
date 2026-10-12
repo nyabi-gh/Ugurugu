@@ -41,17 +41,13 @@ fn main() -> ExitCode {
         })
         .run();
     let document = std::env::args_os().nth(1).map(app::document_argument);
-    // Held until this start's window can take documents itself.
-    let start_lock = match &document {
-        Some(document) => {
-            let lock = ugu_win::instance::StartLock::take(app::START_LOCK);
-            if ugu_win::instance::hand_over(app::WINDOW_CLASS, &app::instance_key(), document) {
-                return ExitCode::SUCCESS;
-            }
-            lock
-        }
-        None => None,
-    };
+    // One window, like Clip Studio Paint: a later start hands its document
+    // to the window open, or just brings it to the front. The lock is held
+    // until this start's own window can take later ones.
+    let start_lock = ugu_win::instance::StartLock::take(app::START_LOCK);
+    if ugu_win::instance::hand_over(app::WINDOW_CLASS, &app::instance_key(), document.as_deref()) {
+        return ExitCode::SUCCESS;
+    }
     let _logging = logs::start();
     tracing::debug!("starting");
 

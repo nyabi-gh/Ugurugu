@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Hands a document named on the command line to a window already open, so
-//! that opening a file from the shell adds a tab there instead of a window.
+//! Keeps one window: a later start hands the document named on its command
+//! line, if any, to the window already open and ends, so that opening a
+//! file from the shell adds a tab there and starting the app again brings
+//! that window to the front.
 //!
-//! The document goes with `WM_COPYDATA` to the topmost window of the class,
-//! which is the one used last. Starts that carry a document are serialized
-//! by a named mutex held until the window can receive, so files opened
-//! together from the shell all reach the first window instead of each
-//! making their own.
+//! The message goes with `WM_COPYDATA` to the topmost window of the class,
+//! which is the one used last. Starts are serialized by a named mutex held
+//! until the window can receive, so files opened together from the shell
+//! all reach the first window instead of each making their own.
 
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -72,15 +73,18 @@ impl Drop for StartLock {
     }
 }
 
-/// Gives `document` to the topmost window of `class` that takes documents
-/// for `key`, which names the installation and data folders so that test
-/// runs and other installations keep to their own windows. Lets that window
-/// come to the front. `false` when no window took it.
-pub fn hand_over(class: &str, key: &str, document: &Path) -> bool {
+/// Gives `document`, or with none just the start, to the topmost window of
+/// `class` that takes them for `key`, which names the installation and data
+/// folders so that test runs and other installations keep to their own
+/// windows. Lets that window come to the front. `false` when no window took
+/// it.
+pub fn hand_over(class: &str, key: &str, document: Option<&Path>) -> bool {
     let class = wide(class.as_ref());
     let mut message: Vec<u16> = key.encode_utf16().collect();
     message.push(0);
-    message.extend(document.as_os_str().encode_wide());
+    if let Some(document) = document {
+        message.extend(document.as_os_str().encode_wide());
+    }
     let data = COPYDATASTRUCT {
         dwData: DOCUMENT,
         cbData: (message.len() * 2) as u32,
@@ -144,7 +148,7 @@ pub unsafe fn bring_to_front(hwnd: isize) {
     }
 }
 
-type Receive = dyn FnMut(PathBuf) -> bool;
+type Receive = dyn FnMut(Option<PathBuf>) -> bool;
 
 /// Receives documents handed over to one window until dropped.
 pub struct DocumentReceiver {
@@ -159,8 +163,9 @@ struct Shared {
 }
 
 impl DocumentReceiver {
-    /// `receive` is called on the window's thread with each document for
-    /// `key` and says whether it took it.
+    /// `receive` is called on the window's thread for each later start for
+    /// `key`, with its document if it named one, and says whether it took
+    /// it.
     ///
     /// # Safety
     /// `hwnd` must be a live window owned by the calling thread, which must
@@ -168,7 +173,7 @@ impl DocumentReceiver {
     pub unsafe fn install(
         hwnd: isize,
         key: &str,
-        receive: impl FnMut(PathBuf) -> bool + 'static,
+        receive: impl FnMut(Option<PathBuf>) -> bool + 'static,
     ) -> Result<Self, &'static str> {
         let hwnd = hwnd as HWND;
         let shared = Box::new(Shared {
@@ -245,11 +250,12 @@ unsafe extern "system" fn subclass_proc(
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
-/// The document in a message, if the message is for `key`.
-fn document_for(message: &[u16], key: &[u16]) -> Option<PathBuf> {
+/// A start's message if it is for `key`: the document it named, if any.
+fn document_for(message: &[u16], key: &[u16]) -> Option<Option<PathBuf>> {
     let (sent_key, document) = message.split_at(message.iter().position(|&unit| unit == 0)?);
     let document = &document[1..];
-    (sent_key == key && !document.is_empty()).then(|| PathBuf::from(OsString::from_wide(document)))
+    (sent_key == key)
+        .then(|| (!document.is_empty()).then(|| PathBuf::from(OsString::from_wide(document))))
 }
 
 fn wide(text: &std::ffi::OsStr) -> Vec<u16> {
@@ -314,28 +320,34 @@ mod tests {
         .unwrap();
 
         let document = Path::new(r"C:\그림\고양이 1.ugurugu");
-        assert!(hand_over(&class, "data", document));
-        assert!(!hand_over(&class, "other data", document));
-        assert_eq!(*received.borrow(), [document.to_path_buf()]);
+        assert!(hand_over(&class, "data", Some(document)));
+        assert!(hand_over(&class, "data", None));
+        assert!(!hand_over(&class, "other data", Some(document)));
+        assert!(!hand_over(&class, "other data", None));
+        assert_eq!(*received.borrow(), [Some(document.to_path_buf()), None]);
 
         drop(receiver);
-        assert!(!hand_over(&class, "data", document));
+        assert!(!hand_over(&class, "data", Some(document)));
         // SAFETY: made above on this thread.
         unsafe { DestroyWindow(window) };
-        assert!(!hand_over(&class, "data", document));
+        assert!(!hand_over(&class, "data", None));
     }
 
     #[test]
-    fn a_message_without_a_document_is_refused() {
+    fn a_message_is_read_for_its_key_only() {
         let key: Vec<u16> = "k".encode_utf16().collect();
         assert_eq!(document_for(&[], &key), None);
         assert_eq!(document_for(&[107], &key), None);
-        assert_eq!(document_for(&[107, 0], &key), None);
-        assert_eq!(document_for(&[107, 0, 97], &key), Some(PathBuf::from("a")));
+        assert_eq!(document_for(&[106, 0, 97], &key), None);
+        assert_eq!(document_for(&[107, 0], &key), Some(None));
+        assert_eq!(
+            document_for(&[107, 0, 97], &key),
+            Some(Some(PathBuf::from("a")))
+        );
     }
 
     #[test]
-    fn starts_with_a_document_take_turns() {
+    fn starts_take_turns() {
         let name = format!("Local\\UguruguInstanceTest{}", std::process::id());
         let first = StartLock::take(&name).unwrap();
         let waited = std::thread::spawn({

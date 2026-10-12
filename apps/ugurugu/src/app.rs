@@ -27,10 +27,10 @@ use crate::settings::Store;
 
 /// Every window's class, which later starts look for to hand a document to.
 pub const WINDOW_CLASS: &str = "Ugurugu 3";
-/// Taken by starts with a document; see [`ugu_win::instance`].
+/// Taken by every start; see [`ugu_win::instance`].
 pub const START_LOCK: &str = r"Local\Ugurugu 3 start";
 
-/// Which windows a start may hand its document to: those of the same
+/// Which window a start may hand its document to: one of the same
 /// executable with the same settings and recovery folders, so that test runs
 /// and the installed app keep apart.
 pub fn instance_key() -> String {
@@ -190,8 +190,11 @@ impl Session {
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
         let to_open = to_render.clone();
-        let open = move |path| {
-            let taken = to_open.send(ToRender::Open(path)).is_ok();
+        let open = move |path: Option<std::path::PathBuf>| {
+            let taken = match path {
+                Some(path) => to_open.send(ToRender::Open(path)).is_ok(),
+                None => true,
+            };
             if taken {
                 // SAFETY: the receiver calls this on the window's thread.
                 unsafe { ugu_win::instance::bring_to_front(hwnd) };

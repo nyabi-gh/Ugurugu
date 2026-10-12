@@ -14,8 +14,8 @@
   must hold every edit.
 - windows: two windows share the recovery root; one is killed. The other's
   folder stays, and a new start offers only the killed window's work. The
-  second window starts without a document: a start with one hands it to the
-  first window.
+  second window has settings of its own: a start with the same settings
+  and recovery folders hands over to the window open instead.
 
 Usage: python kill_probe.py <ugurugu.exe> <ugu-doc.exe> <fixture.ugurugu>
        <output-dir> [--repeat N]"""
@@ -41,10 +41,10 @@ OPEN = []
 class Window:
     """The app on `document`, with the recovery root and settings in `root`."""
 
-    def __init__(self, exe, document, root):
+    def __init__(self, exe, document, root, settings="settings.json"):
         env = dict(os.environ)
         env["UGURUGU_RECOVERY_PATH"] = os.path.join(root, "recovery")
-        env["UGURUGU_SETTINGS_PATH"] = os.path.join(root, "settings.json")
+        env["UGURUGU_SETTINGS_PATH"] = os.path.join(root, settings)
         env["UGURUGU_LOG_PATH"] = os.path.join(root, "logs")
         env["UGURUGU_LANGUAGE"] = "en"
         env["UGURUGU_LOG"] = "info"
@@ -235,7 +235,7 @@ def two_windows(args, out):
     shutil.copyfile(args.fixture, first_document)
     first = Window(args.exe, first_document, root)
     first.stroke()
-    second = Window(args.exe, None, root)
+    second = Window(args.exe, None, root, "settings-second.json")
     second.stroke(0.6, 0.6)
     time.sleep(4.5)
     folders_before = sorted(os.listdir(os.path.join(root, "recovery")))
