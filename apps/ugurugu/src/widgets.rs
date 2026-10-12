@@ -707,3 +707,66 @@ pub fn section(ui: &mut Ui, text: &str, first: bool) {
     );
     ui.add_space(2.0);
 }
+
+/// A menu item: a check mark in the accent when `checked` is on, the text,
+/// and the shortcut quieter at the right. The pointer or the focus on it
+/// raises it.
+pub fn menu_item(
+    ui: &mut Ui,
+    text: &str,
+    shortcut: &str,
+    checked: Option<bool>,
+    enabled: bool,
+) -> Response {
+    const CHECK: f32 = 22.0;
+    const PADDING: f32 = 8.0;
+    let ink = if enabled {
+        theme::text()
+    } else {
+        theme::disabled()
+    };
+    let font = FontId::proportional(theme::BODY);
+    let label = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), ink);
+    let key = (!shortcut.is_empty()).then(|| {
+        ui.painter()
+            .layout_no_wrap(shortcut.to_owned(), font, theme::muted())
+    });
+    let wanted = PADDING
+        + CHECK
+        + label.size().x
+        + key.as_ref().map_or(0.0, |key| 28.0 + key.size().x)
+        + PADDING * 1.5;
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(wanted.max(ui.available_width()), 28.0), sense);
+    response.widget_info(|| match checked {
+        Some(on) => {
+            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, text)
+        }
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text),
+    });
+    let painter = ui.painter();
+    if enabled && (response.hovered() || response.has_focus()) {
+        painter.rect_filled(rect, CornerRadius::same(5), theme::hover());
+    }
+    if checked == Some(true) {
+        let at = |x: f32, y: f32| egui::pos2(rect.left() + PADDING + x, rect.center().y + y);
+        painter.add(egui::Shape::line(
+            vec![at(2.0, 0.0), at(6.0, 4.0), at(13.0, -4.5)],
+            Stroke::new(1.8, if enabled { theme::accent_ink() } else { ink }),
+        ));
+    }
+    let y = rect.center().y - label.size().y / 2.0;
+    painter.galley(egui::pos2(rect.left() + PADDING + CHECK, y), label, ink);
+    if let Some(key) = key {
+        let at = egui::pos2(rect.right() - PADDING * 1.5 - key.size().x, y);
+        painter.galley(at, key, theme::muted());
+    }
+    response
+}

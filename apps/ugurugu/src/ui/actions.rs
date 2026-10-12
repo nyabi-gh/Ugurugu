@@ -230,16 +230,13 @@ pub fn items(
             ui.separator();
             continue;
         };
-        let text = label(action, canvas);
-        let mut button = match checked(action, canvas, &panels.layout) {
-            Some(on) => egui::Button::selectable(on, text),
-            None => egui::Button::new(text),
-        };
-        let key = panels.keys.text(action);
-        if !key.is_empty() {
-            button = button.shortcut_text(key);
-        }
-        let mut response = ui.add_enabled(enabled(action, canvas), button);
+        let mut response = crate::widgets::menu_item(
+            ui,
+            label(action, canvas),
+            &panels.keys.text(action),
+            checked(action, canvas, &panels.layout),
+            enabled(action, canvas),
+        );
         if let Some(tip) = tip(action) {
             response = response.on_hover_text(tip);
         }

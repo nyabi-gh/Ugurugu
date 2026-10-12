@@ -290,7 +290,7 @@ pub fn apply(ctx: &egui::Context) {
             spacing.button_padding = egui::vec2(8.0, 3.0);
             spacing.interact_size = egui::vec2(40.0, 26.0);
             spacing.indent = 14.0;
-            spacing.menu_margin = egui::Margin::same(4);
+            spacing.menu_margin = egui::Margin::same(6);
             spacing.window_margin = egui::Margin::same(8);
             spacing.slider_rail_height = 5.0;
             spacing.scroll = egui::style::ScrollStyle {
