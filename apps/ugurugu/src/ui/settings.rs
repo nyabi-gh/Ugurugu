@@ -300,6 +300,9 @@ fn sidebar_item(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
         galley,
         ink,
     );
+    if response.has_focus() {
+        widgets::focus_ring(painter, rect, theme::radius::CONTROL);
+    }
     response
 }
 
