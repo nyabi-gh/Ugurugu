@@ -53,6 +53,19 @@
 7. **UI**: 캔버스 위 탭 막대(이름, `*`, ×, 가운데 클릭 닫기), 파일 메뉴에 탭 닫기, 창 메뉴에 탭 목록. 단축키는 사용자 지정에 넣는다. 문구는 `strings.txt` → `ts_to_ftl.py`.
 8. **닫기·업데이트**: `Action::Close`/`Update`가 저장 안 한 탭을 차례로 묻는 줄을 만든다. 지금 하나짜리 `confirm`을 탭 id가 붙은 줄로 바꾼다.
 
+### 2단계 나누기 (2026-10-12, `070ac66`에서 필드마다 확인)
+
+1단계에서 도구를 `Canvas`로 옮겼으므로 `Canvas`가 창의 캔버스 영역이 되고, 탭은 `Canvas` 안에 둔다(`tabs: Vec<Tab>`, `current`). `Files`의 메서드는 이미 `&mut Canvas`를 받으므로 현재 탭의 파일 상태를 `Canvas`를 거쳐 읽는다. 두 구조체가 따로 탭 목록을 갖지 않게 한다.
+
+| 어디로 | `Canvas` 필드 | `Files` 필드 |
+|---|---|---|
+| 탭 | `session`, `cache`(4절 5), `split`, `preview`, `text_preview`, `requested`, `display`, `held`, `resume_playback`, `snapshot`, `thumbnails`, `thumbnails_asked`, `reference`, 보기(`scale`, `offset`, `angle`, `mirrored`, `placed`), `playback`(현재 탭만 돈다) | `path`, `id`, `confirm`·`after_save`(탭 id가 붙은 줄로, 4절 8), `unsaved_name`, `unsaved_from`, `opening`, `recovery`의 문서 몫(`written`, `unwritten`, `stored`, 4절 3) |
+| 창 | `tools`, `typesetter`, `upload`·`uploaded`(탭을 바꾸면 `upload_all`), `interaction`(바꾸기 전에 끝냄), `modifiers`, `area`, `pixels_per_point`, `hover_eraser`, `drawn_at`, `sample_count`, `notice`, `animation_allowed`, `stamp`(가설: 획 찍기 작업 공간이라 창 하나로 충분), `spare_coverage`(크기가 다르면 버림) | 작업자·이벤트·`owner`, 저장 수(`saves_started`, `saving`), `opened`, `busy_dialog`, 기본 폴더, 내보내기 크기, 메시지(`message`, `failing`, `upcoming`), `close`, `found`·`reading_found`, 내보내기(`exporting` 등, 탭 id를 붙임), 새 문서 대화상자, `updates` |
+
+주의할 점:
+- `generation`은 지금 문서를 열 때마다 오른다. 탭마다 두면 탭끼리 같은 값이 나올 수 있으므로 창의 카운터가 탭을 만들 때마다 새 값을 준다. 작업자·클립보드의 늦은 답은 이 값으로 탭을 찾는다(`clipboard.rs`, `files.rs`의 `canvas.generation()`).
+- `placed`인 보기는 `set_area`가 영역이 커진 만큼 위치를 옮긴다. 숨은 탭은 그사이 창 크기가 바뀌었을 수 있으므로 탭마다 마지막으로 본 영역을 두고, 돌아올 때 그 차이로 옮긴다.
+
 ## 5. 순서
 
 1. 도구를 `Session` 밖으로, 일반·픽셀 칸 분리(4절 2). 지금 동작은 바뀌지 않고 픽셀 모드 왕복만 좋아진다. 시험: 모드 왕복, 새 문서, 실행 취소, 설정 읽기·쓰기, 옛 `beforePixel` 옮기기.
@@ -82,9 +95,10 @@
 
 ### 정한 것 (2026-10-12 사용자 결정)
 
-1. 참고: **클립 스튜디오**. 처음에 Windows 11 Fluent를 골랐다가 시안을 보기 전에 바꿨다. 조밀한 패널과 머리 줄, 도구 팔레트·보조 도구·도구 속성, 값이 적힌 막대 슬라이더, 캔버스 위 문서 탭. 시안: Design 아티팩트 "Ugurugu Clip Studio식 시안"(어두운·밝은 메인 화면, 사용자만 열 수 있음). 시안을 본 뒤: 고칠 곳 없음, 클립 스튜디오를 참고하되 더 보기 좋게 할 수 있으면 그렇게 한다.
+0. **바뀜(2026-10-12, 앱을 다시 본 뒤):** 지금 디자인을 유지하며 다듬는다. 클립 스튜디오 쪽으로 바꾸지 않는다. 아래 1과 3은 이 결정으로 대신한다. 2(밝은 테마)는 그대로다.
+1. (대신함) 참고: **클립 스튜디오**. 처음에 Windows 11 Fluent를 골랐다가 시안을 보기 전에 바꿨다. 조밀한 패널과 머리 줄, 도구 팔레트·보조 도구·도구 속성, 값이 적힌 막대 슬라이더, 캔버스 위 문서 탭. 시안: Design 아티팩트 "Ugurugu Clip Studio식 시안"(어두운·밝은 메인 화면, 사용자만 열 수 있음). 시안을 본 뒤: 고칠 곳 없음, 클립 스튜디오를 참고하되 더 보기 좋게 할 수 있으면 그렇게 한다.
 2. **밝은 테마도 넣는다**(3.0). 토큰을 테마 둘로 정의한다.
-3. 2.2.13과 **전부 달라져도 된다**: 패널 배치·아이콘·용어까지. 다르게 한 점은 decisions.md 9절에 적는다.
+3. (대신함) 2.2.13과 **전부 달라져도 된다**: 패널 배치·아이콘·용어까지. 다르게 한 점은 decisions.md 9절에 적는다.
 
 아래는 물을 때의 선택지다.
 
