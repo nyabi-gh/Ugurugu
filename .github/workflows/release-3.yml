@@ -204,6 +204,17 @@ jobs:
           if [[ ${#new[@]} -gt 0 ]]; then
             gh release upload updates "${new[@]}" --clobber
           fi
+          # Each build's lists name its own version alone, so an older tag
+          # run again would offer that version as the latest.
+          version="${GITHUB_REF_NAME#v}"
+          if grep -q '^releases\..*\.json ' <<< "$published"; then
+            listed=$(gh release download updates --pattern 'releases.*.json' --output - \
+              | jq -r '.Assets[].Version' | sort -V | tail -n 1)
+            if [[ "$(printf '%s\n' "$listed" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
+              echo "The update lists name $listed, newer than $version, and are kept"
+              exit 0
+            fi
+          fi
           # The list last, so it never names a package not there yet.
           lists=()
           for file in artifacts/*; do
