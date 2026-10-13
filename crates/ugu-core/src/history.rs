@@ -95,7 +95,11 @@ impl LayerRevisions {
                 Change::ReplaceLayer(before) => self.compare(document, before),
                 Change::SetSettings(before) => {
                     let after = document.settings();
-                    if before.wobble != after.wobble || before.canvas != after.canvas {
+                    // Motions place their poses within the frames.
+                    if before.wobble != after.wobble
+                        || before.canvas != after.canvas
+                        || before.frames != after.frames
+                    {
                         self.settings = next_revision();
                     }
                 }
@@ -729,17 +733,23 @@ mod tests {
         assert!(undone.1 != still.1 && undone.1 != drawn.1);
 
         let mut settings = history.document().settings();
+        settings.frames_per_second = 24.0;
+        history
+            .edit("Speed", |_| vec![Change::SetSettings(settings.clone())])
+            .unwrap();
+        assert_eq!(revisions(&history), undone);
         settings.frames = 12;
         history
             .edit("Frames", |_| vec![Change::SetSettings(settings.clone())])
             .unwrap();
-        assert_eq!(revisions(&history), undone);
+        let framed = revisions(&history);
+        assert!(framed.0 > undone.0 && framed.1 > undone.1);
         settings.wobble = Wobble::classic(3.0);
         history
             .edit("Wobble", |_| vec![Change::SetSettings(settings)])
             .unwrap();
         let wobbled = revisions(&history);
-        assert!(wobbled.0 > undone.0 && wobbled.1 > undone.1);
+        assert!(wobbled.0 > framed.0 && wobbled.1 > framed.1);
 
         // Another document's layer 1 never shares a revision.
         let other = History::new(Document::new([64, 64]), false);
