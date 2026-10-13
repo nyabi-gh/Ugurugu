@@ -51,7 +51,7 @@
 | B3-16 | 변형 상자 밖(회전 자리)의 커서가 화살표 | egui `Alias`를 winit이 화살표로 바꾼다. 2.2.13에는 회전 손잡이가 없어 비교 대상이 없다 | `apps/ugurugu/src/canvas/transform.rs` | m6-plan 7절 GUI 확인, 8절 |
 | B3-17 | 파일을 열 때 내장 이미지를 끝까지 디코드해 검증 | 4096² 한 장에 최대 약 50ms(압축 잘 되는 그림 47ms, 잡음 18ms) 더 걸린다. 손상 PNG를 정상처럼 여는 것(A-01)을 막는 비용 | `crates/ugu-io/src/read.rs` `draws_as` | m6-plan 6절 분석 보고서 확인, 8절 |
 | B3-18 | RDP는 Windows Sandbox 원격 세션까지만 확인 | Sandbox도 `TerminalServerSession`이지만 `mstsc`로 다른 PC에 접속한 실행과 같다고 보는 것은 가설 | — | m6-plan 7절 |
-| B3-19 | 업데이트 경로 중 시험하지 않은 것 | GitHub `updates` 릴리스에서 받는 실제 업데이트(`HttpSource`)는 3.0.1을 낼 때 처음 확인된다(로컬 피드와 쿼리 붙은 다운로드 주소만 확인, evidence.md 44절). 설치 뒤 적용 실패(`update-install-failed`)는 만들어 내지 못했다. 여러 창이 떠 있을 때 갱신기가 다른 창을 어떻게 닫는지, 바이러스 백신이 있는 실제 PC도 보지 않았다 | `apps/ugurugu/src/update.rs` | m6-plan 6절 M6-5·M6-7 결과, 7절, 8절 |
+| B3-19 | 업데이트 경로 중 시험하지 않은 것 | GitHub `updates` 릴리스에서 받는 실제 업데이트(`HttpSource`)는 3.0.0 → 3.0.1에서 확인했다(evidence.md 46절). 설치 뒤 적용 실패(`update-install-failed`)는 만들어 내지 못했다. 여러 창이 떠 있을 때 갱신기가 다른 창을 어떻게 닫는지, 바이러스 백신이 있는 실제 PC도 보지 않았다 | `apps/ugurugu/src/update.rs` | m6-plan 6절 M6-5·M6-7 결과, 7절, 8절 |
 | B3-20 | 그리는 중 픽셀 획은 프레임마다 전체를 다시 계산 | 3초 빠른 획 끝에서 약 1.5ms/프레임(잉크 펜의 10배 이상). 프레임을 놓치지 않아 그대로 둔다. B3-24와 관련 | `crates/ugu-render/src/pixel.rs` | m6-plan 6절 M6-16, 8절 |
 | B3-21 | 진행 중 dab 획은 표본 상한(`MAX_DABS` 5만)을 모르고 그린다 | 상한을 넘는 긴 에어브러시·스프레이 획은 확정 뒤 간격이 넓어진 모양으로 바뀐다. 기록 당시 사실이고 지금도 같은지는 다시 확인하지 않았다(가설) | `crates/ugu-render/src/dab.rs` | m4-plan 603행 |
 | B3-22 | Windows 10은 따로 시험하지 않음 | 막지 않고 "Windows 10 이상"을 둔다(사용자 결정). Sandbox 게스트는 Windows 11 계열(10.0.26100) | — | m6-plan 2절 12 |

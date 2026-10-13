@@ -894,3 +894,12 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 **방법:** main `051a15e`의 release 빌드로 `tools/sandbox/prepare.ps1 -Scenario gui -Only <Screen set 둘을 뺀 15단계>`, 이어서 `-Scenario accept`(3.0.0 설치 → 3.0.1 피드).
 
 **결과:** GUI 15단계 모두 통과. 탭 단계 5개(충돌 뒤 모든 탭 복구, 다른 탭을 보여도 그림 유지, Tab 순회, 밖에서 연 파일이 열린 창의 탭으로, 재생 중 누르기)는 첫 회에 통과. "Turn and flip the view"와 "Transform box cursors"는 첫 회에 UI Automation `FromHandle` 시간 초과로 실패했고 다시 돌려 통과. 인수 9단계 모두 통과(세 번째 회차). "Update that fails to download"는 두 회차 연속 같은 시간 초과였다. 그 단계 앱의 로그는 시작 한 줄뿐이었으므로 시작 중인 창에 UI Automation이 붙다가 끊긴 것으로 본다(가설, backlog B3-97). 시험 쪽 `Wait-Until`이 이 시간 초과를 "아직 없음"으로 보고 다시 묻게 고친 뒤 통과(체크섬 불일치 안내, 제목 `*`·3.0.0 유지).
+
+
+## 46. 3.0.0에서 3.0.1로 실제 업데이트 (2026-10-13)
+
+**질문:** 설치된 3.0.0이 GitHub `updates` 릴리스(`HttpSource`)에서 3.0.1을 찾아 받고 설치하나.
+
+**방법:** `release-3.yml` 실행 38345478765로 3.0.1을 냄. `updates`의 자산과 `releases.win-x64.json`을 `gh release`로 확인. 3.0.0이 설치된 사용자 PC에서 앱이 띄운 업데이트를 받음.
+
+**결과:** v3.0.1 릴리스에는 `Ugurugu-3.0.1-Windows-x64-Setup.exe`만 있다. `updates`에 `Ugurugu3-3.0.1-win-x64-full.nupkg`가 올라갔고 목록은 3.0.1 하나를 가리킨다(3.0.0 패키지는 자산으로 남음). 사용자 PC의 3.0.0이 업데이트를 띄웠고 3.0.1로 바뀌었다(사용자 확인).
