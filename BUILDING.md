@@ -37,6 +37,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --release --locked
 python tools/native_deps.py
+python -X utf8 tools/check_docs.py
 ```
 
 Running `cargo test --workspace --release --locked` as well catches
@@ -44,7 +45,9 @@ differences that only the optimised build shows.
 
 `cargo deny` is [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
 0.18.9. `tools/native_deps.py` fails when a crate the app links builds or
-links native code that is not on its approved list.
+links native code that is not on its approved list. `tools/check_docs.py`
+fails when a document links to a file that is not in the tree, or names a
+backlog ID that `docs/rust/backlog.md` has no row for.
 
 ### Package
 
