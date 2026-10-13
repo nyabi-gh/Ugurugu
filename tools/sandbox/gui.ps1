@@ -16,7 +16,8 @@ the save dialog's added extension, the transform box's cursors, no blank
 frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, a file opened from outside going to the open window as
-a tab, and the window opening where and as it closed.
+a tab, the window opening where and as it closed, and closing while an
+animation exports asking first.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -239,7 +240,7 @@ function Read-Words([string] $Language) {
     $words
 }
 
-function Start-App([int] $Width = 1600, [int] $Height = 1000, [string] $Language = 'en') {
+function Start-App([int] $Width = 1600, [int] $Height = 1000, [string] $Language = 'en', [string] $Document) {
     $env:UGURUGU_LANGUAGE = $Language
     $env:UGURUGU_SETTINGS_PATH = Join-Path $env:TEMP 'gui-settings.json'
     $env:UGURUGU_RECOVERY_PATH = Join-Path $env:TEMP 'gui-recovery'
@@ -247,7 +248,11 @@ function Start-App([int] $Width = 1600, [int] $Height = 1000, [string] $Language
     if (-not (Test-Path $env:UGURUGU_SETTINGS_PATH)) {
         Set-Content -Path $env:UGURUGU_SETTINGS_PATH -Encoding ascii -Value '{"format": "ugurugu.settings", "version": 1, "checkForUpdates": false}'
     }
-    Start-Process -FilePath $app | Out-Null
+    if ($Document) {
+        Start-Process -FilePath $app -ArgumentList "`"$Document`"" | Out-Null
+    } else {
+        Start-Process -FilePath $app | Out-Null
+    }
     $process = Wait-Window
     [void][Native]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 50, 50, $Width, $Height, 4)
     [Native]::Front($process.MainWindowHandle)
@@ -934,6 +939,64 @@ Step 'The window opens where it closed' {
         throw $detail
     }
     $detail
+}
+
+# Closing while an animation exports asks first, in English and in Japanese
+# at 100%: "close when done" closes once the file is written, "stop and
+# close" at once without it. Fixture 5 (4096 x 4096) is slow enough to close
+# during its export.
+Step 'Closing while exporting asks first' {
+    $document = Join-Path $env:TEMP 'heavy.ugurugu'
+    & (Join-Path $in 'ugu-doc.exe') fixture 5 $document | Out-Null
+    $env:UGURUGU_UI_SCALE = '100'
+    $notes = @()
+    try {
+        foreach ($case in @(@{ Language = 'en'; Answer = 'export-close-wait' }, @{ Language = 'ja'; Answer = 'export-close-stop' })) {
+            $language = $case.Language
+            $words = Read-Words $language
+            Stop-Apps
+            Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+            $gif = Join-Path $env:TEMP "closing-$language.gif"
+            Remove-Item -Force $gif -ErrorAction SilentlyContinue
+            $process = Start-App -Language $language -Document $document
+            Invoke-Word $process $words 'menu-file'
+            Invoke-Word $process $words 'export-gif'
+            Invoke-Named $process $words['export-confirm']
+            $owner = [uint32]$process.Id
+            $dialog = Wait-Until { $found = [Native]::Dialog($owner); if ($found -ne [IntPtr]::Zero) { $found } } 20 'the save dialog'
+            Start-Sleep -Seconds 2
+            [Native]::Front($dialog)
+            Start-Sleep -Milliseconds 500
+            [Windows.Forms.SendKeys]::SendWait('^a')
+            Start-Sleep -Milliseconds 500
+            [Windows.Forms.SendKeys]::SendWait($gif)
+            Start-Sleep -Milliseconds 500
+            [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+            Start-Sleep -Seconds 1
+            $started = Get-Date
+            [void]$process.CloseMainWindow()
+            [void](Find-Element $process { param($n) $n -eq $words['export-close-title'] } 20 'the question')
+            $asked = Save-Screen "$language-closing-while-exporting"
+            Invoke-Named $process $words[$case.Answer]
+            $after = Save-Screen "$language-after-$($case.Answer)"
+            $closed = $process.WaitForExit(300000)
+            $seconds = [int]((Get-Date) - $started).TotalSeconds
+            $written = (Test-Path $gif) -and (Get-Item $gif).Length -gt 0
+            $note = "$language $($case.Answer): closed $closed after $seconds s, gif written $written; $asked, $after"
+            $notes += $note
+            $expected = $case.Answer -eq 'export-close-wait'
+            if (-not $closed -or $written -ne $expected) {
+                throw $note
+            }
+        }
+    } catch {
+        $shot = Save-Screen 'closing-while-exporting-failed'
+        throw "$($_.Exception.Message); $shot; before: $($notes -join ' // ')"
+    } finally {
+        Remove-Item Env:UGURUGU_UI_SCALE
+        Stop-Apps
+    }
+    $notes -join ' // '
 }
 
 if (Test-Path $logs) {

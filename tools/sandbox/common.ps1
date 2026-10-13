@@ -63,14 +63,15 @@ function Get-InstalledVersion([string] $Root = $installRoot) {
 function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        # A window still starting can let UI Automation time out; that is
-        # not there yet, not a failure.
+        # A window still starting can let UI Automation time out, and an
+        # element can go while the tree is read; that is not there yet, not
+        # a failure.
         try {
             $value = & $Condition
         } catch {
             $cause = $_.Exception
             while ($cause.InnerException) { $cause = $cause.InnerException }
-            if ($cause -isnot [TimeoutException]) { throw }
+            if ($cause -isnot [TimeoutException] -and $cause.GetType().Name -ne 'ElementNotAvailableException') { throw }
             $value = $null
         }
         if ($value) {
