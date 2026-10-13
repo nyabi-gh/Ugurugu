@@ -751,6 +751,25 @@ Step 'Screen set at 100%' {
     }
 }
 
+Step 'Colour triangle' {
+    Stop-Apps
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $taken = @()
+    # At 100%, so the whole colour panel fits the window.
+    $env:UGURUGU_UI_SCALE = '100'
+    foreach ($language in @('ko', 'en')) {
+        $words = Read-Words $language
+        $process = Start-App -Language $language
+        Invoke-Word $process $words 'color-field-triangle'
+        Start-Sleep -Milliseconds 700
+        $taken += Save-Screen "$language-color-triangle"
+        Stop-Apps
+        Start-Sleep -Milliseconds 500
+    }
+    Remove-Item Env:UGURUGU_UI_SCALE
+    "took $($taken -join ', ')"
+}
+
 Step 'Every tab comes back after a crash' {
     $recovery = Join-Path $env:TEMP 'gui-recovery'
     Stop-Apps
