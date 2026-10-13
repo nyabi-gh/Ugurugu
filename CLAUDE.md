@@ -9,7 +9,9 @@ design on measurements and record each departure in `docs/rust/decisions.md`.
 
 ## What the code promises
 
-- The preview and the final render are pixel-identical. Treat any change that
+- The canvas, playback and export evaluate one `RenderPlan`, and at full size
+  the canvas and the export are pixel-identical; playback may draw smaller and
+  with fewer samples (`docs/rust/decisions.md` section 2). Treat any change that
   can break this as a correctness bug, not a quality trade-off.
 - Performance comes before memory; drawing documents are large and loose memory
   budgets are fine. Judge speed at 8 worker threads (`UGU_WORKER_THREADS=8`,
