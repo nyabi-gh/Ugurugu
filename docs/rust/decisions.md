@@ -228,7 +228,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 |---|---|---|---|
 | Windows x64만. Windows 10은 막지 않지만 시험하지 않는다. ARM64 없음, macOS는 3.0 뒤 | Windows 10+, macOS | 사용자 결정(2026-10-11). 계획의 "Windows 10 제외"와 다르다 | m6 2절 12·14 |
 | 배포는 Velopack Rust SDK(`velopack` 1.2.161)와 같은 판 `vpk` | Velopack C API | C DLL이 필요 없다 | port 10.3, M6-5 |
-| 패키지 ID `Ugurugu3`, 채널 `win-x64`, 설치 `%LOCALAPPDATA%\Ugurugu3`, 제목 "Ugurugu 3", 피드는 같은 저장소 Releases의 채널별 파일. Setup 이름은 2.x와 같은 `Ugurugu-Windows-x64-Setup.exe` | `Ugurugu`, `win`, "Ugurugu" | 2.2.13 위에 덮어쓰지 않고 함께 설치. 바로 가기가 서로 덮지 않게. README 링크가 출시 전후 맞게 | m6 2절 4·16 |
+| 패키지 ID `Ugurugu3`, 채널 `win-x64`, 설치 `%LOCALAPPDATA%\Ugurugu3`, 제목 "Ugurugu 3", 피드는 고정 사전 릴리스 `updates`(앱은 `HttpSource`로 `releases/download/updates`를 읽음)에 패키지와 목록을 두고, 버전 릴리스에는 `Ugurugu-<버전>-Windows-x64-Setup.exe`만 둔다. `updates`의 패키지는 지우거나 다시 올리지 않는다(GitHub가 다운로드 수를 잊음, 워크플로가 막음). 다운로드 배지는 Setup·dmg·`-full.nupkg`(업데이트) 수를 모두 센다 | `Ugurugu`, `win`, "Ugurugu", 버전 릴리스마다 피드와 고정 이름 Setup | 2.2.13 위에 덮어쓰지 않고 함께 설치. 바로 가기가 서로 덮지 않게. 릴리스 페이지에는 설치 파일만(2026-10-13 사용자 결정) | m6 2절 4·16 |
 | 2.x에서 3.0으로 이끄는 마지막 2.x 판은 내지 않는다 | — | 사용자가 따로 안내한다 | m6 2절 13 |
 | 2.x(C++)와 웹판은 더 고치거나 내지 않는다. 2.x 릴리스 workflow(macOS 서명·공증 포함)는 지웠고, macOS 3.x 때 새 비밀 값으로 다시 쓴다 | — | 사용자 결정(2026-10-12) | 2026-10-12 |
 | 설치물은 서명하지 않는다. SHA256SUMS와 도움말의 SmartScreen 안내. 서명은 `--signParams`만 더하면 되게 둔다 | 같음 | 사용자 결정(2026-10-11). 계획의 "서명된 설치물"과 다르다 | m6 2절 7 |
