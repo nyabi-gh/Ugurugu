@@ -2,7 +2,7 @@
 
 ## 지금 상태
 
-- Ugurugu 3(Rust, `apps/`, `crates/`)은 Windows판으로 3.0.0과 3.0.1을 냈다(2026-10-13). main에는 3.0.2로 낼 변경이 모여 있다(`release-notes/3.0.2.en.md`). 열린 일은 [backlog.md](rust/backlog.md)에 있다.
+- Ugurugu 3(Rust, `apps/`, `crates/`)은 Windows판으로 3.0.0, 3.0.1, 3.0.2를 냈다(2026-10-13). 열린 일은 [backlog.md](rust/backlog.md)에 있다.
 - 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이고, macOS 3.x는 나중에 따로 한다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
 
 ## 3.0 문서 (`rust/`)
