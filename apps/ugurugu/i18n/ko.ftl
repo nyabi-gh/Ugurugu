@@ -187,6 +187,7 @@ fit-tip = 전체 캔버스를 창에 맞추기
 untitled = 제목 없음
 file-saving = { $name } 저장 중…
 file-saved = { $name } 저장됨
+save-open-elsewhere = { $name } 파일이 다른 탭에 열려 있습니다. 그 탭을 먼저 닫거나 다른 이름으로 저장하세요.
 file-not-saved = 저장하지 못했습니다: { $error }
 file-opening = { $name } 여는 중…
 gpu-software = 쓸 수 있는 GPU가 없어 느린 소프트웨어 표시로 그립니다

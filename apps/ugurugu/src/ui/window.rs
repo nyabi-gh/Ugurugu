@@ -62,6 +62,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     panels.focus.begin(ui.ctx());
     // Before the widgets run, so focus is what the key was pressed in.
     super::shortcuts(ui.ctx(), canvas, files, clipboard, panels, typed);
+    files.release_held(canvas);
     files.confirm(ui.ctx(), canvas);
     files.ask_recovery(ui.ctx(), canvas);
     let telling = crate::logs::tell_about_crashes(ui.ctx(), files.asking());

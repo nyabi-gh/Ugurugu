@@ -187,6 +187,7 @@ fit-tip = Fit the whole canvas in the window
 untitled = Untitled
 file-saving = Saving { $name }…
 file-saved = Saved { $name }
+save-open-elsewhere = { $name } is open in another tab. Close that tab first, or save under another name.
 file-not-saved = Not saved: { $error }
 file-opening = Opening { $name }…
 gpu-software = No usable GPU: drawing with the slow software display

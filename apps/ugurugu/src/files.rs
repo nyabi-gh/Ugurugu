@@ -395,6 +395,15 @@ pub struct Files {
     last_cancelled: Option<u64>,
     exports: u64,
     updates: crate::update::Updates,
+    /// Documents to show once nothing is asked about the tab shown.
+    held: VecDeque<Held>,
+}
+
+/// A document that would change the tab shown while a question or dialog is
+/// about it.
+enum Held {
+    Path(PathBuf),
+    Opened(PathBuf, Result<Opened, String>),
 }
 
 /// A fresh document id, from the same entropy as hash seeds.
@@ -466,6 +475,7 @@ impl Files {
             last_cancelled: None,
             exports: 0,
             updates,
+            held: VecDeque::new(),
         }
     }
 
@@ -911,6 +921,10 @@ impl Files {
     /// Reads the document at `path` into a tab, or shows the tab it is open
     /// in already.
     pub fn open_path(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        if self.holding_tab() {
+            self.held.push_back(Held::Path(path));
+            return;
+        }
         if let Some(index) = canvas.tab_with_path(&path) {
             canvas.show_tab(index);
             return;
@@ -1378,7 +1392,17 @@ impl Files {
                 };
                 match purpose {
                     Purpose::Open => self.open_path(path, canvas),
-                    Purpose::SaveAs => self.start_save(path, canvas),
+                    Purpose::SaveAs => {
+                        let elsewhere = canvas
+                            .tab_with_path(&path)
+                            .is_some_and(|index| index != canvas.tab_position());
+                        if elsewhere {
+                            self.forget_after_save();
+                            self.fail(tr_with("save-open-elsewhere", &args_name(file_name(&path))));
+                        } else {
+                            self.start_save(path, canvas);
+                        }
+                    }
                     Purpose::ExportImage => {
                         let frame = canvas.session().frame();
                         self.start_export(path, canvas, ExportJob::Still { frame });
@@ -1439,6 +1463,10 @@ impl Files {
             },
             FileEvent::Opened(path, result) => {
                 self.opening -= 1;
+                if self.holding_tab() {
+                    self.held.push_back(Held::Opened(path, result));
+                    return;
+                }
                 match result {
                     Ok(opened) => self.show_opened(path, opened, canvas),
                     Err(error) => self.fail(format!("{}: {error}", path.display())),
@@ -1616,6 +1644,27 @@ impl Files {
                         }
                     }
                     Err(error) => self.fail(format!("{}: {error}", tr("recovery-failed"))),
+                }
+            }
+        }
+    }
+
+    /// Whether what is asked or under way is about the tab shown, which
+    /// must then stay shown.
+    fn holding_tab(&self) -> bool {
+        self.asking() || self.after_save.is_some()
+    }
+
+    /// Shows the documents held while the tab shown had to stay.
+    pub fn release_held(&mut self, canvas: &mut Canvas) {
+        while !self.holding_tab()
+            && let Some(held) = self.held.pop_front()
+        {
+            match held {
+                Held::Path(path) => self.open_path(path, canvas),
+                Held::Opened(path, result) => {
+                    self.opening += 1;
+                    self.handle(FileEvent::Opened(path, result), canvas);
                 }
             }
         }
@@ -2421,6 +2470,54 @@ mod tests {
         assert!(!files.busy());
         assert_eq!(canvas.tab_count(), 2);
         assert_eq!(canvas.file().path, Some(path));
+    }
+
+    #[test]
+    fn a_document_arriving_while_a_tab_is_asked_about_waits_for_the_answer() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("held");
+        let path = folder.join("held.ugurugu");
+        ugu_io::save::save(
+            &Files::new_canvas(),
+            [4; 16],
+            &path,
+            &ugu_win::file::replace_file,
+        )
+        .unwrap();
+        canvas.edit(Session::add_layer).unwrap();
+        files.open_path(path.clone(), &mut canvas);
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(canvas.tab_count(), 2);
+        canvas.show_tab(0);
+        let asked = canvas.generation();
+        files.request(Action::CloseTab, &mut canvas);
+        assert_eq!(files.confirm, Some(Action::CloseTab));
+
+        // Another start hands over the document open in the other tab.
+        files.open_path(path.clone(), &mut canvas);
+        files.release_held(&mut canvas);
+        assert_eq!(canvas.generation(), asked);
+        files.confirm = None;
+        files.proceed(Action::CloseTab, &mut canvas);
+        assert_eq!(canvas.tab_count(), 1);
+        files.release_held(&mut canvas);
+        assert_eq!(canvas.file().path, Some(path));
+    }
+
+    #[test]
+    fn saving_as_a_file_open_in_another_tab_is_refused() {
+        let (mut files, mut canvas, _events) = setup();
+        let folder = folder("elsewhere");
+        let path = folder.join("elsewhere.ugurugu");
+        canvas.file_mut().path = Some(path.clone());
+        canvas.open_tab(Document::new([8, 8]), true);
+        files.handle(
+            FileEvent::Picked(Purpose::SaveAs, Some(path.clone())),
+            &mut canvas,
+        );
+        assert!(files.failing());
+        assert!(!files.busy());
+        assert_eq!(canvas.file().path, None);
     }
 
     #[test]

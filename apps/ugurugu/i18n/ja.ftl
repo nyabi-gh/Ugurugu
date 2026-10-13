@@ -187,6 +187,7 @@ fit-tip = キャンバス全体をウィンドウに合わせる
 untitled = 無題
 file-saving = { $name } を保存中…
 file-saved = { $name } を保存しました
+save-open-elsewhere = { $name } は別のタブで開いています。そのタブを先に閉じるか、別の名前で保存してください。
 file-not-saved = 保存できませんでした: { $error }
 file-opening = { $name } を開いています…
 gpu-software = 使える GPU がないため、低速なソフトウェア表示で描画しています
