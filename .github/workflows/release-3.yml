@@ -135,17 +135,6 @@ jobs:
           )
           $metadataPath = Join-Path artifacts "Ugurugu-Windows-x64-build-metadata.txt"
           Set-Content -Path $metadataPath -Value $metadata -Encoding utf8
-          $checksums = foreach ($artifact in (Get-ChildItem artifacts -File | Sort-Object Name)) {
-            $hash = (Get-FileHash -Algorithm SHA256 $artifact.FullName).Hash.ToLowerInvariant()
-            "$hash  $($artifact.Name)"
-          }
-          $checksumPath = Join-Path artifacts "SHA256SUMS-Windows.txt"
-          $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
-          [System.IO.File]::WriteAllText(
-            $checksumPath,
-            ($checksums -join "`n") + "`n",
-            $utf8WithoutBom
-          )
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -229,6 +218,4 @@ jobs:
         with:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
-          files: |
-            artifacts/*-Setup.exe
-            artifacts/SHA256SUMS-Windows.txt
+          files: artifacts/*-Setup.exe

@@ -13,7 +13,7 @@
 | B3-01 | README를 3.0에 맞게 다시 쓴다 | 지금 README는 2.x 기준이다: 작업 파일 `.ugu`와 `.wagle`·`.wobble` 열기(78행), "투명 배경 … JPG"(79행, 실제는 JPEG 흰 바탕·GIF는 alpha 128 기준 이진 투명), `Ctrl+T` = 애니메이션 바(143행, 3.0은 변형이고 바는 `Ctrl+Shift+T`), Redo는 `Ctrl+Y`만(145행, 3.0은 `Ctrl+Shift+Z`도), 그래픽 D3D11(50행, 3.0은 DX12 또는 WARP). `.ugu`는 2.1.0 이후 schema 13만 가져오고 그 전 파일은 2.2.13에서 다시 저장해야 함, `.ugurugu`는 2.x에서 열 수 없음, `.wwpreset` 대신 `.ugurugu-tools`, Classic은 포즈·디테일·연결·무작위성을 쓰지 않음, macOS는 2.2.13 | `README.md` | m6-plan 8절 1, analysis-3.0 1절 5·2.1·3.7·4절 5 |
 | B3-02 | `release-notes/3.0.0.en.md` 확인 | 검토 지적(보이는 그림과 내보내는 그림, 펜·GPU 시험 범위)을 반영한 초안이다 | `release-notes/3.0.0.en.md` | m6-plan 8절 2 |
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
-| B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | 2026-10-13 완료(run 38332552202). `v3.0.0`에는 Setup 하나, `updates`에는 `Ugurugu3-3.0.0-win-x64-full.nupkg`와 `releases.win-x64.json`(채널 `win-x64`)이 있다. 남은 것: 릴리스 노트는 "이 페이지의 `SHA256SUMS-Windows.txt`"를 말하지만 그 파일은 `updates`에만 있다. `v3.0.0`에 올릴지 노트를 고칠지 사용자가 정한다(다음 릴리스부터는 workflow가 올린다) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
+| B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | 2026-10-13 완료(run 38332552202). `v3.0.0`에는 Setup 하나, `updates`에는 `Ugurugu3-3.0.0-win-x64-full.nupkg`와 `releases.win-x64.json`(채널 `win-x64`)이 있다. 체크섬 파일은 다음 릴리스부터 만들지 않는다(사용자 결정) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
 
 ## 2. 열린 gate
 
