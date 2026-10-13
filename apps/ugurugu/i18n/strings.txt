@@ -36,6 +36,8 @@ export-cancel | Cancel | 취소 | キャンセル
 export-canceled | Export canceled | 내보내기를 취소했습니다 | 書き出しをキャンセルしました
 export-done | Exported %1 | %1 내보냄 | %1 を書き出しました | args=path
 export-failed | Export failed | 내보내기 실패 | 書き出しに失敗しました
+tab-failed | A new tab could not be opened; the log folder in Settings > About has the details | 새 탭을 열 수 없습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | 新しいタブを開けませんでした。詳細は設定 > 情報のログフォルダーにあります
+dialog-failed | The file dialog could not be opened; the log folder in Settings > About has the details | 파일 대화상자를 열 수 없습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | ファイルダイアログを開けませんでした。詳細は設定 > 情報のログフォルダーにあります
 tools-import | Import tool preset… | 도구 프리셋 가져오기… | ツールプリセットを読み込む…
 tools-export | Export tool preset… | 도구 프리셋 내보내기… | ツールプリセットを書き出す…
 preset-imported | Imported preset %1 | 프리셋 %1 가져옴 | プリセット%1を読み込みました | args=name

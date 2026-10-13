@@ -413,7 +413,8 @@ fn control_tab_goes_through_the_tabs() {
     let mut window = Window::new();
     window
         .canvas
-        .open_tab(ugu_core::document::Document::new([8, 8]), true);
+        .open_tab(ugu_core::document::Document::new([8, 8]), true)
+        .unwrap();
     assert_eq!(window.canvas.tab_position(), 1);
     window.key(Modifiers::COMMAND, Key::Tab);
     assert_eq!(window.canvas.tab_position(), 0);

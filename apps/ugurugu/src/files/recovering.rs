@@ -302,10 +302,10 @@ fn every_tab_s_unsaved_work_is_written_and_a_closed_tab_s_removed() {
     let root = Root::new("files-tabs");
     let (mut files, mut canvas, events) = setup(&root);
     canvas.edit(Session::add_layer).unwrap();
-    canvas.open_tab(Document::new([8, 8]), true);
+    canvas.open_tab(Document::new([8, 8]), true).unwrap();
     canvas.edit(Session::add_layer).unwrap();
     // Saved as it is: nothing to keep.
-    canvas.open_tab(Document::new([9, 9]), true);
+    canvas.open_tab(Document::new([9, 9]), true).unwrap();
     let start = Instant::now();
     files.keep_recovery(&mut canvas, start);
     files.keep_recovery(&mut canvas, start + recovery::QUIET);

@@ -85,7 +85,6 @@
 | B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다 | `apps/ugurugu/src/cache.rs` 300·315행 | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
 | B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다 | `apps/ugurugu/src/settings.rs` 515·542행 근처 | 분석 3.2 |
-| B3-43 | 작업자 스레드 생성의 `expect` | 파일·대화상자·캔버스 캐시·내보내기·클립보드 스레드 생성이 실패하면 panic이다(자원 부족 때). 업데이트·설정 스레드는 이미 오류로 처리한다 | `apps/ugurugu/src/files.rs` 391·873행, `cache.rs` 199행, `export.rs` 251행, `clipboard.rs` 57행 근처 | 분석 3.2 |
 | B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml` 10행, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
 | B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` 67~83행 | 분석 3.2; 검토 9절 |
 | B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` 642·712·778·793행 근처 | 분석 3.4 |
@@ -138,13 +137,12 @@
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-84 | 내보내는 탭을 닫으면 내보내기가 "render worker stopped"로 실패 | 깨끗한 탭은 묻지 않고 닫혀 그 탭의 캐시 작업자가 멈춘다. 작업자 join 동안 UI가 잠깐 멈출 수 있다(가설). B3-64는 창 닫기·업데이트만 다룬다 | `canvas.rs` `close_tab`, `cache.rs` `Drop`, `export.rs` | 검토 |
+| B3-84 | 내보내는 탭을 닫으면 내보내기가 실패 | 깨끗한 탭은 묻지 않고 닫혀 그 탭의 캐시 작업자가 멈추고, 내보내기는 "the render worker has stopped"로 끝난다(전에는 끝나지 않았다, `cache::tests::an_export_asked_of_a_stopped_worker_gets_no_picture`). 작업자 join 동안 UI가 잠깐 멈출 수 있다(가설). B3-64는 창 닫기·업데이트만 다룬다 | `canvas.rs` `close_tab`, `cache.rs` `Drop`, `export.rs` | 검토 |
 | B3-85 | 창 크기·위치를 기억하지 않고 늘 1600×1000(논리) | 1366×768이나 1920×1080 150%에서 아래쪽이 작업 표시줄 밑으로 간다(가설). 최대화도 기억하지 않는다 | `apps/ugurugu/src/app.rs` | 검토 |
 | B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
 | B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
 | B3-88 | 손상된 `settings.json`을 백업 없이 덮어씀 | 읽지 못하면 기본값으로 시작하고(로그 경고만), 다음 설정 변경 때 기본값+그 변경으로 덮어써 예전 설정·단축키·배치가 사라진다 | `apps/ugurugu/src/settings.rs` | 검토 |
 | B3-89 | 복구 쪽 작은 결함 | 읽지 못하는 복구 폴더 하나가 `begin` 전체를 실패시켜 그 창은 복구 없이 돈다(경고 뒤 건너뛰어야). 탭 이전 형식 창 폴더에 남은 임시 파일은 폴더를 영영 남긴다. 계속 실패하는 복구 쓰기는 3초마다 다시 시도한다. 두 창이 거의 동시에 시작하면 한 창이 다른 창의 빈 폴더를 지워 그 창이 복구 없이 돌 수 있다(가설) | `apps/ugurugu/src/recovery.rs`, `files.rs` | 검토 |
-| B3-90 | 캐시 작업자 panic | 작업자 루프에 `catch_unwind`가 없어 panic 뒤 대기 중인 내보내기의 `recv`가 영영 기다린다(가설, renderer panic이 있어야 함) | `apps/ugurugu/src/cache.rs` | 검토 |
 | B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다. 저장·열기 중 창 닫기는 아무 반응 없이 무시된다. 좁은 창에서 그리는 동안 눌린 패널 폭이 저장된다. 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `files.rs` `request`, `ui/dock.rs`, `shortcuts.rs` `assignable` | 검토 |
 | B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |

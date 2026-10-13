@@ -826,13 +826,19 @@ impl Files {
 
     /// Puts a document read in a tab of its own, or in place of the tab
     /// shown when that holds nothing to keep, as the empty one a window
-    /// starts with; `saved` when it is on disk as it is.
-    fn show_document(canvas: &mut Canvas, document: Document, saved: bool) {
+    /// starts with; `saved` when it is on disk as it is. `false`, with the
+    /// reason said, when no tab could be opened.
+    fn show_document(&mut self, canvas: &mut Canvas, document: Document, saved: bool) -> bool {
         if canvas.is_pristine() {
             canvas.replace(document, saved);
-        } else {
-            canvas.open_tab(document, saved);
+            return true;
         }
+        let opened = canvas.open_tab(document, saved);
+        if let Err(error) = &opened {
+            tracing::error!(%error, "cannot start a tab's canvas cache thread");
+            self.fail(tr("tab-failed").to_owned());
+        }
+        opened.is_ok()
     }
 
     /// Shows a document read.
@@ -846,7 +852,9 @@ impl Files {
         }
         match opened {
             Opened::Document(document, id, layer) => {
-                Self::show_document(canvas, *document, true);
+                if !self.show_document(canvas, *document, true) {
+                    return;
+                }
                 if let Some(layer) = layer {
                     canvas
                         .edit(|session| session.select_layer(layer))
@@ -864,7 +872,9 @@ impl Files {
             // named after the file, saved as .ugurugu next to it.
             Opened::Imported(imported) => {
                 let ugu_io::legacy::Imported { document, active } = *imported;
-                Self::show_document(canvas, document, false);
+                if !self.show_document(canvas, document, false) {
+                    return;
+                }
                 if let Some(active) = active {
                     canvas
                         .edit(|session| session.select_layer(active))
@@ -1003,7 +1013,7 @@ impl Files {
         let owner = self.owner;
         let events = self.events.clone();
         let default_save_folder = self.default_save_folder.clone();
-        std::thread::Builder::new()
+        let started = std::thread::Builder::new()
             .name("file dialog".to_owned())
             .spawn(move || {
                 // Looking at the disk is left to this thread.
@@ -1021,8 +1031,12 @@ impl Files {
                     None
                 });
                 events(FileEvent::Picked(purpose, path));
-            })
-            .expect("cannot start the dialog thread");
+            });
+        if let Err(error) = started {
+            tracing::error!(%error, "cannot start the dialog thread");
+            self.busy_dialog = false;
+            self.fail(tr("dialog-failed").to_owned());
+        }
     }
 
     pub fn insert_image(&mut self) {
@@ -1085,13 +1099,17 @@ impl Files {
     fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
         // Always beside the others, the empty one at start included: a new
         // document is asked for to have one more. Clean until edited.
-        canvas.open_tab(
+        if let Err(error) = canvas.open_tab(
             Document {
                 pixel,
                 ..Document::new(size)
             },
             true,
-        );
+        ) {
+            tracing::error!(%error, "cannot start a tab's canvas cache thread");
+            self.fail(tr("tab-failed").to_owned());
+            return;
+        }
         *canvas.file_mut() = DocumentFile::new();
         self.clear_message();
     }
@@ -1313,7 +1331,7 @@ impl Files {
         let number = self.exports;
         let events = self.events.clone();
         let done_path = path.clone();
-        self.exporting = Some(Exporting::start(
+        match Exporting::start(
             number,
             canvas.snapshot_now(),
             job,
@@ -1326,7 +1344,17 @@ impl Files {
                     outcome,
                 });
             },
-        ));
+        ) {
+            Ok(exporting) => self.exporting = Some(exporting),
+            Err(error) => {
+                tracing::error!(%error, "cannot start the export thread");
+                self.fail(format!(
+                    "{}: {}",
+                    tr("export-failed"),
+                    tr("file-job-failed")
+                ));
+            }
+        }
     }
 
     /// What the status bar shows while an export runs.
@@ -1612,7 +1640,10 @@ impl Files {
                             id,
                             meta,
                         } = *recovered;
-                        Self::show_document(canvas, document, false);
+                        // Not opened, the work stays to be asked about again.
+                        if !self.show_document(canvas, document, false) {
+                            return;
+                        }
                         if let Some(layer) = meta.layer {
                             canvas
                                 .edit(|session| session.select_layer(layer))
@@ -2093,8 +2124,8 @@ mod tests {
     fn closing_the_window_asks_about_each_unsaved_tab_in_turn() {
         let (mut files, mut canvas, _events) = setup();
         canvas.edit(Session::add_layer).unwrap();
-        canvas.open_tab(Document::new([8, 8]), true);
-        canvas.open_tab(Document::new([9, 9]), true);
+        canvas.open_tab(Document::new([8, 8]), true).unwrap();
+        canvas.open_tab(Document::new([9, 9]), true).unwrap();
         canvas.edit(Session::add_layer).unwrap();
         canvas.show_tab(1);
         files.request(Action::Close, &mut canvas);
@@ -2120,7 +2151,7 @@ mod tests {
     fn closing_a_tab_asks_only_about_it() {
         let (mut files, mut canvas, _events) = setup();
         canvas.edit(Session::add_layer).unwrap();
-        canvas.open_tab(Document::new([8, 8]), true);
+        canvas.open_tab(Document::new([8, 8]), true).unwrap();
         files.request(Action::CloseTab, &mut canvas);
         assert_eq!(files.confirm, None);
         assert_eq!(canvas.tab_count(), 1);
@@ -2510,7 +2541,7 @@ mod tests {
         let folder = folder("elsewhere");
         let path = folder.join("elsewhere.ugurugu");
         canvas.file_mut().path = Some(path.clone());
-        canvas.open_tab(Document::new([8, 8]), true);
+        canvas.open_tab(Document::new([8, 8]), true).unwrap();
         files.handle(
             FileEvent::Picked(Purpose::SaveAs, Some(path.clone())),
             &mut canvas,
@@ -2604,7 +2635,7 @@ mod tests {
         document.layers.push(reference);
 
         let path = folder("export").join("frame.png");
-        let worker = crate::cache::CacheWorker::start(|_| {});
+        let worker = crate::cache::CacheWorker::start(|_| {}).unwrap();
         let not_cancelled = std::sync::atomic::AtomicBool::new(false);
         let outcome = crate::export::still(
             Arc::new(document.clone()),

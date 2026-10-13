@@ -282,7 +282,7 @@ pub struct Canvas {
 }
 
 /// A cache worker handing its renders to `done`.
-fn worker(done: &Arc<dyn Fn(Rendered) + Send + Sync>) -> CacheWorker {
+fn worker(done: &Arc<dyn Fn(Rendered) + Send + Sync>) -> std::io::Result<CacheWorker> {
     let done = done.clone();
     CacheWorker::start(move |rendered| done(rendered))
 }
@@ -311,7 +311,12 @@ impl Canvas {
         let cache_done: Arc<dyn Fn(Rendered) + Send + Sync> = Arc::new(cache_done);
         Self {
             // Nothing to lose until edited, as in 2.2.13.
-            tab: Tab::new(document, true, worker(&cache_done), 0),
+            tab: Tab::new(
+                document,
+                true,
+                worker(&cache_done).expect("cannot start the canvas cache thread"),
+                0,
+            ),
             others: Vec::new(),
             position: 0,
             cache_done,
@@ -459,15 +464,18 @@ impl Canvas {
     }
 
     /// Opens `document` in a new tab after the one shown and shows it;
-    /// `saved` when it is on disk as it is.
-    pub fn open_tab(&mut self, document: Document, saved: bool) {
+    /// `saved` when it is on disk as it is. An error, and no tab, when no
+    /// thread could be started to draw it.
+    pub fn open_tab(&mut self, document: Document, saved: bool) -> std::io::Result<()> {
+        let worker = worker(&self.cache_done)?;
         self.generations += 1;
-        let tab = Tab::new(document, saved, worker(&self.cache_done), self.generations);
+        let tab = Tab::new(document, saved, worker, self.generations);
         self.leave_tab();
         let left = std::mem::replace(&mut self.tab, tab);
         self.others.insert(self.position, left);
         self.position += 1;
         self.enter_tab();
+        Ok(())
     }
 
     /// Shows the tab at `index` in the order.
@@ -1897,7 +1905,7 @@ mod tests {
     #[test]
     fn tabs_keep_their_documents_and_changes_apart() {
         let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
-        canvas.open_tab(Document::new([32, 16]), true);
+        canvas.open_tab(Document::new([32, 16]), true).unwrap();
         assert_eq!((canvas.tab_count(), canvas.tab_position()), (2, 1));
         assert_eq!(canvas.session().document().canvas, [32, 16]);
         canvas.edit(Session::add_layer).unwrap();
@@ -1917,10 +1925,10 @@ mod tests {
     #[test]
     fn tabs_of_the_same_name_are_numbered_in_the_order_opened() {
         let mut canvas = Canvas::new(Document::new([10, 10]), |_| {});
-        canvas.open_tab(Document::new([20, 20]), true);
+        canvas.open_tab(Document::new([20, 20]), true).unwrap();
         canvas.file_mut().unsaved_name = Some("Cat".to_owned());
-        canvas.open_tab(Document::new([30, 30]), true);
-        canvas.open_tab(Document::new([40, 40]), true);
+        canvas.open_tab(Document::new([30, 30]), true).unwrap();
+        canvas.open_tab(Document::new([40, 40]), true).unwrap();
         canvas.file_mut().unsaved_name = Some("Cat".to_owned());
         let names = |canvas: &Canvas| -> Vec<String> {
             canvas
@@ -1947,8 +1955,8 @@ mod tests {
     #[test]
     fn moving_and_closing_tabs_keeps_the_order_and_the_one_shown() {
         let mut canvas = Canvas::new(Document::new([10, 10]), |_| {});
-        canvas.open_tab(Document::new([20, 20]), true);
-        canvas.open_tab(Document::new([30, 30]), true);
+        canvas.open_tab(Document::new([20, 20]), true).unwrap();
+        canvas.open_tab(Document::new([30, 30]), true).unwrap();
         assert_eq!(widths(&canvas), [10, 20, 30]);
         canvas.move_tab(2, 0);
         assert_eq!(

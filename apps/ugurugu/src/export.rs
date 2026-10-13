@@ -188,7 +188,7 @@ pub struct Exporting {
 
 impl Exporting {
     /// Exports `document` to `path` as `job` says, and hands the outcome to
-    /// `done`.
+    /// `done`; an error when no thread could be started for it.
     pub fn start(
         number: u64,
         document: Arc<Document>,
@@ -196,7 +196,7 @@ impl Exporting {
         path: PathBuf,
         renders: Renders,
         finished: impl FnOnce(Outcome) + Send + 'static,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         let cancel = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicUsize::new(0));
         let steps = match job {
@@ -250,15 +250,14 @@ impl Exporting {
                     );
                     finished(outcome);
                 }
-            })
-            .expect("cannot start the export thread");
-        Self {
+            })?;
+        Ok(Self {
             number,
             cancel,
             done,
             steps,
             thread,
-        }
+        })
     }
 
     pub fn cancel(&self) {
@@ -615,7 +614,7 @@ mod tests {
     }
 
     fn export(document: Arc<Document>, path: &Path, cancel: bool) -> Outcome {
-        let worker = CacheWorker::start(|_| {});
+        let worker = CacheWorker::start(|_| {}).unwrap();
         still(
             document,
             0,
@@ -677,7 +676,7 @@ mod tests {
         document.background = Rgba8(background);
         document.frames = 3;
         document.frames_per_second = 12.0;
-        let worker = CacheWorker::start(|_| {});
+        let worker = CacheWorker::start(|_| {}).unwrap();
         animation(
             Arc::new(document),
             format,
@@ -808,7 +807,7 @@ mod tests {
     #[test]
     fn enlarged_eight_times_each_pixel_is_an_eight_by_eight_block() {
         let folder = folder("enlarged");
-        let worker = CacheWorker::start(|_| {});
+        let worker = CacheWorker::start(|_| {}).unwrap();
         let document = Arc::new(pixel_art());
         let export = |format, size, name: &str| {
             let path = folder.join(name);

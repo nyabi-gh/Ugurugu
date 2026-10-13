@@ -144,7 +144,7 @@ pub struct CacheWorker {
 impl CacheWorker {
     /// `done` receives each finished split and playback frame, on the
     /// worker thread.
-    pub fn start(done: impl Fn(Rendered) + Send + 'static) -> Self {
+    pub fn start(done: impl Fn(Rendered) + Send + 'static) -> std::io::Result<Self> {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
@@ -167,11 +167,24 @@ impl CacheWorker {
         let thread = std::thread::Builder::new()
             .name("canvas cache".to_owned())
             .spawn(move || {
-                let mut renderer = DocumentRenderer::new(threads);
-                renderer.set_stop(worker.stop.clone());
+                let renderer_for = |worker: &Shared| {
+                    let mut renderer = DocumentRenderer::new(threads);
+                    renderer.set_stop(worker.stop.clone());
+                    renderer
+                };
+                let mut renderer = renderer_for(&worker);
                 while let Some(job) = next(&worker) {
                     renderer.set_surface_budget(worker.surface_budget.load(Ordering::Relaxed));
-                    if let Some(job) = run(&mut renderer, job, &done) {
+                    // A job that panics is dropped, so an export waiting for
+                    // it gets no picture; the panic hook has recorded it.
+                    let again = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        run(&mut renderer, job, &done)
+                    }))
+                    .unwrap_or_else(|_| {
+                        renderer = renderer_for(&worker);
+                        None
+                    });
+                    if let Some(job) = again {
                         // An export stopped for other work goes first next.
                         worker
                             .queue
@@ -195,12 +208,13 @@ impl CacheWorker {
                         renderer.release_scratch();
                     }
                 }
-            })
-            .expect("cannot start the canvas cache thread");
-        Self {
+                // Exports left waiting get no picture rather than none ever.
+                worker.queue.lock().expect("queue lock").exports.clear();
+            })?;
+        Ok(Self {
             renders: Renders { shared },
             thread: Some(thread),
-        }
+        })
     }
 
     pub fn renders(&self) -> Renders {
@@ -300,17 +314,17 @@ impl Renders {
     pub fn render(&self, document: Arc<Document>, plan: RenderPlan, frame: i64) -> Option<Pixmap> {
         let (reply, answer) = channel();
         let shared = &self.shared;
-        shared
-            .queue
-            .lock()
-            .expect("queue lock")
-            .exports
-            .push_back(Job::Export {
-                document,
-                plan,
-                frame,
-                reply,
-            });
+        let mut queue = shared.queue.lock().expect("queue lock");
+        if queue.quit {
+            return None;
+        }
+        queue.exports.push_back(Job::Export {
+            document,
+            plan,
+            frame,
+            reply,
+        });
+        drop(queue);
         shared.wake.notify_one();
         answer.recv().ok()
     }
@@ -488,6 +502,63 @@ mod tests {
             surface_budget: AtomicUsize::new(0),
             surface_bytes: AtomicUsize::new(0),
         }
+    }
+
+    /// Waits for `export` on a thread of its own, at most ten seconds.
+    fn export_within(renders: &Renders, document: Document) -> Option<Option<Pixmap>> {
+        let renders = renders.clone();
+        let (answer, answered) = channel();
+        std::thread::spawn(move || {
+            let _ = answer.send(renders.export(Arc::new(document), 0));
+        });
+        answered
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .ok()
+    }
+
+    #[test]
+    fn an_export_whose_render_panics_gets_no_picture_and_the_next_one_does() {
+        use ugu_core::document::LayerKind;
+        use ugu_core::ops::{MaskId, Op, Rgba8};
+        use ugu_core::store::Mask;
+
+        let worker = CacheWorker::start(|_| {}).unwrap();
+        let renders = worker.renders();
+        // A mask no file or edit can hold any more: its pixels on either
+        // side of i32::MAX made drawing it panic.
+        let mut broken = Document::new([8, 8]);
+        broken.store.masks.insert(
+            MaskId(0),
+            Mask {
+                bounds: [i32::MAX - 3, 0, 8, 2],
+                bits: vec![0b1000_0000, 0b0000_0001].into(),
+            },
+        );
+        let LayerKind::Paint(paint) = &mut broken.layers[0].kind else {
+            unreachable!()
+        };
+        paint.ops.push(Op::Fill {
+            coverage: MaskId(0),
+            color: Rgba8([0, 0, 0, 255]),
+            antialias: false,
+            clip: None,
+        });
+        assert!(matches!(export_within(&renders, broken), Some(None)));
+        assert!(matches!(
+            export_within(&renders, Document::new([8, 8])),
+            Some(Some(_))
+        ));
+    }
+
+    #[test]
+    fn an_export_asked_of_a_stopped_worker_gets_no_picture() {
+        let worker = CacheWorker::start(|_| {}).unwrap();
+        let renders = worker.renders();
+        drop(worker);
+        assert!(matches!(
+            export_within(&renders, Document::new([8, 8])),
+            Some(None)
+        ));
     }
 
     #[test]
