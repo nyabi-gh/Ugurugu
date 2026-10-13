@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리. 3.0(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 줄 번호는 그 커밋 기준이다.
+2026-10-12 정리, 2026-10-13 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이고, 어디 칸의 줄 번호는 적은 때의 코드 기준이라 어긋날 수 있다. 새로 적는 행은 함수 이름을 쓴다.
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -92,11 +92,11 @@
 | B3-49 | Rust reader의 퍼징과 ZIP 디렉터리 메모리 | `.ugurugu`·구형 JSON·qCompress·마스크·프리셋·이미지에 corpus를 두고 시간·메모리 한도를 함께 재는 퍼징이 없다. ZIP 중앙 디렉터리는 항목 수를 보기 전에 zip crate가 파싱하므로 파일 길이(`read::limits::FILE_BYTES`, 약 223MiB)로만 묶여 있다. 그 안에서 항목 머리만 채운 파일이 쓰는 메모리는 재지 않았다(가설: 파일 길이의 몇 배). 취약점으로 입증한 것은 아니다 | `crates/ugu-io/src/read.rs` `read_with`, `legacy.rs`, `apps/ugurugu/src/settings/preset.rs` | 검토 9절; ANALYSIS_REPORT R-08 |
 | B3-50 | 긴 텍스트의 윤곽을 UI 스레드에서 다시 만듦 | 배치한 텍스트가 바뀌면 render/UI 스레드에서 Parley 윤곽을 다시 만든다(같은 글이면 캐시). 긴 문장·대량 붙여넣기는 입력 지연 후보. 재고 길이 제한·지연 합치기·백그라운드 배치를 검토 | `apps/ugurugu/src/canvas/text.rs` 68행 | 검토 8절 |
 | B3-51 | 축소 재생 미리보기의 정확성 fixture | 재생 때 `preview_shrink`는 해상도·표본 간격을 줄인다. 픽셀 모드와 곡선의 축소 미리보기 비교 fixture가 있으면 좋다. 릴리스 노트 문구는 고쳤고 fixture는 더하지 않은 것으로 보인다(가설) | `apps/ugurugu/src/canvas.rs` | 검토 8절, 10절 |
-| B3-52 | 작업 흐름 안내 | 첫 실행의 짧은 안내(그리기 → 재생 → 내보내기), 텍스트 확정 전 "윤곽으로 바뀌어 다시 편집 못 함" 안내, 이미지 삽입이 캔버스에 맞춰 줄였음을 알림, 내보내기의 크기·배경·현재 프레임 의미 통일 | `apps/ugurugu/src/ui/` | 검토 6절 "작업 흐름 개선 제안" |
+| B3-52 | 작업 흐름 안내 | 도움말에는 "시작하기"가 있지만 첫 실행에 띄우지 않는다. 문자 안내(`text-hint`)는 확정하면 윤곽이 되어 다시 편집할 수 없다는 말이 없다. 삽입한 이미지를 캔버스에 맞춰 줄여도 "삽입됨"만 알린다(`import::decode`의 `fit`). 메뉴의 "현재 프레임을 이미지로 내보내기"와 동작 이름 "이미지로 내보내기"가 다르다 | `apps/ugurugu/src/ui/`, `files.rs`, `i18n/strings.txt` | 검토 6절 "작업 흐름 개선 제안" |
 | B3-53 | PNG 연속 프레임·sprite sheet 내보내기 | 게임 엔진·영상 편집으로 재사용, 픽셀 모드와 잘 맞는다 | `apps/ugurugu/src/export.rs` | 분석 3.8 |
 | B3-54 | 인접 포즈를 겹쳐 보는 미리보기(어니언 스킨) | 우글거림 진폭·끊김·연결을 정지 상태에서 비교. 키프레임 편집기 전체가 아니라 포즈 비교로 한정 | `apps/ugurugu/src/cache.rs` | 분석 3.8 |
 | B3-55 | 모션 seed 다시 뽑기·잠금, A/B 비교 | 같은 설정에서 다른 느낌을 찾고 고른 결과를 재현 | `crates/ugu-core/src/store.rs`, `apps/ugurugu/src/ui/mod.rs` | 분석 3.8 |
-| B3-56 | 내보내기 알파 미리보기·크기 안내 | GIF 반투명 손실과 JPEG 흰 바탕을 저장 전에 알게 한다 | `apps/ugurugu/src/files.rs`, `export.rs` | 분석 3.8 |
+| B3-56 | 내보내기 알파 안내 | 애니메이션 창에는 크기·인코딩 메모리 추정·투명 유지 스위치가 있다. GIF가 alpha 128 미만을 버려 부드러운 가장자리가 딱딱해지는 것과, 투명한 문서를 JPEG로 내보내면 흰 바탕이 되는 것은 알리지 않는다 | `apps/ugurugu/src/files.rs` 애니메이션 창, `export.rs` | 분석 3.8 |
 
 ## 7. 2.2.x 분석 보고서 중 3.0에도 해당하는 것
 
@@ -104,13 +104,13 @@
 
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-58 | 읽지 못한 복구 폴더(`failed-…`)가 상한·기한 없이 쌓임 | 손상 복구 폴더를 지우지 않고 `failed-<시각>-<이름>`으로 옮긴 뒤 다시 보지 않는다. 정리 코드가 없다. 폴더마다 문서 2세대 | `apps/ugurugu/src/recovery.rs` 26·197·313행 | ANALYSIS_REPORT B-13 ① |
+| B3-58 | 읽지 못한 복구 폴더(`failed-…`)가 상한·기한 없이 쌓임 | 손상 복구 폴더를 지우지 않고 `failed-<시각>-<이름>`으로 옮긴 뒤 다시 보지 않는다. 정리 코드가 없다. 폴더마다 문서 2세대 | `apps/ugurugu/src/recovery.rs` `FAILED`, `set_aside`, `begin` | ANALYSIS_REPORT B-13 ① |
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
-| B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈추고 winit `Occluded`는 처리하지 않는다. 다른 창에 완전히 가려진 동안의 전력 사용(가설) | `apps/ugurugu/src/render.rs` 160·676행 | ANALYSIS_REPORT P-03 |
+| B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈춘다. winit 0.30.13은 Windows에서 `Occluded`를 보내지 않으므로(문서에 Unsupported) 그것으로는 고칠 수 없다. 하려면 `DWMWA_CLOAKED`(가상 데스크톱), 세션 잠금, 화면 꺼짐을 `ugu-win`에서 받아 최소화처럼 다룬다. 가려진 동안의 전력 사용은 재지 않았다(가설). 먼저 잰다 | `apps/ugurugu/src/render.rs` `minimized` | ANALYSIS_REPORT P-03 |
 | B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
-| B3-64 | 내보내기 중 닫기·업데이트가 묻지 않고 내보내기를 취소, 세션 종료 처리 없음 | 닫기는 문서가 수정됐을 때만 묻고, 끝날 때 진행 중 내보내기를 취소하고 지운다(`Files` 종료). `WM_QUERYENDSESSION`·`WM_ENDSESSION`을 다루지 않아 로그오프 때는 자동복구(마지막 변경 3초 뒤, 늦어도 30초)에 기댄다(winit 기본 동작에 따른 결과는 가설) | `apps/ugurugu/src/files.rs` 552~559·645행 | ANALYSIS_REPORT U-10 |
-| B3-66 | 최근 파일 목록 없음 | 번역 키·메뉴 어디에도 없다 | `apps/ugurugu/src/ui/actions.rs` | ANALYSIS_REPORT U-17; 검토 6절 |
+| B3-64 | 내보내기 중 닫기·업데이트가 묻지 않고 내보내기를 취소, 세션 종료 처리 없음 | 닫기·업데이트는 저장 안 한 탭만 묻고(`close_next`), 끝날 때 진행 중 내보내기를 취소하고 지운다(`Files::end`). `WM_QUERYENDSESSION`·`WM_ENDSESSION`을 다루지 않아 로그오프 때는 자동복구(마지막 변경 3초 뒤, 늦어도 30초)에 기댄다(winit 기본 동작에 따른 결과는 가설) | `apps/ugurugu/src/files.rs` `request`, `close_next`, `end`; `ugu-win` | ANALYSIS_REPORT U-10 |
+| B3-66 | 최근 파일 목록 없음 | 번역 키·메뉴 어디에도 없다. 작업 표시줄 Jump List(`SHAddToRecentDocs`, 열기·저장 때)로 하기로 했다(2026-10-13, 메뉴 하위 목록보다 작고 범위를 덜 바꿈). 메뉴 목록은 scope.md 5절대로 넣지 않는다 | `ugu-win`, `apps/ugurugu/src/files.rs` | ANALYSIS_REPORT U-17; 검토 6절 |
 | B3-67 | 릴리스 PDB를 보관하지 않음 | Release는 `debug = "line-tables-only"`로 PDB를 만들지만 패키지는 exe·LICENSE·고지 세 파일만 담고 `release-3.yml`도 PDB를 올리지 않는다. 네이티브 충돌 기록(모듈+오프셋)을 기호로 풀 수 없고, panic backtrace에도 함수 이름이 빠질 것으로 보인다(가설) | `Cargo.toml` `[profile.release]`, `tools/package_windows.ps1`, `.github/workflows/release-3.yml` | ANALYSIS_REPORT R-11 |
 | B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 링크와 Velopack 피드가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml` 176행 | ANALYSIS_REPORT R-12 |
 
@@ -138,8 +138,8 @@
 | B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
 | B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
 | B3-88 | 손상된 `settings.json`을 백업 없이 덮어씀 | 읽지 못하면 기본값으로 시작하고(로그 경고만), 다음 설정 변경 때 기본값+그 변경으로 덮어써 예전 설정·단축키·배치가 사라진다 | `apps/ugurugu/src/settings.rs` | 검토 |
-| B3-89 | 복구 쪽 작은 결함 | 읽지 못하는 복구 폴더 하나가 `begin` 전체를 실패시켜 그 창은 복구 없이 돈다(경고 뒤 건너뛰어야). 탭 이전 형식 창 폴더에 남은 임시 파일은 폴더를 영영 남긴다. 계속 실패하는 복구 쓰기는 3초마다 다시 시도한다. 두 창이 거의 동시에 시작하면 한 창이 다른 창의 빈 폴더를 지워 그 창이 복구 없이 돌 수 있다(가설) | `apps/ugurugu/src/recovery.rs`, `files.rs` | 검토 |
-| B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다. 저장·열기 중 창 닫기는 아무 반응 없이 무시된다. 좁은 창에서 그리는 동안 눌린 패널 폭이 저장된다. 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `files.rs` `request`, `ui/dock.rs`, `shortcuts.rs` `assignable` | 검토 |
+| B3-89 | 복구 쪽 작은 결함 | 읽지 못하는 복구 폴더 하나가 `begin` 전체를 실패시켜 그 창은 복구 없이 돈다(경고 뒤 건너뛰어야). 탭 이전 형식 창 폴더에 남은 임시 파일은 폴더를 영영 남긴다(`holds_nothing`). 계속 실패하는 복구 쓰기는 바뀐 것이 없어도 3초마다 다시 시도한다(실패 때 `written = None`). 두 창이 거의 동시에 시작하면 한 창이 다른 창의 빈 폴더를 지워 그 창이 복구 없이 돌 수 있다(가설: 폴더를 만든 뒤 잠그기 전) | `apps/ugurugu/src/recovery.rs` `begin`, `holds_nothing`, `lock`; `files.rs` 복구 쓰기 | 검토 |
+| B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다(`leave_tab`이 `cancel_selection`을 부르지 않음). 저장·열기 중 창 닫기는 아무 반응 없이 무시된다. 좁은 창에서 패널 위젯(슬라이더·메뉴·버튼)을 누르는 동안 줄어든 패널 폭이 저장된다(캔버스 그리기는 egui에 가지 않으므로 아님). 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `files.rs` `request`, `ui/dock.rs` 폭 저장, `shortcuts.rs` `assignable` | 검토 |
 | B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |
 | B3-94 | 태그 커밋의 CI가 취소되면 릴리스 실패 | 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `ci.yml`, `release-3.yml` | 검토 |
