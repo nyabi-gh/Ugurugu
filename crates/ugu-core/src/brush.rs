@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! The built-in brushes and erasers, with 2.2.13's values
-//! (`BrushPresetCatalog`, `EraserPresetCatalog`), and 3.0's pixel pencil and
-//! eraser.
+//! (`BrushPresetCatalog`, `EraserPresetCatalog`), and 3.0's pixel pencils and
+//! erasers.
 
 use crate::store::{Brush, BrushEngine, TipShape};
 
@@ -86,7 +86,8 @@ const fn spray(
     }
 }
 
-/// A pixel pencil: full opacity and the same width at any pressure.
+/// A pixel pencil: full opacity and the same width at any pressure, in
+/// blocks of whole pixels.
 const PIXEL: Brush = Brush {
     engine: BrushEngine::Pixel,
     tip: TipShape::Square,
@@ -94,6 +95,12 @@ const PIXEL: Brush = Brush {
     opacity_dynamics: 0.0,
     antialias: false,
     ..Brush::DEFAULT
+};
+
+/// A pixel pencil whose blocks are the pixels inside a circle.
+const ROUND_PIXEL: Brush = Brush {
+    tip: TipShape::Round,
+    ..PIXEL
 };
 
 const fn preset(id: &'static str, category: Category, brush: Brush, size: f32) -> Preset {
@@ -108,7 +115,7 @@ const fn preset(id: &'static str, category: Category, brush: Brush, size: f32) -
 use Category::{Airbrush, Marker, Pen, Pixel, Spray};
 use TipShape::{Round, Square};
 
-pub const BRUSHES: [Preset; 18] = [
+pub const BRUSHES: [Preset; 19] = [
     preset("ink-pen", Pen, line(1.0, 0.8, Round), 6.0),
     preset("g-pen", Pen, line(1.0, 0.95, Round), 7.0),
     preset("round-pen", Pen, line(1.0, 0.6, Round), 8.0),
@@ -182,10 +189,12 @@ pub const BRUSHES: [Preset; 18] = [
         48.0,
     ),
     preset("pixel-pencil", Pixel, PIXEL, 1.0),
+    preset("round-pixel-pencil", Pixel, ROUND_PIXEL, 8.0),
 ];
 
-/// Hard, soft, kneaded and pixel; their category is that of their engine.
-pub const ERASERS: [Preset; 4] = [
+/// Hard, soft, kneaded, pixel and round pixel; their category is that of
+/// their engine.
+pub const ERASERS: [Preset; 5] = [
     preset(
         "hard-eraser",
         Pen,
@@ -213,6 +222,7 @@ pub const ERASERS: [Preset; 4] = [
         48.0,
     ),
     preset("pixel-eraser", Pixel, PIXEL, 1.0),
+    preset("round-pixel-eraser", Pixel, ROUND_PIXEL, 8.0),
 ];
 
 /// The brush or eraser with `id`.
@@ -245,5 +255,22 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), BRUSHES.len() + ERASERS.len());
         assert_eq!(find("wobble-spray").map(|preset| preset.size), Some(48.0));
+    }
+
+    #[test]
+    fn pixel_mode_has_a_round_pencil_and_eraser() {
+        for id in ["round-pixel-pencil", "round-pixel-eraser"] {
+            let preset = find(id).unwrap();
+            assert_eq!(preset.category, Pixel);
+            assert_eq!(preset.brush.engine, BrushEngine::Pixel);
+            assert_eq!(preset.brush.tip, Round);
+            assert_eq!(
+                Brush {
+                    tip: Square,
+                    ..preset.brush
+                },
+                find("pixel-pencil").unwrap().brush
+            );
+        }
     }
 }

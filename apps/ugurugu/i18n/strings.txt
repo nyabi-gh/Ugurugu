@@ -178,10 +178,12 @@ dust-spray | Dust Spray | 먼지 스프레이 | ダストスプレー
 droplet-spray | Droplet Spray | 물방울 스프레이 | しずくスプレー
 wobble-spray | Wobble Spray | 우글 스프레이 | ウォブルスプレー
 pixel-pencil | Pixel Pencil | 픽셀 연필 | ピクセル鉛筆
+round-pixel-pencil | Round Pixel Pencil | 둥근 픽셀 연필 | 丸ピクセル鉛筆
 hard-eraser | Hard | 딱딱함 | ハード
 soft-eraser | Soft | 부드러움 | ソフト
 kneaded-eraser | Kneaded | 반죽 | 練り消し
 pixel-eraser | Pixel | 픽셀 | ピクセル
+round-pixel-eraser | Round Pixel | 둥근 픽셀 | 丸ピクセル
 tools-rail | Tools | 도구 | ツール
 quick-access | Quick access | 빠른 도구 | クイックアクセス
 panels | Panels | 패널 | パネル
