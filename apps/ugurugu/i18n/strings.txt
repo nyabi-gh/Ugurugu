@@ -1,507 +1,507 @@
-# key | Qt context in 2.2.13 | English source [| args=...]
-# tools/ts_to_ftl.py turns this into en.ftl, ko.ftl and ja.ftl.
+# key | English | 한국어 | 日本語 [| access] [| args=...]
+# tools/strings_to_ftl.py turns this into en.ftl, ko.ftl and ja.ftl.
 
 # Menus
-menu-file | ugurugu::MainWindow | &File | access
-menu-edit | ugurugu::MainWindow | &Edit | access
-menu-view | ugurugu::MainWindow | &View | access
-menu-tools | ugurugu::MainWindow | &Tools | access
-menu-window | ugurugu::MainWindow | &Window | access
-menu-help | ugurugu::MainWindow | &Help | access
-file-new | ugurugu::MainWindow | &New
-file-open | ugurugu::MainWindow | &Open…
-file-save | ugurugu::MainWindow | &Save
-file-save-as | ugurugu::MainWindow | Save &As…
-file-export-frame | ugurugu::MainWindow | Export current frame as &image…
-file-export-image | ugurugu::MainWindow | Export &image…
-file-insert-image | ugurugu::MainWindow | Insert &image…
-insert-image-failed | ugurugu::MainWindow | Could not insert image
-image-inserted | ugurugu::MainWindow | Inserted %1 | args=name
-file-close-tab | - | Close tab | 탭 닫기 | タブを閉じる
-file-quit | ugurugu::MainWindow | &Quit
-export-running | ugurugu::MainWindow | Rendering image…
-export-animation-running | ugurugu::MainWindow | Rendering animation…
-export-gif | ugurugu::MainWindow | Export animated &GIF…
-export-gif-title | ugurugu::MainWindow | Export animated GIF
-export-webp | ugurugu::MainWindow | Export animated &WebP…
-export-webp-title | ugurugu::MainWindow | Export animated WebP
-export-confirm | ugurugu::MainWindow | Export
-export-size | ugurugu::GifExportDialog | Size
-export-size-original | - | Original size | 원본 크기 | 元のサイズ
-export-keep-transparency | ugurugu::GifExportDialog | Keep transparent areas
-export-opaque-background | ugurugu::GifExportDialog | The canvas background is opaque, so there is nothing to keep transparent.
-export-estimate | ugurugu::GifExportDialog | %1 frames, about %2 MiB while encoding. | args=frames,mebibytes
-export-over-budget | ugurugu::GifExportDialog | This size needs about %1 MiB while encoding, which is more than the export budget. Choose a smaller size. | args=mebibytes
-export-cancel | ugurugu::MainWindow | Cancel
-export-canceled | ugurugu::MainWindow | Export canceled
-export-done | ugurugu::MainWindow | Exported %1 | args=path
-export-failed | ugurugu::MainWindow | Export failed
-tools-import | - | Import tool preset… | 도구 프리셋 가져오기… | ツールプリセットを読み込む…
-tools-export | - | Export tool preset… | 도구 프리셋 내보내기… | ツールプリセットを書き出す…
-preset-imported | ugurugu::MainWindow | Imported preset %1 | args=name
-preset-exported | ugurugu::MainWindow | Exported preset %1 | args=name
-preset-import-failed | ugurugu::MainWindow | Preset import failed
-preset-export-failed | ugurugu::MainWindow | Preset export failed
-preset-too-large | ugurugu::MainWindow | The preset could not be read or is too large.
-preset-not-preset | - | The file is not an Ugurugu tool preset. | Ugurugu 도구 프리셋 파일이 아닙니다. | Uguruguのツールプリセットではありません。
-recovery-title | ugurugu::MainWindow | Recover unsaved work
-recovery-found | ugurugu::MainWindow | Ugurugu found work from a previous session. Choose whether to recover or discard it.
-recovery-recover | ugurugu::MainWindow | Recover
-recovery-discard | ugurugu::MainWindow | Discard
-recovery-later | - | Later | 나중에 | 後で
-recovery-done | ugurugu::MainWindow | Recovered unsaved work.
-recovery-failed | ugurugu::MainWindow | Recovery failed
+menu-file | &File | 파일(&F) | ファイル(&F) | access
+menu-edit | &Edit | 편집(&E) | 編集(&E) | access
+menu-view | &View | 보기(&V) | 表示(&V) | access
+menu-tools | &Tools | 도구(&T) | ツール(&T) | access
+menu-window | &Window | 창(&W) | ウィンドウ(&W) | access
+menu-help | &Help | 도움말(&H) | ヘルプ(&H) | access
+file-new | &New | 새로 만들기(&N) | 新規(&N)
+file-open | &Open… | 열기(&O)… | 開く(&O)…
+file-save | &Save | 저장(&S) | 保存(&S)
+file-save-as | Save &As… | 다른 이름으로 저장(&A)… | 名前を付けて保存(&A)…
+file-export-frame | Export current frame as &image… | 현재 프레임을 이미지로 내보내기(&I)… | 現在のフレームを画像で書き出す(&I)…
+file-export-image | Export &image… | 이미지로 내보내기(&I)… | 画像で書き出す(&I)…
+file-insert-image | Insert &image… | 이미지 삽입(&I)… | 画像を挿入(&I)…
+insert-image-failed | Could not insert image | 이미지를 삽입할 수 없음 | 画像を挿入できませんでした
+image-inserted | Inserted %1 | %1 삽입됨 | %1を挿入しました | args=name
+file-close-tab | Close tab | 탭 닫기 | タブを閉じる
+file-quit | &Quit | 종료(&Q) | 終了(&Q)
+export-running | Rendering image… | 이미지 렌더링 중… | 画像をレンダリング中…
+export-animation-running | Rendering animation… | 애니메이션 렌더링 중… | アニメーションをレンダリング中…
+export-gif | Export animated &GIF… | 움직이는 GIF 내보내기(&G)… | アニメーションGIFを書き出す(&G)…
+export-gif-title | Export animated GIF | 움직이는 GIF 내보내기 | アニメーションGIFを書き出す
+export-webp | Export animated &WebP… | 움직이는 WebP 내보내기(&W)… | アニメーションWebPを書き出す(&W)…
+export-webp-title | Export animated WebP | 움직이는 WebP 내보내기 | アニメーションWebPを書き出す
+export-confirm | Export | 내보내기 | 書き出し
+export-size | Size | 크기 | サイズ
+export-size-original | Original size | 원본 크기 | 元のサイズ
+export-keep-transparency | Keep transparent areas | 투명한 부분 유지 | 透明部分を保持
+export-opaque-background | The canvas background is opaque, so there is nothing to keep transparent. | 캔버스 배경이 불투명해서 유지할 투명한 부분이 없습니다. | キャンバスの背景が不透明なため、保持する透明部分はありません。
+export-estimate | %1 frames, about %2 MiB while encoding. | %1프레임, 인코딩 중 약 %2 MiB를 사용합니다. | %1フレーム、エンコード中に約 %2 MiB を使用します。 | args=frames,mebibytes
+export-over-budget | This size needs about %1 MiB while encoding, which is more than the export budget. Choose a smaller size. | 이 크기는 인코딩 중 약 %1 MiB가 필요해 내보내기 한도를 넘습니다. 더 작은 크기를 선택하세요. | このサイズはエンコード中に約 %1 MiB が必要で、書き出しの上限を超えます。より小さいサイズを選んでください。 | args=mebibytes
+export-cancel | Cancel | 취소 | キャンセル
+export-canceled | Export canceled | 내보내기를 취소했습니다 | 書き出しをキャンセルしました
+export-done | Exported %1 | %1 내보냄 | %1 を書き出しました | args=path
+export-failed | Export failed | 내보내기 실패 | 書き出しに失敗しました
+tools-import | Import tool preset… | 도구 프리셋 가져오기… | ツールプリセットを読み込む…
+tools-export | Export tool preset… | 도구 프리셋 내보내기… | ツールプリセットを書き出す…
+preset-imported | Imported preset %1 | 프리셋 %1 가져옴 | プリセット%1を読み込みました | args=name
+preset-exported | Exported preset %1 | 프리셋 %1 내보냄 | プリセット%1を書き出しました | args=name
+preset-import-failed | Preset import failed | 프리셋 가져오기 실패 | プリセットの読み込みに失敗しました
+preset-export-failed | Preset export failed | 프리셋 내보내기 실패 | プリセットの書き出しに失敗しました
+preset-too-large | The preset could not be read or is too large. | 프리셋을 읽을 수 없거나 파일이 너무 큽니다. | プリセットを読み込めないか、ファイルが大きすぎます。
+preset-not-preset | The file is not an Ugurugu tool preset. | Ugurugu 도구 프리셋 파일이 아닙니다. | Uguruguのツールプリセットではありません。
+recovery-title | Recover unsaved work | 저장하지 않은 작업 복구 | 未保存の作業を復元
+recovery-found | Ugurugu found work from a previous session. Choose whether to recover or discard it. | Ugurugu에서 이전 세션의 작업을 발견했습니다. 복구하거나 폐기할지 선택하세요. | 前回のセッションの作業が見つかりました。復元するか破棄するかを選択してください。
+recovery-recover | Recover | 복구 | 復元
+recovery-discard | Discard | 폐기 | 破棄
+recovery-later | Later | 나중에 | 後で
+recovery-done | Recovered unsaved work. | 저장하지 않은 작업을 복구했습니다. | 未保存の作業を復元しました。
+recovery-failed | Recovery failed | 복구 실패 | 復元に失敗しました
 
 # Opening a 2.2.13 project
-legacy-imported | - | Imported %1 as a new, unsaved document. | %1을(를) 저장되지 않은 새 문서로 가져왔습니다. | %1 を未保存の新しいドキュメントとして読み込みました。 | args=name
-legacy-damaged | - | This is not an Ugurugu 2.2.13 project, or it is damaged. | Ugurugu 2.2.13 프로젝트가 아니거나 손상되었습니다. | Ugurugu 2.2.13 のプロジェクトではないか、破損しています。
-legacy-older | - | This project is from before Ugurugu 2.2.13. Open it in 2.2.13 and save it, then open it here. | Ugurugu 2.2.13 이전의 프로젝트입니다. 2.2.13에서 열어 저장한 뒤 여기서 여세요. | Ugurugu 2.2.13 より前のプロジェクトです。2.2.13 で開いて保存してから、ここで開いてください。
-legacy-newer | - | This project is from a version newer than Ugurugu 2.2.13. | Ugurugu 2.2.13보다 새 버전의 프로젝트입니다. | Ugurugu 2.2.13 より新しいバージョンのプロジェクトです。
-legacy-too-much | - | This project holds more data than a document can. | 문서가 담을 수 있는 것보다 데이터가 많습니다. | ドキュメントに入るよりも多くのデータがあります。
-legacy-procedural-fill | - | This project has a fill that is redrawn on every frame, which cannot be shown the same way. | 프레임마다 다시 칠하는 채우기가 있어 같은 모습으로 보일 수 없습니다. | フレームごとに塗り直す塗りつぶしがあり、同じ見た目で表示できません。
-legacy-merge-canvas | - | This project crops or resizes the canvas between merged layers, which cannot be shown the same way. | 병합한 레이어 사이에서 캔버스를 자르거나 크기를 바꿔 같은 모습으로 보일 수 없습니다. | 結合したレイヤーの間でキャンバスを切り抜くかサイズを変えているため、同じ見た目で表示できません。
-legacy-large-image | - | This project has an image wider or taller than 16384 pixels. | 너비나 높이가 16384픽셀을 넘는 이미지가 있습니다. | 幅か高さが 16384 ピクセルを超える画像があります。
-legacy-color | - | This project has a colour written as %1, which Ugurugu 2.2.13 does not write. | Ugurugu 2.2.13이 쓰지 않는 형식의 색 %1이(가) 있습니다. | Ugurugu 2.2.13 が書かない形式の色 %1 があります。 | args=color
-recovery-not-saving | ugurugu::MainWindow | Automatic recovery is not saving. Save your work yourself.
-edit-undo | ugurugu::MainWindow | &Undo
-edit-redo | ugurugu::MainWindow | &Redo
-view-zoom-in | ugurugu::MainWindow | Zoom &in
-view-zoom-out | ugurugu::MainWindow | Zoom &out
-view-actual-pixels | ugurugu::MainWindow | Actual &pixels
-view-fit | ugurugu::MainWindow | &Fit canvas
-view-turn-left | ugurugu::MainWindow | Rotate canvas &left
-view-turn-left-tip | ugurugu::MainWindow | Rotate the canvas view 5° counterclockwise
-view-turn-right | ugurugu::MainWindow | Rotate canvas &right
-view-turn-right-tip | ugurugu::MainWindow | Rotate the canvas view 5° clockwise
-view-turn-reset | ugurugu::MainWindow | Rese&t canvas rotation
-view-turn-reset-tip | ugurugu::MainWindow | Reset the canvas view to 0° without changing zoom or mirroring
-view-mirror | ugurugu::MainWindow | Flip canvas horizontally
-view-mirror-tip | ugurugu::MainWindow | Temporarily flip the canvas horizontally
-canvas-rotation | ugurugu::MainWindow | Canvas rotation angle
-view-animate | ugurugu::MainWindow | &Animate preview
-window-next-tab | - | Next tab | 다음 탭 | 次のタブ
-window-previous-tab | - | Previous tab | 이전 탭 | 前のタブ
-window-animation-bar | ugurugu::MainWindow | Show &animation bar
-window-reset-layout | ugurugu::MainWindow | Reset panel layout
-tool-brush | ugurugu::MainWindow | Brush
-tool-eraser | ugurugu::MainWindow | Eraser
-tool-select | ugurugu::MainWindow | &Area select
-edit-select-all | ugurugu::CanvasWidget | Select all
-edit-invert-selection | ugurugu::CanvasWidget | Invert selection
-edit-deselect | ugurugu::CanvasWidget | Deselect
-selection-shape | ugurugu::LassoPopoverPanel | SHAPE
-shape-freehand | ugurugu::LassoPopoverPanel | Freehand
-shape-freehand-tip | ugurugu::LassoPopoverPanel | Draw freely around an area
-shape-rectangle | ugurugu::LassoPopoverPanel | Rectangle
-shape-rectangle-tip | ugurugu::LassoPopoverPanel | Drag between opposite corners
-shape-ellipse | ugurugu::LassoPopoverPanel | Ellipse
-shape-ellipse-tip | ugurugu::LassoPopoverPanel | Drag to fit an oval area
-tool-wand | ugurugu::MainWindow | Auto se&lect
-tool-fill | ugurugu::MainWindow | Paint &bucket
-edit-fill-selection | ugurugu::MainWindow | Fill selection
-edit-fill-selection-tip | ugurugu::MainWindow | Fill the selected area with the brush color
-lasso-mode | ugurugu::LassoPopoverPanel | MODE
-lasso-select | ugurugu::LassoPopoverPanel | Select
-lasso-paint | ugurugu::LassoPopoverPanel | Paint
-transform-method | ugurugu::LassoPopoverPanel | Transform method
-sampling-smooth | ugurugu::LassoPopoverPanel | Smooth
-sampling-smooth-tip | ugurugu::MainWindow | Interpolate neighboring pixels during selection transforms
-sampling-pixels | ugurugu::LassoPopoverPanel | Pixel-based
-sampling-pixels-tip | ugurugu::MainWindow | Skip interpolation without removing existing transparency; edges may look stepped
-transform-selection | ugurugu::DocumentController | Transform selection
-transform-selection-tip | - | Move, scale and turn the selection with handles | 핸들로 선택 영역을 이동·크기 조절·회전합니다 | ハンドルで選択範囲を移動・拡大縮小・回転します
-flip-horizontal | ugurugu::MainWindow | Flip selection horizontally
-flip-vertical | ugurugu::MainWindow | Flip selection vertically
-transform-apply | ugurugu::MainWindow | Apply transform
-transform-apply-tip | - | Apply selection transform | 선택 영역 변형 적용 | 選択範囲の変形を適用
-transform-cancel | ugurugu::MainWindow | Cancel transform
-transform-cancel-tip | - | Cancel selection transform | 선택 영역 변형 취소 | 選択範囲の変形をキャンセル
-transform-duplicate | - | Duplicate | 복제 | 複製
-transform-duplicate-tip | - | Keep the selected part where it was too | 선택한 부분을 원래 자리에도 남깁니다 | 選択した部分を元の場所にも残します
-delete-selected | ugurugu::MainWindow | Delete selected content
-edit-copy | ugurugu::MainWindow | &Copy
-edit-copy-tip | - | Copy the selection to the clipboard | 선택 영역을 클립보드에 복사합니다 | 選択範囲をクリップボードにコピーします
-edit-cut | ugurugu::MainWindow | Cu&t
-edit-paste | ugurugu::MainWindow | &Paste
-edit-paste-tip | ugurugu::MainWindow | Paste the clipboard as a new layer
-paste-nothing | ugurugu::MainWindow | There is nothing to paste.
-paste-failed | ugurugu::MainWindow | The clipboard content could not be pasted.
-fill-reference | ugurugu::BucketPopoverPanel | REFERENCE
-reads-current | ugurugu::BucketPopoverPanel | Active layer
-reads-current-tip | ugurugu::BucketPopoverPanel | Use only the layer you are editing
-reads-marked | ugurugu::BucketPopoverPanel | Reference layers
-reads-marked-tip | ugurugu::BucketPopoverPanel | Use layers marked as references
-reads-visible | ugurugu::BucketPopoverPanel | All visible layers
-reads-visible-tip | ugurugu::BucketPopoverPanel | Combine every visible layer
-fill-comparison | ugurugu::BucketPopoverPanel | COMPARISON
-compare-alpha | ugurugu::BucketPopoverPanel | Alpha boundary
-compare-colour | ugurugu::BucketPopoverPanel | Color tolerance
-fill-tolerance | ugurugu::BucketPopoverPanel | Tolerance
-fill-antialias | ugurugu::BucketPopoverPanel | Antialias fill edge
-fill-no-reference | ugurugu::CanvasWidget | Set a visible paint layer as a reference layer first.
-wand-nothing | ugurugu::CanvasWidget | Click an empty area surrounded by lines to select it.
-fill-outside | ugurugu::CanvasWidget | Click inside the selected area to fill it.
-fill-nothing | ugurugu::CanvasWidget | No fillable area was found.
-fill-no-selection | - | Select an area to fill. | 채울 영역을 선택하세요. | 塗りつぶす範囲を選択してください。
-brush-pen | BrushPresets | Pen
-brush-marker | BrushPresets | Marker
-brush-airbrush | BrushPresets | Airbrush
-brush-spray | BrushPresets | Spray
-brush-pixel | - | Pixel | 픽셀 | ピクセル
-ink-pen | BrushPresets | Ink Pen
-g-pen | BrushPresets | G-Pen
-round-pen | BrushPresets | Round Pen
-monoline | BrushPresets | Monoline
-bold-ink | BrushPresets | Bold Ink
-opaque-marker | BrushPresets | Opaque Marker
-transparent-marker | BrushPresets | Transparent Marker
-highlighter | BrushPresets | Highlighter
-soft-airbrush | BrushPresets | Soft Airbrush
-hard-airbrush | BrushPresets | Hard Airbrush
-dense-airbrush | BrushPresets | Dense Airbrush
-fine-mist | BrushPresets | Fine Mist
-pixel-spray | BrushPresets | Pixel Spray
-rough-spray | BrushPresets | Rough Spray
-dust-spray | BrushPresets | Dust Spray
-droplet-spray | BrushPresets | Droplet Spray
-wobble-spray | BrushPresets | Wobble Spray
-pixel-pencil | - | Pixel Pencil | 픽셀 연필 | ピクセル鉛筆
-hard-eraser | EraserPresets | Hard
-soft-eraser | EraserPresets | Soft
-kneaded-eraser | EraserPresets | Kneaded
-pixel-eraser | - | Pixel | 픽셀 | ピクセル
-tools-rail | ugurugu::MainWindow | Tools
-quick-access | ugurugu::MainWindow | Quick access
-panels | ugurugu::MainWindow | Panels
-panels-tip | ugurugu::MainWindow | Open and close panels
+legacy-imported | Imported %1 as a new, unsaved document. | %1을(를) 저장되지 않은 새 문서로 가져왔습니다. | %1 を未保存の新しいドキュメントとして読み込みました。 | args=name
+legacy-damaged | This is not an Ugurugu 2.2.13 project, or it is damaged. | Ugurugu 2.2.13 프로젝트가 아니거나 손상되었습니다. | Ugurugu 2.2.13 のプロジェクトではないか、破損しています。
+legacy-older | This project is from before Ugurugu 2.2.13. Open it in 2.2.13 and save it, then open it here. | Ugurugu 2.2.13 이전의 프로젝트입니다. 2.2.13에서 열어 저장한 뒤 여기서 여세요. | Ugurugu 2.2.13 より前のプロジェクトです。2.2.13 で開いて保存してから、ここで開いてください。
+legacy-newer | This project is from a version newer than Ugurugu 2.2.13. | Ugurugu 2.2.13보다 새 버전의 프로젝트입니다. | Ugurugu 2.2.13 より新しいバージョンのプロジェクトです。
+legacy-too-much | This project holds more data than a document can. | 문서가 담을 수 있는 것보다 데이터가 많습니다. | ドキュメントに入るよりも多くのデータがあります。
+legacy-procedural-fill | This project has a fill that is redrawn on every frame, which cannot be shown the same way. | 프레임마다 다시 칠하는 채우기가 있어 같은 모습으로 보일 수 없습니다. | フレームごとに塗り直す塗りつぶしがあり、同じ見た目で表示できません。
+legacy-merge-canvas | This project crops or resizes the canvas between merged layers, which cannot be shown the same way. | 병합한 레이어 사이에서 캔버스를 자르거나 크기를 바꿔 같은 모습으로 보일 수 없습니다. | 結合したレイヤーの間でキャンバスを切り抜くかサイズを変えているため、同じ見た目で表示できません。
+legacy-large-image | This project has an image wider or taller than 16384 pixels. | 너비나 높이가 16384픽셀을 넘는 이미지가 있습니다. | 幅か高さが 16384 ピクセルを超える画像があります。
+legacy-color | This project has a colour written as %1, which Ugurugu 2.2.13 does not write. | Ugurugu 2.2.13이 쓰지 않는 형식의 색 %1이(가) 있습니다. | Ugurugu 2.2.13 が書かない形式の色 %1 があります。 | args=color
+recovery-not-saving | Automatic recovery is not saving. Save your work yourself. | 자동 복구가 저장되지 않고 있습니다. 직접 저장하세요. | 自動復元が保存できていません。手動で保存してください。
+edit-undo | &Undo | 실행 취소(&U) | 元に戻す(&U)
+edit-redo | &Redo | 다시 실행(&R) | やり直す(&R)
+view-zoom-in | Zoom &in | 확대(&I) | 拡大(&I)
+view-zoom-out | Zoom &out | 축소(&O) | 縮小(&O)
+view-actual-pixels | Actual &pixels | 실제 픽셀(&P) | 実ピクセル(&P)
+view-fit | &Fit canvas | 캔버스 맞추기(&F) | キャンバスを画面に合わせる(&F)
+view-turn-left | Rotate canvas &left | 캔버스 왼쪽 회전(&L) | キャンバスを左に回転(&L)
+view-turn-left-tip | Rotate the canvas view 5° counterclockwise | 캔버스 보기를 반시계 방향으로 5° 회전 | キャンバス表示を反時計回りに5°回転
+view-turn-right | Rotate canvas &right | 캔버스 오른쪽 회전(&R) | キャンバスを右に回転(&R)
+view-turn-right-tip | Rotate the canvas view 5° clockwise | 캔버스 보기를 시계 방향으로 5° 회전 | キャンバス表示を時計回りに5°回転
+view-turn-reset | Rese&t canvas rotation | 캔버스 회전 초기화(&T) | キャンバスの回転をリセット(&T)
+view-turn-reset-tip | Reset the canvas view to 0° without changing zoom or mirroring | 확대/축소나 좌우 반전을 바꾸지 않고 캔버스 보기를 0°로 초기화 | ズームや左右反転を変えずにキャンバス表示を0°にリセット
+view-mirror | Flip canvas horizontally | 캔버스 좌우반전 | キャンバスを左右反転
+view-mirror-tip | Temporarily flip the canvas horizontally | 캔버스를 임시로 좌우 반전 | キャンバスを一時的に左右反転
+canvas-rotation | Canvas rotation angle | 캔버스 회전 각도 | キャンバスの回転角度
+view-animate | &Animate preview | 미리보기 재생(&A) | プレビューを再生(&A)
+window-next-tab | Next tab | 다음 탭 | 次のタブ
+window-previous-tab | Previous tab | 이전 탭 | 前のタブ
+window-animation-bar | Show &animation bar | 애니메이션 바 표시(&A) | アニメーションバーを表示(&A)
+window-reset-layout | Reset panel layout | 패널 배치 초기화 | パネル配置をリセット
+tool-brush | Brush | 브러시 | ブラシ
+tool-eraser | Eraser | 지우개 | 消しゴム
+tool-select | &Area select | 영역 선택(&A) | 範囲選択(&A)
+edit-select-all | Select all | 전체 선택 | すべて選択
+edit-invert-selection | Invert selection | 선택 반전 | 選択範囲を反転
+edit-deselect | Deselect | 선택 해제 | 選択を解除
+selection-shape | SHAPE | 형태 | 形状
+shape-freehand | Freehand | 자유형 | 自由選択
+shape-freehand-tip | Draw freely around an area | 영역 둘레를 자유롭게 그리기 | 領域の周囲を自由に描画
+shape-rectangle | Rectangle | 사각형 | 長方形
+shape-rectangle-tip | Drag between opposite corners | 마주 보는 두 모서리 사이로 드래그 | 対角の2点間をドラッグ
+shape-ellipse | Ellipse | 타원 | 楕円
+shape-ellipse-tip | Drag to fit an oval area | 타원 영역에 맞게 드래그 | 楕円の領域に合わせてドラッグ
+tool-wand | Auto se&lect | 자동 선택(&W) | 自動選択(&L)
+tool-fill | Paint &bucket | 페인트 통(&G) | 塗りつぶし(&B)
+edit-fill-selection | Fill selection | 선택 영역 채우기 | 選択範囲を塗りつぶす
+edit-fill-selection-tip | Fill the selected area with the brush color | 브러시 색상으로 선택 영역 채우기 | ブラシの色で選択範囲を塗りつぶす
+lasso-mode | MODE | 모드 | モード
+lasso-select | Select | 선택 | 選択
+lasso-paint | Paint | 그리기 | 塗る
+transform-method | Transform method | 변형 방식 | 変形方式
+sampling-smooth | Smooth | 부드럽게 | 滑らか
+sampling-smooth-tip | Interpolate neighboring pixels during selection transforms | 선택 영역을 변형할 때 인접한 픽셀을 보간합니다 | 選択範囲の変形時に隣接するピクセルを補間します
+sampling-pixels | Pixel-based | 픽셀 단위 | ピクセル単位
+sampling-pixels-tip | Skip interpolation without removing existing transparency; edges may look stepped | 기존 투명도를 유지한 채 보간을 생략합니다. 가장자리가 계단처럼 보일 수 있습니다 | 既存の透明度を維持したまま補間を省略します。縁が階段状に見えることがあります
+transform-selection | Transform selection | 선택 영역 변형 | 選択範囲の変形
+transform-selection-tip | Move, scale and turn the selection with handles | 핸들로 선택 영역을 이동·크기 조절·회전합니다 | ハンドルで選択範囲を移動・拡大縮小・回転します
+flip-horizontal | Flip selection horizontally | 선택 영역 좌우 반전 | 選択範囲を左右反転
+flip-vertical | Flip selection vertically | 선택 영역 상하 반전 | 選択範囲を上下反転
+transform-apply | Apply transform | 변형 적용 | 変形を適用
+transform-apply-tip | Apply selection transform | 선택 영역 변형 적용 | 選択範囲の変形を適用
+transform-cancel | Cancel transform | 변형 취소 | 変形をキャンセル
+transform-cancel-tip | Cancel selection transform | 선택 영역 변형 취소 | 選択範囲の変形をキャンセル
+transform-duplicate | Duplicate | 복제 | 複製
+transform-duplicate-tip | Keep the selected part where it was too | 선택한 부분을 원래 자리에도 남깁니다 | 選択した部分を元の場所にも残します
+delete-selected | Delete selected content | 선택 내용 삭제 | 選択内容を削除
+edit-copy | &Copy | 복사(&C) | コピー(&C)
+edit-copy-tip | Copy the selection to the clipboard | 선택 영역을 클립보드에 복사합니다 | 選択範囲をクリップボードにコピーします
+edit-cut | Cu&t | 잘라내기(&T) | 切り取り(&T)
+edit-paste | &Paste | 붙여넣기(&P) | 貼り付け(&P)
+edit-paste-tip | Paste the clipboard as a new layer | 클립보드를 새 레이어로 붙여넣기 | クリップボードを新しいレイヤーとして貼り付け
+paste-nothing | There is nothing to paste. | 붙여넣을 내용이 없습니다. | 貼り付ける内容がありません。
+paste-failed | The clipboard content could not be pasted. | 클립보드 내용을 붙여넣을 수 없습니다. | クリップボードの内容を貼り付けられませんでした。
+fill-reference | REFERENCE | 참조 | 参照
+reads-current | Active layer | 활성 레이어 | 編集中のレイヤー
+reads-current-tip | Use only the layer you are editing | 편집 중인 레이어만 사용 | 編集中のレイヤーのみを使用
+reads-marked | Reference layers | 참조 레이어 | 参照レイヤー
+reads-marked-tip | Use layers marked as references | 참조로 표시한 레이어 사용 | 参照に設定したレイヤーを使用
+reads-visible | All visible layers | 표시된 모든 레이어 | 表示中のすべてのレイヤー
+reads-visible-tip | Combine every visible layer | 보이는 모든 레이어를 합쳐서 사용 | 表示中のすべてのレイヤーを結合して使用
+fill-comparison | COMPARISON | 비교 기준 | 比較
+compare-alpha | Alpha boundary | 알파 경계 | アルファ境界
+compare-colour | Color tolerance | 색상 허용 범위 | 色の許容範囲
+fill-tolerance | Tolerance | 허용 범위 | 許容範囲
+fill-antialias | Antialias fill edge | 채우기 가장자리 안티앨리어싱 | 塗りつぶし境界をアンチエイリアス
+fill-no-reference | Set a visible paint layer as a reference layer first. | 먼저 표시된 페인트 레이어를 참조 레이어로 설정하세요. | 先に表示中のペイントレイヤーを参照レイヤーに設定してください。
+wand-nothing | Click an empty area surrounded by lines to select it. | 선으로 둘러싸인 빈 영역을 클릭하면 선택됩니다. | 線で囲まれた空白部分をクリックすると選択できます。
+fill-outside | Click inside the selected area to fill it. | 선택 영역 안을 클릭해 채우세요. | 選択範囲の内側をクリックすると塗りつぶします。
+fill-nothing | No fillable area was found. | 채울 수 있는 영역을 찾지 못했습니다. | 塗りつぶせる領域が見つかりませんでした。
+fill-no-selection | Select an area to fill. | 채울 영역을 선택하세요. | 塗りつぶす範囲を選択してください。
+brush-pen | Pen | 펜 | ペン
+brush-marker | Marker | 마커 | マーカー
+brush-airbrush | Airbrush | 에어브러시 | エアブラシ
+brush-spray | Spray | 스프레이 | スプレー
+brush-pixel | Pixel | 픽셀 | ピクセル
+ink-pen | Ink Pen | 잉크 펜 | インクペン
+g-pen | G-Pen | G펜 | Gペン
+round-pen | Round Pen | 둥근 펜 | 丸ペン
+monoline | Monoline | 모노라인 | モノライン
+bold-ink | Bold Ink | 굵은 잉크 | 太インク
+opaque-marker | Opaque Marker | 불투명 마커 | 不透明マーカー
+transparent-marker | Transparent Marker | 투명 마커 | 透明マーカー
+highlighter | Highlighter | 형광펜 | 蛍光ペン
+soft-airbrush | Soft Airbrush | 부드러운 에어브러시 | ソフトエアブラシ
+hard-airbrush | Hard Airbrush | 하드 에어브러시 | ハードエアブラシ
+dense-airbrush | Dense Airbrush | 진한 에어브러시 | 濃いエアブラシ
+fine-mist | Fine Mist | 미세 분사 | 細かいミスト
+pixel-spray | Pixel Spray | 픽셀 스프레이 | ピクセルスプレー
+rough-spray | Rough Spray | 거친 스프레이 | ラフスプレー
+dust-spray | Dust Spray | 먼지 스프레이 | ダストスプレー
+droplet-spray | Droplet Spray | 물방울 스프레이 | しずくスプレー
+wobble-spray | Wobble Spray | 우글 스프레이 | ウォブルスプレー
+pixel-pencil | Pixel Pencil | 픽셀 연필 | ピクセル鉛筆
+hard-eraser | Hard | 딱딱함 | ハード
+soft-eraser | Soft | 부드러움 | ソフト
+kneaded-eraser | Kneaded | 반죽 | 練り消し
+pixel-eraser | Pixel | 픽셀 | ピクセル
+tools-rail | Tools | 도구 | ツール
+quick-access | Quick access | 빠른 도구 | クイックアクセス
+panels | Panels | 패널 | パネル
+panels-tip | Open and close panels | 패널 열기 및 닫기 | パネルを開く・閉じる
 
 # Status bar and window
-status-ready | ugurugu::MainWindow | Ready
-status-pointer | ugurugu::MainWindow | x %1  y %2 | args=x,y
-canvas-zoom | ugurugu::MainWindow | Canvas zoom
-canvas-zoom-percent | ugurugu::MainWindow | Canvas zoom percentage
-fit | ugurugu::MainWindow | Fit
-fit-tip | ugurugu::MainWindow | Fit the whole canvas in the window
-untitled | ugurugu::MainWindow | Untitled
-file-saving | ugurugu::MainWindow | Saving %1… | args=name
-file-saved | ugurugu::MainWindow | Saved %1 | args=name
-save-open-elsewhere | - | %1 is open in another tab. Close that tab first, or save under another name. | %1 파일이 다른 탭에 열려 있습니다. 그 탭을 먼저 닫거나 다른 이름으로 저장하세요. | %1 は別のタブで開いています。そのタブを先に閉じるか、別の名前で保存してください。 | args=name
-file-not-saved | - | Not saved: %1 | 저장하지 못했습니다: %1 | 保存できませんでした: %1 | args=error
-file-opening | - | Opening %1… | %1 여는 중… | %1 を開いています… | args=name
-gpu-software | - | No usable GPU: drawing with the slow software display | 쓸 수 있는 GPU가 없어 느린 소프트웨어 표시로 그립니다 | 使える GPU がないため、低速なソフトウェア表示で描画しています
-unsaved-title | ugurugu::MainWindow | Unsaved changes
-unsaved-text | ugurugu::MainWindow | The document has unsaved changes.
-unsaved-save | ugurugu::MainWindow | Save (S)
-unsaved-discard | ugurugu::MainWindow | Don't Save (N)
-unsaved-cancel | ugurugu::MainWindow | Cancel (ESC)
+status-ready | Ready | 준비됨 | 準備完了
+status-pointer | x %1  y %2 | x %1  y %2 | x %1  y %2 | args=x,y
+canvas-zoom | Canvas zoom | 캔버스 확대/축소 | キャンバスのズーム
+canvas-zoom-percent | Canvas zoom percentage | 캔버스 확대/축소 배율 | キャンバスのズーム倍率
+fit | Fit | 맞춤 | 全体表示
+fit-tip | Fit the whole canvas in the window | 전체 캔버스를 창에 맞추기 | キャンバス全体をウィンドウに合わせる
+untitled | Untitled | 제목 없음 | 無題
+file-saving | Saving %1… | %1 저장 중… | %1 を保存中… | args=name
+file-saved | Saved %1 | %1 저장됨 | %1 を保存しました | args=name
+save-open-elsewhere | %1 is open in another tab. Close that tab first, or save under another name. | %1 파일이 다른 탭에 열려 있습니다. 그 탭을 먼저 닫거나 다른 이름으로 저장하세요. | %1 は別のタブで開いています。そのタブを先に閉じるか、別の名前で保存してください。 | args=name
+file-not-saved | Not saved: %1 | 저장하지 못했습니다: %1 | 保存できませんでした: %1 | args=error
+file-opening | Opening %1… | %1 여는 중… | %1 を開いています… | args=name
+gpu-software | No usable GPU: drawing with the slow software display | 쓸 수 있는 GPU가 없어 느린 소프트웨어 표시로 그립니다 | 使える GPU がないため、低速なソフトウェア表示で描画しています
+unsaved-title | Unsaved changes | 저장되지 않은 변경 사항 | 未保存の変更
+unsaved-text | The document has unsaved changes. | 문서에 저장되지 않은 변경 사항이 있습니다. | ドキュメントに未保存の変更があります。
+unsaved-save | Save (S) | 저장(S) | 保存(S)
+unsaved-discard | Don't Save (N) | 저장 안 함(N) | 保存しない(N)
+unsaved-cancel | Cancel (ESC) | 취소(ESC) | キャンセル(ESC)
 
 # Dock title bars
-dock-collapse | PaletteDockTitleBar | Collapse
-dock-close | PaletteDockTitleBar | Close panel
-dock-expand-area | PaletteDockTitleBar | Expand panel dock
-dock-collapse-area | PaletteDockTitleBar | Collapse panel dock
-dock-width-left | - | Width of the left panel dock | 왼쪽 패널 영역 너비 | 左パレットドックの幅
-dock-width-right | - | Width of the right panel dock | 오른쪽 패널 영역 너비 | 右パレットドックの幅
-dock-handle | PaletteDockTitleBar | %1 panel drag handle | args=panel
-dock-move-left | - | Move to the left side | 왼쪽으로 옮기기 | 左側へ移動
-dock-move-right | - | Move to the right side | 오른쪽으로 옮기기 | 右側へ移動
-dock-float | - | Float over the canvas | 캔버스 위에 띄우기 | キャンバスの上に浮かべる
+dock-collapse | Collapse | 접기 | 折りたたむ
+dock-close | Close panel | 패널 닫기 | パネルを閉じる
+dock-expand-area | Expand panel dock | 패널 영역 펼치기 | パレットドックを展開
+dock-collapse-area | Collapse panel dock | 패널 영역 접기 | パレットドックを折りたたむ
+dock-width-left | Width of the left panel dock | 왼쪽 패널 영역 너비 | 左パレットドックの幅
+dock-width-right | Width of the right panel dock | 오른쪽 패널 영역 너비 | 右パレットドックの幅
+dock-handle | %1 panel drag handle | %1 패널 이동 손잡이 | %1パネルの移動ハンドル | args=panel
+dock-move-left | Move to the left side | 왼쪽으로 옮기기 | 左側へ移動
+dock-move-right | Move to the right side | 오른쪽으로 옮기기 | 右側へ移動
+dock-float | Float over the canvas | 캔버스 위에 띄우기 | キャンバスの上に浮かべる
 
 # Tool settings
-tool-settings | ugurugu::ToolDock | Tool settings
-size | ugurugu::BrushSizeRow | SIZE
-brush-size | ugurugu::BrushSizeRow | Brush size
-eraser-size | ugurugu::BrushSizeRow | Eraser size
-brush-opacity | - | Brush opacity | 브러시 불투명도 | ブラシの不透明度
-eraser-opacity | - | Eraser opacity | 지우개 불투명도 | 消しゴムの不透明度
-pen-pressure-use | ugurugu::TabletPressureRow | Use tablet pressure
-pen-pressure-tip | ugurugu::TabletPressureRow | Vary stroke size and opacity with tablet pressure
-stabilization | ugurugu::StrokeStabilizationRow | STABILIZATION
-stabilization-name | ugurugu::StrokeStabilizationRow | Stroke stabilization
-antialiasing | ugurugu::BrushPopoverPanel | ANTI-ALIASING
-antialiasing-name | ugurugu::BrushPopoverPanel | Anti-aliasing
-antialiasing-tip | ugurugu::BrushPopoverPanel | Smooth stroke edges
+tool-settings | Tool settings | 도구 설정 | ツール設定
+size | SIZE | 크기 | サイズ
+brush-size | Brush size | 브러시 크기 | ブラシサイズ
+eraser-size | Eraser size | 지우개 크기 | 消しゴムサイズ
+brush-opacity | Brush opacity | 브러시 불투명도 | ブラシの不透明度
+eraser-opacity | Eraser opacity | 지우개 불투명도 | 消しゴムの不透明度
+pen-pressure-use | Use tablet pressure | 필압 반영 | タブレットの筆圧を反映
+pen-pressure-tip | Vary stroke size and opacity with tablet pressure | 필압에 따라 선의 크기와 불투명도를 바꿉니다 | タブレットの筆圧に応じて線のサイズと不透明度を変えます
+stabilization | STABILIZATION | 손떨림 보정 | 手ぶれ補正
+stabilization-name | Stroke stabilization | 손떨림 보정 | 手ぶれ補正
+antialiasing | ANTI-ALIASING | 안티앨리어싱 | アンチエイリアス
+antialiasing-name | Anti-aliasing | 안티앨리어싱 | アンチエイリアス
+antialiasing-tip | Smooth stroke edges | 선 가장자리를 부드럽게 | 線の縁を滑らかにします
 
 # Wobble
-wobble-dock | ugurugu::WobbleDock | Wobble
-wobble-whole | ugurugu::WobbleDock | Whole drawing
-wobble-layer | ugurugu::WobbleDock | Active layer
-wobble-follow | ugurugu::WobbleDock | Follow drawing settings
-wobble-follow-tip | ugurugu::WobbleDock | Remove this layer's override and use the whole drawing settings.
-wobble | ugurugu::WobblePopoverPanel | WOBBLE
-wobble-scope | - | Wobble applies to | 우글거림 적용 대상 | ゆらぎの適用先
-wobble-preview | ugurugu::WobblePreview | Wobble preview
-wobble-preview-tip | ugurugu::WobblePreview | Live preview of the wobble strength
-motion-style | ugurugu::WobblePopoverPanel | Motion style
-motion-classic | ugurugu::WobblePopoverPanel | Classic
-motion-smooth | ugurugu::LassoPopoverPanel | Smooth
-motion-stepped | ugurugu::WobblePopoverPanel | Stepped
-motion-poses | ugurugu::WobblePopoverPanel | Pose count
-motion-detail | ugurugu::WobblePopoverPanel | Detail
-motion-linked | ugurugu::WobblePopoverPanel | Linked
-motion-randomness | ugurugu::WobblePopoverPanel | Randomness
-motion-broken | ugurugu::WobblePopoverPanel | Broken line
-motion-break-amount | ugurugu::WobblePopoverPanel | Break amount
-motion-break-range | ugurugu::WobblePopoverPanel | Break range
+wobble-dock | Wobble | 우글거림 | ゆらぎ
+wobble-whole | Whole drawing | 전체 그림 | 全体
+wobble-layer | Active layer | 활성 레이어 | 編集中のレイヤー
+wobble-follow | Follow drawing settings | 전체 그림 설정 따르기 | 全体の設定に従う
+wobble-follow-tip | Remove this layer's override and use the whole drawing settings. | 이 레이어의 개별 설정을 제거하고 전체 그림 설정을 사용합니다. | このレイヤーの個別設定を解除し、全体の設定を使用します。
+wobble | WOBBLE | 우글거림 | ウォブル
+wobble-scope | Wobble applies to | 우글거림 적용 대상 | ゆらぎの適用先
+wobble-preview | Wobble preview | 우글거림 미리보기 | ウォブルプレビュー
+wobble-preview-tip | Live preview of the wobble strength | 현재 우글거림 강도를 실시간으로 보여줍니다 | 現在のウォブルの強さをリアルタイムで表示します
+motion-style | Motion style | 모션 스타일 | モーションスタイル
+motion-classic | Classic | 클래식 | クラシック
+motion-smooth | Smooth | 부드럽게 | 滑らか
+motion-stepped | Stepped | 단계별 | ステップ
+motion-poses | Pose count | 포즈 수 | ポーズ数
+motion-detail | Detail | 디테일 | ディテール
+motion-linked | Linked | 연결 | 連動
+motion-randomness | Randomness | 무작위성 | ランダム性
+motion-broken | Broken line | 끊어진 선 | 途切れ線
+motion-break-amount | Break amount | 끊김 정도 | 途切れ量
+motion-break-range | Break range | 끊김 범위 | 途切れ範囲
 
 # Colour
-color-dock | ugurugu::ColorDock | Color
-color-current | ugurugu::ColorDock | Current color
-color-field-square | ugurugu::ColorDock | HSV Square
-color-field-triangle | ugurugu::ColorDock | HSV Triangle
-color-pair | ugurugu::ColorPairSwatch | Current color %1, previous color %2 | args=current,previous
-color-pair-tip | ugurugu::ColorPairSwatch | Current and previous color. Click the rear swatch to swap.
-color-history | ugurugu::ColorHistoryDock | Color history
-color-history-clear | ugurugu::ColorHistoryDock | Clear history
-color-history-swatch | ugurugu::ColorHistoryGrid | History color %1 | args=color
+color-dock | Color | 색상 | 色
+color-current | Current color | 현재 색상 | 現在の色
+color-field-square | HSV Square | HSV 사각 필드 | HSV四角フィールド
+color-field-triangle | HSV Triangle | HSV 삼각 필드 | HSV三角フィールド
+color-pair | Current color %1, previous color %2 | 현재 색상 %1, 이전 색상 %2 | 現在の色 %1、前の色 %2 | args=current,previous
+color-pair-tip | Current and previous color. Click the rear swatch to swap. | 현재 색상과 이전 색상입니다. 뒤쪽 색상 칸을 누르면 서로 바뀝니다. | 現在の色と前の色です。後ろの色をクリックすると入れ替わります。
+color-history | Color history | 색상 기록 | カラー履歴
+color-history-clear | Clear history | 기록 지우기 | 履歴を消去
+color-history-swatch | History color %1 | 기록 색상 %1 | 履歴の色 %1 | args=color
 
 # Layers
-layers | ugurugu::LayerDock | Layers
-layer-add | ugurugu::LayerDock | Add layer
-layer-add-group | ugurugu::LayerDock | Add group containing the selected layer
-layer-ungroup | - | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除
-layer-merge | ugurugu::LayerDock | Merge with layer below
-layer-delete | ugurugu::LayerDock | Delete layer
-layer-up | ugurugu::LayerDock | Move layer up
-layer-down | ugurugu::LayerDock | Move layer down
-layer-move | ugurugu::LayerDock | Move layer
-merge-select-paint | ugurugu::LayerDock | Select a paint layer to merge
-merge-no-paint-below | ugurugu::LayerDock | No paint layer is directly below
-merge-properties | ugurugu::LayerDock | Both layers must use matching safe properties, and no clipping layer may rest on this one
-merge-canvas-change | ugurugu::LayerDock | This layer resizes the canvas or erased merged artwork, so merging would change the picture
-merge-epoch | ugurugu::LayerDock | The layers use incompatible canvas histories
-merge-limit | ugurugu::LayerDock | The merged layer would exceed the stroke limit
-blend-mode | ugurugu::LayerDock | BLEND MODE
-blend-mode-name | ugurugu::LayerDock | Layer blend mode
-blend-normal | ugurugu::LayerDock | Normal
-blend-multiply | ugurugu::LayerDock | Multiply
-blend-screen | ugurugu::LayerDock | Screen
-blend-overlay | ugurugu::LayerDock | Overlay
-percent | ugurugu::LayerDock | %1% | args=value
-opacity | ugurugu::LayerDock | OPACITY
-group | ugurugu::LayerDock | GROUP
-group-parent | ugurugu::LayerDock | Parent layer group
-group-none | ugurugu::LayerDock | No group
-clip | ugurugu::LayerDock | Clip to layer below
-clip-tip | ugurugu::LayerDock | Limit this layer to the opacity of the base layer below it
-reference | ugurugu::LayerDock | Reference layer
-reference-tip | ugurugu::LayerDock | Use this layer when a selection tool references marked layers
-layer-visible | ugurugu::LayerDock | Layer is visible
-layer-hidden | ugurugu::LayerDock | Layer is hidden
-layer-wobbles | - | Layer wobbles | 레이어가 우글거립니다 | レイヤーはゆらいでいます
-layer-still | - | Layer holds still | 레이어가 멈춰 있습니다 | レイヤーは静止しています
-group-fold | - | Fold group | 그룹 접기 | グループを折りたたむ
-group-unfold | - | Unfold group | 그룹 펼치기 | グループを展開
+layers | Layers | 레이어 | レイヤー
+layer-add | Add layer | 레이어 추가 | レイヤーを追加
+layer-add-group | Add group containing the selected layer | 선택한 레이어를 포함하는 그룹 추가 | 選択したレイヤーを含むグループを追加
+layer-ungroup | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除
+layer-merge | Merge with layer below | 아래 레이어와 병합 | 下のレイヤーと結合
+layer-delete | Delete layer | 레이어 삭제 | レイヤーを削除
+layer-up | Move layer up | 레이어 위로 이동 | レイヤーを上へ移動
+layer-down | Move layer down | 레이어 아래로 이동 | レイヤーを下へ移動
+layer-move | Move layer | 레이어 이동 | レイヤーの移動
+merge-select-paint | Select a paint layer to merge | 병합할 페인트 레이어를 선택하세요 | 結合するペイントレイヤーを選択してください
+merge-no-paint-below | No paint layer is directly below | 바로 아래에 페인트 레이어가 없습니다 | 直下にペイントレイヤーがありません
+merge-properties | Both layers must use matching safe properties, and no clipping layer may rest on this one | 두 레이어가 동일한 안전 속성을 사용해야 하며, 이 레이어 위에 클리핑 레이어가 없어야 합니다 | 両方のレイヤーで一致する安全なプロパティが必要で、このレイヤーの上にクリッピングレイヤーがあってはいけません
+merge-canvas-change | This layer resizes the canvas or erased merged artwork, so merging would change the picture | 이 레이어는 캔버스 크기를 바꾸거나 합쳐진 그림을 지운 적이 있어 병합하면 그림이 달라집니다 | このレイヤーはキャンバスサイズを変更するか、結合済みの絵を消したことがあるため、結合すると絵が変わります
+merge-epoch | The layers use incompatible canvas histories | 레이어의 캔버스 기록이 서로 호환되지 않습니다 | レイヤーのキャンバス履歴に互換性がありません
+merge-limit | The merged layer would exceed the stroke limit | 병합한 레이어가 선 개수 한도를 초과합니다 | 結合後のレイヤーがストローク数の上限を超えます
+blend-mode | BLEND MODE | 합성 모드 | ブレンドモード
+blend-mode-name | Layer blend mode | 레이어 합성 모드 | レイヤーのブレンドモード
+blend-normal | Normal | 일반 | 通常
+blend-multiply | Multiply | 곱하기 | 乗算
+blend-screen | Screen | 스크린 | スクリーン
+blend-overlay | Overlay | 오버레이 | オーバーレイ
+percent | %1% | %1% | %1% | args=value
+opacity | OPACITY | 불투명도 | 不透明度
+group | GROUP | 그룹 | グループ
+group-parent | Parent layer group | 상위 레이어 그룹 | 親レイヤーグループ
+group-none | No group | 그룹 없음 | グループなし
+clip | Clip to layer below | 아래 레이어에 클리핑 | 下のレイヤーでクリッピング
+clip-tip | Limit this layer to the opacity of the base layer below it | 이 레이어를 아래 기준 레이어의 불투명 영역 안에 표시합니다 | このレイヤーを下の基準レイヤーの不透明領域内に表示します
+reference | Reference layer | 참조 레이어 | 参照レイヤー
+reference-tip | Use this layer when a selection tool references marked layers | 표시한 레이어를 참조하는 선택 도구에서 이 레이어 사용 | マークしたレイヤーを参照する選択ツールでこのレイヤーを使用
+layer-visible | Layer is visible | 레이어가 표시되어 있습니다 | レイヤーは表示されています
+layer-hidden | Layer is hidden | 레이어가 숨겨져 있습니다 | レイヤーは非表示です
+layer-wobbles | Layer wobbles | 레이어가 우글거립니다 | レイヤーはゆらいでいます
+layer-still | Layer holds still | 레이어가 멈춰 있습니다 | レイヤーは静止しています
+group-fold | Fold group | 그룹 접기 | グループを折りたたむ
+group-unfold | Unfold group | 그룹 펼치기 | グループを展開
 
 # Animation bar
-play-tip | ugurugu::TimelineBar | Play preview (P)
-play | ugurugu::TimelineBar | Play preview
-frame-current | ugurugu::TimelineBar | Current frame
-frame-count | ugurugu::TimelineBar | Animation frames
-fps | ugurugu::TimelineBar | FPS
-fps-tip | ugurugu::TimelineBar | Playback speed (frames per second)
-fps-name | ugurugu::TimelineBar | Playback speed
-bar-hide | ugurugu::TimelineBar | Hide
-bar-hide-tip | ugurugu::TimelineBar | Hide animation bar
-scrubber | ugurugu::FrameScrubber | Frame scrubber
-scrubber-frame | ugurugu::FrameScrubber | Frame %1 of %2 | args=frame,count
+play-tip | Play preview (P) | 미리보기 재생 (P) | プレビューを再生 (P)
+play | Play preview | 미리보기 재생 | プレビューを再生
+frame-current | Current frame | 현재 프레임 | 現在のフレーム
+frame-count | Animation frames | 애니메이션 프레임 수 | アニメーションのフレーム数
+fps | FPS | FPS | FPS
+fps-tip | Playback speed (frames per second) | 재생 속도 (초당 프레임 수) | 再生速度（毎秒フレーム数）
+fps-name | Playback speed | 재생 속도 | 再生速度
+bar-hide | Hide | 접기 | 折りたたむ
+bar-hide-tip | Hide animation bar | 애니메이션 바 접기 | アニメーションバーを折りたたむ
+scrubber | Frame scrubber | 프레임 스크러버 | フレームスクラバー
+scrubber-frame | Frame %1 of %2 | 총 %2개 중 %1번째 프레임 | 全%2フレーム中%1フレーム目 | args=frame,count
 
 # Canvas and image size
-edit-image-size | ugurugu::MainWindow | Change image size…
-edit-canvas-size | ugurugu::MainWindow | Change canvas size…
-dialog-ok | - | OK | 확인 | OK
-dialog-cancel | - | Cancel | 취소 | キャンセル
-new-title | ugurugu::MainWindow | New document
-size-width | ugurugu::CanvasSizeDialog | Width
-size-height | ugurugu::CanvasSizeDialog | Height
-size-change | ugurugu::CanvasSizeDialog | %1 × %2 px  →  %3 × %4 px | args=width,height,new_width,new_height
-canvas-size-title | ugurugu::CanvasSizeDialog | Change canvas size
-canvas-size-description | ugurugu::CanvasSizeDialog | Change the canvas bounds without scaling the artwork.
-canvas-size-preview | ugurugu::CanvasSizeDialog | Canvas size preview
-canvas-size-section | ugurugu::CanvasSizeDialog | CANVAS SIZE
-canvas-size-relative | ugurugu::CanvasSizeDialog | Relative size
-canvas-size-relative-tip | ugurugu::CanvasSizeDialog | Use relative canvas size
-canvas-size-width | ugurugu::CanvasSizeDialog | Canvas width
-canvas-size-height | ugurugu::CanvasSizeDialog | Canvas height
-canvas-size-width-change | ugurugu::CanvasSizeDialog | Width change
-canvas-size-height-change | ugurugu::CanvasSizeDialog | Height change
-canvas-size-width-change-name | ugurugu::CanvasSizeDialog | Canvas width change
-canvas-size-height-change-name | ugurugu::CanvasSizeDialog | Canvas height change
-canvas-size-anchor | ugurugu::CanvasSizeDialog | REFERENCE POINT
-anchor-top-left | ugurugu::CanvasSizeDialog | Top left
-anchor-top-center | ugurugu::CanvasSizeDialog | Top center
-anchor-top-right | ugurugu::CanvasSizeDialog | Top right
-anchor-middle-left | ugurugu::CanvasSizeDialog | Middle left
-anchor-center | ugurugu::CanvasSizeDialog | Center
-anchor-middle-right | ugurugu::CanvasSizeDialog | Middle right
-anchor-bottom-left | ugurugu::CanvasSizeDialog | Bottom left
-anchor-bottom-center | ugurugu::CanvasSizeDialog | Bottom center
-anchor-bottom-right | ugurugu::CanvasSizeDialog | Bottom right
-canvas-size-offset-x | ugurugu::CanvasSizeDialog | X offset
-canvas-size-offset-y | ugurugu::CanvasSizeDialog | Y offset
-canvas-size-offset-x-name | ugurugu::CanvasSizeDialog | Artwork horizontal offset
-canvas-size-offset-y-name | ugurugu::CanvasSizeDialog | Artwork vertical offset
-canvas-size-offset-summary | ugurugu::CanvasSizeDialog | Artwork offset: X %1, Y %2 | args=x,y
-canvas-size-outside | ugurugu::CanvasSizeDialog | The artwork is entirely outside the new canvas.
-canvas-size-clipped | ugurugu::CanvasSizeDialog | Artwork outside the new canvas will be clipped.
-canvas-size-expanded | ugurugu::CanvasSizeDialog | The expanded area uses the canvas background.
-canvas-size-unchanged | ugurugu::CanvasSizeDialog | The canvas and artwork bounds are unchanged.
-image-size-title | ugurugu::ImageSizeDialog | Change image size
-image-size-description | - | Resample the artwork to new pixel dimensions. | 그림을 새 픽셀 크기로 리샘플합니다. | 絵を新しいピクセルサイズにリサンプリングします。
-image-size-preview | ugurugu::ImageSizeDialog | Image size preview
-image-size-section | ugurugu::ImageSizeDialog | IMAGE SIZE
-image-size-width | ugurugu::ImageSizeDialog | Image width
-image-size-height | ugurugu::ImageSizeDialog | Image height
-image-size-scale | ugurugu::ImageSizeDialog | Uniform scale
-image-size-scale-tip | ugurugu::ImageSizeDialog | Changing this value scales both dimensions uniformly.
-image-size-keep-aspect | ugurugu::ImageSizeDialog | Keep aspect ratio
-image-size-keep-aspect-fixed | ugurugu::ImageSizeDialog | No other size can keep this aspect ratio within the canvas size limits.
-image-size-scales | ugurugu::ImageSizeDialog | Width %1%  ·  Height %2% | args=horizontal,vertical
-image-size-distorted | ugurugu::ImageSizeDialog | The aspect ratio will change and the artwork will be distorted.
-image-size-sampling | - | Resampling | 리샘플링 | リサンプリング
+edit-image-size | Change image size… | 이미지 크기 변경… | 画像サイズを変更…
+edit-canvas-size | Change canvas size… | 캔버스 크기 변경… | キャンバスサイズを変更…
+dialog-ok | OK | 확인 | OK
+dialog-cancel | Cancel | 취소 | キャンセル
+new-title | New document | 새 문서 | 新規ドキュメント
+size-width | Width | 너비 | 幅
+size-height | Height | 높이 | 高さ
+size-change | %1 × %2 px  →  %3 × %4 px | %1 × %2 px  →  %3 × %4 px | %1 × %2 px  →  %3 × %4 px | args=width,height,new_width,new_height
+canvas-size-title | Change canvas size | 캔버스 크기 변경 | キャンバスサイズを変更
+canvas-size-description | Change the canvas bounds without scaling the artwork. | 그림 크기를 바꾸지 않고 캔버스 영역을 변경합니다. | 絵を拡大縮小せずにキャンバス領域を変更します。
+canvas-size-preview | Canvas size preview | 캔버스 크기 미리보기 | キャンバスサイズのプレビュー
+canvas-size-section | CANVAS SIZE | 캔버스 크기 | キャンバスサイズ
+canvas-size-relative | Relative size | 상대 크기 | 相対サイズ
+canvas-size-relative-tip | Use relative canvas size | 상대 캔버스 크기 사용 | キャンバスサイズを相対値で指定
+canvas-size-width | Canvas width | 캔버스 너비 | キャンバスの幅
+canvas-size-height | Canvas height | 캔버스 높이 | キャンバスの高さ
+canvas-size-width-change | Width change | 너비 변경량 | 幅の変更量
+canvas-size-height-change | Height change | 높이 변경량 | 高さの変更量
+canvas-size-width-change-name | Canvas width change | 캔버스 너비 변경량 | キャンバス幅の変更量
+canvas-size-height-change-name | Canvas height change | 캔버스 높이 변경량 | キャンバス高さの変更量
+canvas-size-anchor | REFERENCE POINT | 기준점 | 基準点
+anchor-top-left | Top left | 왼쪽 위 | 左上
+anchor-top-center | Top center | 가운데 위 | 上中央
+anchor-top-right | Top right | 오른쪽 위 | 右上
+anchor-middle-left | Middle left | 왼쪽 가운데 | 左中央
+anchor-center | Center | 가운데 | 中央
+anchor-middle-right | Middle right | 오른쪽 가운데 | 右中央
+anchor-bottom-left | Bottom left | 왼쪽 아래 | 左下
+anchor-bottom-center | Bottom center | 가운데 아래 | 下中央
+anchor-bottom-right | Bottom right | 오른쪽 아래 | 右下
+canvas-size-offset-x | X offset | X 오프셋 | Xオフセット
+canvas-size-offset-y | Y offset | Y 오프셋 | Yオフセット
+canvas-size-offset-x-name | Artwork horizontal offset | 그림 가로 오프셋 | 絵の水平方向オフセット
+canvas-size-offset-y-name | Artwork vertical offset | 그림 세로 오프셋 | 絵の垂直方向オフセット
+canvas-size-offset-summary | Artwork offset: X %1, Y %2 | 그림 오프셋: X %1, Y %2 | 絵のオフセット：X %1、Y %2 | args=x,y
+canvas-size-outside | The artwork is entirely outside the new canvas. | 그림이 새 캔버스 영역을 완전히 벗어납니다. | 絵が新しいキャンバスの外側に完全に移動します。
+canvas-size-clipped | Artwork outside the new canvas will be clipped. | 새 캔버스를 벗어난 그림은 잘립니다. | 新しいキャンバスの外側にある絵は切り取られます。
+canvas-size-expanded | The expanded area uses the canvas background. | 확장된 영역에는 캔버스 배경이 사용됩니다. | 拡張した領域にはキャンバスの背景が使用されます。
+canvas-size-unchanged | The canvas and artwork bounds are unchanged. | 캔버스와 그림 영역이 변경되지 않습니다. | キャンバスと絵の範囲は変更されません。
+image-size-title | Change image size | 이미지 크기 변경 | 画像サイズを変更
+image-size-description | Resample the artwork to new pixel dimensions. | 그림을 새 픽셀 크기로 리샘플합니다. | 絵を新しいピクセルサイズにリサンプリングします。
+image-size-preview | Image size preview | 이미지 크기 미리보기 | 画像サイズのプレビュー
+image-size-section | IMAGE SIZE | 이미지 크기 | 画像サイズ
+image-size-width | Image width | 이미지 너비 | 画像の幅
+image-size-height | Image height | 이미지 높이 | 画像の高さ
+image-size-scale | Uniform scale | 균일 배율 | 均等倍率
+image-size-scale-tip | Changing this value scales both dimensions uniformly. | 이 값을 바꾸면 너비와 높이가 같은 비율로 조절됩니다. | この値を変更すると、幅と高さが同じ倍率で変更されます。
+image-size-keep-aspect | Keep aspect ratio | 가로세로 비율 유지 | 縦横比を維持
+image-size-keep-aspect-fixed | No other size can keep this aspect ratio within the canvas size limits. | 캔버스 크기 제한 안에서 이 가로세로 비율을 유지할 수 있는 다른 크기가 없습니다. | キャンバスサイズの制限内でこの縦横比を維持できる他のサイズはありません。
+image-size-scales | Width %1%  ·  Height %2% | 너비 %1%  ·  높이 %2% | 幅 %1%  ·  高さ %2% | args=horizontal,vertical
+image-size-distorted | The aspect ratio will change and the artwork will be distorted. | 가로세로 비율이 바뀌어 그림이 왜곡됩니다. | 縦横比が変わり、絵が歪みます。
+image-size-sampling | Resampling | 리샘플링 | リサンプリング
 
 # Text tool
-tool-text | ugurugu::MainWindow | Te&xt
-tool-text-rail | ugurugu::MainWindow | Text
-text-content-label | ugurugu::TextPopoverPanel | TEXT
-text-content-hint | ugurugu::TextPopoverPanel | Type the text to place…
-text-font | ugurugu::TextPopoverPanel | FONT
-text-font-default | - | Default | 기본 | 既定
-text-size | ugurugu::TextPopoverPanel | Size
-text-filled | ugurugu::TextPopoverPanel | Fill the letters
-text-place | ugurugu::TextPopoverPanel | Place text
-text-cancel | ugurugu::TextPopoverPanel | Cancel
-text-hint | ugurugu::TextPopoverPanel | Click the canvas to place the text, then drag it into position. The letters use the brush color and width, and wobble like drawn lines.
-text-type-hint | ugurugu::CanvasWidget | Type in the Text panel to see it here.
-text-drag-hint | ugurugu::CanvasWidget | Drag to move · Enter applies · Esc cancels
-text-empty | ugurugu::CanvasWidget | Type some text to place it.
+tool-text | Te&xt | 텍스트(&X) | テキスト(&X)
+tool-text-rail | Text | 텍스트 | テキスト
+text-content-label | TEXT | 텍스트 | テキスト
+text-content-hint | Type the text to place… | 배치할 텍스트를 입력하세요… | 配置するテキストを入力…
+text-font | FONT | 글꼴 | フォント
+text-font-default | Default | 기본 | 既定
+text-size | Size | 크기 | サイズ
+text-filled | Fill the letters | 글자 채우기 | 文字を塗りつぶす
+text-place | Place text | 텍스트 배치 | テキストを配置
+text-cancel | Cancel | 취소 | キャンセル
+text-hint | Click the canvas to place the text, then drag it into position. The letters use the brush color and width, and wobble like drawn lines. | 캔버스를 클릭해 텍스트를 놓고 드래그로 위치를 잡으세요. 글자는 브러시 색과 굵기를 사용하며, 그린 선처럼 우글거립니다. | キャンバスをクリックしてテキストを置き、ドラッグで位置を調整します。文字はブラシの色と太さを使い、描いた線のようにうごうごします。
+text-type-hint | Type in the Text panel to see it here. | 텍스트 패널에 입력하면 여기에 표시됩니다. | テキストパネルに入力すると、ここに表示されます。
+text-drag-hint | Drag to move · Enter applies · Esc cancels | 드래그로 이동 · Enter 적용 · Esc 취소 | ドラッグで移動 · Enter で適用 · Esc でキャンセル
+text-empty | Type some text to place it. | 배치할 텍스트를 먼저 입력하세요. | 配置するテキストを先に入力してください。
 
 # Eyedropper and stroke properties
-tool-eyedropper | ugurugu::MainWindow | E&yedropper
-tool-eyedropper-rail | ugurugu::MainWindow | Eyedropper
-tool-eyedropper-tip | ugurugu::MainWindow | Pick a color from the canvas. Alt+click does the same from any paint tool.
-eyedropper-hint | - | Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket. | 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다. | キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
-restyle-selected | ugurugu::MainWindow | Edit selected stroke properties…
-restyle-selected-tip | ugurugu::MainWindow | Change the color or width of selected strokes
-restyle-title | ugurugu::StrokePropertiesDialog | Edit Stroke Properties
-restyle-color | ugurugu::StrokePropertiesDialog | Color
-restyle-width | ugurugu::StrokePropertiesDialog | Width
-restyle-choose-color | ugurugu::StrokePropertiesDialog | Select Stroke Color
-restyle-description | - | Changes the strokes and fills the selection touches on the current layer. Only checked properties change. | 현재 레이어에서 선택 영역에 닿는 선과 채우기를 바꿉니다. 체크한 속성만 바뀝니다. | 現在のレイヤーで選択範囲に触れるストロークと塗りつぶしを変更します。チェックしたプロパティだけが変わります。
-restyle-nothing | - | No strokes or fills in the selection to edit. | 선택 영역에 편집할 선이나 채우기가 없습니다. | 選択範囲に編集できるストロークや塗りつぶしがありません。
-restyle-pending | - | Apply or cancel the transform or text first. | 변형이나 텍스트를 먼저 적용하거나 취소하세요. | 先に変形またはテキストを適用するか、キャンセルしてください。
+tool-eyedropper | E&yedropper | 스포이드(&Y) | スポイト(&Y)
+tool-eyedropper-rail | Eyedropper | 스포이드 | スポイト
+tool-eyedropper-tip | Pick a color from the canvas. Alt+click does the same from any paint tool. | 캔버스에서 색상을 추출합니다. 페인트 도구에서 Alt+클릭해도 같습니다. | キャンバスから色を取得します。どの描画ツールでもAlt+クリックで同じ操作ができます。
+eyedropper-hint | Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket. | 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다. | キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
+restyle-selected | Edit selected stroke properties… | 선택한 선 속성 편집… | 選択したストロークのプロパティを編集…
+restyle-selected-tip | Change the color or width of selected strokes | 선택한 선의 색상 또는 굵기를 변경합니다 | 選択したストロークの色または太さを変更します
+restyle-title | Edit Stroke Properties | 선 속성 편집 | ストロークのプロパティを編集
+restyle-color | Color | 색상 | 色
+restyle-width | Width | 굵기 | 太さ
+restyle-choose-color | Select Stroke Color | 선 색상 선택 | ストロークの色を選択
+restyle-description | Changes the strokes and fills the selection touches on the current layer. Only checked properties change. | 현재 레이어에서 선택 영역에 닿는 선과 채우기를 바꿉니다. 체크한 속성만 바뀝니다. | 現在のレイヤーで選択範囲に触れるストロークと塗りつぶしを変更します。チェックしたプロパティだけが変わります。
+restyle-nothing | No strokes or fills in the selection to edit. | 선택 영역에 편집할 선이나 채우기가 없습니다. | 選択範囲に編集できるストロークや塗りつぶしがありません。
+restyle-pending | Apply or cancel the transform or text first. | 변형이나 텍스트를 먼저 적용하거나 취소하세요. | 先に変形またはテキストを適用するか、キャンセルしてください。
 
 # Settings
-edit-settings | ugurugu::MainWindow | &Settings…
-settings-title | ugurugu::SettingsDialog | Settings
-settings-general | ugurugu::SettingsDialog | General
-settings-language | ugurugu::SettingsDialog | Language
-settings-language-system | ugurugu::SettingsDialog | System default
-settings-theme | - | Theme | 테마 | テーマ
-settings-appearance | - | Appearance | 화면 | 外観
-settings-diagnostics | - | Diagnostic info | 진단 정보 | 診断情報
-settings-logs | - | Logs | 로그 | ログ
-settings-logs-hint | - | Log files of recent runs, to attach to a problem report. | 최근 실행의 로그 파일입니다. 문제를 알릴 때 첨부하세요. | 最近の実行のログファイルです。問題を報告するときに添付してください。
-settings-copy | - | Copy | 복사 | コピー
-settings-copied | - | Copied | 복사했습니다 | コピーしました
-settings-open | - | Open | 열기 | 開く
-settings-updates | - | Updates | 업데이트 | アップデート
-settings-shortcuts-search | - | Search shortcuts | 단축키 검색 | ショートカットを検索
-settings-shortcuts-no-match | - | No shortcut matches. | 맞는 단축키가 없습니다. | 一致するショートカットはありません。
-settings-theme-dark | - | Dark | 어둡게 | ダーク
-settings-theme-light | - | Light | 밝게 | ライト
-settings-theme-system | - | Same as Windows | Windows 설정과 같게 | Windowsの設定に合わせる
-settings-theme-color | ugurugu::SettingsDialog | Theme color
-settings-restart | ugurugu::SettingsDialog | Restart Ugurugu to apply language changes.
-settings-drawing | ugurugu::SettingsDialog | Drawing
-settings-wobble-animation | ugurugu::SettingsDialog | Wobble animation
-settings-pixel-grid | - | Pixel grid | 픽셀 격자 | ピクセルグリッド
-settings-pixel-grid-tip | - | Shows each pixel's edges from 800% up. | 800% 이상으로 확대하면 픽셀 경계를 보입니다. | 800%以上に拡大するとピクセルの境界を表示します。
-settings-files | ugurugu::SettingsDialog | Files
-settings-default-folder | ugurugu::SettingsDialog | Default save folder
-settings-default-folder-hint | ugurugu::SettingsDialog | New projects and exports start in this folder.
-settings-choose | ugurugu::SettingsDialog | Choose…
-settings-system-folder | ugurugu::SettingsDialog | Use system default
-settings-choose-folder | ugurugu::SettingsDialog | Choose default save folder
-settings-about | ugurugu::SettingsDialog | About
-settings-version | ugurugu::SettingsDialog | Version %1 | args=version
-settings-build | - | Build %1 | 빌드 %1 | ビルド %1 | args=commit
-settings-gpu | - | GPU: %1 | GPU: %1 | GPU: %1 | args=gpu
-settings-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
-settings-copy-diagnostics | - | Copy diagnostic info | 진단 정보 복사 | 診断情報をコピー
-settings-credit-icon | ugurugu::SettingsDialog | App icon artwork by seuppi
-settings-restore-defaults | - | Restore defaults | 기본값 복원 | デフォルトに戻す
-settings-close | - | Close | 닫기 | 閉じる
-escape-canvas | ugurugu::MainWindow | Cancel current canvas action
-settings-shortcuts | ugurugu::SettingsDialog | Shortcuts
-settings-shortcuts-hint | ugurugu::SettingsDialog | Click a shortcut field, then press the new key combination.
-settings-shortcut-taken | ugurugu::SettingsDialog | This shortcut is already assigned to %1. | args=action
-settings-shortcut-press | - | Press a key… (Esc cancels) | 키를 누르세요… (Esc: 취소) | キーを押してください…(Esc: 取り消し)
-settings-shortcut-none | - | None | 없음 | なし
-settings-shortcut-clear | - | Clear shortcut | 단축키 지우기 | ショートカットを消去
+edit-settings | &Settings… | 설정(&S)… | 設定(&S)…
+settings-title | Settings | 설정 | 設定
+settings-general | General | 일반 | 一般
+settings-language | Language | 언어 | 言語
+settings-language-system | System default | 시스템 기본값 | システムのデフォルト
+settings-theme | Theme | 테마 | テーマ
+settings-appearance | Appearance | 화면 | 外観
+settings-diagnostics | Diagnostic info | 진단 정보 | 診断情報
+settings-logs | Logs | 로그 | ログ
+settings-logs-hint | Log files of recent runs, to attach to a problem report. | 최근 실행의 로그 파일입니다. 문제를 알릴 때 첨부하세요. | 最近の実行のログファイルです。問題を報告するときに添付してください。
+settings-copy | Copy | 복사 | コピー
+settings-copied | Copied | 복사했습니다 | コピーしました
+settings-open | Open | 열기 | 開く
+settings-updates | Updates | 업데이트 | アップデート
+settings-shortcuts-search | Search shortcuts | 단축키 검색 | ショートカットを検索
+settings-shortcuts-no-match | No shortcut matches. | 맞는 단축키가 없습니다. | 一致するショートカットはありません。
+settings-theme-dark | Dark | 어둡게 | ダーク
+settings-theme-light | Light | 밝게 | ライト
+settings-theme-system | Same as Windows | Windows 설정과 같게 | Windowsの設定に合わせる
+settings-theme-color | Theme color | 테마 색상 | テーマカラー
+settings-restart | Restart Ugurugu to apply language changes. | 언어 변경 사항을 적용하려면 Ugurugu를 다시 시작하세요. | 言語の変更を適用するには Ugurugu を再起動してください。
+settings-drawing | Drawing | 그리기 | 描画
+settings-wobble-animation | Wobble animation | 우글거림 애니메이션 | ウォブルアニメーション
+settings-pixel-grid | Pixel grid | 픽셀 격자 | ピクセルグリッド
+settings-pixel-grid-tip | Shows each pixel's edges from 800% up. | 800% 이상으로 확대하면 픽셀 경계를 보입니다. | 800%以上に拡大するとピクセルの境界を表示します。
+settings-files | Files | 파일 | ファイル
+settings-default-folder | Default save folder | 기본 저장 폴더 | デフォルトの保存フォルダー
+settings-default-folder-hint | New projects and exports start in this folder. | 새 프로젝트와 내보내기는 이 폴더에서 시작합니다. | 新しいプロジェクトと書き出しはこのフォルダーから始まります。
+settings-choose | Choose… | 선택… | 選択…
+settings-system-folder | Use system default | 시스템 기본값 사용 | システムのデフォルトを使用
+settings-choose-folder | Choose default save folder | 기본 저장 폴더 선택 | デフォルトの保存フォルダーを選択
+settings-about | About | 정보 | 情報
+settings-version | Version %1 | 버전 %1 | バージョン %1 | args=version
+settings-build | Build %1 | 빌드 %1 | ビルド %1 | args=commit
+settings-gpu | GPU: %1 | GPU: %1 | GPU: %1 | args=gpu
+settings-open-logs | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
+settings-copy-diagnostics | Copy diagnostic info | 진단 정보 복사 | 診断情報をコピー
+settings-credit-icon | App icon artwork by seuppi | App icon artwork by seuppi | App icon artwork by seuppi
+settings-restore-defaults | Restore defaults | 기본값 복원 | デフォルトに戻す
+settings-close | Close | 닫기 | 閉じる
+escape-canvas | Cancel current canvas action | 현재 캔버스 작업 취소 | 現在のキャンバス操作をキャンセル
+settings-shortcuts | Shortcuts | 단축키 | ショートカット
+settings-shortcuts-hint | Click a shortcut field, then press the new key combination. | 단축키 입력란을 클릭한 다음 새 키 조합을 누르세요. | ショートカット欄をクリックして、新しいキーの組み合わせを押してください。
+settings-shortcut-taken | This shortcut is already assigned to %1. | 이 단축키는 이미 %1에 할당되어 있습니다. | このショートカットはすでに %1 に割り当てられています。 | args=action
+settings-shortcut-press | Press a key… (Esc cancels) | 키를 누르세요… (Esc: 취소) | キーを押してください…(Esc: 取り消し)
+settings-shortcut-none | None | 없음 | なし
+settings-shortcut-clear | Clear shortcut | 단축키 지우기 | ショートカットを消去
 
 # Crash records
-crash-title | - | Ugurugu closed unexpectedly | Ugurugu가 예기치 않게 종료됨 | Ugurugu が予期せず終了しました
-crash-text | - | Ugurugu stopped unexpectedly last time. What happened is recorded in the log folder; attach those files when you report the problem. | 지난번에 Ugurugu가 예기치 않게 종료되었습니다. 무슨 일이 있었는지 로그 폴더에 기록되어 있으니, 문제를 알릴 때 그 파일을 첨부해 주세요. | 前回 Ugurugu が予期せず終了しました。内容はログフォルダーに記録されています。問題を報告するときはそのファイルを添付してください。
-crash-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
-crash-close | - | Close | 닫기 | 閉じる
+crash-title | Ugurugu closed unexpectedly | Ugurugu가 예기치 않게 종료됨 | Ugurugu が予期せず終了しました
+crash-text | Ugurugu stopped unexpectedly last time. What happened is recorded in the log folder; attach those files when you report the problem. | 지난번에 Ugurugu가 예기치 않게 종료되었습니다. 무슨 일이 있었는지 로그 폴더에 기록되어 있으니, 문제를 알릴 때 그 파일을 첨부해 주세요. | 前回 Ugurugu が予期せず終了しました。内容はログフォルダーに記録されています。問題を報告するときはそのファイルを添付してください。
+crash-open-logs | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
+crash-close | Close | 닫기 | 閉じる
 
 # Help menu and updates
-help-check-updates | ugurugu::MainWindow | Check for &Updates…
-help-about | ugurugu::MainWindow | &About Ugurugu
-help-contents | ugurugu::MainWindow | Ugurugu &Help
-help-title | ugurugu::HelpDialog | Ugurugu Help
-help-start | - | Getting started | 시작하기 | はじめに
-help-start-draw | - | Draw a stroke, choose a motion in the Wobble panel and press P to play it. | 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요. | 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。
-help-start-pixel | - | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 작업을 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。
-help-start-export | - | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。
-help-files | - | Projects | 작업 파일 | 作業ファイル
-help-files-format | - | Ugurugu 3 saves projects as .ugurugu files. | Ugurugu 3은 작업을 .ugurugu 파일로 저장합니다. | Ugurugu 3 は作業を .ugurugu ファイルに保存します。
-help-files-tabs | - | Each project opens in a tab above the canvas, and a project opened from File Explorer opens as a tab of the window already open. Ctrl+Tab moves to the next tab and Ctrl+W closes one. | 작업마다 캔버스 위의 탭으로 열리고, 파일 탐색기에서 연 작업도 이미 열린 창의 탭으로 열립니다. Ctrl+Tab으로 다음 탭으로 가고 Ctrl+W로 탭을 닫습니다. | 作業はキャンバスの上のタブで開き、エクスプローラーから開いた作業もすでに開いているウィンドウのタブで開きます。Ctrl+Tab で次のタブへ移り、Ctrl+W でタブを閉じます。
-help-files-import | - | Projects saved as .ugu by Ugurugu 2.1.0 or later open as new projects and are saved as .ugurugu. The .ugu file is not changed. | Ugurugu 2.1.0 이후에 저장한 .ugu 파일은 새 작업으로 열리고 .ugurugu로 저장됩니다. 원래 .ugu 파일은 바뀌지 않습니다. | Ugurugu 2.1.0 以降で保存した .ugu ファイルは新しい作業として開き、.ugurugu に保存されます。元の .ugu ファイルは変更されません。
-help-files-older | - | Older .ugu files and .wagle, .wobble and .wawa files open in Ugurugu 2.2.13. Save older .ugu files there again to open them here. | 그보다 오래된 .ugu와 .wagle·.wobble·.wawa 파일은 Ugurugu 2.2.13에서 열 수 있습니다. 오래된 .ugu는 2.2.13에서 다시 저장하면 여기서 열립니다. | それより古い .ugu と .wagle・.wobble・.wawa ファイルは Ugurugu 2.2.13 で開けます。古い .ugu は 2.2.13 で保存し直すとここで開けます。
-help-install | - | Installing and updates | 설치와 업데이트 | インストールとアップデート
-help-install-beside | - | Ugurugu 3 installs as its own app beside Ugurugu 2, with its own settings and recovery files. Both can stay installed. | Ugurugu 3은 Ugurugu 2와 별개의 앱으로 설치되고 설정과 복구 파일도 따로 씁니다. 둘 다 설치해 두어도 됩니다. | Ugurugu 3 は Ugurugu 2 とは別のアプリとしてインストールされ、設定と復旧ファイルも別です。両方をインストールしたままにできます。
-help-install-smartscreen | - | The installer is not code-signed, so Windows may say it does not recognize it. Choose More info and then Run anyway, and download the installer only from the project's GitHub Releases page. | 설치 파일에 코드 서명이 없어 Windows가 인식할 수 없는 앱이라고 알릴 수 있습니다. 추가 정보를 누른 뒤 실행을 누르세요. 설치 파일은 프로젝트의 GitHub Releases 페이지에서만 받으세요. | インストーラーにはコード署名がないため、Windows が認識できないアプリと表示することがあります。「詳細情報」から「実行」を選んでください。インストーラーはプロジェクトの GitHub Releases ページからのみ入手してください。
-help-install-updates | - | Ugurugu checks for updates when it starts, at most every six hours; turn this off in Settings > General. Help > Check for Updates… checks now. An update installs once the window closes, after asking to save your changes. | Ugurugu는 시작할 때 업데이트를 확인합니다(6시간에 한 번까지). 설정 > 일반에서 끌 수 있고, 도움말 > 업데이트 확인…으로 바로 확인할 수 있습니다. 업데이트는 저장할지 물은 뒤 창이 닫히면 설치됩니다. | Ugurugu は起動時にアップデートを確認します（6時間に1回まで）。設定 > 一般でオフにでき、ヘルプ > アップデートを確認… ですぐに確認できます。アップデートは変更を保存するか確認した後、ウィンドウを閉じるとインストールされます。
-help-problems | - | Reporting a problem | 문제 알리기 | 問題の報告
-help-problems-logs | - | Ugurugu keeps log files of its recent runs and tells you on the next start if it closed unexpectedly. Settings > About opens the log folder and copies diagnostic info to attach to a GitHub issue. Nothing is sent automatically. | Ugurugu는 최근 실행의 로그 파일을 남기고, 예기치 않게 종료되면 다음 시작 때 알려 줍니다. 설정 > 정보에서 로그 폴더를 열거나 진단 정보를 복사해 GitHub 이슈에 첨부할 수 있습니다. 자동으로 보내는 것은 없습니다. | Ugurugu は最近の実行のログファイルを残し、予期せず終了した場合は次の起動時にお知らせします。設定 > 情報からログフォルダーを開いたり診断情報をコピーしたりして、GitHub の Issue に添付できます。自動的に送信されるものはありません。
-help-again | - | Press F1 to open this help again. | F1을 누르면 이 도움말을 다시 열 수 있습니다. | F1 キーでこのヘルプをもう一度開けます。
-update-available-title | ugurugu::UpdateController | Update available
-update-available | ugurugu::UpdateController | Ugurugu %1 is available. | args=version
-update-ask | ugurugu::UpdateController | Download and install it now?
-update-install | ugurugu::UpdateController | Update
-update-downloading | ugurugu::UpdateController | Downloading update…
-update-latest-title | ugurugu::UpdateController | You're up to date
-update-latest | ugurugu::UpdateController | Ugurugu %1 is the latest version. | args=version
-update-failed | ugurugu::UpdateController | Update failed
-update-check-failed | - | Could not check for updates. | 업데이트를 확인할 수 없습니다. | アップデートを確認できませんでした。
-update-download-failed | - | Could not download the update. | 업데이트를 다운로드할 수 없습니다. | アップデートをダウンロードできませんでした。
-update-install-failed | - | The update was downloaded but could not be installed. | 업데이트를 받았지만 설치할 수 없습니다. | アップデートをダウンロードしましたが、インストールできませんでした。
-update-not-installed | - | Updates are checked only in the installed app. | 업데이트는 설치한 앱에서만 확인할 수 있습니다. | アップデートはインストールしたアプリでのみ確認できます。
-settings-check-updates | - | Check for updates automatically | 자동으로 업데이트 확인 | アップデートを自動的に確認
-draw-layer-hidden | ugurugu::CanvasWidget | The active layer is hidden. Make it visible to draw.
-draw-group-hidden | ugurugu::CanvasWidget | The group holding the active layer is hidden. Make it visible to draw.
-draw-on-group | ugurugu::CanvasWidget | Groups can't be painted on. Select a paint layer to draw.
-draw-no-layer | ugurugu::CanvasWidget | Add a layer before using this tool.
-stroke-failed | ugurugu::CanvasWidget | The stroke could not be added.
-stroke-point-limit | ugurugu::CanvasWidget | The stroke could not be added because the project point limit was reached.
-text-failed | ugurugu::CanvasWidget | The text could not be added.
-text-point-limit | ugurugu::CanvasWidget | The text could not be added because the project point limit was reached.
-fill-failed | - | The fill could not be added. | 채우기를 추가하지 못했습니다. | 塗りつぶしを追加できませんでした。
-transform-failed | - | The transform could not be applied. | 변형을 적용하지 못했습니다. | 変形を適用できませんでした。
-edit-data-limit | - | The project data limit was reached. | 프로젝트 데이터 한도에 이르렀습니다. | プロジェクトのデータ上限に達しました。
-edit-layer-limit | - | The project layer limit was reached. | 프로젝트 레이어 수 한도에 이르렀습니다. | プロジェクトのレイヤー数の上限に達しました。
-edit-too-deep | - | Groups cannot be nested any deeper. | 그룹을 더 깊이 넣을 수 없습니다. | グループをこれ以上深く入れられません。
-edit-internal | - | Something went wrong inside Ugurugu. The log folder in Settings > About has the details. | Ugurugu 안에서 문제가 생겼습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다. | Ugurugu の内部で問題が起きました。詳細は設定 > 情報のログフォルダーにあります。
-pixel-mode | - | Pixel mode | 픽셀 모드 | ピクセルモード
-pixel-mode-tip | - | Draw pixel art: pixel brushes only, no blended edges, and transforms and image resizing by whole pixels. | 픽셀 그림을 그립니다. 픽셀 브러시만 쓰고, 가장자리를 섞지 않으며, 변형과 이미지 크기 변경을 픽셀 단위로 합니다. | ピクセルアートを描きます。ピクセルブラシだけを使い、縁をなじませず、変形と画像サイズの変更をピクセル単位で行います。
-type-document | - | Ugurugu projects (*.ugurugu) | Ugurugu 프로젝트 (*.ugurugu) | Uguruguプロジェクト (*.ugurugu)
-type-open | - | Ugurugu projects (*.ugurugu *.ugu) | Ugurugu 프로젝트 (*.ugurugu *.ugu) | Uguruguプロジェクト (*.ugurugu *.ugu)
-type-png | ugurugu::MainWindow | PNG images (*.png)
-type-jpeg | ugurugu::MainWindow | JPEG images (*.jpg *.jpeg)
-type-gif | ugurugu::MainWindow | GIF images (*.gif)
-type-webp | ugurugu::MainWindow | WebP images (*.webp)
-type-tools | - | Ugurugu tool presets (*.ugurugu-tools) | Ugurugu 도구 프리셋 (*.ugurugu-tools) | Uguruguツールプリセット (*.ugurugu-tools)
-type-image | - | Image files | 이미지 파일 | 画像ファイル
-file-job-failed | - | an unexpected error stopped it; the log folder in Settings > About has the details | 예기치 않은 오류로 멈췄습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | 予期しないエラーで止まりました。詳細は設定 > 情報のログフォルダーにあります
+help-check-updates | Check for &Updates… | 업데이트 확인(&U)… | アップデートを確認(&U)…
+help-about | &About Ugurugu | Ugurugu 정보(&A) | Uguruguについて(&A)
+help-contents | Ugurugu &Help | Ugurugu 도움말(&H) | Ugurugu ヘルプ(&H)
+help-title | Ugurugu Help | Ugurugu 도움말 | Ugurugu ヘルプ
+help-start | Getting started | 시작하기 | はじめに
+help-start-draw | Draw a stroke, choose a motion in the Wobble panel and press P to play it. | 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요. | 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。
+help-start-pixel | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 작업을 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。
+help-start-export | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。
+help-files | Projects | 작업 파일 | 作業ファイル
+help-files-format | Ugurugu 3 saves projects as .ugurugu files. | Ugurugu 3은 작업을 .ugurugu 파일로 저장합니다. | Ugurugu 3 は作業を .ugurugu ファイルに保存します。
+help-files-tabs | Each project opens in a tab above the canvas, and a project opened from File Explorer opens as a tab of the window already open. Ctrl+Tab moves to the next tab and Ctrl+W closes one. | 작업마다 캔버스 위의 탭으로 열리고, 파일 탐색기에서 연 작업도 이미 열린 창의 탭으로 열립니다. Ctrl+Tab으로 다음 탭으로 가고 Ctrl+W로 탭을 닫습니다. | 作業はキャンバスの上のタブで開き、エクスプローラーから開いた作業もすでに開いているウィンドウのタブで開きます。Ctrl+Tab で次のタブへ移り、Ctrl+W でタブを閉じます。
+help-files-import | Projects saved as .ugu by Ugurugu 2.1.0 or later open as new projects and are saved as .ugurugu. The .ugu file is not changed. | Ugurugu 2.1.0 이후에 저장한 .ugu 파일은 새 작업으로 열리고 .ugurugu로 저장됩니다. 원래 .ugu 파일은 바뀌지 않습니다. | Ugurugu 2.1.0 以降で保存した .ugu ファイルは新しい作業として開き、.ugurugu に保存されます。元の .ugu ファイルは変更されません。
+help-files-older | Older .ugu files and .wagle, .wobble and .wawa files open in Ugurugu 2.2.13. Save older .ugu files there again to open them here. | 그보다 오래된 .ugu와 .wagle·.wobble·.wawa 파일은 Ugurugu 2.2.13에서 열 수 있습니다. 오래된 .ugu는 2.2.13에서 다시 저장하면 여기서 열립니다. | それより古い .ugu と .wagle・.wobble・.wawa ファイルは Ugurugu 2.2.13 で開けます。古い .ugu は 2.2.13 で保存し直すとここで開けます。
+help-install | Installing and updates | 설치와 업데이트 | インストールとアップデート
+help-install-beside | Ugurugu 3 installs as its own app beside Ugurugu 2, with its own settings and recovery files. Both can stay installed. | Ugurugu 3은 Ugurugu 2와 별개의 앱으로 설치되고 설정과 복구 파일도 따로 씁니다. 둘 다 설치해 두어도 됩니다. | Ugurugu 3 は Ugurugu 2 とは別のアプリとしてインストールされ、設定と復旧ファイルも別です。両方をインストールしたままにできます。
+help-install-smartscreen | The installer is not code-signed, so Windows may say it does not recognize it. Choose More info and then Run anyway, and download the installer only from the project's GitHub Releases page. | 설치 파일에 코드 서명이 없어 Windows가 인식할 수 없는 앱이라고 알릴 수 있습니다. 추가 정보를 누른 뒤 실행을 누르세요. 설치 파일은 프로젝트의 GitHub Releases 페이지에서만 받으세요. | インストーラーにはコード署名がないため、Windows が認識できないアプリと表示することがあります。「詳細情報」から「実行」を選んでください。インストーラーはプロジェクトの GitHub Releases ページからのみ入手してください。
+help-install-updates | Ugurugu checks for updates when it starts, at most every six hours; turn this off in Settings > General. Help > Check for Updates… checks now. An update installs once the window closes, after asking to save your changes. | Ugurugu는 시작할 때 업데이트를 확인합니다(6시간에 한 번까지). 설정 > 일반에서 끌 수 있고, 도움말 > 업데이트 확인…으로 바로 확인할 수 있습니다. 업데이트는 저장할지 물은 뒤 창이 닫히면 설치됩니다. | Ugurugu は起動時にアップデートを確認します（6時間に1回まで）。設定 > 一般でオフにでき、ヘルプ > アップデートを確認… ですぐに確認できます。アップデートは変更を保存するか確認した後、ウィンドウを閉じるとインストールされます。
+help-problems | Reporting a problem | 문제 알리기 | 問題の報告
+help-problems-logs | Ugurugu keeps log files of its recent runs and tells you on the next start if it closed unexpectedly. Settings > About opens the log folder and copies diagnostic info to attach to a GitHub issue. Nothing is sent automatically. | Ugurugu는 최근 실행의 로그 파일을 남기고, 예기치 않게 종료되면 다음 시작 때 알려 줍니다. 설정 > 정보에서 로그 폴더를 열거나 진단 정보를 복사해 GitHub 이슈에 첨부할 수 있습니다. 자동으로 보내는 것은 없습니다. | Ugurugu は最近の実行のログファイルを残し、予期せず終了した場合は次の起動時にお知らせします。設定 > 情報からログフォルダーを開いたり診断情報をコピーしたりして、GitHub の Issue に添付できます。自動的に送信されるものはありません。
+help-again | Press F1 to open this help again. | F1을 누르면 이 도움말을 다시 열 수 있습니다. | F1 キーでこのヘルプをもう一度開けます。
+update-available-title | Update available | 업데이트가 있습니다 | アップデートがあります
+update-available | Ugurugu %1 is available. | Ugurugu %1 버전을 사용할 수 있습니다. | Ugurugu %1を利用できます。 | args=version
+update-ask | Download and install it now? | 지금 다운로드하고 설치할까요? | 今すぐダウンロードしてインストールしますか？
+update-install | Update | 업데이트 | アップデート
+update-downloading | Downloading update… | 업데이트 다운로드 중… | アップデートをダウンロード中…
+update-latest-title | You're up to date | 최신 버전입니다 | 最新の状態です
+update-latest | Ugurugu %1 is the latest version. | Ugurugu %1이 최신 버전입니다. | Ugurugu %1 は最新バージョンです。 | args=version
+update-failed | Update failed | 업데이트 실패 | アップデートに失敗しました
+update-check-failed | Could not check for updates. | 업데이트를 확인할 수 없습니다. | アップデートを確認できませんでした。
+update-download-failed | Could not download the update. | 업데이트를 다운로드할 수 없습니다. | アップデートをダウンロードできませんでした。
+update-install-failed | The update was downloaded but could not be installed. | 업데이트를 받았지만 설치할 수 없습니다. | アップデートをダウンロードしましたが、インストールできませんでした。
+update-not-installed | Updates are checked only in the installed app. | 업데이트는 설치한 앱에서만 확인할 수 있습니다. | アップデートはインストールしたアプリでのみ確認できます。
+settings-check-updates | Check for updates automatically | 자동으로 업데이트 확인 | アップデートを自動的に確認
+draw-layer-hidden | The active layer is hidden. Make it visible to draw. | 활성 레이어가 숨겨져 있습니다. 표시한 후 그릴 수 있습니다. | アクティブレイヤーが非表示です。描画するには表示してください。
+draw-group-hidden | The group holding the active layer is hidden. Make it visible to draw. | 활성 레이어가 속한 그룹이 숨겨져 있습니다. 표시한 후 그릴 수 있습니다. | アクティブレイヤーが入っているグループが非表示です。表示してから描画してください。
+draw-on-group | Groups can't be painted on. Select a paint layer to draw. | 그룹에는 그릴 수 없습니다. 그리려면 페인트 레이어를 선택하세요. | グループには描画できません。描画するにはペイントレイヤーを選択してください。
+draw-no-layer | Add a layer before using this tool. | 이 도구를 사용하기 전에 레이어를 추가하세요. | このツールを使う前にレイヤーを追加してください。
+stroke-failed | The stroke could not be added. | 스트로크를 추가하지 못했습니다. | ストロークを追加できませんでした。
+stroke-point-limit | The stroke could not be added because the project point limit was reached. | 프로젝트의 점 한도에 도달하여 스트로크를 추가하지 못했습니다. | プロジェクトのポイント数の上限に達したため、ストロークを追加できませんでした。
+text-failed | The text could not be added. | 텍스트를 추가하지 못했습니다. | テキストを追加できませんでした。
+text-point-limit | The text could not be added because the project point limit was reached. | 프로젝트의 포인트 한도에 도달하여 텍스트를 추가하지 못했습니다. | プロジェクトのポイント数の上限に達したため、テキストを追加できませんでした。
+fill-failed | The fill could not be added. | 채우기를 추가하지 못했습니다. | 塗りつぶしを追加できませんでした。
+transform-failed | The transform could not be applied. | 변형을 적용하지 못했습니다. | 変形を適用できませんでした。
+edit-data-limit | The project data limit was reached. | 프로젝트 데이터 한도에 이르렀습니다. | プロジェクトのデータ上限に達しました。
+edit-layer-limit | The project layer limit was reached. | 프로젝트 레이어 수 한도에 이르렀습니다. | プロジェクトのレイヤー数の上限に達しました。
+edit-too-deep | Groups cannot be nested any deeper. | 그룹을 더 깊이 넣을 수 없습니다. | グループをこれ以上深く入れられません。
+edit-internal | Something went wrong inside Ugurugu. The log folder in Settings > About has the details. | Ugurugu 안에서 문제가 생겼습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다. | Ugurugu の内部で問題が起きました。詳細は設定 > 情報のログフォルダーにあります。
+pixel-mode | Pixel mode | 픽셀 모드 | ピクセルモード
+pixel-mode-tip | Draw pixel art: pixel brushes only, no blended edges, and transforms and image resizing by whole pixels. | 픽셀 그림을 그립니다. 픽셀 브러시만 쓰고, 가장자리를 섞지 않으며, 변형과 이미지 크기 변경을 픽셀 단위로 합니다. | ピクセルアートを描きます。ピクセルブラシだけを使い、縁をなじませず、変形と画像サイズの変更をピクセル単位で行います。
+type-document | Ugurugu projects (*.ugurugu) | Ugurugu 프로젝트 (*.ugurugu) | Uguruguプロジェクト (*.ugurugu)
+type-open | Ugurugu projects (*.ugurugu *.ugu) | Ugurugu 프로젝트 (*.ugurugu *.ugu) | Uguruguプロジェクト (*.ugurugu *.ugu)
+type-png | PNG images (*.png) | PNG 이미지 (*.png) | PNG画像 (*.png)
+type-jpeg | JPEG images (*.jpg *.jpeg) | JPEG 이미지 (*.jpg *.jpeg) | JPEG画像 (*.jpg *.jpeg)
+type-gif | GIF images (*.gif) | GIF 이미지 (*.gif) | GIF画像 (*.gif)
+type-webp | WebP images (*.webp) | WebP 이미지 (*.webp) | WebP画像 (*.webp)
+type-tools | Ugurugu tool presets (*.ugurugu-tools) | Ugurugu 도구 프리셋 (*.ugurugu-tools) | Uguruguツールプリセット (*.ugurugu-tools)
+type-image | Image files | 이미지 파일 | 画像ファイル
+file-job-failed | an unexpected error stopped it; the log folder in Settings > About has the details | 예기치 않은 오류로 멈췄습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | 予期しないエラーで止まりました。詳細は設定 > 情報のログフォルダーにあります

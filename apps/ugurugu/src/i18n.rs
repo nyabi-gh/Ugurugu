@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! Interface text in the user's language, from the Fluent files in `i18n/`.
-//! English is the source; Korean and Japanese carry 2.2.13's translations,
-//! taken from its Qt catalogues by `tools/ts_to_ftl.py`.
+//! English is the source. `tools/strings_to_ftl.py` writes the files from
+//! `i18n/strings.txt`; Korean and Japanese reuse 2.2.13's translations.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
