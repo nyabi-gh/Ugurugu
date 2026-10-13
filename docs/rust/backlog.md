@@ -89,7 +89,6 @@
 | B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` 67~83행 | 분석 3.2; 검토 9절 |
 | B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` 642·712·778·793행 근처 | 분석 3.4 |
 | B3-47 | 코드에 직접 넣은 사용자 문구 검사 | Fluent 키 일치 시험은 언어 파일끼리만 비교해 코드의 하드코딩 영어를 찾지 못한다. 지금 남은 하드코딩 문구가 있는지는 전수 확인하지 않았다(가설) | `apps/ugurugu/src/i18n.rs` | 분석 3.7; 검토 6절 |
-| B3-48 | 다른 앱 클립보드 이미지의 크기 검사가 RGBA 변환 뒤 | `arboard.get_image()`가 크기를 알려 주기 전에 RGBA로 바꾸므로 큰 이미지는 검사 전에 큰 할당이 생긴다(U3-09에서 파일 삽입만 고침) | `crates/ugu-win/src/clipboard.rs` 40행 | 검토 U3-09; m6-plan 6절 검토 보고서 |
 | B3-49 | Rust reader의 퍼징과 ZIP 디렉터리 메모리 | `.ugurugu`·구형 JSON·qCompress·마스크·프리셋·이미지에 corpus를 두고 시간·메모리 한도를 함께 재는 퍼징이 없다. ZIP 중앙 디렉터리는 항목 수를 보기 전에 zip crate가 파싱하므로 파일 길이(`read::limits::FILE_BYTES`, 약 223MiB)로만 묶여 있다. 그 안에서 항목 머리만 채운 파일이 쓰는 메모리는 재지 않았다(가설: 파일 길이의 몇 배). 취약점으로 입증한 것은 아니다 | `crates/ugu-io/src/read.rs` `read_with`, `legacy.rs`, `apps/ugurugu/src/settings/preset.rs` | 검토 9절; ANALYSIS_REPORT R-08 |
 | B3-50 | 긴 텍스트의 윤곽을 UI 스레드에서 다시 만듦 | 배치한 텍스트가 바뀌면 render/UI 스레드에서 Parley 윤곽을 다시 만든다(같은 글이면 캐시). 긴 문장·대량 붙여넣기는 입력 지연 후보. 재고 길이 제한·지연 합치기·백그라운드 배치를 검토 | `apps/ugurugu/src/canvas/text.rs` 68행 | 검토 8절 |
 | B3-51 | 축소 재생 미리보기의 정확성 fixture | 재생 때 `preview_shrink`는 해상도·표본 간격을 줄인다. 픽셀 모드와 곡선의 축소 미리보기 비교 fixture가 있으면 좋다. 릴리스 노트 문구는 고쳤고 fixture는 더하지 않은 것으로 보인다(가설) | `apps/ugurugu/src/canvas.rs` | 검토 8절, 10절 |

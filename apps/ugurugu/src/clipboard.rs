@@ -15,7 +15,7 @@ use ugu_core::clip::Clip;
 use ugu_core::ops::AssetId;
 use ugu_core::store::Asset;
 
-use ugu_win::clipboard::Image;
+use ugu_win::clipboard::{Encoded, Image, ReadError};
 
 use crate::canvas::Canvas;
 use crate::i18n::tr;
@@ -138,14 +138,25 @@ fn run(job: Job) -> ClipboardEvent {
             ClipboardEvent::Written(result)
         }
         Job::Read { fit, generation } => {
-            let result = ugu_win::clipboard::read_image().and_then(|image| {
-                image
-                    .map(|image| {
-                        ugu_io::import::from_rgba(image.size, image.straight, fit)
+            let limit = usize::try_from(ugu_io::import::ALLOCATION).unwrap_or(usize::MAX);
+            let result = ugu_win::clipboard::read_encoded(limit)
+                .map_err(|error| match error {
+                    ReadError::TooLarge => ugu_io::import::ImportError::TooLarge.to_string(),
+                    ReadError::System(reason) => reason,
+                })
+                .and_then(|image| {
+                    image
+                        .map(|image| {
+                            match image {
+                                Encoded::Png(png) => {
+                                    ugu_io::import::decode(std::io::Cursor::new(png), fit)
+                                }
+                                Encoded::Dib(dib) => ugu_io::import::decode_dib(dib, fit),
+                            }
                             .map_err(|error| error.to_string())
-                    })
-                    .transpose()
-            });
+                        })
+                        .transpose()
+                });
             tracing::debug!(
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 "clipboard image read"

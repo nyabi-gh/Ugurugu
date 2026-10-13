@@ -34,17 +34,43 @@ pub fn write_image(Image { size, straight }: Image) -> Result<u32, String> {
     Ok(sequence())
 }
 
-/// The image on the clipboard; `None` when it holds none.
-pub fn read_image() -> Result<Option<Image>, String> {
-    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
-    match clipboard.get_image() {
-        Ok(image) => Ok(Some(Image {
-            size: [image.width as u32, image.height as u32],
-            straight: image.bytes.into_owned(),
-        })),
-        Err(arboard::Error::ContentNotAvailable) => Ok(None),
-        Err(error) => Err(error.to_string()),
+/// An image on the clipboard as the app that put it there encoded it, to be
+/// decoded within the limits files are.
+#[derive(Debug, PartialEq)]
+pub enum Encoded {
+    Png(Vec<u8>),
+    /// `CF_DIBV5`: a `BITMAPV5HEADER` and the pixels, without a file header.
+    Dib(Vec<u8>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ReadError {
+    /// More than the caller would take, left on the clipboard.
+    TooLarge,
+    System(String),
+}
+
+/// The image on the clipboard, PNG first as arboard reads it, if it is no
+/// more than `limit` bytes; `None` when it holds none.
+pub fn read_encoded(limit: usize) -> Result<Option<Encoded>, ReadError> {
+    let system = |error: clipboard_win::ErrorCode| ReadError::System(error.to_string());
+    let _open = clipboard_win::Clipboard::new_attempts(10).map_err(system)?;
+    let png = clipboard_win::register_format("PNG")
+        .map(u32::from)
+        .filter(|&format| clipboard_win::is_format_avail(format));
+    let (format, wrap): (u32, fn(Vec<u8>) -> Encoded) = match png {
+        Some(format) => (format, Encoded::Png),
+        None if clipboard_win::is_format_avail(clipboard_win::formats::CF_DIBV5) => {
+            (clipboard_win::formats::CF_DIBV5, Encoded::Dib)
+        }
+        None => return Ok(None),
+    };
+    if clipboard_win::raw::size(format).is_some_and(|size| size.get() > limit) {
+        return Err(ReadError::TooLarge);
     }
+    let mut bytes = Vec::new();
+    clipboard_win::raw::get_vec(format, &mut bytes).map_err(system)?;
+    Ok(Some(wrap(bytes)))
 }
 
 #[cfg(test)]
@@ -63,13 +89,9 @@ mod tests {
         })
         .unwrap();
         assert_ne!(after, before);
-        let read = read_image().unwrap().unwrap();
-        assert_eq!(read.size, [2, 2]);
-        for (got, want) in read.straight.chunks(4).zip(pixels.chunks(4)) {
-            assert_eq!(got[3], want[3]);
-            if want[3] == 255 {
-                assert_eq!(got, want);
-            }
-        }
+        let Some(Encoded::Png(png)) = read_encoded(1 << 20).unwrap() else {
+            panic!("no PNG on the clipboard");
+        };
+        assert!(png.starts_with(b"\x89PNG"));
     }
 }

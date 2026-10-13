@@ -4123,6 +4123,7 @@ name = "ugu-win"
 version = "3.0.1"
 dependencies = [
  "arboard",
+ "clipboard-win",
  "tracing",
  "windows",
  "windows-sys 0.61.2",

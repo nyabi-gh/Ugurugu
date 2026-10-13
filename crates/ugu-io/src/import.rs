@@ -24,8 +24,9 @@ use ugu_core::store::{Asset, limits};
 
 /// The largest image read, each way.
 pub const EDGE: u32 = 16_384;
-/// What decoding may allocate.
-const ALLOCATION: u64 = 1024 * 1024 * 1024;
+/// What decoding may allocate, and the most of an encoded image taken from
+/// the clipboard.
+pub const ALLOCATION: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, PartialEq)]
 pub enum ImportError {
@@ -54,15 +55,88 @@ pub fn decode(file: impl BufRead + Seek, fit: [u32; 2]) -> Result<(AssetId, Asse
     let mut reader = ImageReader::new(file)
         .with_guessed_format()
         .map_err(|error| ImportError::Damaged(error.to_string()))?;
-    let mut bounds = Limits::default();
-    bounds.max_image_width = Some(EDGE);
-    bounds.max_image_height = Some(EDGE);
-    bounds.max_alloc = Some(ALLOCATION);
-    reader.limits(bounds);
+    reader.limits(bounds());
     let mut decoder = reader.into_decoder().map_err(error)?;
     let orientation = decoder.orientation().map_err(error)?;
     let image = DynamicImage::from_decoder(decoder).map_err(error)?;
     to_asset(image, orientation, fit)
+}
+
+/// Decodes a `CF_DIBV5` clipboard image, as an asset no larger than `fit`.
+pub fn decode_dib(mut dib: Vec<u8>, fit: [u32; 2]) -> Result<(AssetId, Asset), ImportError> {
+    alpha_in_bi_rgb(&mut dib);
+    let bmp =
+        with_file_header(dib).ok_or_else(|| ImportError::Damaged("a broken bitmap".to_owned()))?;
+    decode(std::io::Cursor::new(bmp), fit)
+}
+
+fn field(dib: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(*dib.get(at..at + 4)?.first_chunk()?))
+}
+
+/// The DIB as a BMP file, whose header says where the pixels start: after
+/// the masks and colours, which writers lay out differently, and before an
+/// embedded colour profile, so at the end of what is left. `None` for a
+/// compressed or broken one.
+fn with_file_header(dib: Vec<u8>) -> Option<Vec<u8>> {
+    const BI_RGB: u32 = 0;
+    const BI_BITFIELDS: u32 = 3;
+    const PROFILE_EMBEDDED: u32 = u32::from_be_bytes(*b"MBED");
+    let header = field(&dib, 0)? as usize;
+    let width = field(&dib, 4)? as i32;
+    let height = field(&dib, 8)? as i32;
+    let bits = u32::from(u16::from_le_bytes(*dib.get(14..16)?.first_chunk()?));
+    if header < 40 || header > dib.len() || ![BI_RGB, BI_BITFIELDS].contains(&field(&dib, 16)?) {
+        return None;
+    }
+    let stride = (u64::from(width.unsigned_abs()) * u64::from(bits)).div_ceil(32) * 4;
+    let pixels = stride.checked_mul(u64::from(height.unsigned_abs()))?;
+    let profile =
+        field(&dib, 112).filter(|_| header >= 124 && field(&dib, 60) == Some(PROFILE_EMBEDDED));
+    let end = match profile {
+        Some(at) if (at as usize) >= header && (at as usize) < dib.len() => at as usize,
+        _ => dib.len(),
+    };
+    let start = (end as u64)
+        .checked_sub(pixels)
+        .filter(|&start| start >= header as u64)?;
+    let mut bmp = Vec::with_capacity(14 + dib.len());
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&u32::try_from(14 + dib.len()).ok()?.to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&u32::try_from(14 + start).ok()?.to_le_bytes());
+    bmp.extend_from_slice(&dib);
+    Some(bmp)
+}
+
+/// Chromium and apps built on it put 32-bit `BI_RGB` images with an alpha
+/// mask, whose high bytes the format says to ignore, on the clipboard with
+/// their transparency in them; read as bit fields, as arboard does.
+fn alpha_in_bi_rgb(dib: &mut [u8]) {
+    const BI_RGB: u32 = 0;
+    const BI_BITFIELDS: u32 = 3;
+    let v5 = field(dib, 0).is_some_and(|size| size >= 124) && dib.len() >= 124;
+    if !v5
+        || u16::from_le_bytes([dib[14], dib[15]]) != 32
+        || field(dib, 16) != Some(BI_RGB)
+        || field(dib, 52) != Some(0xff00_0000)
+    {
+        return;
+    }
+    dib[16..20].copy_from_slice(&BI_BITFIELDS.to_le_bytes());
+    if (40..52).step_by(4).all(|at| field(dib, at) == Some(0)) {
+        for (at, mask) in [(40, 0x00ff_0000u32), (44, 0x0000_ff00), (48, 0x0000_00ff)] {
+            dib[at..at + 4].copy_from_slice(&mask.to_le_bytes());
+        }
+    }
+}
+
+fn bounds() -> Limits {
+    let mut bounds = Limits::default();
+    bounds.max_image_width = Some(EDGE);
+    bounds.max_image_height = Some(EDGE);
+    bounds.max_alloc = Some(ALLOCATION);
+    bounds
 }
 
 fn error(error: image::ImageError) -> ImportError {
@@ -268,6 +342,55 @@ mod tests {
         RgbaImage::from_fn(size[0], size[1], |x, y| {
             image::Rgba([(x * 40) as u8, (y * 40) as u8, 90, 255])
         })
+    }
+
+    /// A `CF_DIBV5` of `size`, 32 bits a pixel, compressed as `compression`,
+    /// with an alpha mask, then `pixels` (bottom row first, BGRA).
+    fn dib(size: [i32; 2], compression: u32, pixels: &[u8]) -> Vec<u8> {
+        let mut dib = vec![0u8; 124];
+        let mut put = |at: usize, value: u32| dib[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        put(0, 124);
+        put(4, size[0] as u32);
+        put(8, size[1] as u32);
+        put(12, 1 | 32 << 16);
+        put(16, compression);
+        put(52, 0xff00_0000);
+        dib.extend_from_slice(pixels);
+        dib
+    }
+
+    #[test]
+    fn a_clipboard_image_too_large_or_broken_is_refused() {
+        let wide = dib([EDGE as i32 + 1, 1], 0, &vec![0; (EDGE as usize + 1) * 4]);
+        assert_eq!(decode_dib(wide, [64, 64]), Err(ImportError::TooLarge));
+        // Fewer pixels than the header says.
+        assert!(matches!(
+            decode_dib(dib([2, 2], 0, &[0; 12]), [64, 64]),
+            Err(ImportError::Damaged(_))
+        ));
+    }
+
+    #[test]
+    fn a_clipboard_image_keeps_the_transparency_chromium_puts_in_bi_rgb() {
+        // Half-transparent red, then opaque green.
+        let (_, asset) = decode_dib(dib([2, 1], 0, &[0, 0, 255, 128, 0, 255, 0, 255]), [64, 64])
+            .expect("decodes");
+        let read = pixels(&asset);
+        assert_eq!(read.get_pixel(0, 0).0, [255, 0, 0, 128]);
+        assert_eq!(read.get_pixel(1, 0).0, [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn a_clipboard_image_with_its_masks_in_the_header_decodes() {
+        // As arboard writes it: bit fields, the masks only in the header.
+        let mut bitfields = dib([2, 1], 3, &[0, 0, 255, 128, 0, 255, 0, 255]);
+        for (at, mask) in [(40, 0x00ff_0000u32), (44, 0x0000_ff00), (48, 0x0000_00ff)] {
+            bitfields[at..at + 4].copy_from_slice(&mask.to_le_bytes());
+        }
+        let (_, asset) = decode_dib(bitfields, [64, 64]).expect("decodes");
+        let read = pixels(&asset);
+        assert_eq!(read.get_pixel(0, 0).0, [255, 0, 0, 128]);
+        assert_eq!(read.get_pixel(1, 0).0, [0, 255, 0, 255]);
     }
 
     fn pixels(asset: &Asset) -> RgbaImage {
