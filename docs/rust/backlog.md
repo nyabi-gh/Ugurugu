@@ -13,7 +13,7 @@
 | B3-01 | README를 3.0에 맞게 다시 쓴다 | 지금 README는 2.x 기준이다: 작업 파일 `.ugu`와 `.wagle`·`.wobble` 열기(78행), "투명 배경 … JPG"(79행, 실제는 JPEG 흰 바탕·GIF는 alpha 128 기준 이진 투명), `Ctrl+T` = 애니메이션 바(143행, 3.0은 변형이고 바는 `Ctrl+Shift+T`), Redo는 `Ctrl+Y`만(145행, 3.0은 `Ctrl+Shift+Z`도), 그래픽 D3D11(50행, 3.0은 DX12 또는 WARP). `.ugu`는 2.1.0 이후 schema 13만 가져오고 그 전 파일은 2.2.13에서 다시 저장해야 함, `.ugurugu`는 2.x에서 열 수 없음, `.wwpreset` 대신 `.ugurugu-tools`, Classic은 포즈·디테일·연결·무작위성을 쓰지 않음, macOS는 2.2.13 | `README.md` | m6-plan 8절 1, analysis-3.0 1절 5·2.1·3.7·4절 5 |
 | B3-02 | `release-notes/3.0.0.en.md` 확인 | 검토 지적(보이는 그림과 내보내는 그림, 펜·GPU 시험 범위)을 반영한 초안이다 | `release-notes/3.0.0.en.md` | m6-plan 8절 2 |
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
-| B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | auto mode는 태그 push를 막는다. 릴리스는 main에서 CI가 성공한 커밋만 낸다(`wait-for-main-ci.sh`). 첫 릴리스가 업데이트용 사전 릴리스 `updates`를 만들므로, 릴리스 뒤 `updates`에 `Ugurugu3-3.0.0-full.nupkg`와 `releases.win.json`이 있고 `v3.0.0`에는 Setup 하나만 있는지 본다 | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
+| B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | 2026-10-13 완료(run 38332552202). `v3.0.0`에는 Setup 하나, `updates`에는 `Ugurugu3-3.0.0-win-x64-full.nupkg`와 `releases.win-x64.json`(채널 `win-x64`)이 있다. 남은 것: 릴리스 노트는 "이 페이지의 `SHA256SUMS-Windows.txt`"를 말하지만 그 파일은 `updates`에만 있다. `v3.0.0`에 올릴지 노트를 고칠지 사용자가 정한다(다음 릴리스부터는 workflow가 올린다) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
 
 ## 2. 열린 gate
 
@@ -129,8 +129,28 @@
 |---|---|---|---|---|
 | B3-69 | WARP 지연의 원인을 나누지 못함 | WARP에서 입력이 60~75ms 늦게 보이고 단계 20~32%가 합쳐진다. 렌더 시간인지 합성 대기인지 나누지 않았다 | `crates/ugu-render/src/gpu.rs` | evidence.md 장치 손실·TDR·WARP |
 | B3-70 | ② 8 작업자에서 30fps 미달 | 8스레드 프레임 42~49ms. 사용자가 받아들였지만 목표는 열려 있다. 다음 수단은 인코드·래스터 일 줄이기(가설) | `crates/ugu-render/src/document.rs` | evidence.md 작업자 수와 레이어 배분 |
-| B3-71 | CPU 제조사가 다를 때 픽셀 동일성 | SSE4.2 고정으로 같은 결과가 나온다는 것은 한 CPU에서 SIMD 단계를 바꿔 본 추론이다. 다른 제조사 CPU에서 비교한 적 없다 | `crates/ugu-render` | evidence.md 렌더러 |
+| B3-71 | CPU 제조사가 다를 때 픽셀 동일성 | SSE4.2 고정으로 같은 결과가 나온다는 것은 한 CPU에서 SIMD 단계를 바꿔 본 추론이다. 다른 제조사 CPU에서 비교한 적 없다. 또 `f64` `sin`·`cos`·`hypot`은 UCRT가 실행 중 FMA3 판을 고를 수 있어 FMA3 유무에 따라 1ulp 달라질 수 있다(가설, `dab.rs` 스프레이, `stroke.rs`, `motion.rs`). 한 PC 안의 미리보기·최종 동일성과는 무관 | `crates/ugu-render` | evidence.md 렌더러 |
 | B3-72 | `vello_cpu` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다 | `Cargo.toml` | evidence.md 렌더러 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
 | B3-74 | main push CI 범위의 실제 확인 | 마지막으로 성공한 main 커밋과 비교하는 변경을 실제 main push에서 확인하지 않았다 | `.github/workflows/ci.yml` | evidence.md main push의 CI 범위 |
+
+## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
+
+2026-10-13 영역별 코드 검토(읽기만, 일부는 시험 crate로 재현). 고친 것은 `rust/3.0.1-fixes`에 있다: 저장 중 원본 손실(`ReplaceFileW` 백업), 대기 변형·글자를 두고 한 레이어·선택·채우기 편집이 변형을 되돌림, 묻는 동안 보이는 탭이 바뀜(엉뚱한 탭 닫기·저장, 내보내기 창 panic), 다른 탭에 열린 파일로 다른 이름 저장, 렌더·내보내기 스레드 panic 뒤 멈춤, 프레임 수 변경 뒤 캐시된 포즈, egui 키보드 UI 확대, release publish 재실행·동시 실행. 아래는 남은 것이다.
+
+| ID | 항목 | 왜·영향 | 어디 | 출처 |
+|---|---|---|---|---|
+| B3-84 | 내보내는 탭을 닫으면 내보내기가 "render worker stopped"로 실패 | 깨끗한 탭은 묻지 않고 닫혀 그 탭의 캐시 작업자가 멈춘다. 작업자 join 동안 UI가 잠깐 멈출 수 있다(가설). B3-64는 창 닫기·업데이트만 다룬다 | `canvas.rs` `close_tab`, `cache.rs` `Drop`, `export.rs` | 검토 |
+| B3-85 | 창 크기·위치를 기억하지 않고 늘 1600×1000(논리) | 1366×768이나 1920×1080 150%에서 아래쪽이 작업 표시줄 밑으로 간다(가설). 최대화도 기억하지 않는다 | `apps/ugurugu/src/app.rs` | 검토 |
+| B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
+| B3-87 | 조작된 파일에 대한 방어 | `.ugurugu` mask 위치·크기 범위를 보지 않는다(i32 합 넘침, 높이 큰 mask의 행별 할당 수 GB). 획·레이어·mask id가 `u32::MAX`면 다음 id가 0으로 돌아 그 문서에 더 그릴 수 없다. 내장 PNG는 선언 크기 검사(`ASSET_PIXELS`) 전에 디코드한다. 2.x `.ugu` 가져오기는 작업 수·저장소 한도를 끝에서야 보므로 할당이 사실상 무제한이고 자산 개수 한도도 없다. B3-49와 함께 fuzzing으로 본다 | `ugu-io` `read.rs` `legacy.rs`, `ugu-core` `store.rs` `command.rs` `clip.rs` `restyle.rs` | 검토 |
+| B3-88 | 손상된 `settings.json`을 백업 없이 덮어씀 | 읽지 못하면 기본값으로 시작하고(로그 경고만), 다음 설정 변경 때 기본값+그 변경으로 덮어써 예전 설정·단축키·배치가 사라진다 | `apps/ugurugu/src/settings.rs` | 검토 |
+| B3-89 | 복구 쪽 작은 결함 | 읽지 못하는 복구 폴더 하나가 `begin` 전체를 실패시켜 그 창은 복구 없이 돈다(경고 뒤 건너뛰어야). 탭 이전 형식 창 폴더에 남은 임시 파일은 폴더를 영영 남긴다. 계속 실패하는 복구 쓰기는 3초마다 다시 시도한다. 두 창이 거의 동시에 시작하면 한 창이 다른 창의 빈 폴더를 지워 그 창이 복구 없이 돌 수 있다(가설) | `apps/ugurugu/src/recovery.rs`, `files.rs` | 검토 |
+| B3-90 | 캐시 작업자 panic | 작업자 루프에 `catch_unwind`가 없어 panic 뒤 대기 중인 내보내기의 `recv`가 영영 기다린다(가설, renderer panic이 있어야 함) | `apps/ugurugu/src/cache.rs` | 검토 |
+| B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다. 저장·열기 중 창 닫기는 아무 반응 없이 무시된다. 좁은 창에서 그리는 동안 눌린 패널 폭이 저장된다. 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `files.rs` `request`, `ui/dock.rs`, `shortcuts.rs` `assignable` | 검토 |
+| B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
+| B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |
+| B3-94 | CI·배포 자잘한 것 | 배지 workflow의 `release: published`는 `GITHUB_TOKEN`으로 만든 릴리스라 돌지 않는다(6시간 일정으로만 갱신). 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `.github/workflows/download-badge.yml`, `ci.yml` | 검토 |
+| B3-95 | 같은 레이어가 같은 획 id를 두 번 쓸 때 재스타일 | 선택이 한쪽만 건드리면 `RemoveStroke`가 남은 참조 때문에 실패해 오류가 난다. 그런 상태로 가는 순서는 찾지 못했다(가설) | `crates/ugu-core/src/restyle.rs` | 검토 |
+| B3-96 | 채우기 기준 그림과 대기 변형 | 영역 클릭은 이제 대기 변형을 먼저 적용하고 기준 그림을 읽는다. 대기 글자도 같이 적용되므로, 배치 중인 글자를 둔 채 자동 선택을 쓰면 글자가 확정된다. 의도와 맞는지 사용자 확인 | `apps/ugurugu/src/canvas.rs` `click_area` | 검토 |
