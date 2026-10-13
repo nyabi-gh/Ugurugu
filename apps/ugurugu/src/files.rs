@@ -808,8 +808,12 @@ impl Files {
     /// `action` once none is left.
     fn close_next(&mut self, action: Action, canvas: &mut Canvas) {
         if let Some(index) = canvas.dirty_tab(&self.discarded) {
-            canvas.show_tab(index);
-            self.confirm = Some(action);
+            // The canvas says why it cannot be shown.
+            if canvas.show_tab(index) {
+                self.confirm = Some(action);
+            } else {
+                self.discarded.clear();
+            }
             return;
         }
         self.discarded.clear();
@@ -879,12 +883,12 @@ impl Files {
             canvas.replace(document, saved);
             return true;
         }
-        let opened = canvas.open_tab(document, saved);
-        if let Err(error) = &opened {
+        // `false` is said by the canvas.
+        canvas.open_tab(document, saved).unwrap_or_else(|error| {
             tracing::error!(%error, "cannot start a tab's canvas cache thread");
             self.fail(tr("tab-failed").to_owned());
-        }
-        opened.is_ok()
+            false
+        })
     }
 
     /// Shows a document read.
@@ -893,7 +897,7 @@ impl Files {
         if matches!(opened, Opened::Document(..))
             && let Some(index) = canvas.tab_with_path(&path)
         {
-            canvas.show_tab(index);
+            let _ = canvas.show_tab(index);
             return;
         }
         match opened {
@@ -1000,7 +1004,7 @@ impl Files {
             return;
         }
         if let Some(index) = canvas.tab_with_path(&path) {
-            canvas.show_tab(index);
+            let _ = canvas.show_tab(index);
             return;
         }
         self.opening += 1;
@@ -1199,16 +1203,19 @@ impl Files {
     fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
         // Always beside the others, the empty one at start included: a new
         // document is asked for to have one more. Clean until edited.
-        if let Err(error) = canvas.open_tab(
-            Document {
-                pixel,
-                ..Document::new(size)
-            },
-            true,
-        ) {
-            tracing::error!(%error, "cannot start a tab's canvas cache thread");
-            self.fail(tr("tab-failed").to_owned());
-            return;
+        let document = Document {
+            pixel,
+            ..Document::new(size)
+        };
+        match canvas.open_tab(document, true) {
+            Ok(true) => {}
+            // Said by the canvas.
+            Ok(false) => return,
+            Err(error) => {
+                tracing::error!(%error, "cannot start a tab's canvas cache thread");
+                self.fail(tr("tab-failed").to_owned());
+                return;
+            }
         }
         *canvas.file_mut() = DocumentFile::new();
         self.clear_message();
@@ -2293,7 +2300,7 @@ mod tests {
         canvas.open_tab(Document::new([8, 8]), true).unwrap();
         canvas.open_tab(Document::new([9, 9]), true).unwrap();
         canvas.edit(Session::add_layer).unwrap();
-        canvas.show_tab(1);
+        assert!(canvas.show_tab(1));
         files.request(Action::Close, &mut canvas);
         assert_eq!(files.confirm, Some(Action::Close));
         assert_eq!(canvas.tab_position(), 0);
@@ -2719,7 +2726,7 @@ mod tests {
         files.open_path(path.clone(), &mut canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.tab_count(), 2);
-        canvas.show_tab(0);
+        assert!(canvas.show_tab(0));
         let asked = canvas.generation();
         files.request(Action::CloseTab, &mut canvas);
         assert_eq!(files.confirm, Some(Action::CloseTab));

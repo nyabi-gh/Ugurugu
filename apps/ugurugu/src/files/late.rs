@@ -98,7 +98,7 @@ fn a_document_read_while_the_shown_one_is_edited_opens_beside_it() {
     assert!(canvas.tab_infos()[0].dirty);
 
     // Opening it again shows its tab without reading it.
-    canvas.show_tab(0);
+    assert!(canvas.show_tab(0));
     files.open_path(path.clone(), &mut canvas);
     assert!(!files.busy());
     assert_eq!(canvas.tab_position(), 1);

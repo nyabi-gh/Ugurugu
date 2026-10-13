@@ -301,10 +301,12 @@ pub fn run(
         A::ImportTools => files.import_tools(),
         A::ExportTools => files.export_tools(canvas),
         A::CloseTab => files.request(files::Action::CloseTab, canvas),
-        A::NextTab => canvas.show_tab((canvas.tab_position() + 1) % canvas.tab_count()),
+        A::NextTab => {
+            let _ = canvas.show_tab((canvas.tab_position() + 1) % canvas.tab_count());
+        }
         A::PreviousTab => {
             let count = canvas.tab_count();
-            canvas.show_tab((canvas.tab_position() + count - 1) % count);
+            let _ = canvas.show_tab((canvas.tab_position() + count - 1) % count);
         }
         A::Quit => files.request(files::Action::Close, canvas),
         A::Undo => report_bool("undo", canvas.edit(Session::undo)),

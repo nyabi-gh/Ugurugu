@@ -464,26 +464,33 @@ impl Canvas {
     }
 
     /// Opens `document` in a new tab after the one shown and shows it;
-    /// `saved` when it is on disk as it is. An error, and no tab, when no
-    /// thread could be started to draw it.
-    pub fn open_tab(&mut self, document: Document, saved: bool) -> std::io::Result<()> {
+    /// `saved` when it is on disk as it is. `false`, and no tab, when the
+    /// tab shown cannot be left (see `leave_tab`); an error when no thread
+    /// could be started to draw it.
+    pub fn open_tab(&mut self, document: Document, saved: bool) -> std::io::Result<bool> {
         let worker = worker(&self.cache_done)?;
+        if !self.leave_tab() {
+            return Ok(false);
+        }
         self.generations += 1;
         let tab = Tab::new(document, saved, worker, self.generations);
-        self.leave_tab();
         let left = std::mem::replace(&mut self.tab, tab);
         self.others.insert(self.position, left);
         self.position += 1;
         self.enter_tab();
-        Ok(())
+        Ok(true)
     }
 
-    /// Shows the tab at `index` in the order.
-    pub fn show_tab(&mut self, index: usize) {
-        if index == self.position || index >= self.tab_count() {
-            return;
+    /// Shows the tab at `index` in the order; whether it is shown, which it
+    /// is not when the tab shown cannot be left (see `leave_tab`).
+    #[must_use]
+    pub fn show_tab(&mut self, index: usize) -> bool {
+        if index == self.position {
+            return true;
         }
-        self.leave_tab();
+        if index >= self.tab_count() || !self.leave_tab() {
+            return false;
+        }
         let (taken, back) = if index < self.position {
             (index, self.position - 1)
         } else {
@@ -494,6 +501,7 @@ impl Canvas {
         self.others.insert(back, left);
         self.position = index;
         self.enter_tab();
+        true
     }
 
     /// Closes the tab at `index`, dropping its changes. Closing the last
@@ -648,15 +656,18 @@ impl Canvas {
 
     /// Ends what the tab shown is doing before another is shown: a pending
     /// transform or placed text is applied, as changing tools does, and
-    /// playback stops.
-    fn leave_tab(&mut self) {
-        if let Err(error) = self.edit(Session::settle) {
-            tracing::warn!(?error, "what was pending could not be applied");
+    /// playback stops. When the document cannot take what is pending, says
+    /// so and returns `false`, and the tab stays shown as it was.
+    fn leave_tab(&mut self) -> bool {
+        if self.edit(Session::settle).is_err() {
+            self.notice = Some(tr("restyle-pending").to_owned());
+            return false;
         }
         self.interaction = Interaction::Idle;
         self.tab.playback = None;
         self.tab.resume_playback = false;
         self.tab.left_area = self.area;
+        true
     }
 
     /// Shows the tab just made current: its pixels are uploaded again and
@@ -1910,16 +1921,44 @@ mod tests {
         assert_eq!(canvas.session().document().canvas, [32, 16]);
         canvas.edit(Session::add_layer).unwrap();
         let edited = canvas.generation();
-        canvas.show_tab(0);
+        assert!(canvas.show_tab(0));
         assert_eq!(canvas.session().document().canvas, [64, 64]);
         assert!(!canvas.session().is_dirty());
         assert_ne!(canvas.generation(), edited);
         assert_eq!(canvas.dirty_tab(&[]), Some(1));
         assert_eq!(canvas.dirty_tab(&[edited]), None);
         assert_eq!(canvas.tab_generations()[1], edited);
-        canvas.show_tab(1);
+        assert!(canvas.show_tab(1));
         assert!(canvas.session().is_dirty());
         assert_eq!(canvas.session().document().layers.len(), 2);
+    }
+
+    #[test]
+    fn a_tab_whose_pending_transform_cannot_be_applied_stays_shown() {
+        use ugu_core::ops::{Affine, Op, PaintLayer};
+        let mut full = Document::new([8, 8]);
+        if let LayerKind::Paint(PaintLayer { ops, .. }) = &mut full.layers[0].kind {
+            *ops = vec![
+                Op::Crop {
+                    offset: [0, 0],
+                    size: [8, 8]
+                };
+                ugu_core::document::limits::OPERATIONS
+            ];
+        }
+        let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
+        assert!(canvas.open_tab(full.clone(), true).unwrap());
+        canvas.edit(Session::select_all).unwrap();
+        canvas.edit(Session::begin_transform).unwrap();
+        canvas.edit(|session| session.set_transform(Affine::translation(1.0, 0.0)));
+        assert!(!canvas.show_tab(0));
+        assert!(!canvas.open_tab(Document::new([4, 4]), true).unwrap());
+        assert_eq!((canvas.tab_count(), canvas.tab_position()), (2, 1));
+        assert_eq!(canvas.notice(), Some(tr("restyle-pending")));
+        assert!(canvas.session().pending().is_some());
+        assert_eq!(canvas.session().document(), &full);
+        canvas.cancel_transform();
+        assert!(canvas.show_tab(0));
     }
 
     #[test]
@@ -1968,7 +2007,7 @@ mod tests {
             (widths(&canvas), canvas.tab_position()),
             (vec![30, 20, 10], 0)
         );
-        canvas.show_tab(2);
+        assert!(canvas.show_tab(2));
         canvas.move_tab(0, 1);
         assert_eq!(
             (widths(&canvas), canvas.tab_position()),

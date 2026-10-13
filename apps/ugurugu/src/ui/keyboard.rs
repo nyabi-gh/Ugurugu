@@ -425,6 +425,24 @@ fn control_tab_goes_through_the_tabs() {
 }
 
 #[test]
+fn each_tab_s_close_button_names_its_document() {
+    let mut window = Window::new();
+    window.canvas.file_mut().unsaved_name = Some("Cat".to_owned());
+    window
+        .canvas
+        .open_tab(ugu_core::document::Document::new([8, 8]), true)
+        .unwrap();
+    window.canvas.file_mut().unsaved_name = Some("Dog".to_owned());
+    window.frame(Vec::new());
+    for name in ["Cat", "Dog"] {
+        let close = super::tabs::close_name(name);
+        assert!(close.contains(name));
+        window.click_named(&close);
+    }
+    assert_eq!(window.canvas.tab_count(), 1);
+}
+
+#[test]
 fn the_canvas_size_dialog_lays_out_inside_the_window() {
     let mut window = Window::new();
     window.click_named(tr("menu-edit"));

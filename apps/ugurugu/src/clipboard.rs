@@ -102,8 +102,8 @@ impl Clipboard {
             ClipboardEvent::Written(result) => {
                 self.writing -= 1;
                 let sequence = result.unwrap_or_else(|error| {
-                    // Other apps do not get it, but this app still pastes it.
                     tracing::warn!(%error, "the copy could not be put on the clipboard");
+                    canvas.set_notice(tr("copy-not-shared").to_owned());
                     ugu_win::clipboard::sequence()
                 });
                 if self.writing == 0 {
@@ -163,5 +163,21 @@ fn run(job: Job) -> ClipboardEvent {
             );
             ClipboardEvent::Read(generation, result)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ugu_core::document::Document;
+
+    #[test]
+    fn a_copy_other_apps_do_not_get_is_said() {
+        let mut clipboard = Clipboard::new(|_| {});
+        let mut canvas = Canvas::new(Document::new([8, 8]), |_| {});
+        clipboard.writing = 1;
+        clipboard.handle(ClipboardEvent::Written(Err("busy".to_owned())), &mut canvas);
+        assert_eq!(canvas.notice(), Some(tr("copy-not-shared")));
+        assert!(clipboard.ours.is_some());
     }
 }

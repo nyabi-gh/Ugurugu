@@ -9,7 +9,9 @@ use std::path::Path;
 
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
+    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, REG_SZ, RRF_RT_REG_SZ, RegCloseKey,
+    RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW,
+    RegQueryInfoKeyW, RegSetKeyValueW,
 };
 use windows_sys::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
 
@@ -49,7 +51,13 @@ fn set(key: &str, name: Option<&str>, data: &str) -> Result<(), String> {
 
 /// `key`'s default value, if it has one.
 fn default_value(key: &str) -> Option<String> {
+    value(key, None)
+}
+
+/// `key`'s value `name` (the default value when `None`), if it has one.
+fn value(key: &str, name: Option<&str>) -> Option<String> {
     let key_wide = wide(key);
+    let name_wide = name.map(wide);
     let mut buffer = [0u16; 256];
     let mut bytes = (buffer.len() * 2) as u32;
     // SAFETY: the key is null-terminated and the buffer's size is given in
@@ -58,7 +66,9 @@ fn default_value(key: &str) -> Option<String> {
         RegGetValueW(
             HKEY_CURRENT_USER,
             key_wide.as_ptr(),
-            std::ptr::null(),
+            name_wide
+                .as_ref()
+                .map_or(std::ptr::null(), |name| name.as_ptr()),
             RRF_RT_REG_SZ,
             std::ptr::null_mut(),
             buffer.as_mut_ptr().cast(),
@@ -67,6 +77,66 @@ fn default_value(key: &str) -> Option<String> {
     };
     let length = (bytes as usize / 2).saturating_sub(1).min(buffer.len());
     (status == ERROR_SUCCESS).then(|| String::from_utf16_lossy(&buffer[..length]))
+}
+
+/// Deletes `key`'s value `name` (the default value when `None`); a missing
+/// one is not an error here.
+fn delete_value(key: &str, name: Option<&str>) {
+    let key_wide = wide(key);
+    let name_wide = name.map(wide);
+    // SAFETY: every string is null-terminated.
+    unsafe {
+        RegDeleteKeyValueW(
+            HKEY_CURRENT_USER,
+            key_wide.as_ptr(),
+            name_wide
+                .as_ref()
+                .map_or(std::ptr::null(), |name| name.as_ptr()),
+        )
+    };
+}
+
+/// Deletes `key` if it holds no values and no keys.
+fn delete_if_empty(key: &str) {
+    let key_wide = wide(key);
+    let mut handle: HKEY = std::ptr::null_mut();
+    // SAFETY: the key is null-terminated and `handle` is closed below.
+    if unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            key_wide.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut handle,
+        )
+    } != ERROR_SUCCESS
+    {
+        return;
+    }
+    let (mut keys, mut values) = (0u32, 0u32);
+    // SAFETY: `handle` is open; what is not asked for is null.
+    let status = unsafe {
+        RegQueryInfoKeyW(
+            handle,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &mut keys,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut values,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    // SAFETY: opened above.
+    unsafe { RegCloseKey(handle) };
+    if status == ERROR_SUCCESS && keys == 0 && values == 0 {
+        // SAFETY: the key is null-terminated.
+        unsafe { RegDeleteKeyW(HKEY_CURRENT_USER, key_wide.as_ptr()) };
+    }
 }
 
 fn delete_tree(key: &str) {
@@ -110,15 +180,18 @@ pub fn register(app: &Path, name: &str, classes: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Takes the association away again, leaving `.ugurugu` alone if something
-/// else has taken it over since.
+/// Takes the association away again: only the values `register` wrote, so
+/// that what other apps keep under `.ugurugu`, the default when one has
+/// taken it over since included, stays.
 pub fn unregister(classes: &str) {
     let extension = format!(r"{classes}\{EXTENSION}");
+    let progids = format!(r"{extension}\OpenWithProgids");
     if default_value(&extension).as_deref() == Some(PROG_ID) {
-        delete_tree(&extension);
-    } else {
-        delete_tree(&format!(r"{extension}\OpenWithProgids\{PROG_ID}"));
+        delete_value(&extension, None);
     }
+    delete_value(&progids, Some(PROG_ID));
+    delete_if_empty(&progids);
+    delete_if_empty(&extension);
     delete_tree(&format!(r"{classes}\{PROG_ID}"));
     changed();
 }
@@ -146,6 +219,9 @@ mod tests {
         assert_eq!(default_value(&format!(r"{classes}\{PROG_ID}")), None);
 
         // Another app's association stays; only ours goes from it.
+        let progids = format!(r"{classes}\.ugurugu\OpenWithProgids");
+        let ours = || value(&progids, Some(PROG_ID));
+        let others = || value(&progids, Some("Other.App"));
         set(&format!(r"{classes}\.ugurugu"), None, "Other.App").unwrap();
         register(app, "Ugurugu document", &classes).unwrap();
         set(&format!(r"{classes}\.ugurugu"), None, "Other.App").unwrap();
@@ -154,6 +230,14 @@ mod tests {
             default_value(&format!(r"{classes}\.ugurugu")).as_deref(),
             Some("Other.App")
         );
+        assert_eq!(ours(), None);
+
+        // Ours as the default, beside another app's.
+        register(app, "Ugurugu document", &classes).unwrap();
+        set(&progids, Some("Other.App"), "").unwrap();
+        unregister(&classes);
+        assert_eq!(default_value(&format!(r"{classes}\.ugurugu")), None);
+        assert_eq!((ours(), others().as_deref()), (None, Some("")));
         delete_tree(&root);
         assert_eq!(default_value(&format!(r"{classes}\.ugurugu")), None);
     }

@@ -9,7 +9,7 @@ use egui::{CornerRadius, FontId, Rect, Response, Sense, Ui, vec2};
 use super::Panels;
 use crate::canvas::{Canvas, TabInfo};
 use crate::files::{self, Files};
-use crate::i18n::tr;
+use crate::i18n::tr_with;
 use crate::icons::{self, Glyph};
 use crate::{theme, widgets};
 
@@ -64,13 +64,22 @@ pub fn tab_bar(ui: &mut Ui, canvas: &mut Canvas, files: &mut Files, panels: &mut
         }
     }
     if let Some(index) = chosen {
-        canvas.show_tab(index);
+        let _ = canvas.show_tab(index);
     }
-    if let Some(index) = closed {
-        // Asked about there, if it has unsaved changes.
-        canvas.show_tab(index);
+    // Asked about there, if it has unsaved changes.
+    if let Some(index) = closed
+        && canvas.show_tab(index)
+    {
         files.request(files::Action::CloseTab, canvas);
     }
+}
+
+/// What the close button of the tab of document `name` is called, so that a
+/// screen reader tells the tabs' buttons apart.
+pub fn close_name(name: &str) -> String {
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("name", name.to_owned());
+    tr_with("tab-close-named", &args)
 }
 
 /// One tab: the document's name, marked when it has unsaved changes, and a
@@ -138,8 +147,9 @@ fn tab(ui: &mut Ui, info: &TabInfo, current: bool) -> (Response, bool) {
         vec2(CLOSE, CLOSE),
     );
     let close = ui.interact(cross, response.id.with("close"), Sense::click());
+    let close_name = close_name(&info.name);
     close.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("file-close-tab"))
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, close_name.as_str())
     });
     if current || hovered || close.hovered() || close.has_focus() {
         if close.hovered() {
@@ -160,7 +170,7 @@ fn tab(ui: &mut Ui, info: &TabInfo, current: bool) -> (Response, bool) {
             widgets::focus_ring(ui.painter(), cross, theme::radius::SMALL);
         }
     }
-    let clicked = close.on_hover_text(tr("file-close-tab")).clicked();
+    let clicked = close.on_hover_text(close_name).clicked();
     let response = if cut {
         response.on_hover_text(title)
     } else {
