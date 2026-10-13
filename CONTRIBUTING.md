@@ -22,8 +22,7 @@ GPL without collecting permission from every past contributor.
 
 ## License headers
 
-Every tracked `.rs`, `.cpp`, `.hpp`, `.mm`, `.vert`, `.frag`, and `.js` file
-starts with:
+Every tracked `.rs` and `.js` file starts with:
 
 ```
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -32,9 +31,7 @@ starts with:
 
 Python and PowerShell tools start with the same two lines as `#` comments.
 New files need them too. CI fails the `Format and release metadata` job when a
-tracked source file is missing the SPDX identifier. `src/main.cpp` carries the
-full GNU notice in addition, and it is the copy that states the warranty
-disclaimer in source form.
+tracked source file is missing the SPDX identifier.
 
 ## Dependencies
 
@@ -48,13 +45,12 @@ are added in that script.
 
 ## Before you open a pull request
 
-Ugurugu 3 (`apps/`, `crates/`) is the maintained app. The C++ 2.2.13 sources
-(`src/`, `web/`) are kept for macOS 2.2.13 and as a reference, and are no
-longer changed.
+Ugurugu 3 (`apps/`, `crates/`) is the maintained app. The C++ 2.x sources
+are at the `v2.2.13` tag.
 
 - Run the checks in [BUILDING.md](BUILDING.md#checks).
 - Write interface text in `apps/ugurugu/i18n/strings.txt` with Korean and
   Japanese translations, then generate the `.ftl` files with
-  `python -X utf8 tools/ts_to_ftl.py`. Do not edit the `.ftl` files by hand.
+  `python -X utf8 tools/strings_to_ftl.py`. Do not edit the `.ftl` files by hand.
 - Add a release note to `release-notes/<version>.en.md` when the change is
   user visible. Release notes are written in English only.

@@ -1,5 +1,0 @@
-InheritParentConfig: true
-Checks: >
-  -bugprone-unchecked-optional-access,
-  -clang-analyzer-core.CallAndMessage,
-  -clang-analyzer-optin.core.EnumCastOutOfRange

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Puts the icon and the version into the executable, as 2.2.13's
-//! `resources/icons/Ugurugu.rc.in`. The icon is resource 1, which the window
-//! and the file association use.
+//! Puts the icon and the version into the executable, as 2.2.13 did. The
+//! icon is resource 1, which the window and the file association use.
 
 use std::path::PathBuf;
 

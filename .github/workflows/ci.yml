@@ -18,7 +18,6 @@ jobs:
   # a push to main against the newest main commit whose CI succeeded, so a
   # cancelled or failed run's changes are checked again. Releases rely on this.
   # Paths no rule recognises, and pushes without such a commit, run everything.
-  # 2.x C++ and the web build are no longer checked: 3.x is the Rust app.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -89,7 +88,7 @@ jobs:
             if ! head -n 3 "$file" | grep -qF "$identifier"; then
               missing+=("$file")
             fi
-          done < <(git ls-files -- '*.cpp' '*.hpp' '*.mm' '*.vert' '*.frag' '*.js' '*.rs')
+          done < <(git ls-files -- '*.js' '*.rs')
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "Sources missing the '$identifier' header:"
             printf '  %s\n' "${missing[@]}"

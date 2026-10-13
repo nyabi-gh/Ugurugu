@@ -195,7 +195,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 | 도구 막대는 아이콘만(툴팁에 이름·키), 그룹은 들여쓰기·접기 | 이름 있는 버튼 | 사용자 제안 | M3-9 |
 | 기본 배치: 왼쪽 도구 설정·색·색 기록, 오른쪽 우글거림·레이어, 패널마다 한 그룹 | 모두 오른쪽, 탭 묶음 | 레이어 목록이 오른쪽 전체 높이 | M3-9, M5-11 |
 | 도킹은 직접 구현(`apps/ugurugu/src/layout.rs`, `ui/dock.rs`): 이동·탭·떠 있게·접기·저장·초기화. 떠 있는 패널은 메인 창 안 egui 창이고, 위아래 경계 끌기는 없다. 창이 낮으면 도크를 세로 스크롤 | QDockWidget, OS 창으로 떼어 냄 | `egui_dock`도 창 안이고 접근성이 없다. OS 창은 창마다 표면·DPI·TDR 비용(두 번째 모니터로 못 빼는 것이 남는 차이) | M5 결정 12, M5-11, m6 2절 20 |
-| 번역은 Fluent(`apps/ugurugu/i18n/*.ftl`). 원문은 2.2.13 영어, ko·ja는 `tools/ts_to_ftl.py`가 2.2.13 `.ts`에서 가져온다. 언어는 `UGURUGU_LANGUAGE` → 설정 → Windows 순, 바꾸면 다시 시작 | Qt `.ts` | 즉시 바꾸려면 egui 문자열 캐시를 다시 만들어야 한다 | M3-9, M5 결정 8, M5-3 |
+| 번역은 Fluent(`apps/ugurugu/i18n/*.ftl`). 원문은 2.2.13 영어, ko·ja는 2.2.13 `.ts`의 번역을 `apps/ugurugu/i18n/strings.txt`에 옮겨 두었고(2026-10-13), `tools/strings_to_ftl.py`가 `.ftl`을 만든다. 언어는 `UGURUGU_LANGUAGE` → 설정 → Windows 순, 바꾸면 다시 시작 | Qt `.ts` | 즉시 바꾸려면 egui 문자열 캐시를 다시 만들어야 한다 | M3-9, M5 결정 8, M5-3 |
 | 글꼴은 동봉한 Pretendard JP 하나 | 같음 | — | M3-9 |
 | 설정은 `%APPDATA%\Ugurugu\3\settings.json`(`UGURUGU_SETTINGS_PATH`). 값마다 읽어 틀린 값만 기본값, 모르는 키는 다시 쓴다. 500ms 모아 "settings" 스레드가 임시 파일 → 교체, 닫을 때 한 번 더. 2.2.13 키는 읽지 않는다 | QSettings 레지스트리 | 보고 지우기 쉽고 시험이 경로를 바꾼다. render 스레드가 파일을 쓰지 않는다 | M5 결정 1·2, M5-3 |
 | 여러 창은 쓰기 직전 다시 읽고 바꾼 최상위 키만 덮는다(`settings.json.lock`) | 키마다 레지스트리 | 2.2.13과 같은 결과 | m6 2절 19 |
@@ -243,7 +243,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 | panic은 `crash-…-panic-<n>.txt`, 못 잡는 예외는 할당 없는 필터가 `crash-…-native.txt`를 쓴다. 다음 시작에 안내하고 본 기록은 `.seen.txt`. 정보 탭에 빌드·GPU·진단 복사. 자동 전송은 없다 | 네이티브 기록 없음 | GUI 서브시스템이라 stdout이 없다. 전송은 개인정보 정책이 필요 | m6 2절 8, M6-4 |
 | 로그에 사용자 글을 남기지 않는다(텍스트는 글자 수만) | — | — | U3-10 |
 | 설정은 Roaming `%APPDATA%\Ugurugu\3`, 복구·로그는 `%LOCALAPPDATA%\Ugurugu Data\3`. 출시 전 위치에서 옮겨 오지 않는다 | 2.2.13 경로 | 2.2.13 제거가 `%LOCALAPPDATA%\Ugurugu`를 통째로 지운다 | m6 2절 21 |
-| C++ 트리는 3.0과 함께 저장소에 남는다. 3.0이 C++에 기대지 않음은 `cargo tree`·패키지 목록·C++ 없는 CI로 확인 | — | macOS는 3.0 뒤까지 2.2.13, 가져오기 fixture는 C++ 생성기. 계획 12절과 다르다 | m6 2절 11 |
+| C++ 트리와 웹판은 저장소에서 지웠다(2026-10-13 사용자 결정). 소스는 `v2.2.13` 태그에 있다. 남긴 것은 3.0이 쓰는 아이콘·글꼴과 `.ugu` 가져오기 fixture(`tests/fixtures/ugu13`)뿐이다 | — | 유지하지 않는 코드가 검색·검토·의존성 갱신에 섞였다. 처음에는 비교 기준·fixture 생성·번역 원본으로 남겼다(m6 2절 11) | m6 2절 11, 2026-10-13 |
 | 설치 수용 시험은 Windows Sandbox(`tools/sandbox/`). RDP는 Sandbox 원격 세션까지 확인했고, 실제 `mstsc` 접속과 같다는 것은 **가설** | CI 설치 smoke | 매번 깨끗한 상태 | m6 2절 9, M6-7 |
 | GPU는 RTX 5080(DX12)과 WARP만 시험했다. 나머지는 열린 gate(로그의 "selected GPU adapter" 보고로 닫음). iGPU 선택 옵션은 출시 뒤 | — | 이 PC에서 고를 수 있는 것이 둘뿐 | M6-13 |
 

@@ -1,14 +1,6 @@
 # macOS
 .DS_Store
 
-# C++
-out/
-build/
-aqtinstall.log
-CMakeUserPresets.json
-compile_commands.json
-.cache/
-
 # IDEs
 .vscode/
 .idea/
