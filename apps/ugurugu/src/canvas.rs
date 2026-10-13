@@ -1291,6 +1291,10 @@ impl Canvas {
         let started = Instant::now();
         self.notice = None;
         self.pause_playback();
+        // The area is read from the document as the fill will see it.
+        if let Err(error) = self.tab.session.settle() {
+            return self.fill_notice(&FillError::Edit(error));
+        }
         let read = self.read_reference();
         let reference = self
             .tab

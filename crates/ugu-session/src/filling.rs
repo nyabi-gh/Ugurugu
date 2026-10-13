@@ -135,6 +135,7 @@ impl Session {
             Combine::Add => "Add to selection",
             Combine::Subtract => "Subtract from selection",
         };
+        self.settle()?;
         let next = Selection::combine(self.selection().map(Arc::as_ref), Some(area), combine);
         Ok(self.history_mut()?.select(label, next))
     }
@@ -153,6 +154,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         };
         self.paintable()?;
+        self.settle()?;
         if self
             .selection()
             .is_some_and(|selection| !selection.mask().contains(seed[0] as i32, seed[1] as i32))
@@ -165,6 +167,7 @@ impl Session {
 
     /// Fills the selection on the current layer with the brush colour.
     pub fn fill_selection(&mut self, tools: &Tools) -> Result<Outcome, FillError> {
+        self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
         // Cut to the selection too, so the softened edge stays inside the
@@ -184,6 +187,7 @@ impl Session {
         let Some(shape) = shape else {
             return Ok(Outcome::NoChange);
         };
+        self.settle()?;
         self.commit_fill(tools, &shape, self.clip())
     }
 

@@ -124,6 +124,7 @@ impl Session {
             (Combine::Add, Some(_)) => "Add to selection",
             (Combine::Subtract, Some(_)) => "Subtract from selection",
         };
+        self.settle()?;
         let next = Selection::combine(self.selection().map(Arc::as_ref), shape, lasso.combine);
         Ok(self.history_mut()?.select(label, next))
     }
@@ -142,6 +143,7 @@ impl Session {
     /// Selects what is not selected; nothing without a selection.
     pub fn invert_selection(&mut self) -> Result<bool, EditError> {
         self.lasso = None;
+        self.settle()?;
         let Some(inverted) = self.selection().map(|selection| selection.invert()) else {
             return Ok(false);
         };

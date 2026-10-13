@@ -476,7 +476,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         let outcome = self
-            .history
+            .history_mut()?
             .edit("Delete layer", |_| command::remove_layer(id))?;
         self.keep_layer_valid();
         Ok(outcome)
@@ -484,6 +484,7 @@ impl Session {
 
     /// Moves the current layer up (`1`) or down (`-1`) among its siblings.
     pub fn move_layer(&mut self, by: isize) -> Result<Outcome, EditError> {
+        self.settle()?;
         let id = self.layer;
         let Some((parent, index)) = self.document().position(id) else {
             return Ok(Outcome::NoChange);
@@ -507,12 +508,14 @@ impl Session {
         parent: Option<LayerId>,
         index: usize,
     ) -> Result<Outcome, EditError> {
+        self.settle()?;
         let changes = command::move_layer(self.document(), id, parent, index)?;
         self.history_mut()?.edit("Move layer", |_| changes)
     }
 
     /// Puts the current layer in a new group in its place.
     pub fn add_group(&mut self) -> Result<Outcome, EditError> {
+        self.settle()?;
         let name = (1..)
             .map(|number| format!("Group {number}"))
             .find(|name| !named(&self.document().layers, name))
@@ -524,6 +527,7 @@ impl Session {
     /// Puts the children of the current group in its place; the top one
     /// becomes current.
     pub fn ungroup(&mut self) -> Result<Outcome, EditError> {
+        self.settle()?;
         let group = self.layer;
         let Some(LayerKind::Group(content)) = self.document().layer(group).map(|layer| &layer.kind)
         else {
@@ -542,6 +546,7 @@ impl Session {
     /// Moves the current layer to the top of `group`, or out to the top level
     /// with `None`.
     pub fn move_to_group(&mut self, group: Option<LayerId>) -> Result<Outcome, EditError> {
+        self.settle()?;
         let changes = command::move_to_group(self.document(), self.layer, group)?;
         let label = match group {
             Some(_) => "Move layer into group",
@@ -557,6 +562,7 @@ impl Session {
         label: &str,
         update: impl FnOnce(&mut Layer),
     ) -> Result<Outcome, EditError> {
+        self.settle()?;
         let changes = command::update_layer(self.document(), id, update)?;
         let unchanged = changes.iter().all(|change| match change {
             ugu_core::edit::Change::ReplaceLayer(layer) => {
@@ -572,6 +578,7 @@ impl Session {
 
     /// Merges the current layer into the one below, which becomes current.
     pub fn merge_down(&mut self) -> Result<Outcome, EditError> {
+        self.settle()?;
         let above = self.layer;
         let below = self.document().position(above).and_then(|(parent, index)| {
             let siblings = command::siblings(self.document(), parent)?;

@@ -1169,6 +1169,141 @@ fn deleting_clears_the_selected_part_after_a_pending_transform() {
     assert_eq!(session.undo_label(), Some("Delete"));
 }
 
+/// A session with a stroke and a selection moved by a pending transform.
+fn moved_selection() -> Session {
+    let mut session = session();
+    draw(&mut session, &Tools::default(), 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 5.0],
+        [40.0, 30.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(100.0, 0.0));
+    session
+}
+
+type Named<T> = (&'static str, T);
+
+#[test]
+fn layer_edits_apply_a_pending_transform_and_keep_it() {
+    let edits: [Named<fn(&mut Session)>; 5] = [
+        ("rename", |session| {
+            let layer = session.current_layer();
+            session
+                .update_layer(layer, "Rename", |layer| layer.name = "Moved".into())
+                .unwrap();
+        }),
+        ("move", |session| {
+            session.add_layer().unwrap();
+            session.move_layer(-1).unwrap();
+        }),
+        ("group", |session| {
+            session.add_group().unwrap();
+        }),
+        ("move out of group", |session| {
+            session.add_group().unwrap();
+            session.ungroup().unwrap();
+        }),
+        ("delete another", |session| {
+            let layer = session.current_layer();
+            session.add_layer().unwrap();
+            session.remove_layer().unwrap();
+            session.select_layer(layer).unwrap();
+        }),
+    ];
+    for (name, edit) in edits {
+        let mut session = moved_selection();
+        edit(&mut session);
+        assert_eq!(session.pending(), None, "{name}");
+        let held: usize = paint_layers(&session.document().layers)
+            .into_iter()
+            .map(|id| transforms(&session, id).len())
+            .sum();
+        assert_eq!(held, 1, "{name}: the transform is kept");
+    }
+}
+
+fn paint_layers(layers: &[Layer]) -> Vec<LayerId> {
+    layers
+        .iter()
+        .flat_map(|layer| match &layer.kind {
+            LayerKind::Paint(_) => vec![layer.id],
+            LayerKind::Group(group) => paint_layers(&group.children),
+        })
+        .collect()
+}
+
+#[test]
+fn merging_down_keeps_a_pending_transform_of_the_upper_layer() {
+    let mut session = session();
+    session.add_layer().unwrap();
+    draw(&mut session, &Tools::default(), 10.0, 60.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [5.0, 5.0],
+        [40.0, 30.0],
+        Combine::Replace,
+    );
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(100.0, 0.0));
+    session.merge_down().unwrap();
+    let ops = ops(&session, session.current_layer());
+    let Some(Op::Isolated(upper)) = ops.last() else {
+        panic!("the upper layer as a section");
+    };
+    assert!(
+        upper
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::TransformSelection { .. }))
+    );
+}
+
+#[test]
+fn deleting_the_layer_of_a_pending_transform_leaves_the_session_usable() {
+    let mut session = moved_selection();
+    session.add_layer().unwrap();
+    session
+        .select_layer(session.document().layers[0].id)
+        .unwrap();
+    session.begin_transform().unwrap();
+    session.set_transform(Affine::translation(100.0, 0.0));
+    session.remove_layer().unwrap();
+    assert_eq!(session.pending(), None);
+    assert!(matches!(session.add_layer(), Ok(Outcome::Committed(_))));
+}
+
+#[test]
+fn fills_and_selection_changes_use_the_moved_selection() {
+    let mut session = moved_selection();
+    let layer = session.current_layer();
+    session.fill_selection(&Tools::default()).unwrap();
+    let (coverage, ..) = *fills(&session, layer).last().unwrap();
+    assert_eq!(
+        session.document().store.masks[&coverage].bounds,
+        [105, 5, 35, 25]
+    );
+
+    let mut session = moved_selection();
+    session.invert_selection().unwrap();
+    assert!(!session.selection().unwrap().mask().contains(110, 10));
+    assert!(session.selection().unwrap().mask().contains(10, 10));
+
+    let mut session = moved_selection();
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [150.0, 60.0],
+        [160.0, 70.0],
+        Combine::Add,
+    );
+    assert_eq!(selected(&session), Some([105, 5, 55, 65]));
+}
+
 #[test]
 fn escape_cancels_a_pending_transform_before_deselecting_and_changing_tool_applies_it() {
     let mut session = session();
