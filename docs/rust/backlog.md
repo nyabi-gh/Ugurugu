@@ -142,7 +142,7 @@
 | B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다. 저장·열기 중 창 닫기는 아무 반응 없이 무시된다. 좁은 창에서 그리는 동안 눌린 패널 폭이 저장된다. 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `files.rs` `request`, `ui/dock.rs`, `shortcuts.rs` `assignable` | 검토 |
 | B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |
-| B3-94 | CI·배포 자잘한 것 | 배지 workflow의 `release: published`는 `GITHUB_TOKEN`으로 만든 릴리스라 돌지 않는다(6시간 일정으로만 갱신). 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `.github/workflows/download-badge.yml`, `ci.yml` | 검토 |
+| B3-94 | 태그 커밋의 CI가 취소되면 릴리스 실패 | 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `ci.yml`, `release-3.yml` | 검토 |
 | B3-95 | 같은 레이어가 같은 획 id를 두 번 쓸 때 재스타일 | 선택이 한쪽만 건드리면 `RemoveStroke`가 남은 참조 때문에 실패해 오류가 난다. 그런 상태로 가는 순서는 찾지 못했다(가설) | `crates/ugu-core/src/restyle.rs` | 검토 |
 | B3-96 | 채우기 기준 그림과 대기 변형 | 영역 클릭은 이제 대기 변형을 먼저 적용하고 기준 그림을 읽는다. 대기 글자도 같이 적용되므로, 배치 중인 글자를 둔 채 자동 선택을 쓰면 글자가 확정된다. 의도와 맞는지 사용자 확인 | `apps/ugurugu/src/canvas.rs` `click_area` | 검토 |
 | B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 시간 초과로 끝나는 일이 되풀이됐다(evidence.md 45절). 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절 |

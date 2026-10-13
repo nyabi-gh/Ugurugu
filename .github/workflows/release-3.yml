@@ -153,6 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -219,3 +220,10 @@ jobs:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
           files: artifacts/*-Setup.exe
+
+      # A release made with this job's token starts no workflow, so its
+      # `release` event never reaches the badge.
+      - name: Count the release on the download badge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run download-badge.yml --repo "$GITHUB_REPOSITORY" --ref main
