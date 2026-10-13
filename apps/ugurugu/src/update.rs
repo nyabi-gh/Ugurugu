@@ -15,12 +15,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use velopack::sources::{FileSource, GithubSource};
+use velopack::sources::{FileSource, HttpSource};
 use velopack::{UpdateCheck, UpdateInfo, UpdateManager};
 
 use crate::i18n::{args, tr, tr_with};
 
-const REPOSITORY: &str = "https://github.com/nyabi-gh/Ugurugu";
+/// The update packages and their list, kept on one GitHub release of their
+/// own so that each version's release holds only its installer. Downloads
+/// from there are counted with the rest (`.github/scripts`).
+const FEED: &str = "https://github.com/nyabi-gh/Ugurugu/releases/download/updates";
 const START_DELAY: Duration = Duration::from_secs(2);
 const INTERVAL_SECONDS: u64 = 6 * 60 * 60;
 
@@ -70,12 +73,12 @@ fn now_seconds() -> u64 {
         .map_or(0, |since| since.as_secs())
 }
 
-/// The GitHub releases, or the folder of packages `UGURUGU_UPDATE_FEED`
+/// The updates release, or the folder of packages `UGURUGU_UPDATE_FEED`
 /// names, to try an update before it is published.
 fn manager() -> Result<UpdateManager, velopack::Error> {
     match std::env::var_os("UGURUGU_UPDATE_FEED") {
         Some(folder) => UpdateManager::new(FileSource::new(folder), None, None),
-        None => UpdateManager::new(GithubSource::new(REPOSITORY, None, false), None, None),
+        None => UpdateManager::new(HttpSource::new(FEED), None, None),
     }
 }
 

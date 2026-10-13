@@ -78,11 +78,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "vpk pack failed with exit code $LASTEXITCODE"
     }
-    # The same file name as 2.x, so the README's link to the latest release
-    # keeps working across the switch to 3.0.
+    # Named with its version, as the release page shows it.
     Move-Item -Force `
         (Join-Path $OutputDirectory 'Ugurugu3-win-x64-Setup.exe') `
-        (Join-Path $OutputDirectory 'Ugurugu-Windows-x64-Setup.exe')
+        (Join-Path $OutputDirectory "Ugurugu-$version-Windows-x64-Setup.exe")
 } finally {
     Remove-Item -Recurse -Force $staging
 }

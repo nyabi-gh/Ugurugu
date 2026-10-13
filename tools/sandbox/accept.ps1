@@ -40,7 +40,7 @@ function Stop-Apps {
 }
 
 Step 'Install 3.0.0' {
-    $setup = Join-Path $in 'install\Ugurugu-Windows-x64-Setup.exe'
+    $setup = (Get-Item (Join-Path $in 'install\*-Setup.exe')).FullName
     $installer = Start-Process -FilePath $setup -ArgumentList '--silent' -PassThru -Wait
     if ($installer.ExitCode -ne 0) {
         throw "Setup exited with code $($installer.ExitCode)"
@@ -240,7 +240,7 @@ Step 'Install and run as a standard user' {
     if ($members -match "\\$name$") {
         throw "$name is an administrator"
     }
-    $setup = Join-Path $in 'install\Ugurugu-Windows-x64-Setup.exe'
+    $setup = (Get-Item (Join-Path $in 'install\*-Setup.exe')).FullName
     $installer = Start-Process -FilePath $setup -ArgumentList '--silent' -Credential $credential -LoadUserProfile -WorkingDirectory $env:SystemRoot -PassThru -Wait
     if ($installer.ExitCode -ne 0) {
         throw "Setup as $name exited with code $($installer.ExitCode)"

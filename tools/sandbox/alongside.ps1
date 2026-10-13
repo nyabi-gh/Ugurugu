@@ -146,7 +146,7 @@ Step 'Install 2.2.13' {
 $legacy = Get-Installed $legacyRoot
 
 Step 'Install 3.0.0 next to 2.2.13' {
-    Install (Join-Path $in 'install\Ugurugu-Windows-x64-Setup.exe') $installRoot
+    Install (Get-Item (Join-Path $in 'install\*-Setup.exe')).FullName $installRoot
     $version = Get-InstalledVersion
     if ($version -ne '3.0.0') {
         throw "Installed version $version"

@@ -12,7 +12,7 @@ them again. The run uses its own settings, recovery and log folders under
 WorkDirectory and does not check for updates.
 
 .EXAMPLE
-tools/package_smoke.ps1 -Setup artifacts/Ugurugu-Windows-x64-Setup.exe -WorkDirectory $env:RUNNER_TEMP/smoke
+tools/package_smoke.ps1 -Setup artifacts/Ugurugu-3.0.0-Windows-x64-Setup.exe -WorkDirectory $env:RUNNER_TEMP/smoke
 #>
 param(
     [Parameter(Mandatory)] [string] $Setup,

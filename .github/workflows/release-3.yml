@@ -115,7 +115,7 @@ jobs:
         shell: pwsh
         run: >-
           ./tools/package_smoke.ps1
-          -Setup artifacts/Ugurugu-Windows-x64-Setup.exe
+          -Setup (Get-Item artifacts/*-Setup.exe).FullName
           -WorkDirectory "$env:RUNNER_TEMP/smoke"
 
       - name: Create Windows release metadata
@@ -173,8 +173,46 @@ jobs:
         id: notes
         run: echo "path=release-notes/${GITHUB_REF_NAME#v}.en.md" >> "$GITHUB_OUTPUT"
 
+      # The app updates from the `updates` release (apps/ugurugu/src/update.rs),
+      # so a version's own release holds only its installer. A package is
+      # never replaced or removed there: GitHub would forget its download
+      # count, which the download badge sums.
+      - name: Publish the update packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          if ! gh release view updates >/dev/null 2>&1; then
+            gh release create updates --prerelease --target "$GITHUB_SHA" \
+              --title "Ugurugu updates" \
+              --notes "Update packages that installed Ugurugu 3 downloads by itself. To install Ugurugu, use the Setup file of the latest release."
+          fi
+          existing=$(gh release view updates --json assets --jq '.assets[].name')
+          packages=(artifacts/*-full.nupkg)
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "No update package was built"
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            if grep -qxF "$(basename "$package")" <<< "$existing"; then
+              echo "$(basename "$package") is published already; a new one would reset its download count"
+              exit 1
+            fi
+          done
+          gh release upload updates "${packages[@]}"
+          # The list last, so it never names a package not there yet.
+          lists=()
+          for file in artifacts/*; do
+            case "$(basename "$file")" in
+              *-full.nupkg | *Setup.exe | releases.*.json) ;;
+              *) lists+=("$file") ;;
+            esac
+          done
+          gh release upload updates "${lists[@]}" --clobber
+          gh release upload updates artifacts/releases.*.json --clobber
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
-          files: artifacts/*
+          files: artifacts/*-Setup.exe

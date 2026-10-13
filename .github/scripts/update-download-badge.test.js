@@ -15,6 +15,8 @@ test('includes installers and actual updater packages', () =>
   for (const name of [
     'Ugurugu-macOS-arm64.dmg',
     'Ugurugu-Windows-x64-Setup.exe',
+    'Ugurugu-3.0.0-Windows-x64-Setup.exe',
+    'Ugurugu3-3.0.0-full.nupkg',
     'Ugurugu-0.7.0-full.nupkg',
     'Ugurugu-macOS-arm64.zip',
     'Ugurugu-0.4.0-macOS-arm64.zip',
@@ -50,6 +52,29 @@ test('excludes updater metadata requests', () =>
   {
     assert.equal(isDistributionAsset(name), false, name)
   }
+})
+
+test('counts the update packages on the updates prerelease', () =>
+{
+  const releases = [
+    {
+      draft: false,
+      prerelease: false,
+      assets: [
+        { name: 'Ugurugu-Windows-x64-Setup.exe', download_count: 40 },
+      ],
+    },
+    {
+      draft: false,
+      prerelease: true,
+      assets: [
+        { name: 'releases.win.json', download_count: 500 },
+        { name: 'Ugurugu3-3.0.0-full.nupkg', download_count: 7 },
+        { name: 'Ugurugu3-3.0.1-full.nupkg', download_count: 3 },
+      ],
+    },
+  ]
+  assert.equal(distributionDownloadTotal(releases), 50)
 })
 
 test('sums public distribution assets only', () =>

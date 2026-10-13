@@ -163,7 +163,7 @@ jobs:
 
       - name: Install, run and uninstall
         shell: pwsh
-        run: ./tools/package_smoke.ps1 -Setup "$env:RUNNER_TEMP/package/Ugurugu-Windows-x64-Setup.exe" -WorkDirectory "$env:RUNNER_TEMP/smoke"
+        run: ./tools/package_smoke.ps1 -Setup (Get-Item "$env:RUNNER_TEMP/package/*-Setup.exe").FullName -WorkDirectory "$env:RUNNER_TEMP/smoke"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
