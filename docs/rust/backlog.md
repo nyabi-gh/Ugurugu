@@ -14,9 +14,6 @@
 | B3-02 | `release-notes/3.0.0.en.md` 확인 | 검토 지적(보이는 그림과 내보내는 그림, 펜·GPU 시험 범위)을 반영한 초안이다 | `release-notes/3.0.0.en.md` | m6-plan 8절 2 |
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
 | B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | auto mode는 태그 push를 막는다. 릴리스는 main에서 CI가 성공한 커밋만 낸다(`wait-for-main-ci.sh`) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
-| B3-05 | 개발용 `%LOCALAPPDATA%\Ugurugu\3`를 지울지 정한다 | 2.2.13 설치 루트 안의 옛 3.0 개발 폴더. 2026-10-12에 빈 `recovery` 폴더뿐이었다. 3.0은 더 쓰지 않는다(지금은 `%LOCALAPPDATA%\Ugurugu Data\3`) | 이 PC | m6-plan 6절 M6-8 결과, 8절 |
-| B3-77 | UI 다듬기(특히 설정) | 2026-10-12 사용자 평가: 투박하고 별로라 예쁘게 다듬어야 한다. 3.0 출시 전에 한다. 같은 날 밝은 테마, 설정 창, 대화상자, 메뉴, 크기 토큰, 위젯 통일을 했다. 남은 것은 계획서 "진행"의 마지막 줄 | `apps/ugurugu/src/theme.rs`, `widgets.rs`, `ui/settings.rs` | [plan-document-tabs.md](plan-document-tabs.md) 7절 |
-| B3-75 | 한 창 안의 문서 탭 | 2026-10-12 사용자 요청, 3.0에 넣기로 함(출시가 늦어짐). 새로 만들기·열기가 지금 문서를 바꿔 끼워 저장하거나 버려야 한다 | `apps/ugurugu/src/render.rs`, `files.rs`, `canvas.rs` | [plan-document-tabs.md](plan-document-tabs.md) |
 
 ## 2. 열린 gate
 
@@ -39,7 +36,7 @@
 | B3-13 | macOS 3.x | 3.0은 Windows만. 2.x 릴리스 workflow(`release.yml`, macOS 서명·공증·Sparkle 포함)는 지웠다. 3.x가 macOS를 지원할 때 새 비밀(인증서·공증·업데이트 키)로 다시 쓴다. 코드 쪽은 `ugu-render`가 CPU 렌더와 DX12 표시를 함께 의존하고 Windows FFI가 `ugu-win`에 모여 있어, 렌더·표시 경계를 먼저 나눠야 한다 | `.github/workflows/`, `crates/ugu-render/Cargo.toml`, `crates/ugu-win` | m6-plan 2절 14, analysis-3.0 3.1·4절 14 |
 | B3-14 | macOS 2.2.13의 업데이트 확인 | 2.2.13의 Sparkle 피드는 `releases/latest/download/appcast.xml`이다. `v3.0.0`이 GitHub Latest가 되면 이 주소는 404가 된다. m6-plan은 "업데이트 없음"으로 끝난다고 적었지만 확인하지 않았다(**가설**). Sparkle이 404를 오류로 보여 줄 수도 있다. 자동 확인이면 조용히 실패하고 수동 확인이면 오류 창이 뜰 것으로 보인다(가설). 피하려면 3.x 릴리스마다 2.2.13의 `appcast.xml`을 자산으로 함께 올리는 방법이 있다(정하지 않음) | GitHub Releases, `release-3.yml` | m6-plan 2절 14 |
 | B3-15 | ARM64 Windows | 범위 밖으로 뺐다. 빌드 대상·libwebp·ring·Velopack 런타임을 함께 봐야 한다 | `.cargo/config.toml`, 패키지 | m6-plan 1절, 8절 |
-| B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/render.rs` | [plan-document-tabs.md](plan-document-tabs.md) 3절 3 |
+| B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/render.rs` | [plan-document-tabs.md](https://github.com/nyabi-gh/Ugurugu/blob/70c27f4/docs/rust/plan-document-tabs.md) 3절 3 |
 | B3-80 | 탭이 많을 때 보이는 탭의 표면 예산 | 숨은 탭은 레이어 표면을 놓지 않고(⑤ 탭당 약 405MiB), 표면 예산은 탭마다 빈 메모리로 정한다. 메모리가 적은 PC에서 큰 문서 탭이 많으면 보이는 탭이 바닥값(128MiB)으로 내려가 레이어를 하나씩 그릴 수 있다(가설, 8GiB PC에서 재지 않음). 고치려면 숨은 탭 작업자에 표면을 비우는 일을 보내고 예산을 창 전체에서 보이는 탭 먼저 나눈다. 탭마다 래스터 스레드 풀(8개)을 따로 두는 것도 함께 볼 수 있다(쉬는 스레드라 비용은 측정상 없음) | `apps/ugurugu/src/cache.rs`, `budget.rs`, `canvas.rs` | evidence.md 41절, plan-document-tabs 4절 5 |
 | B3-82 | 일본어 줄바꿈 금칙 | egui는 글자 단위로 줄을 바꾸므로 작은 가나·장음·구두점이 줄 머리에 올 수 있다(설명 글 몇 곳). 넘치지는 않는다 | egui 줄바꿈 | evidence.md 43절 |
 | B3-83 | 날짜 표기의 언어 | 복구 안내 등의 날짜는 시스템 로캘로 쓴다. UI 언어가 다르면 섞인다(한국어 Windows + 일본어 UI에서 "오전") | `ugu-win` `locale` | evidence.md 43절 |
