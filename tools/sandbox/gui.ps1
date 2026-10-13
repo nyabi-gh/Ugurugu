@@ -660,8 +660,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
     foreach ($language in $Languages) {
         $words = Read-Words $language
         # Each shot starts from a fresh window, so one that fails leaves
-        # nothing open for the next. Settings open with Ctrl+, because the
-        # gear button's name starts like the menu item's.
+        # nothing open for the next. Settings open with Ctrl+,.
         $shots = [ordered]@{
             'main' = { param($p) }
             'menu-file' = { param($p) Invoke-Word $p $words 'menu-file' }
