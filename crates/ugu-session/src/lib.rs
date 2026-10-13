@@ -33,7 +33,7 @@ pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
 use crate::stabilizer::Stabilizer;
-pub use crate::tools::{Brushes, ColorHistory, Tools, is_pixel};
+pub use crate::tools::{Brushes, ColorHistory, Kept, Tools, is_pixel};
 pub use crate::transforming::{Ended, Pending};
 use ugu_core::selection::Selection;
 
@@ -59,6 +59,9 @@ pub struct ToolSettings {
     pub antialias: bool,
     /// 0 (off) to 1.
     pub stabilizer: f32,
+    /// How opaque the whole stroke is, in place of its preset's; a pixel
+    /// brush draws opaque whatever it is.
+    pub opacity: f32,
     /// What the stroke is drawn with.
     pub preset: &'static Preset,
 }
@@ -69,6 +72,7 @@ impl ToolSettings {
         width: 6.0,
         antialias: false,
         stabilizer: 0.0,
+        opacity: brush::BRUSHES[0].brush.opacity,
         preset: &brush::BRUSHES[0],
     };
     /// 2.2.13's hard eraser.
@@ -76,6 +80,7 @@ impl ToolSettings {
         width: 6.0,
         antialias: true,
         stabilizer: 0.0,
+        opacity: brush::ERASERS[0].brush.opacity,
         preset: &brush::ERASERS[0],
     };
 }
@@ -328,6 +333,11 @@ impl Session {
             ),
             brush: Brush {
                 antialias: settings.antialias && !pixel,
+                opacity: if pixel {
+                    settings.preset.brush.opacity
+                } else {
+                    settings.opacity.clamp(0.01, 1.0)
+                },
                 ..settings.preset.brush
             },
             seed: self.seeds.hash_one(self.strokes_started),

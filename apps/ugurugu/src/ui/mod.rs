@@ -387,6 +387,25 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     let pixel = settings.preset.brush.engine == ugu_core::store::BrushEngine::Pixel;
     if pixel {
         settings.width = settings.width.round().max(1.0);
+    } else {
+        // The whole stroke at once, as Clip Studio Paint's opacity: a pen
+        // does not build up where it crosses itself. Pixel brushes draw
+        // opaque.
+        let opacity_name = match tool {
+            Tool::Eraser => tr("eraser-opacity"),
+            _ => tr("brush-opacity"),
+        };
+        let mut opacity = settings.opacity * 100.0;
+        slider_row(
+            ui,
+            tr("opacity"),
+            opacity_name,
+            &mut opacity,
+            1.0..=100.0,
+            "%",
+            0,
+        );
+        settings.opacity = opacity / 100.0;
     }
     let mut stabilization = settings.stabilizer * 100.0;
     slider_row(

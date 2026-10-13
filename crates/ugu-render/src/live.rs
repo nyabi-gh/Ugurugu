@@ -776,6 +776,26 @@ mod tests {
     }
 
     #[test]
+    fn a_brush_at_half_opacity_draws_the_whole_stroke_at_half_alpha() {
+        let mut pen = pen(true);
+        pen.brush.opacity = 0.5;
+        let mut live = LiveStroke::new([200, 120], pen, 2, [200, 0, 0, 255], false, None);
+        let points = points();
+        for count in 1..=points.len() {
+            live.update(&points[..count]);
+        }
+        let mut darkest = 0;
+        for y in 0..120 {
+            for x in 0..200 {
+                let mut layer = [0; 4];
+                live.apply(x, y, &mut layer);
+                darkest = darkest.max(layer[3]);
+            }
+        }
+        assert_eq!(darkest, 128);
+    }
+
+    #[test]
     fn a_translucent_live_stroke_does_not_darken_where_it_overlaps() {
         let pen = pen(true);
         let mut live = LiveStroke::new([200, 120], pen, 2, [200, 0, 0, 100], false, None);

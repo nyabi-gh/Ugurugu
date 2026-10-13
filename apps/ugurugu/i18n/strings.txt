@@ -211,6 +211,8 @@ tool-settings | ugurugu::ToolDock | Tool settings
 size | ugurugu::BrushSizeRow | SIZE
 brush-size | ugurugu::BrushSizeRow | Brush size
 eraser-size | ugurugu::BrushSizeRow | Eraser size
+brush-opacity | - | Brush opacity | 브러시 불투명도 | ブラシの不透明度
+eraser-opacity | - | Eraser opacity | 지우개 불투명도 | 消しゴムの不透明度
 pen-pressure-use | ugurugu::TabletPressureRow | Use tablet pressure
 pen-pressure-tip | ugurugu::TabletPressureRow | Vary stroke size and opacity with tablet pressure
 stabilization | ugurugu::StrokeStabilizationRow | STABILIZATION

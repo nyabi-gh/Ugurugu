@@ -2043,3 +2043,32 @@ fn pixel_mode_stays_through_animation_changes() {
     session.set_animation(12, 10.0, wobble).unwrap();
     assert!(session.pixel_mode());
 }
+
+#[test]
+fn a_stroke_takes_the_tool_s_opacity_and_each_preset_keeps_its_own() {
+    let mut session = session();
+    let mut tools = Tools::default();
+    tools.plain.pen.opacity = 0.4;
+    draw(&mut session, &tools, 10.0, 60.0);
+    let drawn = session.document().store.strokes.values().next().unwrap();
+    assert_eq!(drawn.brush.opacity, 0.4);
+
+    let other = &ugu_core::brush::BRUSHES[2];
+    let first = tools.plain.pen.preset;
+    tools.plain.choose(Tool::Pen, other);
+    assert_eq!(tools.plain.pen.opacity, other.brush.opacity);
+    tools.plain.choose(Tool::Pen, first);
+    assert_eq!(tools.plain.pen.opacity, 0.4);
+}
+
+#[test]
+fn a_pixel_brush_draws_opaque_whatever_the_opacity() {
+    let mut session = session();
+    session.set_pixel_mode(true).unwrap();
+    let mut tools = Tools::default();
+    tools.pixel.pen.opacity = 0.3;
+    draw(&mut session, &tools, 10.0, 60.0);
+    let drawn = session.document().store.strokes.values().next().unwrap();
+    assert_eq!(drawn.brush.engine, BrushEngine::Pixel);
+    assert_eq!(drawn.brush.opacity, 1.0);
+}

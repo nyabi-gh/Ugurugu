@@ -56,14 +56,41 @@ pub fn is_pixel(preset: &Preset) -> bool {
     preset.brush.engine == BrushEngine::Pixel
 }
 
-/// A brush and an eraser, and the width and stabilizer each preset not in
-/// use had when another was chosen.
+/// What a preset not in use keeps until it is chosen again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Kept {
+    pub width: f32,
+    pub stabilizer: f32,
+    pub opacity: f32,
+}
+
+impl Kept {
+    /// A preset as it comes: its own size and opacity, no stabilizer.
+    pub fn of(preset: &Preset) -> Self {
+        Self {
+            width: preset.size,
+            stabilizer: 0.0,
+            opacity: preset.brush.opacity,
+        }
+    }
+
+    pub fn from(settings: &ToolSettings) -> Self {
+        Self {
+            width: settings.width,
+            stabilizer: settings.stabilizer,
+            opacity: settings.opacity,
+        }
+    }
+}
+
+/// A brush and an eraser, and what each preset not in use had when another
+/// was chosen.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Brushes {
     pub pen: ToolSettings,
     pub eraser: ToolSettings,
     /// By preset id.
-    pub remembered: HashMap<&'static str, (f32, f32)>,
+    pub remembered: HashMap<&'static str, Kept>,
 }
 
 impl Brushes {
@@ -88,6 +115,7 @@ impl Brushes {
             preset,
             width: preset.size,
             stabilizer: 0.0,
+            opacity: preset.brush.opacity,
             antialias: preset.brush.antialias,
         };
         Self {
@@ -117,8 +145,8 @@ impl Brushes {
     }
 
     /// Makes `preset` the brush, or with `Tool::Eraser` the eraser. Each
-    /// preset keeps its own width and stabilizer, starting from its size and
-    /// none, as in 2.2.13.
+    /// preset keeps its own width, stabilizer and opacity, starting from its
+    /// size, none and its own, as width and stabilizer do in 2.2.13.
     pub fn choose(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
             Tool::Eraser => &mut self.eraser,
@@ -130,14 +158,15 @@ impl Brushes {
             return;
         }
         self.remembered
-            .insert(settings.preset.id, (settings.width, settings.stabilizer));
-        let (width, stabilizer) = self
+            .insert(settings.preset.id, Kept::from(settings));
+        let kept = self
             .remembered
             .remove(preset.id)
-            .unwrap_or((preset.size, 0.0));
+            .unwrap_or_else(|| Kept::of(preset));
         settings.preset = preset;
-        settings.width = width;
-        settings.stabilizer = stabilizer;
+        settings.width = kept.width;
+        settings.stabilizer = kept.stabilizer;
+        settings.opacity = kept.opacity;
         if tool == Tool::Eraser {
             settings.antialias = preset.brush.antialias;
         }

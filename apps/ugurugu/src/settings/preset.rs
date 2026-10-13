@@ -183,6 +183,7 @@ mod tests {
             preset: &brush::BRUSHES[3],
             width: 21.0,
             stabilizer: 0.3,
+            opacity: 0.6,
             antialias: true,
         };
         tools.fill.tolerance = 12;

@@ -10,7 +10,8 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::STROKE_WIDTH;
 use ugu_session::{
-    Brushes, ColorHistory, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools, is_pixel,
+    Brushes, ColorHistory, Kept, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools,
+    is_pixel,
 };
 
 const TOOLS: [(Tool, &str); 7] = [
@@ -127,13 +128,13 @@ pub(super) fn parse(value: &Value) -> Tools {
 }
 
 /// `brushes` with what `value` holds taken over them: `brush`, `eraser` and
-/// every preset's width and stabilizer in `presets`.
+/// every preset's width, stabilizer and opacity in `presets`.
 fn read_brushes(value: &Value, mut brushes: Brushes, pixel_only: bool) -> Brushes {
-    // Every preset's width and stabilizer, the ones in use included; one
-    // at its own is the same as one not kept.
+    // Every preset's, the ones in use included; one at its own is the same
+    // as one not kept.
     for settings in [brushes.pen, brushes.eraser] {
-        let kept = (settings.width, settings.stabilizer);
-        if kept != (settings.preset.size, 0.0) {
+        let kept = Kept::from(&settings);
+        if kept != Kept::of(settings.preset) {
             brushes.remembered.insert(settings.preset.id, kept);
         }
     }
@@ -147,21 +148,27 @@ fn read_brushes(value: &Value, mut brushes: Brushes, pixel_only: bool) -> Brushe
             let Some(kept) = kept.as_object() else {
                 continue;
             };
-            let width = number(kept, "width", STROKE_WIDTH).unwrap_or(preset.size);
-            let stabilizer = number(kept, "stabilizer", 0.0..=1.0).unwrap_or(0.0);
-            brushes.remembered.insert(preset.id, (width, stabilizer));
+            let own = Kept::of(preset);
+            let kept = Kept {
+                width: number(kept, "width", STROKE_WIDTH).unwrap_or(own.width),
+                stabilizer: number(kept, "stabilizer", 0.0..=1.0).unwrap_or(own.stabilizer),
+                // Not in settings written before the opacity setting.
+                opacity: number(kept, "opacity", 0.01..=1.0).unwrap_or(own.opacity),
+            };
+            brushes.remembered.insert(preset.id, kept);
         }
     }
     let settings_of = |chosen: &'static Preset, base: ToolSettings| {
-        let (width, stabilizer) = brushes
+        let kept = brushes
             .remembered
             .get(chosen.id)
             .copied()
-            .unwrap_or((chosen.size, 0.0));
+            .unwrap_or_else(|| Kept::of(chosen));
         ToolSettings {
             preset: chosen,
-            width,
-            stabilizer,
+            width: kept.width,
+            stabilizer: kept.stabilizer,
+            opacity: kept.opacity,
             ..base
         }
     };
@@ -291,19 +298,23 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
 /// `brush`, `eraser` and `presets` of `brushes`.
 fn brushes_to_json(brushes: &Brushes) -> Map<String, Value> {
     let mut presets = Map::new();
-    let mut kept: Vec<(&str, (f32, f32))> = brushes
+    let mut kept: Vec<(&str, Kept)> = brushes
         .remembered
         .iter()
         .map(|(id, kept)| (*id, *kept))
         .collect();
     for settings in [&brushes.pen, &brushes.eraser] {
         kept.retain(|(id, _)| *id != settings.preset.id);
-        kept.push((settings.preset.id, (settings.width, settings.stabilizer)));
+        kept.push((settings.preset.id, Kept::from(settings)));
     }
-    for (id, (width, stabilizer)) in kept {
+    for (id, kept) in kept {
         presets.insert(
             id.to_owned(),
-            json!({ "width": width, "stabilizer": stabilizer }),
+            json!({
+                "width": kept.width,
+                "stabilizer": kept.stabilizer,
+                "opacity": kept.opacity,
+            }),
         );
     }
     let mut object = Map::new();
@@ -397,23 +408,33 @@ mod tests {
             preset: &brush::BRUSHES[4],
             width: 33.5,
             stabilizer: 0.4,
+            opacity: 0.45,
             antialias: true,
         };
         tools.plain.eraser = ToolSettings {
             preset: &brush::ERASERS[2],
             width: 80.0,
             stabilizer: 0.0,
+            opacity: brush::ERASERS[2].brush.opacity,
             // Not the preset's own.
             antialias: !brush::ERASERS[2].brush.antialias,
         };
-        tools
-            .plain
-            .remembered
-            .insert(brush::BRUSHES[0].id, (12.0, 0.25));
-        tools
-            .plain
-            .remembered
-            .insert(brush::ERASERS[0].id, (40.0, 0.5));
+        tools.plain.remembered.insert(
+            brush::BRUSHES[0].id,
+            Kept {
+                width: 12.0,
+                stabilizer: 0.25,
+                opacity: 0.7,
+            },
+        );
+        tools.plain.remembered.insert(
+            brush::ERASERS[0].id,
+            Kept {
+                width: 40.0,
+                stabilizer: 0.5,
+                opacity: 1.0,
+            },
+        );
         tools.pixel.pen.width = 3.0;
         tools.pixel.eraser.stabilizer = 0.2;
         tools.fill.reads = Reads::Visible;
@@ -488,7 +509,7 @@ mod tests {
         // The brush left keeps its width for when it is chosen again.
         assert_eq!(
             tools.plain.remembered.get(kept.plain.pen.preset.id),
-            Some(&(kept.plain.pen.width, kept.plain.pen.stabilizer))
+            Some(&Kept::from(&kept.plain.pen))
         );
         assert!(!tools.plain.remembered.contains_key(brush::BRUSHES[1].id));
         assert_eq!(tools.pixel, kept.pixel);
