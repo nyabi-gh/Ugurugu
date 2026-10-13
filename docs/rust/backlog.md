@@ -143,3 +143,20 @@
 | B3-95 | 같은 레이어가 같은 획 id를 두 번 쓸 때 재스타일 | 선택이 한쪽만 건드리면 `RemoveStroke`가 남은 참조 때문에 실패해 오류가 난다. 그런 상태로 가는 순서는 찾지 못했다(가설) | `crates/ugu-core/src/restyle.rs` | 검토 |
 | B3-96 | 채우기 기준 그림과 대기 변형 | 영역 클릭은 이제 대기 변형을 먼저 적용하고 기준 그림을 읽는다. 대기 글자도 같이 적용되므로, 배치 중인 글자를 둔 채 자동 선택을 쓰면 글자가 확정된다. 의도와 맞는지 사용자 확인 | `apps/ugurugu/src/canvas.rs` `click_area` | 검토 |
 | B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 시간 초과로 끝나는 일이 되풀이됐다(evidence.md 45절). 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절 |
+
+## 10. 2026-10-14 외부 검토에서 확인한 것
+
+외부 검토 보고서(`8195424` 기준, 저장소에 두지 않음)의 발견 R01~R10을 코드로 확인했다. R10(evidence.md 39절의 낡은 문장)은 고쳤고, 나머지를 옮긴다. 출처 칸의 R 번호는 그 보고서의 번호다. 재현은 보고서 작성자가 공용 crate를 직접 부른 시험 crate로 했고, 예산 분기는 `set_surface_budget(0)`으로 강제한 것이다.
+
+| ID | 항목 | 왜·영향 | 어디 | 출처 |
+|---|---|---|---|---|
+| B3-100 | 끊어진 선과 움직이는 스프레이를 정적 레이어로 분류 | `moves`는 흔들림 양 > 0이고 브러시 흔들림 배율 > 0일 때만 움직인다고 본다. 그러나 끊어진 선(`Mover::breaks`)과 `animated_jitter` 스프레이(`dab.rs`, 흔들림 배율 > 0)는 흔들림 양과 관계없이 프레임마다 다르다. 그래서 흔들림 양이 0인 문서(또는 흔들림 배율 0 브러시의 끊어진 선)에서는 revisions를 넘기는 캔버스·재생이 프레임 0의 표면을 다시 쓰고, revisions 없이 그리는 내보내기와 달라진다(96×72 시험 문서에서 스프레이 580화소, 끊어진 선 500화소). 2.2.13 `isLayerFrameInvariant`(`StaticLayerCache.cpp`)는 끊어진 선과 움직이는 흩뿌림을 셌다(포팅 회귀). 캐시를 쓴 연속 프레임과 새로 그린 프레임을 바이트 비교하는 시험이 없다 | `crates/ugu-render/src/plan.rs` `moves`, `document.rs` 캐시 키 | 검토 R01 |
+| B3-101 | 예산 초과 편집 split이 캔버스·내보내기 화소 일치를 깬다 | 레이어 표면이 예산을 넘으면 `split`이 편집 레이어 뒤의 Normal 레이어들을 미리 한 표면으로 합친다(`reduced`). 8비트 반올림 순서가 바뀌어 원본 크기 캔버스가 내보내기와 최대 2단계 다르다(주석이 인정, 시험 `compose.rs`는 오차 허용). 8×8 반투명 레이어 8개에서 64화소 모두 [160,103,149] 대 [159,102,148]. 같은 예산의 내보내기(`render_streamed`)는 전체 렌더와 같다. 메모리가 부족할 때만 생긴다(빈도는 가설). 고치려면 미리 합치지 않고 같은 순서를 지키는 평가가 필요하다(메모리·성능 설계, B3-38·B3-80과 함께) | `crates/ugu-render/src/compose.rs` `split`, `stream.rs` `reduced` | 검토 R02 |
+| B3-102 | 예산 초과 참조 렌더에 문서 배경이 깔린다 | 일반 경로는 `Purpose::Reference`면 투명 배경이지만 `render_streamed`는 늘 문서 배경을 깐다. split이 줄어 있으면(`layers: None`) 앱은 작업자 렌더로 가고, 그것도 예산 초과면 이 경로다. 채우기·자동 선택의 알파 경계 결과가 예산에 따라 달라진다(빈 화소 [0,0,0,0] 대 [255,255,255,255]) | `crates/ugu-render/src/stream.rs` `render_streamed`, `apps/ugurugu/src/canvas.rs` 참조 그림 | 검토 R03 |
+| B3-103 | 잘라내기의 클립보드 쓰기 실패를 알리지 않음 | 잘라내기는 쓰기 결과 전에 지우고, 쓰기 실패(`ClipboardEvent::Written(Err)`)는 로그만 남긴다. 앱 안 붙여넣기와 실행 취소로 되찾을 수 있어 그림을 잃지는 않지만, 다른 앱에 가지 않은 것을 사용자가 모른다 | `apps/ugurugu/src/clipboard.rs` `cut`, `handle` | 검토 R04 |
+| B3-104 | 탭 전환이 대기 편집 적용 실패를 삼킨다 | `leave_tab`이 `Session::settle` 실패를 로그만 남기고 탭을 바꾼다. decisions.md 4절 "적용이 실패하면 그 동작을 하지 않는다"와 다르다. 숨은 탭은 대기 변형을 쥔 채 남고, 숨은 탭 복구 쓰기는 "떠나면 적용됨"을 전제로 확정 문서만 쓴다(`write_recovery`). 연산 상한(20,000)·데이터 상한에 닿은 문서에서만 실패한다 | `apps/ugurugu/src/canvas.rs` `leave_tab`, `files.rs` `write_recovery` | 검토 R05 |
+| B3-105 | 복사가 render 스레드를 수십 ms 쥔다 | `Canvas::copy`가 현재 레이어 그림(split이 없으면 작업자 렌더를 기다림)과 선택 범위의 straight RGBA 변환을 render 스레드에서 한다. fixture ④ 전체 선택에서 split이 있으면 p50 26ms, 없으면 62ms(evidence.md 52절). 안: 사본·선택·프레임을 고정해 작업자에서 만든다 | `apps/ugurugu/src/canvas/clipboard.rs` `copy`, `layer_pixels` | 검토 R06 |
+| B3-106 | 예전 릴리스를 다시 돌리면 업데이트 목록이 예전 판으로 돌아감 | publish 단계는 같은 패키지면 지나가지만 끝에서 그 빌드의 `releases.*.json`을 버전 비교 없이 `--clobber`로 올린다. 더 새 판을 낸 뒤 예전 태그 실행을 다시 돌리면 피드의 최신이 예전 판이 된다(작성자가 `gh`만 모의로 바꿔 확인). 설치된 새 판이 내려가지는 않는다(가설: Velopack은 낮은 판을 업데이트로 보지 않음). 안: 올리기 전 피드의 최신 판과 비교 | `.github/workflows/release-3.yml` "Publish the update packages" | 검토 R07 |
+| B3-107 | 파일 연결 해제가 남의 값을 지우거나 자기 값을 남김 | `unregister`는 기본 연결이 Ugurugu면 `.ugurugu` 키를 통째로 지워 다른 앱의 `OpenWithProgids` 값도 지운다. 다른 앱이 기본 연결을 가져갔으면 값인 `Ugurugu.Document.3`을 하위 키로 지우려 해 남는다. 제거할 때만 생긴다. 안: 자기 값만 `RegDeleteValueW`로 | `crates/ugu-win/src/association.rs` `unregister` | 검토 R08 |
+| B3-108 | 역행렬이 유한한 입력에서 무한대를 돌려줄 수 있음 | `Affine::inverse`는 입력과 행렬식만 보고 결과 성분을 보지 않는다(`[1e-300,0,1e100,0,1,0]` → 이동 −inf). 조작된 파일의 변환에서만 나오고 GUI 문제는 재현하지 않았다(가설) | `crates/ugu-core/src/ops.rs` `inverse` | 검토 R09 |
+| B3-109 | 탭 닫기 버튼의 접근성 이름이 모두 같음 | 모든 탭의 닫기 버튼이 "Close tab"이라 화면 읽기 프로그램에서 어느 문서를 닫는지 구분되지 않는다 | `apps/ugurugu/src/ui/tabs.rs` | 검토 개선 제안 |

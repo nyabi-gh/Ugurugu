@@ -805,7 +805,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **결과:** 종료 전 `tab-0`·`tab-1` 둘 다 기록(보이지 않던 첫 탭 포함). 다시 실행하면 두 문서를 하나씩 묻고, 둘 다 새 창의 탭으로 열려 새 창 폴더 아래 다시 기록, 죽은 창 폴더는 남지 않음(1회, 통과). 화면에 `Untitled-recovered*` 탭 둘, 각각 획이 있다. 단위 시험은 `recovery::tests`(탭 문서를 하나씩 찾고 창 폴더는 마지막과 함께 감, 옛 형식 4개)와 `files::recovering`(보이지 않는 탭 기록, 닫은 탭 지움).
 
-**남은 것:** 강제 종료 반복(`kill_probe.py`의 recover는 탭 폴더를 보지 않아 고쳐야 하고, Python이 없는 Sandbox에서는 돌지 않는다). 같은 이름의 복구 탭 둘은 구분이 어렵다(가설: 복구 대화상자의 크기·시각으로 구분).
+**남은 것:** 강제 종료 반복(`kill_probe.py`는 탭 폴더를 읽지만, Python이 없는 Sandbox에서는 돌지 않는다). 같은 이름의 복구 탭 둘은 구분이 어렵다(가설: 복구 대화상자의 크기·시각으로 구분).
 
 ## 40. 파일을 주고 실행하면 떠 있는 창으로 (`5c18365`)
 
@@ -959,3 +959,18 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 | 변경 | 43ms | 20ms | `lock`, `tab-1/1.json`, `tab-1/1.ugurugu`(39,614바이트), 로그 "work written for recovery ms=11.5" |
 
 **결론:** 전에는 쉼 3초가 지나기 전에 세션이 끝나면 그 작업이 남지 않았다. 이제 `WM_ENDSESSION`에 답하기 전에 쓴다. 실제 로그오프·다시 시작으로는 확인하지 않았다(Sandbox를 끝내는 일이라). 코드는 `apps/ugurugu/src/app.rs`(`SESSION_END_WAIT`), `Files::keep_for_session_end`, `crates/ugu-win/src/session.rs`.
+
+## 52. 복사의 render 스레드 비용 (2026-10-14)
+
+**질문:** 큰 선택을 복사할 때 render 스레드가 얼마나 멈추나(backlog B3-105).
+
+**방법:** 외부 검토가 만든 시험 crate(앱 소스 `8195424` 복사본 + 공용 crate, 저장소에 두지 않음)의 `review_copy_cost_on_fixture4_with_and_without_split`을 release, `UGU_WORKER_THREADS=8`로 다시 돌림. fixture ④(2048², 레이어 1, 획 20,000) 전체 선택에서 `Canvas::copy` 진입부터 반환까지 10회씩. OS 클립보드 쓰기는 빼고, split 없음과 split을 받은 뒤를 비교.
+
+**결과:**
+
+| 조건 | p50 | 최대 | 검토 보고서 값(p50 / 최대) |
+|---|---|---|---|
+| split 없음 | 62.1ms | 71.2ms | 59.7 / 71.0ms |
+| split 있음 | 26.3ms | 30.2ms | 25.6 / 28.0ms |
+
+**결론:** 화면에 split이 있는 보통 경우에도 160Hz에서 몇 프레임을 놓친다. 입력→표시로 잰 값은 아니다.
