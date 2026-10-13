@@ -29,10 +29,8 @@ pub struct ColorDock {
     hsv: Option<[f32; 3]>,
     /// The colour before the current one; clicking it swaps the two.
     previous: Option<Rgba8>,
-    /// The colour when the current drag began.
+    /// The colour when the current press began.
     dragged_from: Option<Rgba8>,
-    /// Which part a drag started in.
-    dragging_ring: bool,
     /// The pen colour when the dock was last shown.
     seen: Option<Rgba8>,
     /// The colour being typed.
@@ -262,14 +260,18 @@ impl ColorDock {
         }
         painter.add(egui::Shape::mesh(field));
 
-        if response.drag_started() || response.clicked() {
+        // The part pressed is where the press began, from its first frame:
+        // egui tells a drag or a click only after the pointer has moved or
+        // been let go, and the colour follows the pointer before that.
+        let pressed = response.is_pointer_button_down_on();
+        if pressed && self.dragged_from.is_none() {
             self.dragged_from = Some(color);
-            self.dragging_ring = response
-                .interact_pointer_pos()
-                .is_some_and(|pointer| pointer.distance(center) > inner + RING_GAP / 2.0);
         }
-        if let Some(pointer) = response.interact_pointer_pos() {
-            if self.dragging_ring {
+        let origin = ui.input(|input| input.pointer.press_origin());
+        if let (true, Some(pointer), Some(origin)) =
+            (pressed, response.interact_pointer_pos(), origin)
+        {
+            if origin.distance(center) > inner + RING_GAP / 2.0 {
                 let offset = pointer - center;
                 hsv[0] = (f32::atan2(-offset.y, offset.x) / std::f32::consts::TAU).rem_euclid(1.0);
             } else if *shape == ColorField::Triangle {
@@ -303,7 +305,7 @@ impl ColorDock {
             canvas.tools_mut().color = picked;
         }
         self.seen = Some(picked);
-        if (response.drag_stopped() || response.clicked())
+        if !pressed
             && let Some(from) = self.dragged_from.take()
             && from != picked
         {
@@ -469,6 +471,132 @@ mod tests {
         dock.dragged_from = Some(blue);
         dock.follow(green);
         assert_eq!(dock.previous, Some(red));
+    }
+
+    /// The dock alone in a window, pressed and dragged as a mouse does.
+    struct Wheel {
+        ctx: egui::Context,
+        canvas: Canvas,
+        dock: ColorDock,
+        shape: ColorField,
+        area: Rect,
+    }
+
+    impl Wheel {
+        fn new(color: Rgba8) -> Self {
+            let mut canvas = Canvas::new(ugu_core::document::Document::new([8, 8]), |_| {});
+            canvas.tools_mut().color = color;
+            let mut wheel = Self {
+                ctx: egui::Context::default(),
+                canvas,
+                dock: ColorDock::default(),
+                shape: ColorField::Square,
+                area: Rect::NOTHING,
+            };
+            wheel.frame(Vec::new());
+            wheel
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 600.0))),
+                events,
+                ..egui::RawInput::default()
+            };
+            let Self {
+                ctx,
+                canvas,
+                dock,
+                shape,
+                area,
+            } = self;
+            let mut output = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    *area = Rect::from_min_size(
+                        ui.cursor().min,
+                        Vec2::splat(ui.available_width().min(240.0)),
+                    );
+                    dock.show(ui, canvas, shape);
+                });
+            });
+            output.textures_delta.clear();
+        }
+
+        fn button(at: Pos2, pressed: bool) -> egui::Event {
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+
+        /// Presses at `from`, moves to `to` in steps and lets go.
+        fn drag(&mut self, from: Pos2, to: Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(from)]);
+            self.frame(vec![Self::button(from, true)]);
+            for step in 1..=4 {
+                let at = from + (to - from) * (step as f32 / 4.0);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            self.frame(vec![Self::button(to, false)]);
+            self.frame(Vec::new());
+        }
+
+        /// Presses and lets go at `at`, a frame apart, without moving.
+        fn click(&mut self, at: Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(at)]);
+            self.frame(vec![Self::button(at, true)]);
+            self.frame(Vec::new());
+            self.frame(vec![Self::button(at, false)]);
+            self.frame(Vec::new());
+        }
+
+        fn hsv(&self) -> [f32; 3] {
+            let [r, g, b, _] = self
+                .canvas
+                .tools()
+                .color
+                .0
+                .map(|channel| f32::from(channel) / 255.0);
+            rgb_to_hsv([r, g, b])
+        }
+    }
+
+    #[test]
+    fn pressing_the_square_after_the_ring_keeps_the_hue_and_the_other_way_round() {
+        let mut wheel = Wheel::new(Rgba8([255, 200, 0, 255]));
+        let center = wheel.area.center();
+        let side = wheel.area.width();
+        let outer = side * 0.5 - MARGIN;
+        let thickness = (side * 0.11).max(10.0);
+        let ring = outer - thickness * 0.5;
+        // Cyan, on the left of the ring.
+        wheel.drag(
+            center + Vec2::new(-ring, 10.0),
+            center + Vec2::new(-ring, 0.0),
+        );
+        let hue = wheel.hsv()[0];
+        assert!((hue - 0.5).abs() < 0.02, "{hue}");
+        // Near the square's top right, where the ring's angle is orange.
+        let corner = (outer - thickness - RING_GAP) / std::f32::consts::SQRT_2;
+        let cyan = wheel.canvas.tools().color;
+        wheel.click(center + Vec2::new(corner - 6.0, -(corner - 6.0)));
+        assert_eq!(wheel.dock.previous, Some(cyan));
+        let [hue, saturation, value] = wheel.hsv();
+        assert!(
+            (hue - 0.5).abs() < 0.02,
+            "the square took the ring's hue: {hue}"
+        );
+        assert!(saturation > 0.9 && value > 0.9, "{saturation} {value}");
+        // Back on the ring, at the top: green, keeping saturation and value.
+        wheel.click(center + Vec2::new(0.0, -ring));
+        let [hue, saturation, value] = wheel.hsv();
+        assert!((hue - 0.25).abs() < 0.02, "{hue}");
+        assert!(
+            saturation > 0.9 && value > 0.9,
+            "the ring moved the square: {saturation} {value}"
+        );
     }
 
     #[test]
