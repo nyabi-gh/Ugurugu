@@ -878,3 +878,11 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 - 복구 안내의 날짜는 시스템 로캘로 쓴다(한국어 Windows에서 일본어 UI면 "오전"). backlog B3-83.
 - 앞선 Screen set의 설정 장면은 메뉴가 열린 채였다: 스크립트가 "Settings"로 시작하는 이름을 찾다가 위쪽 톱니 버튼을 눌렀기 때문(앱 문제 아님, Ctrl+,로 바꿈). 화면 읽기 프로그램의 Click으로 메뉴 항목을 누르면 메뉴가 닫히는지 시험을 더함.
 
+## 44. 업데이트 피드를 `updates` 릴리스로 (2026-10-13)
+
+**질문:** 앱이 GitHub 릴리스 다운로드 주소를 `HttpSource`로 읽을 수 있나. 그렇게 받은 패키지도 다운로드 수에 들어가나.
+
+**방법:** `curl -L`로 `https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/releases.win.json?localVersion=3.0.0&id=Ugurugu3&stagingId=x`(Velopack `HttpSource`가 붙이는 쿼리)를 받음. 집계는 `.github/scripts/update-download-badge.js`를 읽고 node 시험(`update-download-badge.test.js`, 사전 릴리스의 `-full.nupkg`를 셈)을 더함.
+
+**결과:** 리디렉션 1번 뒤 200, 250바이트(파일 그대로). 배지는 초안이 아닌 모든 릴리스(사전 릴리스 포함)의 `Setup.exe`·`.dmg`·`-full.nupkg` 다운로드 수를 더하므로 `updates`의 패키지 다운로드(실제 업데이트)도 센다. 목록 파일(`releases.win.json`)은 세지 않는다. GitHub는 자산을 다시 올리면 수를 잊으므로 `release-3.yml`은 이미 있는 패키지를 다시 올리지 않는다. 실제 업데이트 전 과정은 3.0.1에서 처음 확인한다(B3-19).
+
