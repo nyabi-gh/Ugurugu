@@ -168,7 +168,6 @@ See [BUILDING.md](BUILDING.md) to build from source and
 
 ## Credits and license
 
-- Development support by seuppi
 - App icon artwork by seuppi (`resources/icons/`, distributed under GPL-3.0-or-later)
 
 Copyright (C) 2026 Nyabi (nyabi-gh)

@@ -430,7 +430,6 @@ settings-build = ビルド { $commit }
 settings-gpu = GPU: { $gpu }
 settings-open-logs = ログフォルダーを開く
 settings-copy-diagnostics = 診断情報をコピー
-settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = デフォルトに戻す
 settings-close = 閉じる

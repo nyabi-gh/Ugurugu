@@ -430,7 +430,6 @@ settings-build = Build { $commit }
 settings-gpu = GPU: { $gpu }
 settings-open-logs = Open log folder
 settings-copy-diagnostics = Copy diagnostic info
-settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = Restore defaults
 settings-close = Close

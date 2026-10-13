@@ -428,7 +428,6 @@ settings-build | - | Build %1 | 빌드 %1 | ビルド %1 | args=commit
 settings-gpu | - | GPU: %1 | GPU: %1 | GPU: %1 | args=gpu
 settings-open-logs | - | Open log folder | 로그 폴더 열기 | ログフォルダーを開く
 settings-copy-diagnostics | - | Copy diagnostic info | 진단 정보 복사 | 診断情報をコピー
-settings-credit-development | ugurugu::SettingsDialog | Development support by seuppi
 settings-credit-icon | ugurugu::SettingsDialog | App icon artwork by seuppi
 settings-restore-defaults | - | Restore defaults | 기본값 복원 | デフォルトに戻す
 settings-close | - | Close | 닫기 | 閉じる

@@ -72,7 +72,6 @@
 
 ## 크레딧과 라이선스
 
-- Development support by seuppi
 - App icon artwork by seuppi
 
 Copyright (C) 2026 Nyabi (nyabi-gh). [GPL-3.0-or-later](LICENSE)로 배포합니다.

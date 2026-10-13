@@ -167,7 +167,6 @@ WiggleWiggleTool 10で保存した`.wawa`ファイルを**ファイル → 開�
 
 ## クレジットとライセンス
 
-- Development support by seuppi
 - App icon artwork by seuppi（`resources/icons/`、GPL-3.0-or-laterで配布）
 
 Copyright (C) 2026 Nyabi (nyabi-gh)

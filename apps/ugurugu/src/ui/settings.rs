@@ -784,16 +784,11 @@ fn about(ui: &mut egui::Ui, dialog: &mut Dialog) {
             });
         });
         widgets::divider(ui, theme::space::L);
-        for credit in [
-            tr("settings-credit-development"),
-            tr("settings-credit-icon"),
-        ] {
-            ui.label(
-                egui::RichText::new(credit)
-                    .size(theme::SMALL)
-                    .color(theme::muted()),
-            );
-        }
+        ui.label(
+            egui::RichText::new(tr("settings-credit-icon"))
+                .size(theme::SMALL)
+                .color(theme::muted()),
+        );
         widgets::space_after(ui, theme::space::XL);
     });
     ui.add_space(theme::space::XL);

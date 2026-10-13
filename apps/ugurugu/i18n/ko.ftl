@@ -430,7 +430,6 @@ settings-build = 빌드 { $commit }
 settings-gpu = GPU: { $gpu }
 settings-open-logs = 로그 폴더 열기
 settings-copy-diagnostics = 진단 정보 복사
-settings-credit-development = Development support by seuppi
 settings-credit-icon = App icon artwork by seuppi
 settings-restore-defaults = 기본값 복원
 settings-close = 닫기
