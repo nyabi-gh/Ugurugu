@@ -26,6 +26,10 @@ pub mod limits {
     /// Spray particles per sample, in sixes.
     pub const DENSITY: std::ops::RangeInclusive<f32> = 0.05..=4.0;
     pub const ASSET_PIXELS: u64 = 4096 * 4096;
+    /// All images together. Opening a file decodes each in full to check
+    /// it, so this bounds that work; the byte limit alone admits thousands
+    /// of flat images that compress to almost nothing.
+    pub const IMAGE_PIXELS: u64 = 64 * ASSET_PIXELS;
     /// Everything the store holds, as stored.
     pub const BYTES: u64 = 128 * 1024 * 1024;
 }
@@ -268,8 +272,10 @@ pub enum StoreError {
     StrokeBrush(StrokeId),
     TooManyPoints(usize),
     MaskSize(MaskId),
+    MaskBounds(MaskId),
     AssetSize(AssetId),
     TooManyBytes(u64),
+    TooManyPixels(u64),
 }
 
 impl std::fmt::Display for StoreError {
@@ -281,8 +287,10 @@ impl std::fmt::Display for StoreError {
             Self::StrokeBrush(id) => write!(f, "stroke {} has a brush setting out of range", id.0),
             Self::TooManyPoints(count) => write!(f, "{count} points is over the limit"),
             Self::MaskSize(id) => write!(f, "mask {} does not match its bounds", id.0),
+            Self::MaskBounds(id) => write!(f, "mask {} lies outside the largest canvas", id.0),
             Self::AssetSize(_) => write!(f, "an image is empty or over the size limit"),
             Self::TooManyBytes(bytes) => write!(f, "{bytes} bytes of data is over the limit"),
+            Self::TooManyPixels(pixels) => write!(f, "{pixels} image pixels is over the limit"),
         }
     }
 }
@@ -331,8 +339,20 @@ impl Store {
         if bytes > limits::BYTES {
             return Err(StoreError::TooManyBytes(bytes));
         }
-        Ok(())
+        check_image_pixels(self.assets.values().map(|asset| asset.size))
     }
+}
+
+/// Checks the pixels of images of `sizes` together.
+pub fn check_image_pixels(sizes: impl IntoIterator<Item = [u32; 2]>) -> Result<(), StoreError> {
+    let pixels = sizes
+        .into_iter()
+        .map(|[width, height]| u64::from(width) * u64::from(height))
+        .fold(0u64, u64::saturating_add);
+    if pixels > limits::IMAGE_PIXELS {
+        return Err(StoreError::TooManyPixels(pixels));
+    }
+    Ok(())
 }
 
 pub fn check_stroke(id: StrokeId, stroke: &Stroke) -> Result<(), StoreError> {
@@ -371,13 +391,71 @@ pub fn brush_in_range(brush: &Brush) -> bool {
         && limits::WOBBLE_SCALE.contains(&brush.wobble_scale)
 }
 
+/// Every mask is a selection of the canvas it was made on, so it lies
+/// inside the largest canvas; arithmetic on its bounds cannot overflow.
 pub fn check_mask(id: MaskId, mask: &Mask) -> Result<(), StoreError> {
+    if !mask_bounds_valid(mask.bounds) {
+        return Err(StoreError::MaskBounds(id));
+    }
     let [_, _, width, height] = mask.bounds;
-    let expected = (height.max(0) as usize).checked_mul(Mask::row_bytes(width));
-    if width <= 0 || height <= 0 || expected != Some(mask.bits.len()) {
+    if height as usize * Mask::row_bytes(width) != mask.bits.len() {
         return Err(StoreError::MaskSize(id));
     }
     Ok(())
+}
+
+/// Whether `bounds` is a non-empty rectangle inside the largest canvas.
+pub fn mask_bounds_valid([left, top, width, height]: [i32; 4]) -> bool {
+    let edge = *crate::document::limits::CANVAS_EDGE.end() as i32;
+    let within = |start: i32, length: i32| {
+        start >= 0 && length > 0 && start.checked_add(length).is_some_and(|end| end <= edge)
+    };
+    within(left, width) && within(top, height)
+}
+
+/// Ids not in use, for new stored data or layers: counting up from past the
+/// largest, as ids have always been given, and only if that reaches
+/// `u32::MAX`, the gaps below it. The limits keep far fewer ids in use than
+/// there are, so there is always one.
+pub struct FreeIds<I> {
+    used: I,
+    next: Option<u32>,
+    taken: Vec<u32>,
+    /// `used` and `taken` in order, made only once the count runs out.
+    sorted: Option<Vec<u32>>,
+    gap: u32,
+}
+
+impl<I: Iterator<Item = u32> + Clone> FreeIds<I> {
+    pub fn new(used: I) -> Self {
+        let next = used.clone().max().map_or(Some(0), |max| max.checked_add(1));
+        Self {
+            used,
+            next,
+            taken: Vec::new(),
+            sorted: None,
+            gap: 0,
+        }
+    }
+
+    pub fn take(&mut self) -> u32 {
+        if let Some(id) = self.next {
+            self.next = id.checked_add(1);
+            self.taken.push(id);
+            return id;
+        }
+        let sorted = self.sorted.get_or_insert_with(|| {
+            let mut all: Vec<u32> = self.used.clone().chain(self.taken.drain(..)).collect();
+            all.sort_unstable();
+            all
+        });
+        while sorted.binary_search(&self.gap).is_ok() {
+            self.gap = self.gap.checked_add(1).expect("the limits leave ids free");
+        }
+        let id = self.gap;
+        sorted.insert(sorted.partition_point(|&used| used < id), id);
+        id
+    }
 }
 
 pub fn check_asset(id: AssetId, asset: &Asset) -> Result<(), StoreError> {
@@ -482,6 +560,71 @@ mod tests {
             },
         );
         assert_eq!(store.validate(), Err(StoreError::MaskSize(MaskId(2))));
+    }
+
+    #[test]
+    fn masks_lie_inside_the_largest_canvas() {
+        let edge = 4096;
+        let mask = |bounds: [i32; 4]| Mask {
+            bounds,
+            bits: vec![0; bounds[3].max(0) as usize * Mask::row_bytes(bounds[2])].into(),
+        };
+        for good in [[0, 0, 8, 1], [edge - 8, edge - 1, 8, 1], [0, 0, edge, edge]] {
+            assert_eq!(check_mask(MaskId(1), &mask(good)), Ok(()), "{good:?}");
+        }
+        for bad in [
+            [-1, 0, 8, 1],
+            [0, -1, 8, 1],
+            [edge - 7, 0, 8, 1],
+            [0, edge, 8, 1],
+            [i32::MAX - 3, 0, 8, 2],
+            [0, i32::MAX, 8, 1],
+            [0, 0, 0, 1],
+        ] {
+            assert_eq!(
+                check_mask(MaskId(1), &mask(bad)),
+                Err(StoreError::MaskBounds(MaskId(1))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn free_ids_count_up_and_then_fill_gaps() {
+        let mut ids = FreeIds::new([3, 1].into_iter());
+        assert_eq!([ids.take(), ids.take()], [4, 5]);
+        let mut ids = FreeIds::new(std::iter::empty());
+        assert_eq!(ids.take(), 0);
+        let mut ids = FreeIds::new([u32::MAX - 1, 0, 2].into_iter());
+        assert_eq!(
+            [ids.take(), ids.take(), ids.take(), ids.take()],
+            [u32::MAX, 1, 3, 4]
+        );
+        let mut ids = FreeIds::new([u32::MAX].into_iter());
+        assert_eq!([ids.take(), ids.take()], [0, 1]);
+    }
+
+    #[test]
+    fn images_are_limited_in_pixels_together() {
+        let mut store = Store::default();
+        let full = (limits::IMAGE_PIXELS / limits::ASSET_PIXELS) as u8;
+        for index in 0..=full {
+            store.assets.insert(
+                AssetId([index; 32]),
+                Asset {
+                    size: [4096, 4096],
+                    png: vec![1].into(),
+                },
+            );
+            let expected = if index < full {
+                Ok(())
+            } else {
+                Err(StoreError::TooManyPixels(
+                    limits::IMAGE_PIXELS + limits::ASSET_PIXELS,
+                ))
+            };
+            assert_eq!(store.check_totals(), expected);
+        }
     }
 
     #[test]

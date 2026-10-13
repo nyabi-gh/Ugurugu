@@ -34,6 +34,14 @@ pub mod limits {
         + 12 * ugu_core::store::limits::POINTS as u64;
     /// All entries together, inflated.
     pub const TOTAL_BYTES: u64 = DOCUMENT_BYTES + ugu_core::store::limits::BYTES + 1024 * 1024;
+    /// The file: every entry stored or barely grown by Deflate, and each
+    /// entry's headers and name. The ZIP directory is parsed before its
+    /// entry count can be checked, so this bounds that work.
+    pub const FILE_BYTES: u64 = TOTAL_BYTES + TOTAL_BYTES / 256 + 512 * ENTRIES as u64;
+    pub const STROKES: usize = ugu_core::document::limits::OPERATIONS;
+    /// A paint, erase or fill refers to two masks at most.
+    pub const MASKS: usize = 2 * ugu_core::document::limits::OPERATIONS;
+    pub const IMAGES: usize = ugu_core::document::limits::OPERATIONS;
 }
 
 #[derive(Debug)]
@@ -128,6 +136,10 @@ pub fn read<R: Read + Seek>(input: R) -> Result<(Document, [u8; 16]), ReadError>
 pub fn read_with<R: Read + Seek>(
     mut input: R,
 ) -> Result<(Document, [u8; 16], Option<LayerId>), ReadError> {
+    let file_bytes = input
+        .seek(std::io::SeekFrom::End(0))
+        .map_err(ReadError::Io)?;
+    input.rewind().map_err(ReadError::Io)?;
     let mut start = [0u8; 64];
     let length = read_up_to(&mut input, &mut start).map_err(ReadError::Io)?;
     input.rewind().map_err(ReadError::Io)?;
@@ -135,6 +147,9 @@ pub fn read_with<R: Read + Seek>(
         && let Some(kind) = legacy(&start[..length])
     {
         return Err(ReadError::Legacy(kind));
+    }
+    if file_bytes > limits::FILE_BYTES {
+        return Err(ReadError::TooLarge(format!("{file_bytes} bytes")));
     }
     let archive =
         ZipArchive::new(input).map_err(|error| ReadError::NotAnArchive(error.to_string()))?;
@@ -268,12 +283,32 @@ impl<R: Read + Seek> Entries<R> {
     }
 
     fn store(&mut self, dto: &DocumentDto) -> Result<Store, ReadError> {
-        let mut store = Store::default();
-        let mut points = parse_strokes(&self.read(STROKES, limits::STROKES_BYTES)?)
-            .ok_or_else(|| corrupt("stroke points"))?;
-        if points.len() != dto.strokes.len() {
-            return Err(corrupt("stroke points do not match the strokes"));
+        // Only what operations refer to is written, so these bound every
+        // file the app saved.
+        for (count, limit, what) in [
+            (dto.strokes.len(), limits::STROKES, "strokes"),
+            (dto.masks.len(), limits::MASKS, "masks"),
+            (dto.images.len(), limits::IMAGES, "images"),
+        ] {
+            if count > limit {
+                return Err(ReadError::TooLarge(format!("{count} {what}")));
+            }
         }
+        // Checking an image decodes it, so its size is checked first.
+        for image in &dto.images {
+            let pixels = u64::from(image.size[0]) * u64::from(image.size[1]);
+            if pixels == 0 || pixels > store::limits::ASSET_PIXELS {
+                return Err(corrupt(format!("image {} has an invalid size", image.id)));
+            }
+        }
+        store::check_image_pixels(dto.images.iter().map(|image| image.size))
+            .map_err(|error| ReadError::TooLarge(error.to_string()))?;
+        let mut store = Store::default();
+        let mut points = parse_strokes(
+            &self.read(STROKES, limits::STROKES_BYTES)?,
+            dto.strokes.len(),
+        )
+        .ok_or_else(|| corrupt("stroke points do not match the strokes"))?;
         for stroke in &dto.strokes {
             let id = StrokeId(stroke.id);
             let points = points
@@ -316,11 +351,8 @@ impl<R: Read + Seek> Entries<R> {
                 return Err(corrupt(format!("stroke {} appears twice", stroke.id)));
             }
         }
-        let mut masks = parse_masks(&self.read(MASKS, store::limits::BYTES)?)
-            .ok_or_else(|| corrupt("mask bits"))?;
-        if masks.len() != dto.masks.len() {
-            return Err(corrupt("mask bits do not match the masks"));
-        }
+        let mut masks = parse_masks(&self.read(MASKS, store::limits::BYTES)?, dto.masks.len())
+            .ok_or_else(|| corrupt("mask bits do not match the masks"))?;
         for mask in &dto.masks {
             let value = masks
                 .remove(&mask.id)
@@ -381,9 +413,13 @@ fn take_u32(bytes: &mut &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(*value))
 }
 
-/// Records in strictly increasing id order, covering the entry exactly.
-fn parse_strokes(bytes: &[u8]) -> Option<BTreeMap<u32, Vec<Point>>> {
+/// `expected` records in strictly increasing id order, covering the entry
+/// exactly.
+fn parse_strokes(bytes: &[u8], expected: usize) -> Option<BTreeMap<u32, Vec<Point>>> {
     let (count, mut rest) = header(bytes, STROKE_MAGIC)?;
+    if count != expected {
+        return None;
+    }
     let mut strokes = BTreeMap::new();
     for _ in 0..count {
         let id = take_u32(&mut rest)?;
@@ -413,9 +449,13 @@ fn parse_strokes(bytes: &[u8]) -> Option<BTreeMap<u32, Vec<Point>>> {
     rest.is_empty().then_some(strokes)
 }
 
-/// Records in strictly increasing id order, covering the entry exactly.
-fn parse_masks(bytes: &[u8]) -> Option<BTreeMap<u32, Mask>> {
+/// `expected` records in strictly increasing id order, each inside the
+/// largest canvas, covering the entry exactly.
+fn parse_masks(bytes: &[u8], expected: usize) -> Option<BTreeMap<u32, Mask>> {
     let (count, mut rest) = header(bytes, MASK_MAGIC)?;
+    if count != expected {
+        return None;
+    }
     let mut masks = BTreeMap::new();
     for _ in 0..count {
         let id = take_u32(&mut rest)?;
@@ -424,11 +464,12 @@ fn parse_masks(bytes: &[u8]) -> Option<BTreeMap<u32, Mask>> {
             *value = take_u32(&mut rest)? as i32;
         }
         let [_, _, width, height] = bounds;
-        if width <= 0 || height <= 0 || masks.last_key_value().is_some_and(|(last, _)| *last >= id)
+        if !store::mask_bounds_valid(bounds)
+            || masks.last_key_value().is_some_and(|(last, _)| *last >= id)
         {
             return None;
         }
-        let length = (height as usize).checked_mul(Mask::row_bytes(width))?;
+        let length = height as usize * Mask::row_bytes(width);
         if length > rest.len() {
             return None;
         }

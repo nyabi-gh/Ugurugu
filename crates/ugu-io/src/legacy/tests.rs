@@ -261,3 +261,51 @@ fn base64_is_decoded_strictly() {
         assert_eq!(decode_base64(bad), None, "{bad}");
     }
 }
+
+#[test]
+fn a_fill_mask_used_twice_is_stored_once() {
+    let masks = |bytes: &[u8]| import(bytes).expect("imports").document.store.masks.len();
+    let twice = edited(FILL, |root| {
+        let layers = root["layers"].as_array_mut().expect("layers");
+        let fills = layers
+            .iter_mut()
+            .find(|layer| layer["name"] == "Fills")
+            .expect("fills");
+        let strokes = fills["strokes"].as_array_mut().expect("strokes");
+        let mut copy = strokes
+            .iter()
+            .find(|stroke| stroke.get("fillMaskId").is_some())
+            .expect("a schema-5 fill")
+            .clone();
+        copy["id"] = "copy".into();
+        strokes.push(copy);
+    });
+    assert_eq!(masks(&twice), masks(FILL));
+}
+
+#[test]
+fn an_import_stops_at_a_limit_before_reading_the_rest() {
+    let bytes = edited(FILL, |root| {
+        let layers = root["layers"].as_array_mut().expect("layers");
+        let lines = layers
+            .iter_mut()
+            .find(|layer| layer["name"] == "Lines")
+            .expect("lines");
+        let strokes = lines["strokes"].as_array_mut().expect("strokes");
+        let mut one = strokes[0].clone();
+        one["points"] = serde_json::json!([[10.0, 10.0, 1.0]]);
+        strokes.clear();
+        for index in 0..=ugu_core::document::limits::OPERATIONS {
+            let mut stroke = one.clone();
+            stroke["id"] = index.to_string().into();
+            strokes.push(stroke);
+        }
+        let mut broken = one.clone();
+        broken["mode"] = "nonsense".into();
+        strokes.push(broken);
+    });
+    assert!(matches!(
+        import(&bytes),
+        Err(LegacyError::Invalid(DocumentError::TooManyOperations(_)))
+    ));
+}

@@ -57,7 +57,7 @@ pub fn copy(document: &Document, layer: LayerId, selection: Arc<Selection>) -> O
         });
     }
     if let Some(outside) = selection.invert() {
-        let id = MaskId(store.masks.keys().map(|id| id.0 + 1).max().unwrap_or(0));
+        let id = MaskId(crate::command::free_mask_ids(&store).take());
         store.masks.insert(id, outside.mask().clone());
         ops.push(Op::ClearSelection { mask: id });
     }
@@ -86,7 +86,7 @@ pub fn paste(
 ) -> (LayerId, Vec<Change>, Option<Selection>) {
     let mut changes = Vec::new();
     let store = &document.store;
-    let mut next_stroke = store.strokes.keys().map(|id| id.0 + 1).max().unwrap_or(0);
+    let mut free_strokes = crate::command::free_stroke_ids(store);
     let mut strokes = HashMap::new();
     let mut sorted: Vec<_> = clip.store.strokes.iter().collect();
     sorted.sort_by_key(|(id, _)| **id);
@@ -94,14 +94,13 @@ pub fn paste(
         let to = if store.strokes.get(&id) == Some(stroke) {
             id
         } else {
-            let new = StrokeId(next_stroke);
-            next_stroke += 1;
+            let new = StrokeId(free_strokes.take());
             changes.push(Change::InsertStroke(new, stroke.clone()));
             new
         };
         strokes.insert(id, to);
     }
-    let mut next_mask = store.masks.keys().map(|id| id.0 + 1).max().unwrap_or(0);
+    let mut free_masks = crate::command::free_mask_ids(store);
     let mut masks = HashMap::new();
     let mut sorted: Vec<_> = clip.store.masks.iter().collect();
     sorted.sort_by_key(|(id, _)| **id);
@@ -109,8 +108,7 @@ pub fn paste(
         let to = if store.masks.get(&id) == Some(mask) {
             id
         } else {
-            let new = MaskId(next_mask);
-            next_mask += 1;
+            let new = MaskId(free_masks.take());
             changes.push(Change::InsertMask(new, mask.clone()));
             new
         };

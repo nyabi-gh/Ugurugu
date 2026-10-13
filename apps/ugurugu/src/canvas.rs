@@ -1847,7 +1847,14 @@ pub(crate) fn edit_reason(error: &EditError) -> &'static str {
         _ => None,
     };
     match (error, store) {
-        (_, Some(StoreError::TooManyPoints(_) | StoreError::TooManyBytes(_)))
+        (
+            _,
+            Some(
+                StoreError::TooManyPoints(_)
+                | StoreError::TooManyBytes(_)
+                | StoreError::TooManyPixels(_),
+            ),
+        )
         | (EditError::Document(DocumentError::TooManyOperations(_)), _) => tr("edit-data-limit"),
         (EditError::Document(DocumentError::TooManyLayers(_)), _) => tr("edit-layer-limit"),
         (EditError::Document(DocumentError::TooDeep(_)), _) => tr("edit-too-deep"),

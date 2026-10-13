@@ -462,6 +462,34 @@ fn broken_binary_entries_are_refused() {
 }
 
 #[test]
+fn masks_outside_the_largest_canvas_are_refused_before_their_bits_are_used() {
+    // The left of the first mask, after the header and id.
+    for left in [-1, 4096, i32::MAX - 3] {
+        let bytes = with_entry(MASKS, |data| {
+            data[16..20].copy_from_slice(&left.to_le_bytes())
+        });
+        assert!(
+            matches!(read_bytes(bytes), Err(ReadError::Corrupt(_))),
+            "{left}"
+        );
+    }
+}
+
+#[test]
+fn an_image_too_large_to_hold_is_refused_before_it_is_decoded() {
+    let id = sample_image_entry();
+    let id = id.trim_start_matches("images/").trim_end_matches(".png");
+    let from = format!(r#""id":"{id}","size":[2,2]"#);
+    let to = format!(r#""id":"{id}","size":[65536,65536]"#);
+    let bytes = with_json(DOCUMENT, &from, &to);
+    let result = read_bytes(bytes);
+    assert!(
+        matches!(&result, Err(ReadError::Corrupt(reason)) if reason.contains("invalid size")),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn an_image_that_matches_its_name_but_does_not_draw_is_refused() {
     let with_image = |png: Vec<u8>, size: [u32; 2]| {
         let mut document = sample();

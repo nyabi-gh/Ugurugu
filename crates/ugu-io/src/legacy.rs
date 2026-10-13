@@ -19,7 +19,7 @@ use ugu_core::ops::{
     Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
     StrokeId, Wobble,
 };
-use ugu_core::store::{Brush, BrushEngine, Mask, Point, Store, StoreError, Stroke, TipShape};
+use ugu_core::store::{self, Brush, BrushEngine, Mask, Point, Store, StoreError, Stroke, TipShape};
 
 use crate::import::{self, ImportError};
 
@@ -346,8 +346,14 @@ struct Importer<'a> {
     store: Store,
     clips: HashMap<ClipKey<'a>, Clip>,
     packed: HashMap<&'a str, MaskId>,
+    fills: HashMap<(&'a str, [u32; 2]), Option<MaskId>>,
     next_stroke: u32,
     next_mask: u32,
+    /// What the document holds so far, checked as it grows so that a small
+    /// file cannot make the import build far more than a document may hold.
+    operations: usize,
+    points: usize,
+    bytes: u64,
 }
 
 impl<'a> Importer<'a> {
@@ -409,8 +415,11 @@ impl<'a> Importer<'a> {
                 return Err(damaged("a binary mask is listed twice"));
             }
         }
+        store::check_image_pixels(root.raster_assets.iter().map(|entry| entry.size))
+            .map_err(|_| LegacyError::Refused(Refusal::TooMuchData))?;
         let mut store = Store::default();
         let mut assets = HashMap::new();
+        let mut bytes = 0;
         for entry in &root.raster_assets {
             let [width, height] = entry.size;
             let pixels = u64::from(width) * u64::from(height);
@@ -427,6 +436,10 @@ impl<'a> Importer<'a> {
             if asset.size != entry.size {
                 return Err(LegacyError::Refused(Refusal::LargeImage));
             }
+            bytes += asset.png.len() as u64;
+            if bytes > store::limits::BYTES {
+                return Err(LegacyError::Refused(Refusal::TooMuchData));
+            }
             store.assets.insert(id, asset);
             if assets.insert(entry.id.as_str(), id).is_some() {
                 return Err(damaged("an image is listed twice"));
@@ -439,9 +452,28 @@ impl<'a> Importer<'a> {
             store,
             clips: HashMap::new(),
             packed: HashMap::new(),
+            fills: HashMap::new(),
             next_stroke: 1,
             next_mask: 1,
+            operations: 0,
+            points: 0,
+            bytes,
         })
+    }
+
+    /// Counts what was just stored, refusing as the document would.
+    fn grew(&mut self, points: usize, bytes: u64) -> Result<(), LegacyError> {
+        self.points += points;
+        self.bytes += bytes;
+        if self.points > store::limits::POINTS {
+            return Err(LegacyError::Invalid(DocumentError::Store(
+                StoreError::TooManyPoints(self.points),
+            )));
+        }
+        if self.bytes > store::limits::BYTES {
+            return Err(LegacyError::Refused(Refusal::TooMuchData));
+        }
+        Ok(())
     }
 
     fn document(mut self, root: &'a Root) -> Result<Imported, LegacyError> {
@@ -596,6 +628,12 @@ impl<'a> Importer<'a> {
                 continue;
             }
             if let Some(op) = self.op(stroke, &mut size)? {
+                self.operations += 1;
+                if self.operations > ugu_core::document::limits::OPERATIONS {
+                    return Err(LegacyError::Invalid(DocumentError::TooManyOperations(
+                        self.operations,
+                    )));
+                }
                 parts.last_mut().expect("one part").push(op);
             }
         }
@@ -763,6 +801,7 @@ impl<'a> Importer<'a> {
                 pressure: *pressure as f32,
             })
             .collect();
+        self.grew(points.len(), points.len() as u64 * 12)?;
         let id = StrokeId(self.next_stroke);
         self.next_stroke += 1;
         self.store.strokes.insert(
@@ -799,12 +838,16 @@ impl<'a> Importer<'a> {
 
     /// A schema-5 fill mask as coverage, `None` when it covers nothing.
     fn fill_mask(&mut self, id: &'a str, size: [u32; 2]) -> Result<Option<MaskId>, LegacyError> {
+        if let Some(&stored) = self.fills.get(&(id, size)) {
+            return Ok(stored);
+        }
         let gray = self.gray_pixels(id, size)?;
-        let (bounds, bits) = match bits(size, None, |x, y| gray[y * size[0] as usize + x] >= 128)? {
-            Some(found) => found,
-            None => return Ok(None),
+        let stored = match bits(size, None, |x, y| gray[y * size[0] as usize + x] >= 128)? {
+            Some((bounds, bits)) => Some(self.store_mask(bounds, bits)?),
+            None => None,
         };
-        Ok(Some(self.store_mask(bounds, bits)))
+        self.fills.insert((id, size), stored);
+        Ok(stored)
     }
 
     /// The 8-bit mask `id` (none for "") within `rect`, as bits: 2.2.13
@@ -833,7 +876,7 @@ impl<'a> Importer<'a> {
                 if whole {
                     Clip::Whole
                 } else {
-                    Clip::Mask(self.store_mask(bounds, bits))
+                    Clip::Mask(self.store_mask(bounds, bits)?)
                 }
             }
         };
@@ -852,7 +895,8 @@ impl<'a> Importer<'a> {
         Ok(gray.pixels.clone())
     }
 
-    fn store_mask(&mut self, bounds: [i32; 4], bits: Vec<u8>) -> MaskId {
+    fn store_mask(&mut self, bounds: [i32; 4], bits: Vec<u8>) -> Result<MaskId, LegacyError> {
+        self.grew(0, bits.len() as u64)?;
         let id = MaskId(self.next_mask);
         self.next_mask += 1;
         self.store.masks.insert(
@@ -862,7 +906,7 @@ impl<'a> Importer<'a> {
                 bits: bits.into(),
             },
         );
-        id
+        Ok(id)
     }
 
     fn packed(&mut self, id: &'a str, size: [u32; 2]) -> Result<MaskId, LegacyError> {
@@ -876,9 +920,11 @@ impl<'a> Importer<'a> {
         if *canvas != size {
             return Err(damaged("a binary mask does not match the canvas"));
         }
+        let mask = mask.clone();
+        self.grew(0, mask.bits.len() as u64)?;
         let stored = MaskId(self.next_mask);
         self.next_mask += 1;
-        self.store.masks.insert(stored, mask.clone());
+        self.store.masks.insert(stored, mask);
         self.packed.insert(id, stored);
         Ok(stored)
     }

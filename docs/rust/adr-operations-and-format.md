@@ -116,7 +116,7 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | 문서 | `pixel` | M6-17 | 문서 단위 픽셀 모드(decisions.md 픽셀 모드). 꺼져 있으면 쓰지 않으므로 그 파일의 바이트는 전과 같다. render revision은 그대로 |
 | 문서 | `active_layer` | M6(2절 23) | 저장할 때 편집하던 페인트 레이어 id. 선택 필드이고, 열 때 페인트 레이어가 아니면 무시한다. 프레임은 저장하지 않는다(2.2.13과 같음). API는 `ugu_io::write_with`·`read_with`·`save_with` |
 
-그 밖의 검증 한도(`ugu_core::document::limits`): 레이어 256개, 그룹 깊이 9단계(2.2.13 파일을 받으려고 8에서 올림, ugu-import.md 2절 3), 연산 20,000개, section 깊이 16단계, 캔버스 한 변 1~4096, 프레임 2~60.
+그 밖의 검증 한도(`ugu_core::document::limits`): 레이어 256개, 그룹 깊이 9단계(2.2.13 파일을 받으려고 8에서 올림, ugu-import.md 2절 3), 연산 20,000개, section 깊이 16단계, 캔버스 한 변 1~4096, 프레임 2~60. 저장소(`ugu_core::store`): mask는 0~4096 안, 이미지 화소 합 4096²×64. 읽기(`ugu_io::read::limits`): 획 20,000개, mask 40,000개, 이미지 20,000개, 파일 길이 약 223MiB.
 
 `.ugurugu` 밖의 형식(앱, `apps/ugurugu/src`):
 

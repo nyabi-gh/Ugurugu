@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use ugu_core::command;
 use ugu_core::edit::{Change, EditError, Outcome};
 use ugu_core::history::Group;
 use ugu_core::ops::MaskId;
@@ -187,7 +188,7 @@ pub(crate) fn stored_mask(
     {
         return Ok(id);
     }
-    let id = MaskId(masks.keys().map(|id| id.0 + 1).max().unwrap_or(0));
+    let id = MaskId(command::free_mask_ids(&group.document().store).take());
     group.apply(|_| vec![Change::InsertMask(id, mask.clone())])?;
     Ok(id)
 }

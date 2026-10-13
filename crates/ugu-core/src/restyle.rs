@@ -16,7 +16,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::command::next_stroke_id;
+use crate::command::free_stroke_ids;
 use crate::document::{Document, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError};
 use crate::ops::{Affine, MaskId, Op, Rgba8, StrokeId};
@@ -97,7 +97,7 @@ pub fn restyle(
         return Err(EditError::NotPaintLayer(layer));
     };
     let mut ops = paint.ops.clone();
-    let mut next = next_stroke_id(document);
+    let mut free = free_stroke_ids(&document.store);
     let mut renamed: HashMap<StrokeId, StrokeId> = HashMap::new();
     let mut inserted = Vec::new();
     let mut changed = false;
@@ -113,8 +113,7 @@ pub fn restyle(
                     return;
                 }
                 *id = *renamed.entry(*id).or_insert_with(|| {
-                    let new = next;
-                    next = StrokeId(next.0 + 1);
+                    let new = StrokeId(free.take());
                     inserted.push(Change::InsertStroke(
                         new,
                         Stroke {

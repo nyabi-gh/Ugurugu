@@ -9,34 +9,35 @@
 use crate::document::{Document, Group, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError};
 use crate::ops::{self, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
-use crate::store::Stroke;
+use crate::store::{FreeIds, Store, Stroke};
 
-/// A stroke id not in use. Ids freed by undo may be reused, because a new
+/// Stroke ids not in use. Ids freed by undo may be reused, because a new
 /// edit clears the redo history that held them.
+pub fn free_stroke_ids(store: &Store) -> FreeIds<impl Iterator<Item = u32> + Clone + '_> {
+    FreeIds::new(store.strokes.keys().map(|id| id.0))
+}
+
+pub fn free_mask_ids(store: &Store) -> FreeIds<impl Iterator<Item = u32> + Clone + '_> {
+    FreeIds::new(store.masks.keys().map(|id| id.0))
+}
+
 pub fn next_stroke_id(document: &Document) -> StrokeId {
-    StrokeId(
-        document
-            .store
-            .strokes
-            .keys()
-            .map(|id| id.0 + 1)
-            .max()
-            .unwrap_or(0),
-    )
+    StrokeId(free_stroke_ids(&document.store).take())
 }
 
 pub fn next_layer_id(document: &Document) -> LayerId {
-    fn max(layers: &[Layer]) -> u32 {
-        layers
-            .iter()
-            .map(|layer| match &layer.kind {
-                LayerKind::Group(group) => layer.id.0.max(max(&group.children)),
-                LayerKind::Paint(_) => layer.id.0,
-            })
-            .max()
-            .unwrap_or(0)
+    fn ids(layers: &[Layer], out: &mut Vec<u32>) {
+        for layer in layers {
+            out.push(layer.id.0);
+            if let LayerKind::Group(group) = &layer.kind {
+                ids(&group.children, out);
+            }
+        }
     }
-    LayerId(max(&document.layers) + 1)
+    // 0 stays unused, as when ids were one past the largest or 0.
+    let mut used = vec![0];
+    ids(&document.layers, &mut used);
+    LayerId(FreeIds::new(used.into_iter()).take())
 }
 
 /// Draws (or erases with) `stroke` on top of `layer`'s operations.
@@ -411,6 +412,31 @@ mod tests {
             panic!("nothing was committed");
         };
         assert!(matches!(commit(document, undo), Ok(Outcome::Committed(_))));
+    }
+
+    #[test]
+    fn ids_at_the_end_of_their_range_leave_new_ones_to_take() {
+        let mut document = Document::new([64, 64]);
+        document.layers[0].id = LayerId(u32::MAX);
+        for x in [u32::MAX - 1, u32::MAX] {
+            document.store.strokes.insert(StrokeId(x), stroke(1.0));
+        }
+        for _ in 0..2 {
+            run(&mut document, |document| {
+                add_paint_layer(document, None, 0, String::new()).1
+            })
+            .unwrap();
+        }
+        let layer = document.layers[0].id;
+        for _ in 0..2 {
+            run(&mut document, |document| {
+                draw(document, layer, stroke(2.0), false, None)
+            })
+            .unwrap();
+        }
+        assert_eq!(document.layers.len(), 3);
+        assert_eq!(document.store.strokes.len(), 4);
+        assert_eq!(document.validate(), Ok(()));
     }
 
     #[test]
