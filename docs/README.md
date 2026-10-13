@@ -2,7 +2,7 @@
 
 ## 지금 상태
 
-- Ugurugu 3.0(Rust, `apps/`, `crates/`)은 Windows판으로 출시를 기다린다. M0~M6를 마쳤고, 출시 전에 한 창 안의 문서 탭과 단일 실행을 넣고 UI를 다듬었다(2026-10-12~13). 남은 것은 [backlog.md](rust/backlog.md) 1절의 출시 절차다.
+- Ugurugu 3(Rust, `apps/`, `crates/`)은 Windows판으로 3.0.0과 3.0.1을 냈다(2026-10-13). 열린 일은 [backlog.md](rust/backlog.md)에 있다.
 - 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이고, macOS 3.x는 나중에 따로 한다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
 
 ## 3.0 문서 (`rust/`)
@@ -16,7 +16,7 @@
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
 
-새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다.
+새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다. 일을 닫으면 backlog.md의 행과 다른 문서의 그 ID도 함께 지운다. CI의 `tools/check_docs.py`가 문서 링크와 backlog ID를 검사한다.
 
 ## 지운 문서
 
@@ -26,4 +26,4 @@
 
 ## 그 밖
 
-사용자 안내는 루트 README(ko·en·ja), 빌드는 BUILDING.md, 기여는 CONTRIBUTING.md, 보안은 SECURITY.md, 2.x 고지는 THIRD_PARTY_NOTICES.md, 판별 변경 내용은 `release-notes/`에 있다.
+사용자 안내는 루트 README(ko·en·ja), 빌드는 BUILDING.md, 기여는 CONTRIBUTING.md, 보안은 SECURITY.md, 판별 변경 내용은 `release-notes/`에 있다. 제3자 고지는 저장소에 두지 않고 패키지를 만들 때 `tools/third_party_notices.py`가 `THIRD_PARTY_NOTICES.txt`로 만든다.

@@ -6,14 +6,11 @@
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
 - ID `B3-nn`은 이 문서 전용이다. 원래 문서의 ID(U3-xx, A-xx, B-xx 등)는 출처 칸에만 쓴다.
 
-## 1. 출시 전 사용자 할 일
+## 1. 사용자 할 일
 
 | ID | 할 일 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-01 | README를 3.0에 맞게 다시 쓴다 | 지금 README는 2.x 기준이다: 작업 파일 `.ugu`와 `.wagle`·`.wobble` 열기(78행), "투명 배경 … JPG"(79행, 실제는 JPEG 흰 바탕·GIF는 alpha 128 기준 이진 투명), `Ctrl+T` = 애니메이션 바(143행, 3.0은 변형이고 바는 `Ctrl+Shift+T`), Redo는 `Ctrl+Y`만(145행, 3.0은 `Ctrl+Shift+Z`도), 그래픽 D3D11(50행, 3.0은 DX12 또는 WARP). `.ugu`는 2.1.0 이후 schema 13만 가져오고 그 전 파일은 2.2.13에서 다시 저장해야 함, `.ugurugu`는 2.x에서 열 수 없음, `.wwpreset` 대신 `.ugurugu-tools`, Classic은 포즈·디테일·연결·무작위성을 쓰지 않음, macOS는 2.2.13 | `README.md` | m6-plan 8절 1, analysis-3.0 1절 5·2.1·3.7·4절 5 |
-| B3-02 | `release-notes/3.0.0.en.md` 확인 | 검토 지적(보이는 그림과 내보내는 그림, 펜·GPU 시험 범위)을 반영한 초안이다 | `release-notes/3.0.0.en.md` | m6-plan 8절 2 |
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
-| B3-04 | `v3.0.0` 태그를 push해 `release-3.yml`을 돌린다 | 2026-10-13 완료(run 38332552202). `v3.0.0`에는 Setup 하나, `updates`에는 `Ugurugu3-3.0.0-win-x64-full.nupkg`와 `releases.win-x64.json`(채널 `win-x64`)이 있다. 체크섬 파일은 다음 릴리스부터 만들지 않는다(사용자 결정) | `.github/workflows/release-3.yml` | m6-plan 8절 4 |
 
 ## 2. 열린 gate
 
@@ -34,7 +31,7 @@
 | B3-11 | 델타 업데이트 | 2.2.13도 `--delta None`. 전체 패키지 15.5MB | `tools/package_windows.ps1` | m6-plan 1절 |
 | B3-12 | 코드 서명 | 서명 없이 내기로 했다(2026-10-11 사용자). SmartScreen 경고는 도움말에 있다. 서명하게 되면 `vpk pack --signParams`만 더한다. 2.x 분석 R-02의 지적도 그대로 해당한다: Windows 업데이트의 신뢰 근거가 GitHub 릴리스 하나뿐이라 계정·토큰이 털리면 업데이트 경로로 코드가 나간다(서명 전까지는 2FA·토큰 범위 관리) | `tools/package_windows.ps1`, `release-3.yml` | m6-plan 2절 7, 5절; ANALYSIS_REPORT R-02 |
 | B3-13 | macOS 3.x | 3.0은 Windows만. 2.x 릴리스 workflow(`release.yml`, macOS 서명·공증·Sparkle 포함)는 지웠다. 3.x가 macOS를 지원할 때 새 비밀(인증서·공증·업데이트 키)로 다시 쓴다. 코드 쪽은 `ugu-render`가 CPU 렌더와 DX12 표시를 함께 의존하고 Windows FFI가 `ugu-win`에 모여 있어, 렌더·표시 경계를 먼저 나눠야 한다 | `.github/workflows/`, `crates/ugu-render/Cargo.toml`, `crates/ugu-win` | m6-plan 2절 14, analysis-3.0 3.1·4절 14 |
-| B3-14 | macOS 2.2.13의 업데이트 확인 | 2.2.13의 Sparkle 피드는 `releases/latest/download/appcast.xml`이다. `v3.0.0`이 GitHub Latest가 되면 이 주소는 404가 된다. m6-plan은 "업데이트 없음"으로 끝난다고 적었지만 확인하지 않았다(**가설**). Sparkle이 404를 오류로 보여 줄 수도 있다. 자동 확인이면 조용히 실패하고 수동 확인이면 오류 창이 뜰 것으로 보인다(가설). 피하려면 3.x 릴리스마다 2.2.13의 `appcast.xml`을 자산으로 함께 올리는 방법이 있다(정하지 않음) | GitHub Releases, `release-3.yml` | m6-plan 2절 14 |
+| B3-14 | macOS 2.2.13의 업데이트 확인 | 2.2.13의 Sparkle 피드는 `releases/latest/download/appcast.xml`이다. 3.x가 GitHub Latest라 이 주소는 404다(2026-10-13 `curl`로 확인, `v3.0.1`로 리디렉션된 뒤 404). m6-plan은 "업데이트 없음"으로 끝난다고 적었지만 2.2.13에서 확인하지 않았다(**가설**). Sparkle이 404를 오류로 보여 줄 수도 있다. 자동 확인이면 조용히 실패하고 수동 확인이면 오류 창이 뜰 것으로 보인다(가설). 피하려면 3.x 릴리스마다 2.2.13의 `appcast.xml`을 자산으로 함께 올리는 방법이 있다(정하지 않음) | GitHub Releases, `release-3.yml` | m6-plan 2절 14 |
 | B3-15 | ARM64 Windows | 범위 밖으로 뺐다. 빌드 대상·libwebp·ring·Velopack 런타임을 함께 봐야 한다 | `.cargo/config.toml`, 패키지 | m6-plan 1절, 8절 |
 | B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/render.rs` | [plan-document-tabs.md](https://github.com/nyabi-gh/Ugurugu/blob/70c27f4/docs/rust/plan-document-tabs.md) 3절 3 |
 | B3-80 | 탭이 많을 때 보이는 탭의 표면 예산 | 숨은 탭은 레이어 표면을 놓지 않고(⑤ 탭당 약 405MiB), 표면 예산은 탭마다 빈 메모리로 정한다. 메모리가 적은 PC에서 큰 문서 탭이 많으면 보이는 탭이 바닥값(128MiB)으로 내려가 레이어를 하나씩 그릴 수 있다(가설, 8GiB PC에서 재지 않음). 고치려면 숨은 탭 작업자에 표면을 비우는 일을 보내고 예산을 창 전체에서 보이는 탭 먼저 나눈다. 탭마다 래스터 스레드 풀(8개)을 따로 두는 것도 함께 볼 수 있다(쉬는 스레드라 비용은 측정상 없음) | `apps/ugurugu/src/cache.rs`, `budget.rs`, `canvas.rs` | evidence.md 41절, plan-document-tabs 4절 5 |
@@ -110,10 +107,10 @@
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-58 | 읽지 못한 복구 폴더(`failed-…`)가 상한·기한 없이 쌓임 | 손상 복구 폴더를 지우지 않고 `failed-<시각>-<이름>`으로 옮긴 뒤 다시 보지 않는다. 정리 코드가 없다. 폴더마다 문서 2세대 | `apps/ugurugu/src/recovery.rs` 26·197·313행 | ANALYSIS_REPORT B-13 ① |
-| B3-59 | 첫 명령줄 인자를 옵션 구분 없이 파일로 엶 | `std::env::args_os().nth(1)`을 그대로 경로로 만든다. `--help` 같은 인자도 열기 실패가 된다. Velopack hook 인자는 `VelopackApp`이 먼저 처리하므로 영향은 작다 | `apps/ugurugu/src/app.rs` 159·294행 | ANALYSIS_REPORT B-22 |
+| B3-59 | 첫 명령줄 인자를 옵션 구분 없이 파일로 엶 | `std::env::args_os().nth(1)`을 그대로 경로로 만든다. `--help` 같은 인자도 열기 실패가 된다. Velopack hook 인자는 `VelopackApp`이 먼저 처리하므로 영향은 작다 | `apps/ugurugu/src/main.rs` 43행 | ANALYSIS_REPORT B-22 |
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
 | B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈추고 winit `Occluded`는 처리하지 않는다. 다른 창에 완전히 가려진 동안의 전력 사용(가설) | `apps/ugurugu/src/render.rs` 160·676행 | ANALYSIS_REPORT P-03 |
-| B3-62 | 다크 테마 고정, 고대비·글자 크기 설정 없음 | 테마는 2.2.13 다크를 옮긴 고정값이고 Windows 고대비를 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
+| B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
 | B3-64 | 내보내기 중 닫기·업데이트가 묻지 않고 내보내기를 취소, 세션 종료 처리 없음 | 닫기는 문서가 수정됐을 때만 묻고, 끝날 때 진행 중 내보내기를 취소하고 지운다(`Files` 종료). `WM_QUERYENDSESSION`·`WM_ENDSESSION`을 다루지 않아 로그오프 때는 자동복구(마지막 변경 3초 뒤, 늦어도 30초)에 기댄다(winit 기본 동작에 따른 결과는 가설) | `apps/ugurugu/src/files.rs` 552~559·645행 | ANALYSIS_REPORT U-10 |
 | B3-65 | 파일 끌어다 놓기 미지원 | winit `DroppedFile`을 다루지 않는다. 다른 앱 이미지 붙여넣기는 된다 | `apps/ugurugu/src/app.rs` | ANALYSIS_REPORT U-15 |
@@ -133,7 +130,7 @@
 | B3-72 | `vello_cpu` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다 | `Cargo.toml` | evidence.md 렌더러 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-74 | main push CI 범위의 실제 확인 | 마지막으로 성공한 main 커밋과 비교하는 변경을 실제 main push에서 확인하지 않았다 | `.github/workflows/ci.yml` | evidence.md main push의 CI 범위 |
+| B3-74 | main push CI 범위 중 건너뛰기의 실제 확인 | 취소된 실행의 변경을 다시 검사하는 경우는 실제 main push에서 확인했다(evidence.md 35절). 문서만 바뀐 push가 Rust 작업을 건너뛰는 경우는 아직 main에서 일어나지 않았다 | `.github/workflows/ci.yml` | evidence.md main push의 CI 범위 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 

@@ -73,5 +73,5 @@
 - App icon artwork by seuppi
 
 Copyright (C) 2026 Nyabi (nyabi-gh). [GPL-3.0-or-later](LICENSE)로 배포합니다.
-소스 빌드는 [BUILDING.md](BUILDING.md), 사용한 글꼴과 라이브러리는
-[서드파티 고지](THIRD_PARTY_NOTICES.md)를 보세요.
+소스 빌드는 [BUILDING.md](BUILDING.md)를 보세요. 사용한 글꼴과 라이브러리의
+고지는 앱과 함께 설치되는 `THIRD_PARTY_NOTICES.txt`에 있습니다.

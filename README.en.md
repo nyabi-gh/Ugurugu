@@ -73,5 +73,5 @@ diagnostic info and logs from **Settings → About** helps us fix it quickly.
 - App icon artwork by seuppi
 
 Copyright (C) 2026 Nyabi (nyabi-gh). Released under [GPL-3.0-or-later](LICENSE).
-See [BUILDING.md](BUILDING.md) to build from source and the
-[third-party notices](THIRD_PARTY_NOTICES.md) for the fonts and libraries used.
+See [BUILDING.md](BUILDING.md) to build from source. The notices for the fonts
+and libraries used are in `THIRD_PARTY_NOTICES.txt`, installed with the app.
