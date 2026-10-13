@@ -962,7 +962,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 ## 52. 복사의 render 스레드 비용 (2026-10-14)
 
-**질문:** 큰 선택을 복사할 때 render 스레드가 얼마나 멈추나(backlog B3-105).
+**질문:** 큰 선택을 복사할 때 render 스레드가 얼마나 멈추나.
 
 **방법:** 외부 검토가 만든 시험 crate(앱 소스 `8195424` 복사본 + 공용 crate, 저장소에 두지 않음)의 `review_copy_cost_on_fixture4_with_and_without_split`을 release, `UGU_WORKER_THREADS=8`로 다시 돌림. fixture ④(2048², 레이어 1, 획 20,000) 전체 선택에서 `Canvas::copy` 진입부터 반환까지 10회씩. OS 클립보드 쓰기는 빼고, split 없음과 split을 받은 뒤를 비교.
 
@@ -974,3 +974,13 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 | split 있음 | 26.3ms | 30.2ms | 25.6 / 28.0ms |
 
 **결론:** 화면에 split이 있는 보통 경우에도 160Hz에서 몇 프레임을 놓친다. 입력→표시로 잰 값은 아니다.
+
+**고친 뒤 (2026-10-14):** 복사는 render 스레드에서 연산 사본(`Session::copy`)과 문서 snapshot만 만들고, 다른 앱에 줄 그림(현재 레이어의 참조 렌더와 straight RGBA 변환)은 클립보드 스레드가 그 snapshot에서 새 `DocumentRenderer`(작업자와 같은 스레드 수)로 그린다(`CopiedPixels`). 앱 안의 시험 `copy_cost_on_a_large_document`(ignored)를 같은 fixture ④ 전체 선택, release, `UGU_WORKER_THREADS=8`로 바꾸기 전과 뒤에 두 번씩 돌렸다. 바꾸기 전 이 시험의 값은 split 없음 p50 56.6ms·최대 66.8ms, 있음 26.3·27.9ms로 위 표와 같은 크기다.
+
+| 조건 | 바꾸기 전 p50 / 최대 | 바꾼 뒤 p50 / 최대 |
+|---|---|---|
+| render 스레드, split 없음 | 56.6 / 66.8ms | 3.4~3.6 / 4.5~5.0ms |
+| render 스레드, split 있음 | 26.3 / 27.9ms | 3.4~3.5 / 5.4~6.9ms |
+| 클립보드 스레드의 그림 | (render 스레드에 포함) | 59.2~59.6 / 60.3~62.9ms |
+
+다른 앱이 그림을 받는 때는 split이 있던 경우 약 35ms 늦어진다(매번 새로 그리므로). 앱 안 붙여넣기는 연산 사본을 바로 쓰므로 영향이 없다. 남은 3.4ms는 연산 사본과 snapshot(문서 복제)으로 보이나 나눠 재지는 않았다(가설).

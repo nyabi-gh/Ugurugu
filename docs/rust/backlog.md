@@ -150,4 +150,3 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-101 | 예산 초과 편집 split이 캔버스·내보내기 화소 일치를 깬다 | 레이어 표면이 예산을 넘으면 `split`이 편집 레이어 뒤의 Normal 레이어들을 미리 한 표면으로 합친다(`reduced`). 8비트 반올림 순서가 바뀌어 원본 크기 캔버스가 내보내기와 최대 2단계 다르다(주석이 인정, 시험 `compose.rs`는 오차 허용). 8×8 반투명 레이어 8개에서 64화소 모두 [160,103,149] 대 [159,102,148]. 같은 예산의 내보내기(`render_streamed`)는 전체 렌더와 같다. 메모리가 부족할 때만 생긴다(빈도는 가설). 고치려면 미리 합치지 않고 같은 순서를 지키는 평가가 필요하다(메모리·성능 설계, B3-38·B3-80과 함께) | `crates/ugu-render/src/compose.rs` `split`, `stream.rs` `reduced` | 검토 R02 |
-| B3-105 | 복사가 render 스레드를 수십 ms 쥔다 | `Canvas::copy`가 현재 레이어 그림(split이 없으면 작업자 렌더를 기다림)과 선택 범위의 straight RGBA 변환을 render 스레드에서 한다. fixture ④ 전체 선택에서 split이 있으면 p50 26ms, 없으면 62ms(evidence.md 52절). 안: 사본·선택·프레임을 고정해 작업자에서 만든다 | `apps/ugurugu/src/canvas/clipboard.rs` `copy`, `layer_pixels` | 검토 R06 |

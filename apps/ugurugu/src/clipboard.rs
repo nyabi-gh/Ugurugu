@@ -15,9 +15,9 @@ use ugu_core::clip::Clip;
 use ugu_core::ops::AssetId;
 use ugu_core::store::Asset;
 
-use ugu_win::clipboard::{Encoded, Image, ReadError};
+use ugu_win::clipboard::{Encoded, ReadError};
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, CopiedPixels};
 use crate::i18n::tr;
 
 pub enum ClipboardEvent {
@@ -30,7 +30,7 @@ pub enum ClipboardEvent {
 }
 
 enum Job {
-    Write(Image),
+    Write(CopiedPixels),
     Read { fit: [u32; 2], generation: u64 },
 }
 
@@ -76,10 +76,10 @@ impl Clipboard {
         }
     }
 
-    fn keep(&mut self, clip: Arc<Clip>, image: Image) {
+    fn keep(&mut self, clip: Arc<Clip>, pixels: CopiedPixels) {
         self.clip = Some(clip);
         self.writing += 1;
-        let _ = self.to_worker.send(Job::Write(image));
+        let _ = self.to_worker.send(Job::Write(pixels));
     }
 
     pub fn paste(&mut self, canvas: &mut Canvas) {
@@ -127,10 +127,13 @@ impl Clipboard {
 fn run(job: Job) -> ClipboardEvent {
     let started = std::time::Instant::now();
     match job {
-        Job::Write(image) => {
+        Job::Write(pixels) => {
+            let image = pixels.image();
             let size = image.size;
+            let drawn = started.elapsed();
             let result = ugu_win::clipboard::write_image(image);
             tracing::debug!(
+                drawn_ms = drawn.as_secs_f64() * 1000.0,
                 ms = started.elapsed().as_secs_f64() * 1000.0,
                 ?size,
                 "copy put on the clipboard"

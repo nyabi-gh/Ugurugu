@@ -45,6 +45,7 @@ mod text;
 mod transform;
 mod view;
 
+pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
@@ -2623,7 +2624,11 @@ mod tests {
         });
         settle(&mut canvas, &renders);
         let source = canvas.session().current_layer();
-        let (clip, image) = canvas.copy().expect("copied");
+        let (clip, pixels) = canvas.copy().expect("copied");
+        // Drawn later, as on the clipboard thread, from the copied state.
+        canvas.delete_selected();
+        let image = pixels.image();
+        canvas.edit(Session::undo).unwrap();
         assert_eq!(image.size, [70, 80]);
         assert_eq!(image.straight.len(), 70 * 80 * 4);
         assert!(image.straight.chunks(4).any(|pixel| pixel[3] == 255));

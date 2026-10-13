@@ -179,17 +179,7 @@ impl CacheWorker {
             surface_bytes: AtomicUsize::new(0),
         });
         let worker = shared.clone();
-        // One thread is left for the render thread, which takes input.
-        // `UGU_WORKER_THREADS` sets the count, to measure as a smaller
-        // processor would.
-        let threads = std::env::var("UGU_WORKER_THREADS")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map_or(1, |count| count.get().saturating_sub(1).max(1))
-                    .min(usize::from(u16::MAX)) as u16
-            });
+        let threads = worker_threads();
         let thread = std::thread::Builder::new()
             .name("canvas cache".to_owned())
             .spawn(move || {
@@ -518,6 +508,21 @@ impl Drop for CacheWorker {
             let _ = thread.join();
         }
     }
+}
+
+/// How many threads a renderer off the render thread uses: all but one,
+/// which is left for the render thread, as it takes input.
+/// `UGU_WORKER_THREADS` sets the count, to measure as a smaller processor
+/// would.
+pub fn worker_threads() -> u16 {
+    std::env::var("UGU_WORKER_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map_or(1, |count| count.get().saturating_sub(1).max(1))
+                .min(usize::from(u16::MAX)) as u16
+        })
 }
 
 #[cfg(test)]
