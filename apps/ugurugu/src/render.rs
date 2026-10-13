@@ -132,6 +132,8 @@ pub struct Links {
 
 pub struct RenderThread {
     window: Arc<Window>,
+    /// winit gives the handle only on the window's thread.
+    hwnd: isize,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     surface_source: SurfaceSource,
@@ -335,6 +337,7 @@ impl RenderThread {
         let display = Display::open_any(first, early, &surface_source, adapter_choice, size)?;
         let mut render = Self {
             window,
+            hwnd,
             egui_ctx,
             egui_state,
             surface_source,
@@ -516,6 +519,12 @@ impl RenderThread {
             self.files.keep_recovery(&mut self.canvas, Instant::now());
             self.files.keep_updates(Instant::now());
             if self.files.should_close() {
+                if let Some(placement) =
+                    ugu_win::placement::get(self.hwnd).filter(ugu_win::placement::Placement::valid)
+                {
+                    self.settings
+                        .change(|settings| settings.window = Some(placement));
+                }
                 // Only a normal close drops the work kept for recovery.
                 self.files.end();
                 break;
@@ -647,6 +656,10 @@ impl RenderThread {
                 match &event {
                     WindowEvent::ModifiersChanged(modifiers) => {
                         self.modifiers = modifiers.state();
+                    }
+                    WindowEvent::DroppedFile(path) => {
+                        self.files.drop_path(path.clone(), &mut self.canvas);
+                        self.needs_frame = true;
                     }
                     // egui-winit turns these into clipboard events, Ctrl+V
                     // only when the clipboard holds text, and an image from

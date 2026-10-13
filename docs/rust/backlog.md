@@ -105,13 +105,11 @@
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-58 | 읽지 못한 복구 폴더(`failed-…`)가 상한·기한 없이 쌓임 | 손상 복구 폴더를 지우지 않고 `failed-<시각>-<이름>`으로 옮긴 뒤 다시 보지 않는다. 정리 코드가 없다. 폴더마다 문서 2세대 | `apps/ugurugu/src/recovery.rs` 26·197·313행 | ANALYSIS_REPORT B-13 ① |
-| B3-59 | 첫 명령줄 인자를 옵션 구분 없이 파일로 엶 | `std::env::args_os().nth(1)`을 그대로 경로로 만든다. `--help` 같은 인자도 열기 실패가 된다. Velopack hook 인자는 `VelopackApp`이 먼저 처리하므로 영향은 작다 | `apps/ugurugu/src/main.rs` 43행 | ANALYSIS_REPORT B-22 |
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
 | B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈추고 winit `Occluded`는 처리하지 않는다. 다른 창에 완전히 가려진 동안의 전력 사용(가설) | `apps/ugurugu/src/render.rs` 160·676행 | ANALYSIS_REPORT P-03 |
 | B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
 | B3-64 | 내보내기 중 닫기·업데이트가 묻지 않고 내보내기를 취소, 세션 종료 처리 없음 | 닫기는 문서가 수정됐을 때만 묻고, 끝날 때 진행 중 내보내기를 취소하고 지운다(`Files` 종료). `WM_QUERYENDSESSION`·`WM_ENDSESSION`을 다루지 않아 로그오프 때는 자동복구(마지막 변경 3초 뒤, 늦어도 30초)에 기댄다(winit 기본 동작에 따른 결과는 가설) | `apps/ugurugu/src/files.rs` 552~559·645행 | ANALYSIS_REPORT U-10 |
-| B3-65 | 파일 끌어다 놓기 미지원 | winit `DroppedFile`을 다루지 않는다. 다른 앱 이미지 붙여넣기는 된다 | `apps/ugurugu/src/app.rs` | ANALYSIS_REPORT U-15 |
 | B3-66 | 최근 파일 목록 없음 | 번역 키·메뉴 어디에도 없다 | `apps/ugurugu/src/ui/actions.rs` | ANALYSIS_REPORT U-17; 검토 6절 |
 | B3-67 | 릴리스 PDB를 보관하지 않음 | Release는 `debug = "line-tables-only"`로 PDB를 만들지만 패키지는 exe·LICENSE·고지 세 파일만 담고 `release-3.yml`도 PDB를 올리지 않는다. 네이티브 충돌 기록(모듈+오프셋)을 기호로 풀 수 없고, panic backtrace에도 함수 이름이 빠질 것으로 보인다(가설) | `Cargo.toml` `[profile.release]`, `tools/package_windows.ps1`, `.github/workflows/release-3.yml` | ANALYSIS_REPORT R-11 |
 | B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 링크와 Velopack 피드가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml` 176행 | ANALYSIS_REPORT R-12 |
@@ -137,7 +135,6 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-84 | 내보내는 탭을 닫으면 내보내기가 실패 | 깨끗한 탭은 묻지 않고 닫혀 그 탭의 캐시 작업자가 멈추고, 내보내기는 "the render worker has stopped"로 끝난다(전에는 끝나지 않았다, `cache::tests::an_export_asked_of_a_stopped_worker_gets_no_picture`). 작업자 join 동안 UI가 잠깐 멈출 수 있다(가설). B3-64는 창 닫기·업데이트만 다룬다 | `canvas.rs` `close_tab`, `cache.rs` `Drop`, `export.rs` | 검토 |
-| B3-85 | 창 크기·위치를 기억하지 않고 늘 1600×1000(논리) | 1366×768이나 1920×1080 150%에서 아래쪽이 작업 표시줄 밑으로 간다(가설). 최대화도 기억하지 않는다 | `apps/ugurugu/src/app.rs` | 검토 |
 | B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
 | B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
 | B3-88 | 손상된 `settings.json`을 백업 없이 덮어씀 | 읽지 못하면 기본값으로 시작하고(로그 경고만), 다음 설정 변경 때 기본값+그 변경으로 덮어써 예전 설정·단축키·배치가 사라진다 | `apps/ugurugu/src/settings.rs` | 검토 |

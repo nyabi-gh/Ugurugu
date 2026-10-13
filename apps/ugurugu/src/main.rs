@@ -40,7 +40,7 @@ fn main() -> ExitCode {
             ugu_win::association::unregister(ugu_win::association::CLASSES)
         })
         .run();
-    let document = std::env::args_os().nth(1).map(app::document_argument);
+    let document = app::document_in(std::env::args_os().skip(1));
     // One window, like Clip Studio Paint: a later start hands its document
     // to the window open, or just brings it to the front. The lock is held
     // until this start's own window can take later ones.

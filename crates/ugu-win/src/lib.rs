@@ -13,4 +13,5 @@ pub mod folder;
 pub mod instance;
 pub mod locale;
 pub mod memory;
+pub mod placement;
 pub mod pointer;

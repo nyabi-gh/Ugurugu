@@ -26,6 +26,7 @@ use ugu_session::Tools;
 
 use crate::layout::Layout;
 use crate::shortcuts::Shortcuts;
+use ugu_win::placement::Placement;
 
 pub mod preset;
 mod tools;
@@ -93,6 +94,8 @@ pub struct Settings {
     pub update_checked: Option<u64>,
     /// Where the panels are.
     pub layout: Layout,
+    /// Where the window was when it last closed.
+    pub window: Option<Placement>,
     /// Keys this version does not know, kept to be written back.
     unknown: Map<String, Value>,
 }
@@ -112,6 +115,7 @@ impl Default for Settings {
             check_updates: true,
             update_checked: None,
             layout: Layout::default(),
+            window: None,
             unknown: Map::new(),
         }
     }
@@ -132,6 +136,7 @@ impl Settings {
             shortcuts: self.shortcuts.restored(),
             update_checked: self.update_checked,
             layout: self.layout.clone(),
+            window: self.window,
             unknown: self.unknown.clone(),
             ..Self::default()
         }
@@ -225,6 +230,28 @@ impl Settings {
         if let Some(value) = object.remove("panels") {
             settings.layout = Layout::parse(&value);
         }
+        if let Some(value) = object.remove("window") {
+            let number = |key| {
+                value
+                    .get(key)
+                    .and_then(Value::as_i64)
+                    .and_then(|n| i32::try_from(n).ok())
+            };
+            let placement = match ["left", "top", "right", "bottom"].map(number) {
+                [Some(left), Some(top), Some(right), Some(bottom)] => Some(Placement {
+                    normal: [left, top, right, bottom],
+                    maximized: value
+                        .get("maximized")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                }),
+                _ => None,
+            };
+            match placement.filter(Placement::valid) {
+                Some(placement) => settings.window = Some(placement),
+                None => tracing::warn!(%value, "the window place in the settings is not one"),
+            }
+        }
         if !object.is_empty() {
             let keys: Vec<&String> = object.keys().collect();
             tracing::info!(?keys, "settings this version does not use are kept");
@@ -283,6 +310,22 @@ impl Settings {
         }
         if self.layout != Layout::default() {
             object.insert("panels".to_owned(), self.layout.to_json());
+        }
+        if let Some(Placement {
+            normal: [left, top, right, bottom],
+            maximized,
+        }) = self.window
+        {
+            object.insert(
+                "window".to_owned(),
+                serde_json::json!({
+                    "left": left,
+                    "top": top,
+                    "right": right,
+                    "bottom": bottom,
+                    "maximized": maximized,
+                }),
+            );
         }
         object
     }
@@ -642,8 +685,32 @@ mod tests {
                 );
                 layout
             },
+            window: Some(Placement {
+                normal: [-1700, 40, -100, 1040],
+                maximized: true,
+            }),
             unknown: Map::new(),
         }
+    }
+
+    #[test]
+    fn a_window_place_that_is_not_one_is_dropped_and_restoring_keeps_it() {
+        for bad in [
+            r#"{"window": {"left": 0, "top": 0, "right": 50, "bottom": 50}}"#,
+            r#"{"window": {"left": 0, "top": 0, "right": 5000000000, "bottom": 900}}"#,
+            r#"{"window": [0, 0, 900, 900]}"#,
+        ] {
+            assert_eq!(Settings::parse(bad).window, None, "{bad}");
+        }
+        let settings = Settings::parse(
+            r#"{"window": {"left": 10, "top": 20, "right": 1610, "bottom": 1020}}"#,
+        );
+        let placement = Some(Placement {
+            normal: [10, 20, 1610, 1020],
+            maximized: false,
+        });
+        assert_eq!(settings.window, placement);
+        assert_eq!(settings.restored().window, placement);
     }
 
     #[test]

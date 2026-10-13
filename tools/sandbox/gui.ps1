@@ -15,8 +15,8 @@ flipping the view, the eyedropper's cursor, the docks of a short window,
 the save dialog's added extension, the transform box's cursors, no blank
 frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
-keyboard focus, and a file opened from outside going to the open window as
-a tab.
+keyboard focus, a file opened from outside going to the open window as
+a tab, and the window opening where and as it closed.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -58,6 +58,7 @@ public static class Native
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
@@ -260,6 +261,10 @@ function Get-Rect($Process) {
     $rect = New-Object Native+RECT
     [void][Native]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)
     $rect
+}
+
+function Format-Rect($Rect) {
+    "$($Rect.Left),$($Rect.Top),$($Rect.Right),$($Rect.Bottom)"
 }
 
 # Labels and tooltips share names with controls, so the first element with
@@ -892,6 +897,40 @@ Step 'A file opened from outside becomes a tab of the open window' {
     Stop-Apps
     $detail = "launcher exited: $exited (code $(if ($exited) { $launch.ExitCode })); windows: $windows; restored: $restored; in front: $front; tab: $tab; $shot"
     if (-not $exited -or $launch.ExitCode -ne 0 -or $windows -ne 1 -or -not $restored -or -not $front -or -not $tab) {
+        throw $detail
+    }
+    $detail
+}
+
+Step 'The window opens where it closed' {
+    Stop-Apps
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $process = Start-App
+    [void][Native]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 300, 200, 1100, 700, 4)
+    Start-Sleep -Seconds 1
+    Close-App $process
+    $reopen = {
+        Start-Process -FilePath $app | Out-Null
+        $process = Wait-Window
+        [void](Get-Value $process (Read-Words 'en')['canvas-zoom-percent'])
+        Start-Sleep -Seconds 1
+        $process
+    }
+    $process = & $reopen
+    $first = Format-Rect (Get-Rect $process)
+    [void][Native]::ShowWindow($process.MainWindowHandle, 3)
+    Start-Sleep -Seconds 1
+    Close-App $process
+    $process = & $reopen
+    $maximized = [Native]::IsZoomed($process.MainWindowHandle)
+    [void][Native]::ShowWindow($process.MainWindowHandle, 9)
+    Start-Sleep -Seconds 1
+    $restored = Format-Rect (Get-Rect $process)
+    $shot = Save-Screen 'window-place'
+    Close-App $process
+    $expected = '300,200,1400,900'
+    $detail = "reopened at $first; maximized again: $maximized; restored to $restored; $shot"
+    if ($first -ne $expected -or -not $maximized -or $restored -ne $expected) {
         throw $detail
     }
     $detail

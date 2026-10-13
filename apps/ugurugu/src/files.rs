@@ -404,6 +404,7 @@ pub struct Files {
 enum Held {
     Path(PathBuf),
     Opened(PathBuf, Result<Opened, String>),
+    Dropped(PathBuf),
 }
 
 /// A fresh document id, from the same entropy as hash seeds.
@@ -944,6 +945,42 @@ impl Files {
         let _ = self.to_worker.send(Job::Open(path));
     }
 
+    /// A file dropped on the window: a document opens, as from another
+    /// start, an image is inserted and a tool preset taken, as when chosen.
+    pub fn drop_path(&mut self, path: PathBuf, canvas: &mut Canvas) {
+        if self.holding_tab() {
+            self.held.push_back(Held::Dropped(path));
+            return;
+        }
+        let extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let is = |kind: FileType| kind.extensions.contains(&extension.as_str());
+        if is(open_type()) {
+            self.open_path(path, canvas);
+        } else if is(image_type()) {
+            self.insert_from(path, canvas);
+        } else if is(tools_type()) {
+            self.import_tools_from(path);
+        } else {
+            self.fail(tr_with("drop-unsupported", &args_name(file_name(&path))));
+        }
+    }
+
+    fn insert_from(&mut self, path: PathBuf, canvas: &Canvas) {
+        let fit = canvas.session().document().canvas;
+        let _ = self.to_worker.send(Job::Insert {
+            path,
+            fit,
+            generation: canvas.generation(),
+        });
+    }
+
+    fn import_tools_from(&mut self, path: PathBuf) {
+        let _ = self.to_worker.send(Job::ReadTools(path));
+    }
+
     pub fn save(&mut self, canvas: &mut Canvas) {
         match canvas.file().path.clone() {
             Some(path) => self.start_save(path, canvas),
@@ -1440,17 +1477,8 @@ impl Files {
                             self.start_export(path, canvas, job);
                         }
                     }
-                    Purpose::InsertImage => {
-                        let fit = canvas.session().document().canvas;
-                        let _ = self.to_worker.send(Job::Insert {
-                            path,
-                            fit,
-                            generation: canvas.generation(),
-                        });
-                    }
-                    Purpose::ImportTools => {
-                        let _ = self.to_worker.send(Job::ReadTools(path));
-                    }
+                    Purpose::InsertImage => self.insert_from(path, canvas),
+                    Purpose::ImportTools => self.import_tools_from(path),
                     Purpose::ExportTools => {
                         let wobble = canvas.session().document().wobble;
                         let bytes = preset::write(canvas.tools(), wobble);
@@ -1693,6 +1721,7 @@ impl Files {
         {
             match held {
                 Held::Path(path) => self.open_path(path, canvas),
+                Held::Dropped(path) => self.drop_path(path, canvas),
                 Held::Opened(path, result) => {
                     self.opening += 1;
                     self.handle(FileEvent::Opened(path, result), canvas);
@@ -2411,6 +2440,40 @@ mod tests {
                 .unwrap()
                 .starts_with(tr("insert-image-failed"))
         );
+    }
+
+    #[test]
+    fn a_dropped_file_opens_inserts_or_says_why_not_by_its_type() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("drop");
+        let picture = folder.join("picture.PNG");
+        ugu_io::image::export(
+            &[200, 40, 90, 255].repeat(6),
+            [3, 2],
+            ugu_io::image::Format::Png,
+            &picture,
+            &ugu_win::file::replace_file,
+        )
+        .unwrap();
+        files.drop_path(picture, &mut canvas);
+        files.handle(next(&events), &mut canvas);
+        assert!(
+            canvas.session().pending().is_some(),
+            "{:?}",
+            files.message()
+        );
+
+        let drawing = folder.join("drawing.ugurugu");
+        let document = ugu_core::document::Document::new([40, 30]);
+        ugu_io::save::save(&document, [5; 16], &drawing, &ugu_win::file::replace_file).unwrap();
+        files.drop_path(drawing.clone(), &mut canvas);
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(canvas.file().path.as_deref(), Some(drawing.as_path()));
+        assert_eq!(canvas.tab_count(), 2);
+
+        files.drop_path(folder.join("notes.txt"), &mut canvas);
+        let refused = tr_with("drop-unsupported", &args_name("notes.txt".to_owned()));
+        assert_eq!(files.message(), Some(refused.as_str()));
     }
 
     #[test]

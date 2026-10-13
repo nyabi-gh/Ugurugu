@@ -118,6 +118,19 @@ impl App {
     }
 }
 
+/// The window's size before it has a place of its own: 1600 by 1000, made
+/// smaller on a screen of `monitor` (logical) to leave room for the taskbar
+/// and the title bar.
+fn first_size(monitor: Option<[f64; 2]>) -> winit::dpi::LogicalSize<f64> {
+    let [width, height] = monitor.map_or([1600.0, 1000.0], |[width, height]| {
+        [
+            (width * 0.9).min(1600.0).round(),
+            (height * 0.8).min(1000.0).round(),
+        ]
+    });
+    winit::dpi::LogicalSize::new(width, height)
+}
+
 fn hwnd_of(window: &Window) -> Result<isize, String> {
     let handle = window
         .window_handle()
@@ -144,7 +157,10 @@ impl Session {
             .with_class_name(WINDOW_CLASS)
             .with_window_icon(icon.clone())
             .with_taskbar_icon(icon)
-            .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 1000.0))
+            .with_inner_size(first_size(event_loop.primary_monitor().map(|monitor| {
+                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                [size.width, size.height]
+            })))
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
         let window = Arc::new(
@@ -158,6 +174,14 @@ impl Session {
         // drops the subclass before the window.
         let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
+        // Where it last closed: placed while hidden, then maximized and shown
+        // through winit, which keeps track of both.
+        if let Some(placement) = settings.get().window {
+            // SAFETY: the window is alive and owned by this thread.
+            if unsafe { ugu_win::placement::restore_to(hwnd_of(&window)?, &placement) } {
+                window.set_maximized(placement.maximized);
+            }
+        }
         window.set_visible(true);
         tracing::debug!("window shown");
 
@@ -377,9 +401,53 @@ pub fn document_argument(argument: std::ffi::OsString) -> std::path::PathBuf {
     std::path::absolute(&path).unwrap_or(path)
 }
 
+/// The first argument that is not an option (one starting with `-`, until a
+/// `--`), as a document; options this version does not have are passed by.
+pub fn document_in(
+    arguments: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let mut options = true;
+    arguments
+        .into_iter()
+        .find(|argument| {
+            if options && argument == "--" {
+                options = false;
+                return false;
+            }
+            !(options && argument.as_encoded_bytes().starts_with(b"-"))
+        })
+        .map(document_argument)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn options_are_not_taken_for_a_document() {
+        let document = |arguments: &[&str]| document_in(arguments.iter().map(Into::into));
+        assert_eq!(document(&[]), None);
+        assert_eq!(document(&["--help"]), None);
+        let file = r"C:\Drawings\cat.ugurugu";
+        assert_eq!(document(&["--later-option", file]), Some(file.into()));
+        assert_eq!(
+            document(&["--", "-dash.ugurugu"]),
+            Some(document_argument("-dash.ugurugu".into()))
+        );
+    }
+
+    #[test]
+    fn the_first_window_fits_a_small_screen() {
+        let size = |monitor| {
+            let size = first_size(monitor);
+            [size.width, size.height]
+        };
+        assert_eq!(size(None), [1600.0, 1000.0]);
+        assert_eq!(size(Some([2560.0, 1440.0])), [1600.0, 1000.0]);
+        // 1920 by 1080 at 150%, and 1366 by 768 at 100%.
+        assert_eq!(size(Some([1280.0, 720.0])), [1152.0, 576.0]);
+        assert_eq!(size(Some([1366.0, 768.0])), [1229.0, 614.0]);
+    }
 
     #[test]
     fn a_document_argument_is_made_absolute_in_windows_form() {
