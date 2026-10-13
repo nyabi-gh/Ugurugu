@@ -162,6 +162,8 @@ impl Session {
         tracing::debug!("window shown");
 
         let egui_ctx = egui::Context::default();
+        // Ctrl+Plus, Minus and 0 zoom the canvas, never the interface.
+        egui_ctx.options_mut(|options| options.zoom_with_keyboard = false);
         crate::theme::apply(&egui_ctx);
         crate::theme::set_accent(&egui_ctx, settings.get().accent);
         // `UGURUGU_UI_SCALE` draws the interface at that percentage whatever
