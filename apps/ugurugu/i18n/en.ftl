@@ -44,6 +44,7 @@ export-close-text = Closing now stops the export.
 export-close-wait = Close When Done
 export-close-stop = Stop and Close
 close-after-export = Closes when the export is done
+settings-set-aside = The settings could not be read, so the defaults are used; the old file is kept as { $name }
 close-waits = Closes when saving or opening is done
 tab-failed = A new tab could not be opened; the log folder in Settings > About has the details
 dialog-failed = The file dialog could not be opened; the log folder in Settings > About has the details

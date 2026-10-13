@@ -142,21 +142,27 @@ impl Settings {
         }
     }
 
-    /// Reads settings from `text`. Anything unreadable is left at its default
-    /// and logged.
+    /// Reads settings from `text`, the defaults when it holds none.
+    #[cfg(test)]
     fn parse(text: &str) -> Self {
+        Self::read(text).unwrap_or_default()
+    }
+
+    /// Reads settings from `text`. A value that cannot be read is left at
+    /// its default and logged; `None` when `text` is no JSON object at all.
+    fn read(text: &str) -> Option<Self> {
         let mut settings = Self::default();
         // Notepad may have saved it with a byte order mark.
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut object = match serde_json::from_str::<Value>(text) {
             Ok(Value::Object(object)) => object,
             Ok(_) => {
-                tracing::warn!("the settings file is not a JSON object; using the defaults");
-                return settings;
+                tracing::warn!("the settings file is not a JSON object");
+                return None;
             }
             Err(error) => {
-                tracing::warn!(%error, "the settings file cannot be read; using the defaults");
-                return settings;
+                tracing::warn!(%error, "the settings file cannot be read");
+                return None;
             }
         };
         if object.get("format").and_then(Value::as_str) != Some(FORMAT) {
@@ -257,7 +263,7 @@ impl Settings {
             tracing::info!(?keys, "settings this version does not use are kept");
         }
         settings.unknown = object;
-        settings
+        Some(settings)
     }
 
     #[cfg(test)]
@@ -390,15 +396,48 @@ pub fn default_path() -> Option<PathBuf> {
     )
 }
 
-fn load(path: &Path) -> Settings {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Settings::parse(&text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+/// The settings at `path`, and where a file there that held none was moved
+/// to, so that writing the defaults does not lose it.
+fn load(path: &Path) -> (Settings, Option<PathBuf>) {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (Settings::default(), None);
+        }
+        // Left as it is: writing reads it again and fails the same way.
         Err(error) => {
             tracing::warn!(%error, ?path, "the settings file cannot be opened; using the defaults");
-            Settings::default()
+            return (Settings::default(), None);
+        }
+    };
+    if let Some(settings) = Settings::read(&text) {
+        return (settings, None);
+    }
+    match set_aside(path) {
+        Ok(kept) => {
+            tracing::warn!(?kept, "using the default settings; the file is kept");
+            (Settings::default(), Some(kept))
+        }
+        Err(error) => {
+            tracing::warn!(%error, ?path, "using the default settings; the file could not be kept");
+            (Settings::default(), None)
         }
     }
+}
+
+/// Moves the file at `path` beside it, named for now, and says where.
+fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let stamp = ugu_win::clock::local_stamp().unwrap_or_else(|| "unknown".to_owned());
+    let mut kept = path.with_file_name(format!("{stem}-unreadable-{stamp}.json"));
+    for again in 2.. {
+        if !kept.exists() {
+            break;
+        }
+        kept = path.with_file_name(format!("{stem}-unreadable-{stamp}-{again}.json"));
+    }
+    std::fs::rename(path, &kept)?;
+    Ok(kept)
 }
 
 /// Writes what changed from `base` to `settings` over the file at `path` as
@@ -421,8 +460,13 @@ fn write_changes_over(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
-    // One that cannot be read is replaced, as at start.
+    // One that cannot be read is kept beside it and replaced, as at start;
+    // left in place, and not written over, if it cannot be moved.
     let Some(mut merged) = on_disk else {
+        if path.exists() {
+            let kept = set_aside(path)?;
+            tracing::warn!(?kept, "the settings file had become unreadable; it is kept");
+        }
         return write_text(path, &to_text(current));
     };
     for key in base.keys().chain(current.keys()) {
@@ -495,6 +539,8 @@ fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
 pub struct Store {
     settings: Settings,
     writer: Option<Writer>,
+    /// Where an unreadable settings file found at start was moved to.
+    set_aside: Option<PathBuf>,
 }
 
 struct Writer {
@@ -517,13 +563,19 @@ impl Store {
 
     /// Reads the settings at `path`; `None` keeps them only in memory.
     pub fn open(path: Option<PathBuf>) -> Self {
-        let settings = path.as_deref().map(load).unwrap_or_default();
+        let (settings, set_aside) = path.as_deref().map(load).unwrap_or_default();
         tracing::debug!(?path, ?settings, "settings read");
         let base = settings.to_object();
         Self {
             settings,
             writer: path.map(|path| Writer::spawn(path, base)),
+            set_aside,
         }
+    }
+
+    /// Where an unreadable settings file found at start was moved to, once.
+    pub fn take_set_aside(&mut self) -> Option<PathBuf> {
+        self.set_aside.take()
     }
 
     pub fn get(&self) -> &Settings {
@@ -760,6 +812,39 @@ mod tests {
         }
         let marked = Settings::parse("\u{feff}{\"language\": \"ko\"}");
         assert_eq!(marked.language, Language::Korean);
+    }
+
+    #[test]
+    fn an_unreadable_file_is_kept_beside_the_defaults_written_over_it() {
+        let folder = Folder::new("unreadable");
+        let path = folder.settings();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let broken = "{\"language\": \"ko\", \"shortcuts\": {";
+        std::fs::write(&path, broken).unwrap();
+        let mut store = Store::open(Some(path.clone()));
+        assert_eq!(*store.get(), Settings::default());
+        let kept = store.take_set_aside().expect("the file is kept");
+        assert_eq!(store.take_set_aside(), None);
+        store.change(|settings| settings.pixel_grid = false);
+        drop(store);
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), broken);
+        assert!(!Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
+
+        // Broken while the window runs: kept again before it is written over.
+        let mut store = Store::open(Some(path.clone()));
+        std::fs::write(&path, "not json").unwrap();
+        store.change(|settings| settings.pixel_grid = true);
+        drop(store);
+        let names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        let kept_again: Vec<&String> = names
+            .iter()
+            .filter(|name| name.starts_with("settings-unreadable-"))
+            .collect();
+        assert_eq!(kept_again.len(), 2, "{names:?}");
+        assert!(Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
     }
 
     #[test]

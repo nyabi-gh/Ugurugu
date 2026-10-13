@@ -104,7 +104,6 @@
 
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-58 | 읽지 못한 복구 폴더(`failed-…`)가 상한·기한 없이 쌓임 | 손상 복구 폴더를 지우지 않고 `failed-<시각>-<이름>`으로 옮긴 뒤 다시 보지 않는다. 정리 코드가 없다. 폴더마다 문서 2세대 | `apps/ugurugu/src/recovery.rs` `FAILED`, `set_aside`, `begin` | ANALYSIS_REPORT B-13 ① |
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
 | B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈춘다. winit 0.30.13은 Windows에서 `Occluded`를 보내지 않으므로(문서에 Unsupported) 그것으로는 고칠 수 없다. 하려면 `DWMWA_CLOAKED`(가상 데스크톱), 세션 잠금, 화면 꺼짐을 `ugu-win`에서 받아 최소화처럼 다룬다. 가려진 동안의 전력 사용은 재지 않았다(가설). 먼저 잰다 | `apps/ugurugu/src/render.rs` `minimized` | ANALYSIS_REPORT P-03 |
 | B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
@@ -135,8 +134,6 @@
 |---|---|---|---|---|
 | B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
 | B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
-| B3-88 | 손상된 `settings.json`을 백업 없이 덮어씀 | 읽지 못하면 기본값으로 시작하고(로그 경고만), 다음 설정 변경 때 기본값+그 변경으로 덮어써 예전 설정·단축키·배치가 사라진다 | `apps/ugurugu/src/settings.rs` | 검토 |
-| B3-89 | 복구 쪽 작은 결함 | 읽지 못하는 복구 폴더 하나가 `begin` 전체를 실패시켜 그 창은 복구 없이 돈다(경고 뒤 건너뛰어야). 탭 이전 형식 창 폴더에 남은 임시 파일은 폴더를 영영 남긴다(`holds_nothing`). 계속 실패하는 복구 쓰기는 바뀐 것이 없어도 3초마다 다시 시도한다(실패 때 `written = None`). 두 창이 거의 동시에 시작하면 한 창이 다른 창의 빈 폴더를 지워 그 창이 복구 없이 돌 수 있다(가설: 폴더를 만든 뒤 잠그기 전) | `apps/ugurugu/src/recovery.rs` `begin`, `holds_nothing`, `lock`; `files.rs` 복구 쓰기 | 검토 |
 | B3-91 | 작은 상호작용 결함 | 선택 영역을 끌다가 Ctrl+Tab하면 숨은 탭에 lasso가 남는다(`leave_tab`이 `cancel_selection`을 부르지 않음). 좁은 창에서 패널 위젯(슬라이더·메뉴·버튼)을 누르는 동안 줄어든 패널 폭이 저장된다(캔버스 그리기는 egui에 가지 않으므로 아님). 다음·이전 탭 단축키를 바꾸면 편집기가 Tab 조합을 받지 않아 되돌릴 수 없다(모든 설정 기본값으로만) | `canvas.rs` `leave_tab`, `ui/dock.rs` 폭 저장, `shortcuts.rs` `assignable` | 검토 |
 | B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |

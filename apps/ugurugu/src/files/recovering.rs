@@ -260,11 +260,12 @@ fn recovered_work_stays_where_it_was_until_it_is_written_here() {
     assert_eq!(written(&mut files, &mut canvas, &events), [0u64; 0]);
     written(&mut files, &mut canvas, &events);
     assert!(crashed.exists());
-    // The next one, unchanged work tried again, succeeds.
+    // The next one, unchanged work tried again after the longest wait,
+    // succeeds.
     std::fs::remove_dir(own.join("1.json")).unwrap();
-    let start = Instant::now();
-    files.keep_recovery(&mut canvas, start);
-    files.keep_recovery(&mut canvas, start + recovery::QUIET);
+    let later = Instant::now() + recovery::LONGEST;
+    files.keep_recovery(&mut canvas, later);
+    files.keep_recovery(&mut canvas, later + recovery::QUIET);
     assert_eq!(written(&mut files, &mut canvas, &events), [2]);
     written(&mut files, &mut canvas, &events);
     assert!(!crashed.exists());
@@ -362,4 +363,31 @@ fn as_the_session_ends_every_tab_s_unsaved_work_is_written_at_once() {
     // Nothing is removed: the next start asks about it.
     drop(files);
     assert!(recovery::tab_folder(&own, 1).join("1.ugurugu").exists());
+}
+
+#[test]
+fn a_write_that_fails_is_tried_again_once_the_work_changes_or_after_the_longest_wait() {
+    let root = Root::new("files-failing");
+    let (mut files, mut canvas, events) = setup(&root);
+    // A file where the tab's folder goes: every write fails.
+    std::fs::write(
+        recovery::tab_folder(&folder(&files), canvas.generation()),
+        b"",
+    )
+    .unwrap();
+    canvas.edit(Session::add_layer).unwrap();
+    let start = Instant::now();
+    files.keep_recovery(&mut canvas, start);
+    files.keep_recovery(&mut canvas, start + recovery::QUIET);
+    let written = next(&events);
+    assert!(matches!(written, FileEvent::RecoveryWritten(_, _, Err(_))));
+    files.handle(written, &mut canvas);
+    files.keep_recovery(&mut canvas, start + recovery::QUIET * 2);
+    assert_eq!(files.recovery_due(), None, "unchanged, not tried again");
+    files.keep_recovery(&mut canvas, start + recovery::LONGEST * 2);
+    assert!(files.recovery_due().is_some(), "tried again after a while");
+    canvas.edit(Session::add_layer).unwrap();
+    files.keep_recovery(&mut canvas, start + recovery::QUIET * 2);
+    assert!(files.recovery_due().is_some(), "changed, tried again");
+    files.end();
 }

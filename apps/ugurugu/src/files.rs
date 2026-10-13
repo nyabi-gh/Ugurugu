@@ -295,6 +295,9 @@ struct TabRecovery {
     /// is now.
     unwritten: Option<(Instant, Instant, Mark)>,
     writing: bool,
+    /// The work whose write failed last, and when: written again once it
+    /// changes, or after `recovery::LONGEST`.
+    failed: Option<(Mark, Instant)>,
     /// Work recovered from another folder, removed once write `.0` or a
     /// later one is on disk here, or the work is saved, dropped or closed.
     handoff: Option<(u64, Found)>,
@@ -569,7 +572,10 @@ impl Files {
             } else {
                 Mark::of_session(generation, session)
             };
-            if tab.written.as_ref() == Some(&mark) {
+            let failed_lately = tab.failed.as_ref().is_some_and(|(failed, at)| {
+                *failed == mark && now < *at + recovery::LONGEST && !all
+            });
+            if tab.written.as_ref() == Some(&mark) || failed_lately {
                 tab.unwritten = None;
                 continue;
             }
@@ -742,7 +748,7 @@ impl Files {
     }
 
     /// Says what failed, kept until something else is said.
-    fn fail(&mut self, text: String) {
+    pub fn fail(&mut self, text: String) {
         self.say(text);
         self.failing = true;
     }
@@ -1702,6 +1708,7 @@ impl Files {
                 match result {
                     Ok(()) => {
                         recovering.failing = false;
+                        tab.failed = None;
                         if tab
                             .handoff
                             .as_ref()
@@ -1713,8 +1720,9 @@ impl Files {
                     }
                     Err(error) => {
                         tracing::error!(%error, "cannot write the work for recovery");
-                        // Tried again once the work changes.
-                        tab.written = None;
+                        if let Some(mark) = tab.written.take() {
+                            tab.failed = Some((mark, Instant::now()));
+                        }
                         if !std::mem::replace(&mut recovering.failing, true) {
                             self.fail(tr("recovery-not-saving").to_owned());
                         }

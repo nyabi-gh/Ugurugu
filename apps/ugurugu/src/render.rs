@@ -390,6 +390,13 @@ impl RenderThread {
             &mut render.files,
             &mut render.panels,
         );
+        if let Some(kept) = render.settings.take_set_aside() {
+            let name = kept.file_name().unwrap_or_default().to_string_lossy();
+            render.files.fail(crate::i18n::tr_with(
+                "settings-set-aside",
+                &crate::i18n::args([("name", name.into_owned())]),
+            ));
+        }
         if let Some(path) = open_at_start {
             render.files.open_path(path, &mut render.canvas);
         }

@@ -27,6 +27,8 @@ pub const LONGEST: Duration = Duration::from_secs(30);
 const LOCK: &str = "lock";
 /// Folders whose work could not be read; kept for the user, never offered.
 const FAILED: &str = "failed-";
+/// How long they are kept.
+const FAILED_KEPT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const FORMAT: &str = "ugurugu.recovery";
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
@@ -128,10 +130,17 @@ impl Drop for Left {
     }
 }
 
-/// Whether nothing but a lock is in `folder`.
+/// Whether nothing but a lock and temporary files is in `folder`. Its
+/// window has ended, so a temporary file is one a write left unfinished.
 fn holds_nothing(folder: &Path) -> bool {
     std::fs::read_dir(folder).is_ok_and(|mut entries| {
-        entries.all(|entry| entry.is_ok_and(|entry| entry.file_name() == LOCK))
+        entries.all(|entry| {
+            entry.is_ok_and(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name == LOCK || (name.starts_with('.') && name.ends_with(".tmp"))
+            })
+        })
     })
 }
 
@@ -160,6 +169,17 @@ fn lock(folder: &Path) -> io::Result<File> {
         .write(true)
         .create(true)
         .truncate(false)
+        .share_mode(0)
+        .open(folder.join(LOCK))
+}
+
+/// As `lock`, for another window's folder. One without a lock is being made
+/// by a window starting now, which makes and holds its lock at once, so it
+/// is not taken: `NotFound`.
+fn lock_left(folder: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
         .share_mode(0)
         .open(folder.join(LOCK))
 }
@@ -232,12 +252,25 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
     for entry in std::fs::read_dir(root)?.flatten() {
         let folder = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
-        if folder == session || name.starts_with(FAILED) || !folder.is_dir() {
+        if folder == session || !folder.is_dir() {
             continue;
         }
-        let lock = match lock(&folder) {
+        if name.starts_with(FAILED) {
+            if failed_long_ago(&name)
+                && let Err(error) = std::fs::remove_dir_all(&folder)
+            {
+                tracing::warn!(%error, folder = %folder.display(), "cannot remove old recovery work that did not read");
+            }
+            continue;
+        }
+        let lock = match lock_left(&folder) {
             Ok(lock) => lock,
-            Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => continue,
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+                    || error.kind() == io::ErrorKind::NotFound =>
+            {
+                continue;
+            }
             Err(error) => {
                 tracing::warn!(%error, folder = %folder.display(), "cannot look at a recovery folder");
                 continue;
@@ -249,12 +282,19 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
         });
         // The window's own document from before tabs, then its tabs'.
         let mut places = vec![folder.clone()];
-        places.extend(
-            std::fs::read_dir(&folder)?
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.is_dir()),
-        );
+        match std::fs::read_dir(&folder) {
+            Ok(entries) => places.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir()),
+            ),
+            // Its tabs are left for a later start; the other folders go on.
+            Err(error) => {
+                tracing::warn!(%error, folder = %folder.display(), "cannot look in a recovery folder");
+                continue;
+            }
+        }
         for place in places {
             match generations(&place).into_iter().next() {
                 Some((_, meta)) => found.push(Found {
@@ -365,8 +405,24 @@ pub fn discard(found: Found) -> io::Result<()> {
     }
 }
 
+/// Whether a folder set aside as `name` was set aside longer ago than it is
+/// kept.
+fn failed_long_ago(name: &str) -> bool {
+    let Some(seconds) = name
+        .strip_prefix(FAILED)
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|time| time.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    now.saturating_sub(Duration::from_secs(seconds)) > FAILED_KEPT
+}
+
 /// Moves a folder whose work could not be read out of the way, where the
-/// user can still find it; returns where.
+/// user can still find it for `FAILED_KEPT`; returns where.
 pub fn set_aside(found: Found) -> io::Result<PathBuf> {
     let window = &found.window.folder;
     let time = SystemTime::now()
@@ -522,6 +578,7 @@ pub(crate) mod tests {
         // One that does not read either is set aside, never removed.
         let broken = root.0.join("broken");
         std::fs::create_dir_all(&broken).unwrap();
+        File::create(broken.join(LOCK)).unwrap();
         std::fs::write(document_path(&broken, 0), b"not a document").unwrap();
         let (_own, found) = begin(&root.0, &root.0.join("third")).unwrap();
         assert!(found.iter().all(|found| found.folder != broken));
@@ -583,6 +640,78 @@ pub(crate) mod tests {
         end(&root.0.join("new"), own).unwrap();
         drop(running_lock);
         assert_eq!(root.names(), ["running"]);
+    }
+
+    #[test]
+    fn a_folder_a_starting_window_has_made_but_not_locked_is_left_to_it() {
+        let root = Root::new("starting");
+        let starting = root.0.join("starting");
+        std::fs::create_dir_all(&starting).unwrap();
+        let (_own, found) = begin(&root.0, &root.0.join("next")).unwrap();
+        assert!(found.is_empty());
+        assert!(starting.exists());
+        assert!(begin(&root.0, &starting).is_ok());
+    }
+
+    #[test]
+    fn a_left_folder_that_cannot_be_looked_in_does_not_stop_the_start() {
+        let root = Root::new("unlisted");
+        let crashed = root.0.join("crashed");
+        let (held, _) = begin(&root.0, &crashed).unwrap();
+        write(&tab_folder(&crashed, 1), &document(11), [1; 16], &meta(1)).unwrap();
+        drop(held);
+        let everyone_may_not_list = |how: &str| {
+            let status = std::process::Command::new("icacls")
+                .arg(&crashed)
+                .args(how.split(' '))
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "icacls {how}");
+        };
+        everyone_may_not_list("/deny *S-1-1-0:(RD)");
+        let begun = begin(&root.0, &root.0.join("next"));
+        everyone_may_not_list("/remove:d *S-1-1-0");
+        let (_own, found) = begun.unwrap();
+        assert!(found.is_empty());
+        // Its work is offered at a later start.
+        let (_own, found) = begin(&root.0, &root.0.join("later")).unwrap();
+        assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn a_left_window_folder_goes_with_its_work_despite_unfinished_writes() {
+        let root = Root::new("unfinished");
+        let crashed = root.0.join("crashed");
+        let (held, _) = begin(&root.0, &crashed).unwrap();
+        // As a window from before tabs wrote it.
+        write(&crashed, &document(11), [1; 16], &meta(1)).unwrap();
+        std::fs::write(crashed.join(".1.ugurugu.4242-0.tmp"), b"part").unwrap();
+        drop(held);
+        let (_own, mut found) = begin(&root.0, &root.0.join("next")).unwrap();
+        discard(found.pop().unwrap()).unwrap();
+        assert!(!crashed.exists());
+    }
+
+    #[test]
+    fn work_that_did_not_read_is_kept_thirty_days() {
+        let root = Root::new("failed-age");
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let day = 24 * 60 * 60;
+        for (name, age) in [("old", 31 * day), ("recent", 29 * day)] {
+            std::fs::create_dir_all(root.0.join(format!("{FAILED}{}-{name}", now - age))).unwrap();
+        }
+        let (_own, _) = begin(&root.0, &root.0.join("next")).unwrap();
+        assert_eq!(
+            root.names(),
+            [
+                format!("{FAILED}{}-recent", now - 29 * day),
+                "next".to_owned()
+            ]
+        );
     }
 
     #[test]
