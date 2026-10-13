@@ -660,7 +660,9 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
     foreach ($language in $Languages) {
         $words = Read-Words $language
         # Each shot starts from a fresh window, so one that fails leaves
-        # nothing open for the next. Settings open with Ctrl+,.
+        # nothing open for the next. Settings open with Ctrl+,, and their
+        # pages are pressed by the whole name: "Files" in Korean and Japanese
+        # starts the File menu's name too.
         $shots = [ordered]@{
             'main' = { param($p) }
             'menu-file' = { param($p) Invoke-Word $p $words 'menu-file' }
@@ -677,9 +679,9 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
             'pixel-mode' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'pixel-mode' }
             'settings-general' = { param($p) Send-Keys $p '^,' }
-            'settings-drawing' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-drawing' }
-            'settings-files' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-files' }
-            'settings-shortcuts' = { param($p) Send-Keys $p '^,'; Invoke-Word $p $words 'settings-shortcuts' }
+            'settings-drawing' = { param($p) Send-Keys $p '^,'; Invoke-Named $p $words['settings-drawing'] }
+            'settings-files' = { param($p) Send-Keys $p '^,'; Invoke-Named $p $words['settings-files'] }
+            'settings-shortcuts' = { param($p) Send-Keys $p '^,'; Invoke-Named $p $words['settings-shortcuts'] }
             'settings-about' = { param($p) Invoke-Word $p $words 'menu-help'; Invoke-Word $p $words 'help-about' }
             'new-document' = { param($p) Send-Keys $p '^n' }
             'image-size' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'edit-image-size' }
