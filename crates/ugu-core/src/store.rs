@@ -112,6 +112,11 @@ impl Brush {
         wobble_scale: 1.0,
         antialias: false,
     };
+
+    /// Whether spray particles land elsewhere on each frame.
+    pub fn scatters_each_frame(&self) -> bool {
+        self.engine == BrushEngine::Spray && self.animated_jitter && self.wobble_scale > 0.0
+    }
 }
 
 impl Default for Brush {

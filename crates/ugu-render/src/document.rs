@@ -22,7 +22,6 @@ use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use vello_cpu::peniko::{BlendMode, Compose, ImageQuality, ImageSampler, Mix};
 use vello_cpu::{Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, Resources};
 
-use crate::compose::premultiplied;
 use crate::composite::{self, Source};
 use crate::dab::{self, Dab};
 use crate::mask::Runs;
@@ -637,11 +636,7 @@ impl DocumentRenderer {
                     .map_or(Source::Empty, |cached| Source::Tiles(&cached.surface))
             })
             .collect();
-        let background = if plan.purpose == Purpose::Reference {
-            [0; 4]
-        } else {
-            premultiplied(document.background.0)
-        };
+        let background = plan.background(document);
         let rect = [0, 0, u32::from(width), u32::from(height)];
         let finished = composite::evaluate(
             &composite::program(plan),
@@ -2709,7 +2704,7 @@ mod tests {
         let coverage = add_mask(&mut document, [10, 4, 70, 40], blob);
         let clip = add_mask(&mut document, [0, 0, 96, 30], |_, _| true);
         let half_green = Rgba8([0, 255, 0, 128]);
-        let green = premultiplied(half_green.0);
+        let green = crate::compose::premultiplied(half_green.0);
         let under = render(
             &with_ops(
                 &document,
@@ -3568,6 +3563,53 @@ mod tests {
     }
 
     #[test]
+    fn strokes_that_move_without_wobble_are_drawn_on_every_frame() {
+        let still = Wobble::classic(0.0);
+        let broken = Wobble {
+            motion: Motion {
+                broken: true,
+                break_amount: 0.5,
+                break_range: 8.0,
+                ..Motion::DEFAULT
+            },
+            ..still
+        };
+        let mut spray = Document::new([96, 72]);
+        spray.wobble = still;
+        let brush = ugu_core::brush::find("wobble-spray").unwrap().brush;
+        let stroke = brushed(
+            &mut spray,
+            brush,
+            44.0,
+            [0, 0, 0, 255],
+            &[(18.0, 36.0, 1.0), (78.0, 36.0, 1.0)],
+        );
+        let spray = with_ops(&spray, vec![paint(stroke)]);
+        let mut line = Document::new([96, 72]);
+        line.wobble = broken;
+        let stroke = self::line(&mut line, 8.0, 88.0, 36.0, BLUE, true);
+        line.store
+            .strokes
+            .get_mut(&stroke)
+            .unwrap()
+            .brush
+            .wobble_scale = 0.0;
+        let line = with_ops(&line, vec![paint(stroke)]);
+        for document in [spray, line] {
+            assert!(
+                render(&document, 0, 0).data_as_u8_slice()
+                    != render(&document, 1, 0).data_as_u8_slice()
+            );
+            let revisions = LayerRevisions::default();
+            let mut renderer = DocumentRenderer::new(0);
+            let drawn: Vec<usize> = (0..4)
+                .map(|frame| cached(&mut renderer, &document, frame, &revisions))
+                .collect();
+            assert_eq!(drawn, [1, 1, 1, 1]);
+        }
+    }
+
+    #[test]
     fn a_marker_has_square_ends() {
         let mut document = Document::new([96, 48]);
         document.background = Rgba8([0, 0, 0, 0]);
@@ -3940,21 +3982,33 @@ mod tests {
     }
 
     fn over_the_budget(document: &Document) {
-        let document = document.clone();
-        let plan = RenderPlan::new(&document, Purpose::Display);
+        let mut opaque = document.clone();
+        opaque.background = Rgba8([250, 245, 235, 255]);
+        for document in [document, &opaque] {
+            let plans = [
+                RenderPlan::new(document, Purpose::Display),
+                RenderPlan::reference(document, crate::plan::Reference::Visible),
+            ];
+            for plan in &plans {
+                over_the_budget_as(document, plan);
+            }
+        }
+    }
+
+    fn over_the_budget_as(document: &Document, plan: &RenderPlan) {
         for shrink in [1, 2] {
             let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
             for frame in [0, 3] {
                 let mut kept = Pixmap::new(size[0], size[1]);
                 DocumentRenderer::new(0)
-                    .render_scaled(&document, &plan, frame, None, shrink, &mut kept);
+                    .render_scaled(document, plan, frame, None, shrink, &mut kept);
                 for threads in [0, 8] {
                     let mut renderer = DocumentRenderer::new(threads);
                     renderer.set_surface_budget(0);
                     let mut streamed = Pixmap::new(size[0], size[1]);
                     assert!(renderer.render_scaled(
-                        &document,
-                        &plan,
+                        document,
+                        plan,
                         frame,
                         None,
                         shrink,
@@ -3962,7 +4016,8 @@ mod tests {
                     ));
                     assert!(
                         streamed.data_as_u8_slice() == kept.data_as_u8_slice(),
-                        "1/{shrink} frame {frame} on {threads} threads"
+                        "{:?} 1/{shrink} frame {frame} on {threads} threads",
+                        plan.purpose
                     );
                     assert_eq!(renderer.surface_bytes(), 0);
                 }

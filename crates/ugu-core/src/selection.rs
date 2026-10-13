@@ -1107,6 +1107,8 @@ mod tests {
             Affine::scaling_about([0.0, 1.0], [0.0, 0.0]).inverse(),
             None
         );
+        // Finite, but its inverse moves past the largest float.
+        assert_eq!(Affine([1e-300, 0.0, 1e100, 0.0, 1.0, 0.0]).inverse(), None);
     }
 
     #[test]

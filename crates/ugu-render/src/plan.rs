@@ -104,6 +104,16 @@ impl RenderPlan {
         plan
     }
 
+    /// What the layers go over, premultiplied: transparency for a tool
+    /// reading the frame, the document's background otherwise.
+    pub fn background(&self, document: &Document) -> [u8; 4] {
+        if self.purpose == Purpose::Reference {
+            [0; 4]
+        } else {
+            crate::compose::premultiplied(document.background.0)
+        }
+    }
+
     /// Whether paint layer `id` is drawn, and whether it moves.
     pub fn moves(&self, id: LayerId) -> Option<bool> {
         self.layers
@@ -166,11 +176,11 @@ impl RenderPlan {
 fn moves(ops: &[Op], store: &Store, document: Wobble, wobble: Wobble) -> bool {
     ops.iter().any(|op| match op {
         Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
-            wobble.amount > 0.0
-                && store
-                    .strokes
-                    .get(stroke)
-                    .is_some_and(|stroke| stroke.brush.wobble_scale > 0.0)
+            store.strokes.get(stroke).is_some_and(|stroke| {
+                wobble.motion.broken
+                    || (wobble.amount > 0.0 && stroke.brush.wobble_scale > 0.0)
+                    || stroke.brush.scatters_each_frame()
+            })
         }
         Op::Isolated(section) => moves(
             &section.ops,

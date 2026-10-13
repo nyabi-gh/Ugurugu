@@ -111,7 +111,7 @@ impl DocumentRenderer {
             frame,
             shrink,
         };
-        let background = crate::compose::premultiplied(document.background.0);
+        let background = plan.background(document);
         match self.stream(&run, &tree(&plan.steps), Some(background)) {
             Some(done) => {
                 *pixmap = done;
@@ -136,7 +136,7 @@ impl DocumentRenderer {
             shrink: 1,
         };
         let nodes = tree(&plan.steps);
-        let background = crate::compose::premultiplied(document.background.0);
+        let background = plan.background(document);
         let mut program = Program {
             puts: Vec::new(),
             sources: Vec::new(),

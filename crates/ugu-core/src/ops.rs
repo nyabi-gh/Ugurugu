@@ -81,7 +81,7 @@ impl Affine {
         ])
     }
 
-    /// `None` when it flattens the plane or is not finite.
+    /// `None` when it flattens the plane, or it or its inverse is not finite.
     pub fn inverse(&self) -> Option<Self> {
         let [a, b, c, d, e, f] = self.0;
         let determinant = a * e - b * d;
@@ -89,14 +89,11 @@ impl Affine {
             return None;
         }
         let [ia, ib, id, ie] = [e, -b, -d, a].map(|value| value / determinant);
-        Some(Self([
-            ia,
-            ib,
-            -(ia * c + ib * f),
-            id,
-            ie,
-            -(id * c + ie * f),
-        ]))
+        let inverse = [ia, ib, -(ia * c + ib * f), id, ie, -(id * c + ie * f)];
+        inverse
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(Self(inverse))
     }
 }
 

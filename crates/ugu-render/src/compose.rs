@@ -295,7 +295,7 @@ impl DocumentRenderer {
             frame: cycle,
             edited: plan.layers.iter().position(|(id, _)| *id == layer),
             puts: composite::program(&plan),
-            background: Some(premultiplied(document.background.0)),
+            background: Some(plan.background(document)),
             sources,
             layers: Some(plan.layers.iter().map(|(id, _)| *id).collect()),
         })

@@ -117,7 +117,7 @@ pub fn dabs_of(
         }
         BrushEngine::Spray => {
             let count = ((f64::from(brush.density) * 6.0).round() as usize).clamp(1, 24);
-            let still = if brush.animated_jitter && brush.wobble_scale > 0.0 {
+            let still = if brush.scatters_each_frame() {
                 frame
             } else {
                 0
