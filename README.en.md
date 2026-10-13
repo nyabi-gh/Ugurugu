@@ -30,8 +30,7 @@ Save your moving drawings as GIF or WebP and share them anywhere.
 | Windows | Windows 10 or later, 64-bit | [Latest release](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
 | macOS (2.2.13) | macOS 14 or later, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-Download `Ugurugu-<version>-Windows-x64-Setup.exe` from the latest release and run it.
-If "Windows protected your PC" appears, choose **More info → Run anyway**.
+If "Windows protected your PC" appears during setup, choose **More info → Run anyway**.
 
 ## Getting started
 

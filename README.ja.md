@@ -30,8 +30,7 @@
 | Windows | Windows 10 以降、64 ビット | [最新リリース](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
 | macOS (2.2.13) | macOS 14 以降、Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-最新リリースから `Ugurugu-バージョン-Windows-x64-Setup.exe` をダウンロードして実行してください。
-「Windows によって PC が保護されました」と表示されたら、**詳細情報 → 実行** を選んでください。
+インストール時に「Windows によって PC が保護されました」と表示されたら、**詳細情報 → 実行** を選んでください。
 
 ## はじめに
 

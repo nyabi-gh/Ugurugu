@@ -30,8 +30,7 @@
 | Windows | Windows 10 이상, 64비트 | [최신 릴리스](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
 | macOS (2.2.13) | macOS 14 이상, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-최신 릴리스에서 `Ugurugu-버전-Windows-x64-Setup.exe`를 받아 실행하세요. 설치할 때
-"Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누르면 됩니다.
+설치할 때 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누르면 됩니다.
 
 ## 처음 시작하기
 
