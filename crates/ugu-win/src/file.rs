@@ -11,6 +11,7 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, STILL_ACT
 use windows::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows_sys::Win32::Foundation::ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
 use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACEFILE_IGNORE_MERGE_ERRORS, ReplaceFileW,
 };
@@ -23,31 +24,49 @@ fn wide(path: &Path) -> Vec<u16> {
 /// `ReplaceFileW`, which keeps its attributes and security; a new one is a
 /// write-through move that fails if the target appeared meanwhile.
 ///
-/// On error the target keeps its old content. `ReplaceFileW` can fail after
-/// renaming files only when given a backup name, and none is given.
+/// On error the target keeps its old content and `replacement` is left in
+/// place. The old file passes through a backup beside `replacement`: without
+/// one, `ReplaceFileW` can fail after the old file is gone.
 pub fn replace_file(replacement: &Path, target: &Path) -> io::Result<()> {
-    let replacement = wide(replacement);
-    let target_wide = wide(target);
-    // SAFETY: both strings are NUL-terminated and outlive the calls.
-    let done = unsafe {
-        if target.exists() {
-            ReplaceFileW(
-                target_wide.as_ptr(),
-                replacement.as_ptr(),
-                std::ptr::null(),
-                REPLACEFILE_IGNORE_MERGE_ERRORS,
-                std::ptr::null(),
-                std::ptr::null(),
-            )
-        } else {
-            MoveFileExW(
-                replacement.as_ptr(),
-                target_wide.as_ptr(),
-                MOVEFILE_WRITE_THROUGH,
-            )
-        }
+    if !target.exists() {
+        return move_file(replacement, target);
+    }
+    let backup = replacement.with_extension("old");
+    let (replacement_wide, target_wide, backup_wide) =
+        (wide(replacement), wide(target), wide(&backup));
+    // SAFETY: all strings are NUL-terminated and outlive the call.
+    let replaced = unsafe {
+        ReplaceFileW(
+            target_wide.as_ptr(),
+            replacement_wide.as_ptr(),
+            backup_wide.as_ptr(),
+            REPLACEFILE_IGNORE_MERGE_ERRORS,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
     };
-    if done == 0 {
+    if replaced != 0 {
+        let _ = std::fs::remove_file(&backup);
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    // The old file is the backup now and nothing is at `target`.
+    if error.raw_os_error() == Some(ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 as i32)
+        && move_file(&backup, target).is_err()
+    {
+        return Err(io::Error::other(format!(
+            "{error}; the old file is kept as {}",
+            backup.display()
+        )));
+    }
+    Err(error)
+}
+
+/// A write-through move that fails if `to` exists.
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    let (from, to) = (wide(from), wide(to));
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
         Err(io::Error::last_os_error())
     } else {
         Ok(())
@@ -128,6 +147,7 @@ mod tests {
         replace_file(&replacement, &target).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         assert!(!replacement.exists());
+        assert!(!replacement.with_extension("old").exists());
 
         let fresh = folder.0.join("fresh.ugurugu");
         let replacement = folder.file("fresh.tmp", b"first");
@@ -169,5 +189,24 @@ mod tests {
         assert!(error.raw_os_error().is_some(), "{error}");
         assert_eq!(std::fs::read(&target).unwrap(), b"old");
         assert_eq!(std::fs::read(&replacement).unwrap(), b"new");
+    }
+
+    #[test]
+    fn a_replacement_that_cannot_move_leaves_both_files() {
+        let folder = Folder::new("held");
+        let target = folder.file("doc.ugurugu", b"old");
+        let replacement = folder.file("doc.tmp", b"new");
+        // A scanner reading the new file, not letting it be renamed.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&replacement)
+            .unwrap();
+        let failed = replace_file(&replacement, &target).is_err();
+        drop(held);
+        assert!(failed);
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new");
+        assert!(!replacement.with_extension("old").exists());
     }
 }
