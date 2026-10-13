@@ -395,6 +395,15 @@ text-empty = 배치할 텍스트를 먼저 입력하세요.
 # Eyedropper and stroke properties
 tool-eyedropper = 스포이드
 tool-eyedropper-rail = 스포이드
+tool-shape = 도형
+tool-shape-rail = 도형
+shape-kind = 모양
+shape-line = 직선
+shape-polygon = 다각형
+shape-star = 별
+shape-sides = 변 수
+shape-points = 꼭짓점 수
+shape-hint = 드래그해서 브러시로 그립니다. Shift는 정사각형·원·45° 직선으로, Alt는 가운데부터 그립니다.
 tool-eyedropper-tip = 캔버스에서 색상을 추출합니다. 페인트 도구에서 Alt+클릭해도 같습니다.
 eyedropper-hint = 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다.
 restyle-selected = 선택한 선 속성 편집…

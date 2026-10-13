@@ -2207,3 +2207,81 @@ fn a_pixel_brush_draws_opaque_whatever_the_opacity() {
     assert_eq!(drawn.brush.engine, BrushEngine::Pixel);
     assert_eq!(drawn.brush.opacity, 1.0);
 }
+
+#[test]
+fn a_shape_is_one_pen_stroke_along_its_outline() {
+    let mut session = session();
+    let tools = Tools {
+        tool: Tool::Shape,
+        color: Rgba8([200, 10, 10, 255]),
+        shape: ShapeSettings {
+            shape: Shape::Rectangle,
+            ..ShapeSettings::DEFAULT
+        },
+        ..Tools::default()
+    };
+    let layer = session.current_layer();
+    session.begin_shape(&tools, [10.0, 20.0]).unwrap();
+    assert!(session.drag_shape([30.0, 30.0], Drag::default()));
+    assert!(!session.drag_shape([30.0, 30.0], Drag::default()));
+    let outcome = session.end_shape([60.0, 70.0], Drag::default()).unwrap();
+    assert!(matches!(outcome, Outcome::Committed(_)));
+    assert!(session.live().is_none());
+    let [Op::Paint { stroke, .. }] = ops(&session, layer)[..] else {
+        panic!("one stroke");
+    };
+    let stroke = &session.document().store.strokes[&stroke];
+    let pen = tools.plain.pen;
+    assert_eq!(stroke.width, pen.width);
+    assert_eq!(stroke.brush.engine, pen.preset.brush.engine);
+    assert_eq!(stroke.color, tools.color);
+    let expected: Vec<[f32; 2]> = outline(tools.shape, [10.0, 20.0], [60.0, 70.0], Drag::default())
+        .into_iter()
+        .map(|point| point.map(|value| value as f32))
+        .collect();
+    let points: Vec<[f32; 2]> = stroke
+        .points
+        .iter()
+        .map(|point| [point.x, point.y])
+        .collect();
+    assert_eq!(points, expected);
+    assert!(stroke.points.iter().all(|point| point.pressure == 1.0));
+    assert_eq!(session.undo_label(), Some("Draw"));
+
+    // A click draws nothing; Esc's cancel leaves nothing.
+    session.begin_shape(&tools, [5.0, 5.0]).unwrap();
+    assert_eq!(
+        session.end_shape([5.2, 5.0], Drag::default()),
+        Ok(Outcome::NoChange)
+    );
+    session.begin_shape(&tools, [5.0, 5.0]).unwrap();
+    session.drag_shape([50.0, 50.0], Drag::default());
+    session.cancel_stroke();
+    assert_eq!(ops(&session, layer).len(), 1);
+}
+
+#[test]
+fn a_shape_in_pixel_mode_runs_through_pixel_centres() {
+    let mut document = Document::new([64, 64]);
+    document.pixel = true;
+    let mut session = Session::new(document, false);
+    let tools = Tools {
+        tool: Tool::Shape,
+        shape: ShapeSettings {
+            shape: Shape::Line,
+            ..ShapeSettings::DEFAULT
+        },
+        ..Tools::default()
+    };
+    session.begin_shape(&tools, [3.2, 4.9]).unwrap();
+    session.end_shape([20.7, 4.1], Drag::default()).unwrap();
+    let layer = session.current_layer();
+    let [Op::Paint { stroke, .. }] = ops(&session, layer)[..] else {
+        panic!("one stroke");
+    };
+    let stroke = &session.document().store.strokes[&stroke];
+    assert_eq!(stroke.brush.engine, BrushEngine::Pixel);
+    assert!(stroke.points.iter().all(|point| point.y == 4.5));
+    let ends = [stroke.points[0].x, stroke.points.last().unwrap().x];
+    assert_eq!(ends, [3.5, 20.5]);
+}

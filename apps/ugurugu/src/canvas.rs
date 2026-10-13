@@ -28,7 +28,9 @@ use ugu_render::plan::{Reference, RenderPlan};
 use ugu_render::raster::PixelRect;
 use ugu_render::stroke::Pen;
 use ugu_render::view::Placement;
-use ugu_session::{Brushes, FillError, InputPoint, Reads, Session, StrokeRefused, Tool, Tools};
+use ugu_session::{
+    Brushes, Drag, FillError, InputPoint, Reads, Session, StrokeRefused, Tool, Tools,
+};
 use ugu_win::clock::Ticks;
 use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
@@ -88,6 +90,9 @@ enum Interaction {
     Drawing {
         live: Box<LiveStroke>,
         rect: Option<PixelRect>,
+        /// Dragged out with the shape tool, its points all replaced as it
+        /// changes.
+        shape: bool,
     },
     Panning {
         last: [f64; 2],
@@ -1179,6 +1184,14 @@ impl Canvas {
                 let point = self.to_document(sample.position);
                 self.click_area(point);
             }
+            // The eraser end of a pen erases, as with any tool.
+            CanvasInput::Begin(Gesture::Draw, kind, sample)
+                if self.tools.tool == Tool::Shape
+                    && !(kind == PointerKind::Pen && sample.inverted) =>
+            {
+                self.sample_count += 1;
+                self.begin_shape(&sample);
+            }
             CanvasInput::Begin(Gesture::Draw, kind, sample) => {
                 self.sample_count += 1;
                 self.begin_stroke(kind, &sample);
@@ -1191,6 +1204,7 @@ impl Canvas {
                         self.tab.offset[1] += sample.position[1] - last[1];
                         *last = sample.position;
                     }
+                    Interaction::Drawing { shape: true, .. } => self.drag_shape(&sample),
                     Interaction::Drawing { .. } => self.extend_stroke(&sample),
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
@@ -1208,7 +1222,17 @@ impl Canvas {
             CanvasInput::End(sample) => {
                 self.sample_count += 1;
                 match std::mem::replace(&mut self.interaction, Interaction::Idle) {
-                    Interaction::Drawing { live, rect } => self.end_stroke(&sample, live, rect),
+                    Interaction::Drawing { live, rect, shape } => {
+                        let before = self.key();
+                        let point = self.input_point(&sample);
+                        let outcome = if shape {
+                            let drag = self.shape_drag();
+                            self.tab.session.end_shape(point.position, drag)
+                        } else {
+                            self.tab.session.end_stroke(point)
+                        };
+                        self.end_drawing(before, outcome, live, rect);
+                    }
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
                         let before = self.key();
@@ -1476,6 +1500,28 @@ impl Canvas {
             } else {
                 self.tab.session.begin_stroke(&self.tools, point)
             };
+        self.start_drawing(begun, false);
+    }
+
+    /// Starts the shape the shape tool drags out.
+    fn begin_shape(&mut self, sample: &PointerSample) {
+        self.notice = None;
+        self.pause_playback();
+        let point = self.to_document(sample.position);
+        let begun = self.tab.session.begin_shape(&self.tools, point);
+        self.start_drawing(begun, true);
+    }
+
+    /// The modifier keys' say in how a shape is dragged.
+    fn shape_drag(&self) -> Drag {
+        Drag {
+            constrain: self.modifiers.0,
+            centred: self.modifiers.1,
+        }
+    }
+
+    /// Shows the stroke the session has `begun`, or says why there is none.
+    fn start_drawing(&mut self, begun: Result<(), StrokeRefused>, shape: bool) {
         match begun {
             Ok(()) => {}
             Err(StrokeRefused::Pending) => {
@@ -1491,6 +1537,19 @@ impl Canvas {
                 return;
             }
         }
+        let spare = self.spare_coverage.take();
+        let mut stroke = self.live_stroke(spare);
+        let rect = stroke.update(&self.tab.session.live().expect("a stroke has begun").points);
+        self.interaction = Interaction::Drawing {
+            live: Box::new(stroke),
+            rect,
+            shape,
+        };
+        self.recomposite(rect);
+    }
+
+    /// The display of the session's stroke, with none of its points drawn.
+    fn live_stroke(&self, spare: Option<Pixmap>) -> LiveStroke {
         let live = self.tab.session.live().expect("a stroke has begun");
         let document = self.tab.session.document();
         let pen = Pen::new(
@@ -1499,21 +1558,39 @@ impl Canvas {
             document.frames,
         );
         let size = document.canvas.map(|edge| edge as u16);
-        let mut stroke = LiveStroke::new(
+        LiveStroke::new(
             size,
             pen,
             self.key().frame,
             live.template.color.0,
             live.erase,
-            self.spare_coverage.take(),
+            spare,
         )
-        .with_clip(live.clip.as_ref().map(|selection| selection.mask().clone()));
-        let rect = stroke.update(&live.points);
+        .with_clip(live.clip.as_ref().map(|selection| selection.mask().clone()))
+    }
+
+    /// Drags the shape to `sample` and shows it anew where it was and is.
+    fn drag_shape(&mut self, sample: &PointerSample) {
+        let point = self.to_document(sample.position);
+        if !self.tab.session.drag_shape(point, self.shape_drag()) {
+            return;
+        }
+        let Interaction::Drawing {
+            live: old,
+            rect: was,
+            shape: true,
+        } = std::mem::replace(&mut self.interaction, Interaction::Idle)
+        else {
+            unreachable!("dragging a shape");
+        };
+        let mut stroke = self.live_stroke(Some(old.into_spare()));
+        let rect = stroke.update(&self.tab.session.live().expect("dragging").points);
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
             rect,
+            shape: true,
         };
-        self.recomposite(rect);
+        self.recomposite(union(was, rect));
     }
 
     fn extend_stroke(&mut self, sample: &PointerSample) {
@@ -1522,7 +1599,7 @@ impl Canvas {
             return;
         }
         let points = &self.tab.session.live().expect("drawing").points;
-        let Interaction::Drawing { live, rect } = &mut self.interaction else {
+        let Interaction::Drawing { live, rect, .. } = &mut self.interaction else {
             return;
         };
         let changed = live.update(points);
@@ -1530,16 +1607,16 @@ impl Canvas {
         self.recomposite(changed);
     }
 
-    fn end_stroke(
+    /// Shows how the stroke the session has ended, from state `before`,
+    /// came out.
+    fn end_drawing(
         &mut self,
-        sample: &PointerSample,
+        before: Key,
+        outcome: Result<Outcome, ugu_core::edit::EditError>,
         live: Box<LiveStroke>,
         rect: Option<PixelRect>,
     ) {
         let started = Instant::now();
-        let before = self.key();
-        let point = self.input_point(sample);
-        let outcome = self.tab.session.end_stroke(point);
         self.record_colors();
         self.spare_coverage = Some(live.into_spare());
         match outcome {
@@ -2696,6 +2773,60 @@ mod tests {
             time: Ticks(0),
             frame_id: 0,
         }
+    }
+
+    #[test]
+    fn a_dragged_shape_shows_as_it_goes_and_ends_as_the_export_draws_it() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        settle(&mut canvas, &renders);
+        let blank = canvas.display().clone();
+        canvas.set_tool(Tool::Shape).unwrap();
+        canvas.tools_mut().shape.shape = ugu_session::Shape::Ellipse;
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let begin = at(&canvas, 10.0, 10.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        let far = at(&canvas, 110.0, 80.0);
+        canvas.apply(CanvasInput::Extend(far));
+        assert!(canvas.display().data_as_u8_slice() != blank.data_as_u8_slice());
+        // Shrunk, it leaves nothing where it was.
+        let near = at(&canvas, 40.0, 30.0);
+        canvas.apply(CanvasInput::Extend(near));
+        let shown = canvas.display();
+        for y in 50..90u16 {
+            for x in 60..120u16 {
+                let index = (usize::from(y) * 120 + usize::from(x)) * 4;
+                assert_eq!(
+                    shown.data_as_u8_slice()[index..index + 4],
+                    blank.data_as_u8_slice()[index..index + 4],
+                    "{x}, {y}"
+                );
+            }
+        }
+        canvas.set_modifiers(true, false);
+        canvas.apply(CanvasInput::End(near));
+        canvas.set_modifiers(false, false);
+        let layer = canvas.session().current_layer();
+        let LayerKind::Paint(paint) = &canvas.session().document().layer(layer).unwrap().kind
+        else {
+            panic!("a paint layer");
+        };
+        assert_eq!(paint.ops.len(), 1);
+        assert_eq!(canvas.session().undo_label(), Some("Draw"));
+        let mut full = Pixmap::new(120, 90);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            canvas.session().document(),
+            canvas.session().frame(),
+            ugu_render::document::Purpose::Display,
+            &mut full,
+        );
+        assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
     }
 
     // Synthetic pen input cannot carry the eraser end (Windows drops the pen

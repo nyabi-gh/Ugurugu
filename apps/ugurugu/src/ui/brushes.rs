@@ -72,14 +72,24 @@ impl Presets {
             self.ink = ink;
         }
         let current = match tool {
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                canvas.brushes().pen.preset
-            }
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape => canvas.brushes().pen.preset,
             Tool::Eraser => canvas.brushes().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
             // Pixel mode has the pixel ones alone, with no tabs.
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape
                 if canvas.session().pixel_mode() =>
             {
                 BRUSHES
@@ -87,7 +97,13 @@ impl Presets {
                     .filter(|preset| preset.brush.engine == BrushEngine::Pixel)
                     .collect()
             }
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape => {
                 let shown = self.category.unwrap_or(current.category);
                 // As many equal tabs a row as fit their names, so the tabs
                 // never widen the panel.
@@ -132,11 +148,12 @@ impl Presets {
                 })
                 .collect(),
         };
-        let columns = if tool == Tool::Pen { 2 } else { 3 };
+        let brush = tool != Tool::Eraser;
+        let columns = if brush { 2 } else { 3 };
         let gap = 4.0;
         let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
         let mut chosen = None;
-        egui::Grid::new(("presets", tool == Tool::Pen))
+        egui::Grid::new(("presets", brush))
             .spacing([gap, gap])
             .show(ui, |ui| {
                 for (index, preset) in presets.iter().enumerate() {

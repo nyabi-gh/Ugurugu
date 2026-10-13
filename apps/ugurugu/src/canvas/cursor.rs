@@ -45,7 +45,7 @@ impl Canvas {
             return None;
         }
         let eraser = self.hover_eraser || tool == Tool::Eraser;
-        if !eraser && tool != Tool::Pen {
+        if !eraser && !matches!(tool, Tool::Pen | Tool::Shape) {
             return None;
         }
         let settings = if eraser {

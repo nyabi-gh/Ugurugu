@@ -41,6 +41,7 @@ pub enum Glyph {
     Deselect = 29,
     Confirm = 30,
     Cancel = 31,
+    Shape = 32,
 }
 
 type Points = Vec<[f64; 2]>;
@@ -289,6 +290,24 @@ fn shapes(glyph: Glyph) -> Shapes {
         Glyph::Cancel => {
             lines.push(vec![[6.0, 6.0], [18.0, 18.0]]);
             lines.push(vec![[18.0, 6.0], [6.0, 18.0]]);
+        }
+        Glyph::Shape => {
+            // A square, and a circle over its corner.
+            lines.push(vec![
+                [4.0, 10.0],
+                [14.0, 10.0],
+                [14.0, 20.0],
+                [4.0, 20.0],
+                [4.0, 10.0],
+            ]);
+            lines.push(
+                (0..=28)
+                    .map(|step| {
+                        let angle = std::f64::consts::TAU * f64::from(step) / 28.0;
+                        [14.5 + 5.5 * angle.cos(), 9.5 + 5.5 * angle.sin()]
+                    })
+                    .collect(),
+            );
         }
     }
     shapes

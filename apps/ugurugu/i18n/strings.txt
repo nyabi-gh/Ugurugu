@@ -393,6 +393,15 @@ text-empty | Type some text to place it. | 배치할 텍스트를 먼저 입력�
 # Eyedropper and stroke properties
 tool-eyedropper | E&yedropper | 스포이드(&Y) | スポイト(&Y)
 tool-eyedropper-rail | Eyedropper | 스포이드 | スポイト
+tool-shape | &Shape | 도형(&S) | 図形(&S)
+tool-shape-rail | Shape | 도형 | 図形
+shape-kind | Shape | 모양 | 形
+shape-line | Line | 직선 | 直線
+shape-polygon | Polygon | 다각형 | 多角形
+shape-star | Star | 별 | 星
+shape-sides | Sides | 변 수 | 辺の数
+shape-points | Points | 꼭짓점 수 | 頂点の数
+shape-hint | Drag to draw with the brush. Shift keeps a square, a circle or a 45° line; Alt draws from the centre. | 드래그해서 브러시로 그립니다. Shift는 정사각형·원·45° 직선으로, Alt는 가운데부터 그립니다. | ドラッグしてブラシで描きます。Shiftで正方形・円・45°の直線に、Altで中心から描きます。
 tool-eyedropper-tip | Pick a color from the canvas. Alt+click does the same from any paint tool. | 캔버스에서 색상을 추출합니다. 페인트 도구에서 Alt+클릭해도 같습니다. | キャンバスから色を取得します。どの描画ツールでもAlt+クリックで同じ操作ができます。
 eyedropper-hint | Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket. | 캔버스를 클릭하여 색상을 추출합니다. 브러시, 지우개 또는 페인트 통에서 Alt+클릭해도 같습니다. | キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
 restyle-selected | Edit selected stroke properties… | 선택한 선 속성 편집… | 選択したストロークのプロパティを編集…

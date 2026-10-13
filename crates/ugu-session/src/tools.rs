@@ -11,7 +11,7 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::BrushEngine;
 
-use crate::{FillSettings, ShapeKind, TextSettings, Tool, ToolSettings};
+use crate::{FillSettings, ShapeKind, ShapeSettings, TextSettings, Tool, ToolSettings};
 
 /// The colours strokes, fills and text were made with, newest first and each
 /// once, as 2.2.13's colour history.
@@ -129,18 +129,26 @@ impl Brushes {
     pub fn get(&self, tool: Tool) -> &ToolSettings {
         match tool {
             Tool::Eraser => &self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                &self.pen
-            }
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape => &self.pen,
         }
     }
 
     pub fn get_mut(&mut self, tool: Tool) -> &mut ToolSettings {
         match tool {
             Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                &mut self.pen
-            }
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape => &mut self.pen,
         }
     }
 
@@ -150,9 +158,13 @@ impl Brushes {
     pub fn choose(&mut self, tool: Tool, preset: &'static Preset) {
         let settings = match tool {
             Tool::Eraser => &mut self.eraser,
-            Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-                &mut self.pen
-            }
+            Tool::Pen
+            | Tool::Select
+            | Tool::Wand
+            | Tool::Fill
+            | Tool::Text
+            | Tool::Eyedropper
+            | Tool::Shape => &mut self.pen,
         };
         if settings.preset.id == preset.id {
             return;
@@ -185,6 +197,7 @@ pub struct Tools {
     pub pixel: Brushes,
     pub selection_shape: ShapeKind,
     pub lasso_paints: bool,
+    pub shape: ShapeSettings,
     pub uses_pressure: bool,
     pub fill: FillSettings,
     pub transform_sampling: Sampling,
@@ -202,6 +215,7 @@ impl Default for Tools {
             pixel: Brushes::pixel(),
             selection_shape: ShapeKind::default(),
             lasso_paints: false,
+            shape: ShapeSettings::DEFAULT,
             uses_pressure: true,
             fill: FillSettings::DEFAULT,
             transform_sampling: Sampling::Smooth,

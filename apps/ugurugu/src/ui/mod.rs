@@ -309,6 +309,7 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         (Tool::Wand, Action::Wand, Glyph::Wand, "tool-wand"),
         (Tool::Fill, Action::Fill, Glyph::Bucket, "tool-fill"),
         (Tool::Text, Action::Text, Glyph::Text, "tool-text-rail"),
+        (Tool::Shape, Action::Shape, Glyph::Shape, "tool-shape-rail"),
         (
             Tool::Eyedropper,
             Action::Eyedropper,
@@ -361,6 +362,8 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
             );
             return;
         }
+        // Drawn with the pen, whose settings follow.
+        Tool::Shape => shape_settings(ui, canvas),
         Tool::Pen | Tool::Eraser => {}
     }
     panels.presets.show(ui, canvas, tool);
@@ -370,9 +373,13 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     ui.add_space(theme::space::XS);
     let size_name = match tool {
         Tool::Eraser => tr("eraser-size"),
-        Tool::Pen | Tool::Select | Tool::Wand | Tool::Fill | Tool::Text | Tool::Eyedropper => {
-            tr("brush-size")
-        }
+        Tool::Pen
+        | Tool::Select
+        | Tool::Wand
+        | Tool::Fill
+        | Tool::Text
+        | Tool::Eyedropper
+        | Tool::Shape => tr("brush-size"),
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -436,6 +443,53 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
 
 /// The selection tool's mode and shapes, as 2.2.13's area select panel;
 /// painting also shows how fills look.
+/// Which shape the shape tool drags out, and its corners.
+fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    use ugu_session::{Shape, ShapeSettings};
+    let mut settings = canvas.tools().shape;
+    widgets::panel_heading(ui, tr("shape-kind"));
+    widgets::segmented(
+        ui,
+        &mut settings.shape,
+        &[
+            (Shape::Line, tr("shape-line")),
+            (Shape::Rectangle, tr("shape-rectangle")),
+            (Shape::Ellipse, tr("shape-ellipse")),
+            (Shape::Polygon, tr("shape-polygon")),
+            (Shape::Star, tr("shape-star")),
+        ],
+        3,
+    );
+    let corners = match settings.shape {
+        Shape::Polygon => Some((&mut settings.sides, tr("shape-sides"))),
+        Shape::Star => Some((&mut settings.points, tr("shape-points"))),
+        Shape::Line | Shape::Rectangle | Shape::Ellipse => None,
+    };
+    if let Some((count, name)) = corners {
+        let range = ShapeSettings::CORNERS;
+        let mut value = *count as f32;
+        slider_row(
+            ui,
+            name,
+            name,
+            &mut value,
+            *range.start() as f32..=*range.end() as f32,
+            "",
+            0,
+        );
+        *count = (value.round() as u32).clamp(*range.start(), *range.end());
+    }
+    ui.label(
+        egui::RichText::new(tr("shape-hint"))
+            .size(theme::SMALL)
+            .color(theme::muted()),
+    );
+    if settings != canvas.tools().shape {
+        canvas.tools_mut().shape = settings;
+    }
+    ui.add_space(theme::space::S);
+}
+
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     widgets::panel_heading(ui, tr("lasso-mode"));
     let mut paints = canvas.tools().lasso_paints;

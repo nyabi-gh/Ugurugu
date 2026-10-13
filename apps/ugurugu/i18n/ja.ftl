@@ -395,6 +395,15 @@ text-empty = 配置するテキストを先に入力してください。
 # Eyedropper and stroke properties
 tool-eyedropper = スポイト
 tool-eyedropper-rail = スポイト
+tool-shape = 図形
+tool-shape-rail = 図形
+shape-kind = 形
+shape-line = 直線
+shape-polygon = 多角形
+shape-star = 星
+shape-sides = 辺の数
+shape-points = 頂点の数
+shape-hint = ドラッグしてブラシで描きます。Shiftで正方形・円・45°の直線に、Altで中心から描きます。
 tool-eyedropper-tip = キャンバスから色を取得します。どの描画ツールでもAlt+クリックで同じ操作ができます。
 eyedropper-hint = キャンバスをクリックして色を取得します。ブラシ、消しゴム、塗りつぶしではAlt+クリックでも同じ操作ができます。
 restyle-selected = 選択したストロークのプロパティを編集…

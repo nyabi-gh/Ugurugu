@@ -14,6 +14,7 @@ mod filling;
 mod placing;
 mod restyling;
 mod selecting;
+mod shaping;
 pub mod stabilizer;
 mod tools;
 mod transforming;
@@ -32,6 +33,7 @@ use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
+pub use crate::shaping::{Drag, Shape, ShapeSettings, outline};
 use crate::stabilizer::Stabilizer;
 pub use crate::tools::{Brushes, ColorHistory, Kept, Tools, is_pixel};
 pub use crate::transforming::{Ended, Pending};
@@ -49,6 +51,7 @@ pub enum Tool {
     Fill,
     Text,
     Eyedropper,
+    Shape,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -120,6 +123,8 @@ pub struct LiveStroke {
     stabilizer: Stabilizer,
     /// The pressure setting when the stroke began, which it keeps.
     uses_pressure: bool,
+    /// The shape dragged out, for a stroke the shape tool draws.
+    shaping: Option<shaping::Shaping>,
 }
 
 impl LiveStroke {
@@ -355,6 +360,7 @@ impl Session {
             clip: self.clip(),
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
             uses_pressure: tools.uses_pressure,
+            shaping: None,
         });
         Ok(())
     }
@@ -394,6 +400,11 @@ impl Session {
         });
         let mut live = self.live.take().expect("still drawing");
         live.finish(clamp_position(input.position), carried);
+        self.commit(live)
+    }
+
+    /// Commits `live` as one edit.
+    fn commit(&mut self, live: LiveStroke) -> Result<Outcome, EditError> {
         let stroke = Stroke {
             points: Arc::from(live.points),
             ..live.template

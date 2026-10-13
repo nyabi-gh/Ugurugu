@@ -10,11 +10,11 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::STROKE_WIDTH;
 use ugu_session::{
-    Brushes, ColorHistory, Kept, Reads, ShapeKind, TextSettings, Tool, ToolSettings, Tools,
-    is_pixel,
+    Brushes, ColorHistory, Kept, Reads, Shape, ShapeKind, ShapeSettings, TextSettings, Tool,
+    ToolSettings, Tools, is_pixel,
 };
 
-const TOOLS: [(Tool, &str); 7] = [
+const TOOLS: [(Tool, &str); 8] = [
     (Tool::Pen, "brush"),
     (Tool::Eraser, "eraser"),
     (Tool::Select, "select"),
@@ -22,11 +22,19 @@ const TOOLS: [(Tool, &str); 7] = [
     (Tool::Fill, "fill"),
     (Tool::Text, "text"),
     (Tool::Eyedropper, "eyedropper"),
+    (Tool::Shape, "shape"),
 ];
 const SHAPES: [(ShapeKind, &str); 3] = [
     (ShapeKind::Freehand, "freehand"),
     (ShapeKind::Rectangle, "rectangle"),
     (ShapeKind::Ellipse, "ellipse"),
+];
+const FIGURES: [(Shape, &str); 5] = [
+    (Shape::Line, "line"),
+    (Shape::Rectangle, "rectangle"),
+    (Shape::Ellipse, "ellipse"),
+    (Shape::Polygon, "polygon"),
+    (Shape::Star, "star"),
 ];
 const SAMPLINGS: [(Sampling, &str); 2] =
     [(Sampling::Smooth, "smooth"), (Sampling::Nearest, "nearest")];
@@ -265,6 +273,17 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
             &mut tools.transform_sampling,
         );
     }
+    if let Some(shape) = object(value, "shape") {
+        named(shape, "shape", &FIGURES, &mut tools.shape.shape);
+        let corners = ShapeSettings::CORNERS;
+        let range = *corners.start() as f32..=*corners.end() as f32;
+        if let Some(sides) = number(shape, "sides", range.clone()) {
+            tools.shape.sides = sides.round() as u32;
+        }
+        if let Some(points) = number(shape, "points", range) {
+            tools.shape.points = points.round() as u32;
+        }
+    }
     if let Some(tablet) = object(value, "tablet") {
         boolean(tablet, "pressure", &mut tools.uses_pressure);
     }
@@ -351,6 +370,11 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "paint": tools.lasso_paints,
             "sampling": name(&SAMPLINGS, tools.transform_sampling),
         },
+        "shape": {
+            "shape": name(&FIGURES, tools.shape.shape),
+            "sides": tools.shape.sides,
+            "points": tools.shape.points,
+        },
         "tablet": { "pressure": tools.uses_pressure },
         "fill": {
             "reads": name(&READS, tools.fill.reads),
@@ -399,6 +423,11 @@ mod tests {
             tool: Tool::Wand,
             selection_shape: ShapeKind::Ellipse,
             lasso_paints: true,
+            shape: ShapeSettings {
+                shape: Shape::Star,
+                sides: 7,
+                points: 9,
+            },
             uses_pressure: false,
             transform_sampling: Sampling::Nearest,
             ..Tools::default()

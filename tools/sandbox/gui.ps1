@@ -640,6 +640,39 @@ Step 'Pixel mode from the Edit menu' {
     $detail
 }
 
+Step 'Shapes and the round pixel pencil' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $process 'u'
+    Invoke-Named $process 'Star'
+    $points = Test-Named $process 'Points'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.1)), ($paper.Left + [int]($w * 0.3)), ($paper.Left + [int]($w * 0.45))),
+        @(($paper.Top + [int]($h * 0.1)), ($paper.Top + [int]($h * 0.3)), ($paper.Top + [int]($h * 0.45))))
+    $drawn = Test-Named $process 'Untitled*'
+    Invoke-Named $process 'Polygon'
+    $sides = Test-Named $process 'Sides'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.55)), ($paper.Left + [int]($w * 0.9))),
+        @(($paper.Top + [int]($h * 0.1)), ($paper.Top + [int]($h * 0.45))))
+    $shapes = Save-Screen 'shapes'
+    Invoke-Named $process 'Edit'
+    Invoke-Named $process 'Pixel mode'
+    Start-Sleep -Milliseconds 500
+    Send-Keys $process 'b'
+    Invoke-Named $process 'Round Pixel Pencil'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.8))),
+        @(($paper.Top + [int]($h * 0.75)), ($paper.Top + [int]($h * 0.8))))
+    $round = Save-Screen 'round-pixel-pencil'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "star points control $points, drawn $drawn, polygon sides control $sides; $shapes; $round"
+    if (-not ($points -and $drawn -and $sides)) {
+        throw $detail
+    }
+    $detail
+}
+
 # Presses the control whose name starts with the words for $Key, without a
 # trailing ellipsis: menu items carry their shortcut after the label.
 function Invoke-Word($Process, $Words, [string] $Key) {
@@ -682,6 +715,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'tool-fill' = { param($p) Send-Keys $p 'g' }
             'tool-text' = { param($p) Send-Keys $p 't' }
             'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
+            'tool-shape' = { param($p) Send-Keys $p 'u' }
             'pixel-mode' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'pixel-mode' }
             'settings-general' = { param($p) Send-Keys $p '^,' }
             'settings-drawing' = { param($p) Send-Keys $p '^,'; Invoke-Named $p $words['settings-drawing'] }

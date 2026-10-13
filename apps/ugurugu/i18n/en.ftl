@@ -395,6 +395,15 @@ text-empty = Type some text to place it.
 # Eyedropper and stroke properties
 tool-eyedropper = Eyedropper
 tool-eyedropper-rail = Eyedropper
+tool-shape = Shape
+tool-shape-rail = Shape
+shape-kind = Shape
+shape-line = Line
+shape-polygon = Polygon
+shape-star = Star
+shape-sides = Sides
+shape-points = Points
+shape-hint = Drag to draw with the brush. Shift keeps a square, a circle or a 45° line; Alt draws from the centre.
 tool-eyedropper-tip = Pick a color from the canvas. Alt+click does the same from any paint tool.
 eyedropper-hint = Click the canvas to pick up its color. Alt+click does the same from the brush, eraser or paint bucket.
 restyle-selected = Edit selected stroke properties…

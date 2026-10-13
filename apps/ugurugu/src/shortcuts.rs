@@ -317,6 +317,7 @@ actions! {
     Fill "bucket" "tool-fill" [plain(Key::G)] [];
     Text "text" "tool-text" [plain(Key::T)] [];
     Eyedropper "eyedropper" "tool-eyedropper" [plain(Key::I)] [];
+    Shape "shape" "tool-shape" [plain(Key::U)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];
     NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];

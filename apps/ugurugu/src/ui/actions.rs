@@ -89,6 +89,7 @@ pub const TOOLS: &[Entry] = &[
     Do(A::Fill),
     Do(A::Text),
     Do(A::Eyedropper),
+    Do(A::Shape),
     Gap,
     Do(A::ImportTools),
     Do(A::ExportTools),
@@ -132,6 +133,7 @@ pub fn tool(action: Action) -> Option<Tool> {
         A::Fill => Tool::Fill,
         A::Text => Tool::Text,
         A::Eyedropper => Tool::Eyedropper,
+        A::Shape => Tool::Shape,
         _ => return None,
     })
 }
@@ -366,6 +368,7 @@ pub fn run(
         | A::Fill
         | A::Text
         | A::Eyedropper
+        | A::Shape
         | A::AnimationBar
         | A::ToolSettings
         | A::WobbleDock
