@@ -185,6 +185,7 @@ fit-tip | ugurugu::MainWindow | Fit the whole canvas in the window
 untitled | ugurugu::MainWindow | Untitled
 file-saving | ugurugu::MainWindow | Saving %1… | args=name
 file-saved | ugurugu::MainWindow | Saved %1 | args=name
+save-open-elsewhere | - | %1 is open in another tab. Close that tab first, or save under another name. | %1 파일이 다른 탭에 열려 있습니다. 그 탭을 먼저 닫거나 다른 이름으로 저장하세요. | %1 は別のタブで開いています。そのタブを先に閉じるか、別の名前で保存してください。 | args=name
 file-not-saved | - | Not saved: %1 | 저장하지 못했습니다: %1 | 保存できませんでした: %1 | args=error
 file-opening | - | Opening %1… | %1 여는 중… | %1 を開いています… | args=name
 gpu-software | - | No usable GPU: drawing with the slow software display | 쓸 수 있는 GPU가 없어 느린 소프트웨어 표시로 그립니다 | 使える GPU がないため、低速なソフトウェア表示で描画しています
