@@ -698,7 +698,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **질문:** 깨끗한 Windows에서 설치·연결·업데이트·제거가 되나. 2.2.13과 함께 설치해도 서로 건드리지 않나.
 
-**방법:** `tools/sandbox/prepare.ps1`이 같은 exe를 3.0.0 설치본과 3.0.1 로컬 피드로 묶고(`-Scenario alongside`, `-Only`로 단계 선택), `accept.ps1`·`alongside.ps1`이 게스트(10.0.26100, 네트워크 끔·vGPU 끔)에서 돈다. 시험 문서는 `ugu-doc fixture 1`. 실패 업데이트는 피드 사본의 nupkg 1바이트를 0xFF와 XOR한 것이다.
+**방법:** `tools/sandbox/prepare.ps1`이 같은 exe를 작업 공간 판 설치본과 다음 patch 판 로컬 피드로 묶고(`in\versions.json`, 2026-10-13 전에는 3.0.0·3.0.1로 고정이라 판을 올리면 첫 단계부터 실패했다)(`-Scenario alongside`, `-Only`로 단계 선택), `accept.ps1`·`alongside.ps1`이 게스트(10.0.26100, 네트워크 끔·vGPU 끔)에서 돈다. 시험 문서는 `ugu-doc fixture 1`. 실패 업데이트는 피드 사본의 nupkg 1바이트를 0xFF와 XOR한 것이다.
 
 **깨끗한 설치 (최종 회차 9단계 모두 통과):** 설치(`%LOCALAPPDATA%\Ugurugu3`, 앱 목록 'Ugurugu 3', 바로 가기 둘) → 실행(RTX 5080, 원격 세션 `TerminalServerSession` True) → `UGURUGU_ADAPTER=warp` 실행(Microsoft Basic Render Driver) → 한글 경로에서 연결로 열기(`document opened ms=1.30`) → 다운로드 실패 업데이트(체크섬 불일치 안내, 제목 `*`·3.0.0 유지) → 저장 안 한 변경이 있을 때 3.0.1 업데이트(질문 → 취소 → 앱 유지 → 다시 질문 → 저장 안 함 → 3.0.1로 다시 시작) → 오프라인 확인(안내만) → 제거(남음: `Local\Ugurugu Data`, `Roaming\Ugurugu`) → 표준 사용자 계정으로 설치·실행·제거. Setup 매니페스트는 `asInvoker`.
 
@@ -934,5 +934,13 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **결과:** 첫 회 FAIL(기본 자리로 열림): 저장을 render 스레드에서 `window_handle()`로 하려 했는데 winit이 `tried to access window handle outside of the main thread`로 거절해 아무것도 저장되지 않았다. UI 스레드에서 받아 둔 hwnd를 render 스레드가 들도록 고친 뒤 통과: 300,200,1400,900으로 다시 열림, 최대화 유지, 복원하면 같은 사각형.
 
-**함정:** 앞 회차 Sandbox를 강제 종료한 직후 띄운 회차는 로그온 명령이 돌지 않아 20분 동안 결과가 없었다(원인 미확인, 가설: 서버 상태가 남음). 모두 닫고 다시 띄우니 돌았다.
+**함정:** 앞 회차 Sandbox를 강제 종료한 직후 띄운 회차는 로그온 명령이 돌지 않아 20분 동안 결과가 없었다(`Stop-Process`로 끄면 VM 프로세스 `vmmemWindowsSandbox`가 몇 분 넘게 남았다(2026-10-13 다시 봄). `wsb stop --id <wsb list의 id>`로 끈 뒤 띄운 회차는 바로 돌았다. Sandbox는 `wsb stop`으로 끈다.
 
+
+## 50. 3.0.2 출시 (2026-10-13)
+
+**방법:** main `7b1726f`("Prepare the 3.0.2 release")의 release 빌드로 `gui.ps1` 16단계(화면 모음 둘 제외), `accept.ps1` 9단계(3.0.2 설치 → 3.0.3 피드). 태그 `v3.0.2` → `release-3.yml` 실행 38367754090.
+
+**결과:** GUI 16/16 통과(창 배치 포함). 수용 9/9 통과(판을 실제 판에서 정하게 고친 스크립트로, 설치 3.0.2, 실패 업데이트 뒤 3.0.2 유지, 저장 안 한 변경을 묻고 3.0.3으로 업데이트, 표준 사용자 설치·실행·제거). 릴리스 실행 성공: `v3.0.2`에는 `Ugurugu-3.0.2-Windows-x64-Setup.exe`만, `updates`에 `Ugurugu3-3.0.2-win-x64-full.nupkg`가 더해지고 `releases.win-x64.json`이 3.0.2를 가리킨다. 다운로드 배지 workflow가 발행 2초 뒤 `workflow_dispatch`로 돌았다(릴리스 job이 부르게 고친 것이 동작).
+
+**남은 것:** 설치된 3.0.1에서 3.0.2로의 실제 업데이트는 사용자 PC에서 보지 않았다(3.0.0 → 3.0.1은 46절).

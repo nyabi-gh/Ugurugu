@@ -8,8 +8,10 @@ an install next to 2.2.13, synthetic pen and touch input or GUI checks
 (docs/rust/evidence.md sections 32 to 34).
 
 .DESCRIPTION
-For the installer runs, packs the executable twice, as 3.0.0 to install and
-as 3.0.1 in a local update feed; for the pointer and GUI runs, copies the
+For the installer runs, packs the executable twice, as the workspace's
+version to install and as the next patch version in a local update feed, and
+writes both to versions.json for the scripts; for the pointer and GUI runs,
+copies the
 executable and ugu-doc. Then writes a .wsb that maps them read-only into a Sandbox with
 the vGPU disabled and runs the scenario's script there at logon:
 accept.ps1 (no network; with a document to open and a feed whose package is
@@ -55,10 +57,18 @@ $in = Join-Path $Work 'in'
 $out = Join-Path $Work 'out'
 
 if ($Scenario -in 'accept', 'alongside') {
+    $manifest = Get-Content (Join-Path $root 'Cargo.toml') -Raw
+    if ($manifest -notmatch '(?ms)^\[workspace\.package\][^\[]*?^version = "(\d+)\.(\d+)\.(\d+)"') {
+        throw 'Could not read the workspace version from Cargo.toml'
+    }
+    $installed = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+    $update = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
     $package = Join-Path $root 'tools/package_windows.ps1'
     & $package -Executable $Executable -OutputDirectory (Join-Path $in 'install') -Vpk $Vpk
     & $package -Executable $Executable -OutputDirectory (Join-Path $in 'feed') -Vpk $Vpk `
-        -Version 3.0.1 -ReleaseNotes (Join-Path $root 'release-notes/3.0.0.en.md')
+        -Version $update -ReleaseNotes (Join-Path $root "release-notes/$installed.en.md")
+    @{ installed = $installed; update = $update } | ConvertTo-Json |
+        Set-Content -Path (Join-Path $in 'versions.json') -Encoding utf8
 }
 
 if ($Scenario -in 'pointer', 'gui') {

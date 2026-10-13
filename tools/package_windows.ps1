@@ -15,7 +15,7 @@ the expected ones, so nothing else reaches the installer unnoticed.
 tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory artifacts
 
 .EXAMPLE
-tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory feed -Version 3.0.1 -ReleaseNotes release-notes/3.0.0.en.md
+tools/package_windows.ps1 -Executable target/release/ugurugu.exe -OutputDirectory feed -Version 3.0.3 -ReleaseNotes release-notes/3.0.2.en.md
 
 A later version of the same build, for trying an update from a local feed
 (tools/sandbox). Releases take the version and notes from the repository.

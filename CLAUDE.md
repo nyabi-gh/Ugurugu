@@ -67,7 +67,9 @@ Keep development runs apart from an installed Ugurugu with
 checks that need screenshots, window focus or synthetic pen and pointer input run
 in Windows Sandbox (`tools/sandbox/prepare.ps1 -Work <new folder> -Scenario gui
 -Only '<step>'`); on the developer's own desktop, check through process state,
-logs and files only. Close a finished Sandbox before starting the next.
+logs and files only. Close a finished Sandbox with `wsb stop --id <id from wsb list>`
+before starting the next; one ended with `Stop-Process` leaves its VM behind
+and the next one never runs its script.
 
 ## Shell on this machine
 

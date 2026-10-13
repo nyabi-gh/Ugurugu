@@ -45,6 +45,8 @@ $shortcuts = @(
     (Join-Path ([Environment]::GetFolderPath('Programs')) 'Ugurugu 3.lnk')
 )
 $results = New-Object System.Collections.ArrayList
+# The versions prepare.ps1 packed: the one installed, and the one in the feed.
+$versions = Get-Content (Join-Path $in 'versions.json') -Raw | ConvertFrom-Json
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -145,10 +147,10 @@ Step 'Install 2.2.13' {
 
 $legacy = Get-Installed $legacyRoot
 
-Step 'Install 3.0.0 next to 2.2.13' {
+Step 'Install 3.x next to 2.2.13' {
     Install (Get-Item (Join-Path $in 'install\*-Setup.exe')).FullName $installRoot
     $version = Get-InstalledVersion
-    if ($version -ne '3.0.0') {
+    if ($version -ne $versions.installed) {
         throw "Installed version $version"
     }
     $missing = @($shortcuts + $legacyShortcuts | Where-Object { -not (Test-Path $_) })
@@ -162,12 +164,12 @@ Step 'Install 3.0.0 next to 2.2.13' {
         throw '.ugurugu is not associated with 3.0'
     }
     Assert-Same $legacy (Get-Installed $legacyRoot) '2.2.13 install'
-    "3.0.0 in $installRoot", 'both Apps entries and all four shortcuts', ".ugu association: '$(Get-DefaultValue 'HKCU:\Software\Classes\.ugu')'"
+    "$version in $installRoot", 'both Apps entries and all four shortcuts', ".ugu association: '$(Get-DefaultValue 'HKCU:\Software\Classes\.ugu')'"
     Start-Current
     Start-Legacy
 }
 
-Step 'Update 3.0 to 3.0.1' {
+Step 'Update 3.x next to 2.2.13' {
     $env:UGURUGU_UPDATE_FEED = Join-Path $in 'feed'
     try {
         Start-Process -FilePath $app | Out-Null
@@ -183,7 +185,7 @@ Step 'Update 3.0 to 3.0.1' {
     $restarted = Wait-Window 120
     $version = Get-InstalledVersion
     Close-App $restarted
-    if ($version -ne '3.0.1') {
+    if ($version -ne $versions.update) {
         throw "Installed version after the update: $version"
     }
     "updated to $version", (Assert-Same $legacy (Get-Installed $legacyRoot) '2.2.13 install')

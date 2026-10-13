@@ -32,6 +32,8 @@ $shortcuts = @(
     (Join-Path ([Environment]::GetFolderPath('Programs')) 'Ugurugu 3.lnk')
 )
 $results = New-Object System.Collections.ArrayList
+# The versions prepare.ps1 packed: the one installed, and the one in the feed.
+$versions = Get-Content (Join-Path $in 'versions.json') -Raw | ConvertFrom-Json
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -39,7 +41,7 @@ function Stop-Apps {
     Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
 }
 
-Step 'Install 3.0.0' {
+Step 'Install' {
     $setup = (Get-Item (Join-Path $in 'install\*-Setup.exe')).FullName
     $installer = Start-Process -FilePath $setup -ArgumentList '--silent' -PassThru -Wait
     if ($installer.ExitCode -ne 0) {
@@ -49,7 +51,7 @@ Step 'Install 3.0.0' {
     Start-Sleep -Seconds 5
     Get-AppProcess | ForEach-Object { Close-App $_ }
     $version = Get-InstalledVersion
-    if ($version -ne '3.0.0') {
+    if ($version -ne $versions.installed) {
         throw "Installed version $version"
     }
     $files = @(Get-ChildItem -Recurse -File (Join-Path $installRoot 'current') | ForEach-Object Name | Sort-Object)
@@ -152,13 +154,13 @@ Step 'Update that fails to download' {
         Remove-Item Env:UGURUGU_UPDATE_FEED, Env:UGURUGU_SETTINGS_PATH
     }
     $version = Get-InstalledVersion
-    if ($version -ne '3.0.0') {
+    if ($version -ne $versions.installed) {
         throw "Installed version after the failed update: $version"
     }
     "notice '$text'", "title '$caption' kept", "still $version"
 }
 
-Step 'Update to 3.0.1 with unsaved changes' {
+Step 'Update with unsaved changes' {
     $env:UGURUGU_UPDATE_FEED = Join-Path $in 'feed'
     try {
         Start-Process -FilePath $app | Out-Null
@@ -185,7 +187,7 @@ Step 'Update to 3.0.1 with unsaved changes' {
     $restarted = Wait-Window 120
     $version = Get-InstalledVersion
     Close-App $restarted
-    if ($version -ne '3.0.1') {
+    if ($version -ne $versions.update) {
         throw "Installed version after the update: $version"
     }
     "asked about unsaved changes, cancelled, asked again from Check for Updates, updated to $version and started again"
