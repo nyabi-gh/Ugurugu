@@ -157,6 +157,10 @@ jobs:
     name: Publish GitHub release
     needs: [verify, windows]
     if: success() && startsWith(github.ref, 'refs/tags/')
+    # One at a time across tags: they share the `updates` release.
+    concurrency:
+      group: release-3-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -187,19 +191,29 @@ jobs:
               --title "Ugurugu updates" \
               --notes "Update packages that installed Ugurugu 3 downloads by itself. To install Ugurugu, use the Setup file of the latest release."
           fi
-          existing=$(gh release view updates --json assets --jq '.assets[].name')
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/updates" \
+            --jq '.assets[] | select(.state == "uploaded") | "\(.name) \(.digest)"')
           packages=(artifacts/*-full.nupkg)
           if [[ ${#packages[@]} -eq 0 ]]; then
             echo "No update package was built"
             exit 1
           fi
+          # A rerun finds its own package there already and goes on.
+          new=()
           for package in "${packages[@]}"; do
-            if grep -qxF "$(basename "$package")" <<< "$existing"; then
-              echo "$(basename "$package") is published already; a new one would reset its download count"
+            name=$(basename "$package")
+            digest="sha256:$(sha256sum "$package" | cut -d' ' -f1)"
+            there=$(awk -v name="$name" '$1 == name { print $2 }' <<< "$published")
+            if [[ -z "$there" ]]; then
+              new+=("$package")
+            elif [[ "$there" != "$digest" ]]; then
+              echo "$name is published already with other content; a new one would reset its download count"
               exit 1
             fi
           done
-          gh release upload updates "${packages[@]}"
+          if [[ ${#new[@]} -gt 0 ]]; then
+            gh release upload updates "${new[@]}" --clobber
+          fi
           # The list last, so it never names a package not there yet.
           lists=()
           for file in artifacts/*; do
@@ -215,4 +229,6 @@ jobs:
         with:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
-          files: artifacts/*-Setup.exe
+          files: |
+            artifacts/*-Setup.exe
+            artifacts/SHA256SUMS-Windows.txt
