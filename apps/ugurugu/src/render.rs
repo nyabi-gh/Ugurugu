@@ -48,6 +48,9 @@ pub enum ToRender {
     CloseRequested,
     /// Another start of the app handed over a document to open in a tab.
     Open(std::path::PathBuf),
+    /// Windows is ending the session; the sender hears once unsaved work is
+    /// on disk for recovery.
+    SessionEnding(std::sync::mpsc::Sender<()>),
 }
 
 /// How long to sleep when nothing is scheduled; any message wakes it earlier.
@@ -572,6 +575,9 @@ impl RenderThread {
             ToRender::CloseRequested => {
                 self.files.request(Action::Close, &mut self.canvas);
                 self.needs_frame = true;
+            }
+            ToRender::SessionEnding(written) => {
+                self.files.keep_for_session_end(&mut self.canvas, written);
             }
             ToRender::Open(path) => {
                 tracing::info!("opening a document handed over by another start");

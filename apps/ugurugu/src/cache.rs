@@ -116,7 +116,12 @@ struct Queue {
     /// The newest list of thumbnails wanted.
     thumbnails: Option<Job>,
     running: Option<Running>,
+    /// Its tab has closed: only exports are drawn, while any are asked for.
     quit: bool,
+    /// `Renders` that may still ask for exports.
+    askers: usize,
+    /// The thread has ended, so nothing asked of it is answered.
+    ended: bool,
 }
 
 struct Shared {
@@ -130,14 +135,35 @@ struct Shared {
     surface_bytes: AtomicUsize,
 }
 
-/// Hands work to the worker; cheap to clone.
-#[derive(Clone)]
+/// Asks the worker for exports; cheap to clone. While one is held, the
+/// worker outlives its tab, so an export of a tab closed meanwhile ends.
 pub struct Renders {
     shared: Arc<Shared>,
 }
 
+impl Renders {
+    fn new(shared: Arc<Shared>) -> Self {
+        shared.queue.lock().expect("queue lock").askers += 1;
+        Self { shared }
+    }
+}
+
+impl Clone for Renders {
+    fn clone(&self) -> Self {
+        Self::new(self.shared.clone())
+    }
+}
+
+impl Drop for Renders {
+    fn drop(&mut self) {
+        self.shared.queue.lock().expect("queue lock").askers -= 1;
+        // A worker whose tab has closed may be waiting for the last one.
+        self.shared.wake.notify_one();
+    }
+}
+
 pub struct CacheWorker {
-    renders: Renders,
+    shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -208,34 +234,30 @@ impl CacheWorker {
                         renderer.release_scratch();
                     }
                 }
-                // Exports left waiting get no picture rather than none ever.
-                worker.queue.lock().expect("queue lock").exports.clear();
+                worker.queue.lock().expect("queue lock").ended = true;
             })?;
         Ok(Self {
-            renders: Renders { shared },
+            shared,
             thread: Some(thread),
         })
     }
 
     pub fn renders(&self) -> Renders {
-        self.renders.clone()
+        Renders::new(self.shared.clone())
     }
 
     /// Lets the layers' own surfaces take `bytes` from the next render on.
     pub fn set_surface_budget(&self, bytes: usize) {
-        self.renders
-            .shared
-            .surface_budget
-            .store(bytes, Ordering::Relaxed);
+        self.shared.surface_budget.store(bytes, Ordering::Relaxed);
     }
 
     /// What the layers' own surfaces took after the last render.
     pub fn surface_bytes(&self) -> usize {
-        self.renders.shared.surface_bytes.load(Ordering::Relaxed)
+        self.shared.surface_bytes.load(Ordering::Relaxed)
     }
 
     pub fn request(&self, key: Key, snapshot: Snapshot) {
-        self.renders.shared.request(key, snapshot);
+        self.shared.request(key, snapshot);
     }
 
     /// Replaces the playback frames waiting to be rendered, the first due
@@ -248,8 +270,7 @@ impl CacheWorker {
         snapshot: &Snapshot,
         preview: Preview,
     ) {
-        self.renders
-            .shared
+        self.shared
             .request_frames(version, frames, snapshot, preview);
     }
 
@@ -261,7 +282,7 @@ impl CacheWorker {
         layers: Vec<(LayerId, u64)>,
         document: Arc<Document>,
     ) {
-        let shared = &self.renders.shared;
+        let shared = &self.shared;
         let mut queue = shared.queue.lock().expect("queue lock");
         queue.thumbnails = Some(Job::Thumbnails(generation, layers, document));
         shared.wake.notify_one();
@@ -315,7 +336,7 @@ impl Renders {
         let (reply, answer) = channel();
         let shared = &self.shared;
         let mut queue = shared.queue.lock().expect("queue lock");
-        if queue.quit {
+        if queue.ended {
             return None;
         }
         queue.exports.push_back(Job::Export {
@@ -330,12 +351,19 @@ impl Renders {
     }
 }
 
-/// The next job by priority, marked as running; `None` once quitting.
+/// The next job by priority, marked as running; `None` once the tab has
+/// closed and no export is or can still be asked for.
 fn next(shared: &Shared) -> Option<Job> {
     let mut queue = shared.queue.lock().expect("queue lock");
     loop {
         if queue.quit {
-            return None;
+            // Nothing shows them any more.
+            queue.split = None;
+            queue.frames.clear();
+            queue.thumbnails = None;
+            if queue.exports.is_empty() && queue.askers == 0 {
+                return None;
+            }
         }
         let job = if let Some((key, snapshot)) = queue.split.take() {
             Some((Running::Split, Job::Split(key, snapshot)))
@@ -472,12 +500,21 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
 }
 
 impl Drop for CacheWorker {
+    /// Stops what was drawn for the tab. An export still asking for frames
+    /// keeps the thread, which then ends by itself after it.
     fn drop(&mut self) {
-        let shared = &self.renders.shared;
-        shared.queue.lock().expect("queue lock").quit = true;
-        shared.stop.store(true, Ordering::Relaxed);
+        let shared = &self.shared;
+        let mut queue = shared.queue.lock().expect("queue lock");
+        queue.quit = true;
+        if queue.running != Some(Running::Export) {
+            shared.stop.store(true, Ordering::Relaxed);
+        }
+        let exporting = queue.askers > 0;
+        drop(queue);
         shared.wake.notify_one();
-        if let Some(thread) = self.thread.take() {
+        if let Some(thread) = self.thread.take()
+            && !exporting
+        {
             let _ = thread.join();
         }
     }
@@ -551,14 +588,23 @@ mod tests {
     }
 
     #[test]
-    fn an_export_asked_of_a_stopped_worker_gets_no_picture() {
+    fn a_closed_tabs_worker_draws_what_an_export_asks_then_ends() {
         let worker = CacheWorker::start(|_| {}).unwrap();
+        let shared = worker.shared.clone();
         let renders = worker.renders();
         drop(worker);
-        assert!(matches!(
-            export_within(&renders, Document::new([8, 8])),
-            Some(None)
-        ));
+        for _ in 0..2 {
+            assert!(matches!(
+                export_within(&renders, Document::new([8, 8])),
+                Some(Some(_))
+            ));
+        }
+        drop(renders);
+        let started = Instant::now();
+        while !shared.queue.lock().unwrap().ended {
+            assert!(started.elapsed().as_secs() < 10, "the worker ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     #[test]

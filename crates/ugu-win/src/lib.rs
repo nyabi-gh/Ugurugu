@@ -15,3 +15,4 @@ pub mod locale;
 pub mod memory;
 pub mod placement;
 pub mod pointer;
+pub mod session;

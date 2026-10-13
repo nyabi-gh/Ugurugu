@@ -924,7 +924,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **결과:** 고치기 전에는 둘 다 10초 제한에 걸림(끝나지 않음). 고친 뒤 panic한 내보내기는 그림 없이 끝나고 다음 내보내기는 그림을 받는다(debug·release 모두). 끝난 작업자에 낸 요청은 바로 그림 없음으로 끝난다.
 
-**결론:** backlog B3-84의 "실패로 끝남"은 실제로는 "끝나지 않음"이었다. 작업자가 job마다 `catch_unwind`하고 끝날 때 기다리던 내보내기를 비운다(decisions.md 7절).
+**결론:** 내보내는 탭을 닫았을 때 적어 둔 "실패로 끝남"은 실제로는 "끝나지 않음"이었다. 작업자가 job마다 `catch_unwind`한다. 그 뒤 탭을 닫아도 내보내기가 끝까지 그려지게 바꿨다(`cache::tests::a_closed_tabs_worker_draws_what_an_export_asks_then_ends`, decisions.md 7절).
 
 ## 49. 창 배치 (Windows Sandbox, 2026-10-13)
 
@@ -944,3 +944,18 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 **결과:** GUI 16/16 통과(창 배치 포함). 수용 9/9 통과(판을 실제 판에서 정하게 고친 스크립트로, 설치 3.0.2, 실패 업데이트 뒤 3.0.2 유지, 저장 안 한 변경을 묻고 3.0.3으로 업데이트, 표준 사용자 설치·실행·제거). 릴리스 실행 성공: `v3.0.2`에는 `Ugurugu-3.0.2-Windows-x64-Setup.exe`만, `updates`에 `Ugurugu3-3.0.2-win-x64-full.nupkg`가 더해지고 `releases.win-x64.json`이 3.0.2를 가리킨다. 다운로드 배지 workflow가 발행 2초 뒤 `workflow_dispatch`로 돌았다(릴리스 job이 부르게 고친 것이 동작).
 
 **남은 것:** 설치된 3.0.1에서 3.0.2로의 실제 업데이트는 사용자 PC에서 보지 않았다(3.0.0 → 3.0.1은 46절).
+
+## 51. 세션 종료 때 복구본 (2026-10-13)
+
+**질문:** Windows가 세션을 끝낼 때 마지막 편집이 복구 폴더에 남나. 자동복구는 마지막 변경 3초 뒤에 쓴다.
+
+**방법:** 격리한 설정·복구·로그 경로로 release 빌드를 `tests/fixtures/ugu13/motion.ugu`와 함께 띄운다(가져온 문서는 저장 안 한 상태). 창 제목에 `*`가 보이자마자 `SendMessageW`로 `WM_QUERYENDSESSION`, 이어서 `WM_ENDSESSION`(wParam 1)을 보내고, 두 메시지가 답한 직후 복구 폴더를 나열한 뒤 프로세스를 끝낸다. 포커스·화면 캡처는 쓰지 않는다. 같은 스크립트로 main(`be94afd`) 빌드와 이 변경을 잰다.
+
+**결과:**
+
+| 빌드 | 제목 `*` 뒤 메시지까지 | 두 메시지 답 | 답한 직후 복구 폴더 |
+|---|---|---|---|
+| main | 17ms | 3ms | `lock`만 |
+| 변경 | 43ms | 20ms | `lock`, `tab-1/1.json`, `tab-1/1.ugurugu`(39,614바이트), 로그 "work written for recovery ms=11.5" |
+
+**결론:** 전에는 쉼 3초가 지나기 전에 세션이 끝나면 그 작업이 남지 않았다. 이제 `WM_ENDSESSION`에 답하기 전에 쓴다. 실제 로그오프·다시 시작으로는 확인하지 않았다(Sandbox를 끝내는 일이라). 코드는 `apps/ugurugu/src/app.rs`(`SESSION_END_WAIT`), `Files::keep_for_session_end`, `crates/ugu-win/src/session.rs`.

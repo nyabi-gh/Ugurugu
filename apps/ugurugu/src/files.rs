@@ -230,6 +230,8 @@ enum Job {
         folder: PathBuf,
         lock: File,
     },
+    /// Answered once the jobs before it are done.
+    Flush(Sender<()>),
     /// Ends the file thread once the jobs before it are done.
     Stop,
 }
@@ -348,6 +350,11 @@ pub struct Files {
     owner: isize,
     /// Asking whether to save before this action.
     confirm: Option<Action>,
+    /// Asking whether closing or updating stops the export under way.
+    export_question: Option<Action>,
+    /// Closing or updating asked for while a save, a read or a dialog was
+    /// under way, and whether it also waits for the export to end.
+    closing: Option<(Action, bool)>,
     /// Runs once save `.0` succeeds; `None` until that save starts.
     after_save: Option<(Option<u64>, Action)>,
     /// Saves started, and how many of them have not ended.
@@ -450,6 +457,8 @@ impl Files {
             events,
             owner,
             confirm: None,
+            export_question: None,
+            closing: None,
             after_save: None,
             saves_started: 0,
             saving: 0,
@@ -505,6 +514,23 @@ impl Files {
     /// on for long, and removes what was written once the work is saved,
     /// dropped or its tab closed.
     pub fn keep_recovery(&mut self, canvas: &mut Canvas, now: Instant) {
+        self.keep_recovery_now(canvas, now, false);
+    }
+
+    /// Writes each tab's work not yet on disk at once, as Windows ends the
+    /// session without the window closing; `written` hears once it is on
+    /// disk, or is dropped when there is nowhere to write it.
+    pub fn keep_for_session_end(&mut self, canvas: &mut Canvas, written: Sender<()>) {
+        if self.recovery.is_none() {
+            return;
+        }
+        self.keep_recovery_now(canvas, Instant::now(), true);
+        let _ = self.to_worker.send(Job::Flush(written));
+    }
+
+    /// As `keep_recovery`; `all` writes what is not on disk without
+    /// waiting for editing to pause.
+    fn keep_recovery_now(&mut self, canvas: &mut Canvas, now: Instant, all: bool) {
         let Some(recovering) = self.recovery.as_mut() else {
             return;
         };
@@ -556,7 +582,7 @@ impl Files {
                 }
                 None => tab.unwritten = Some((now, now, mark)),
             }
-            if tab.due().is_some_and(|at| at <= now) {
+            if all || tab.due().is_some_and(|at| at <= now) {
                 due.push(generation);
             }
         }
@@ -744,12 +770,25 @@ impl Files {
 
     /// Starts `action`, first asking about unsaved changes.
     pub fn request(&mut self, action: Action, canvas: &mut Canvas) {
+        let closes = matches!(action, Action::Close | Action::Update);
         if self.busy() {
+            // Closing waits for it rather than being lost; one asked for
+            // before the save under way already runs after it.
+            if closes && !matches!(self.after_save, Some((_, Action::Close | Action::Update))) {
+                self.closing = Some((action, false));
+                self.say(tr("close-waits").to_owned());
+            }
             return;
+        }
+        if closes {
+            self.closing = None;
         }
         match action {
             // Nothing open closes: what is made or read goes in a tab.
             Action::New | Action::Open | Action::Recover => self.proceed(action, canvas),
+            Action::Close | Action::Update if self.exporting.is_some() => {
+                self.export_question = Some(action);
+            }
             Action::Close | Action::Update => {
                 self.discarded.clear();
                 self.close_next(action, canvas);
@@ -927,6 +966,24 @@ impl Files {
             self.request(Action::Update, canvas);
         }
         self.updates.ask(ctx, asking);
+    }
+
+    /// Closes, or updates, as asked while a save, a read, a dialog or the
+    /// export was under way, once none is and nothing else is asked.
+    pub fn resume_closing(&mut self, asking: bool, canvas: &mut Canvas) {
+        let Some((action, after_export)) = self.closing else {
+            return;
+        };
+        if asking
+            || self.asking()
+            || self.busy()
+            || self.close
+            || (after_export && self.exporting.is_some())
+        {
+            return;
+        }
+        self.closing = None;
+        self.request(action, canvas);
     }
 
     /// Reads the document at `path` into a tab, or shows the tab it is open
@@ -1416,6 +1473,10 @@ impl Files {
             self.last_cancelled = Some(export.number);
             self.cancelled.push(export);
             self.say(tr("export-canceled").to_owned());
+            // It waited to keep the export, which is gone.
+            if let Some((_, true)) = self.closing {
+                self.closing = None;
+            }
         }
     }
 
@@ -1562,6 +1623,10 @@ impl Files {
                     Outcome::Cancelled => self.say(tr("export-canceled").to_owned()),
                     Outcome::Failed(error) => {
                         self.fail(format!("{}: {error}", tr("export-failed")));
+                        // Left open to say so and to export again.
+                        if let Some((_, true)) = self.closing {
+                            self.closing = None;
+                        }
                     }
                 }
             }
@@ -1733,6 +1798,7 @@ impl Files {
     /// Whether a question or a file dialog is open, or one is about to be.
     pub fn asking(&self) -> bool {
         self.confirm.is_some()
+            || self.export_question.is_some()
             || self.reading_found
             || self.busy_dialog
             || !self.found.is_empty()
@@ -1822,6 +1888,61 @@ impl Files {
             // Unlocked, so the next start asks again.
             Some(Answer::Later) => drop(self.found.pop_front()),
             None => {}
+        }
+    }
+
+    /// The question about closing while an export runs, while one is open.
+    pub fn ask_export_close(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {
+        let Some(action) = self.export_question else {
+            return;
+        };
+        let mut choice = None;
+        let modal = widgets::dialog(
+            ctx,
+            "closing while exporting",
+            420.0,
+            tr("export-close-title"),
+            Some(tr("export-close-text")),
+            |ui| {
+                widgets::dialog_buttons(ui, |ui| {
+                    for (choice_here, key, emphasis) in [
+                        (Some(true), "export-close-wait", widgets::Emphasis::Primary),
+                        (
+                            Some(false),
+                            "export-close-stop",
+                            widgets::Emphasis::Secondary,
+                        ),
+                        (None, "dialog-cancel", widgets::Emphasis::Secondary),
+                    ] {
+                        if widgets::button(ui, tr(key), emphasis, true).clicked() {
+                            choice = Some(choice_here);
+                        }
+                    }
+                });
+            },
+        );
+        if modal.should_close() && choice.is_none() {
+            choice = Some(None);
+        }
+        if let Some(choice) = choice {
+            self.answer_export_close(action, choice, canvas);
+        }
+    }
+
+    /// Waits for the export (`Some(true)`), stops it (`Some(false)`) or
+    /// stays open (`None`).
+    fn answer_export_close(&mut self, action: Action, choice: Option<bool>, canvas: &mut Canvas) {
+        self.export_question = None;
+        match choice {
+            Some(true) => {
+                self.closing = Some((action, true));
+                self.say(tr("close-after-export").to_owned());
+            }
+            Some(false) => {
+                self.cancel_export();
+                self.request(action, canvas);
+            }
+            None => self.forget(action),
         }
     }
 
@@ -1946,7 +2067,11 @@ fn failure(job: &Job) -> Option<Box<dyn FnOnce(String) -> FileEvent + Send>> {
             Box::new(move |error| FileEvent::RecoveryWritten(tab, sequence, Err(error)))
         }
         Job::ReadRecovery(_) => Box::new(|error| FileEvent::Recovered(Err(error))),
-        Job::ForgetRecovery(_) | Job::DiscardRecovery(_) | Job::EndRecovery { .. } | Job::Stop => {
+        Job::ForgetRecovery(_)
+        | Job::DiscardRecovery(_)
+        | Job::EndRecovery { .. }
+        | Job::Flush(_)
+        | Job::Stop => {
             return None;
         }
     })
@@ -2074,6 +2199,10 @@ fn run(job: Job) -> Option<FileEvent> {
             if let Err(error) = recovery::end(&folder, lock) {
                 tracing::warn!(%error, "cannot remove the recovery folder");
             }
+            return None;
+        }
+        Job::Flush(done) => {
+            let _ = done.send(());
             return None;
         }
         Job::Stop => return None,
@@ -2802,6 +2931,66 @@ mod tests {
             .filter(|name| name.ends_with(".tmp"))
             .collect();
         assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn closing_while_exporting_asks_whether_to_wait_for_it_or_stop_it() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("export-close");
+        let first = folder.join("first.png");
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(first.clone())),
+            &mut canvas,
+        );
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.export_question, Some(Action::Close));
+        assert!(!files.should_close());
+        // Cancel: the window and the export go on.
+        files.answer_export_close(Action::Close, None, &mut canvas);
+        assert!(files.export_status().is_some());
+        files.resume_closing(false, &mut canvas);
+        assert!(!files.should_close());
+        // Close when done: open until it is.
+        files.request(Action::Close, &mut canvas);
+        files.answer_export_close(Action::Close, Some(true), &mut canvas);
+        assert_eq!(files.message(), Some(tr("close-after-export")));
+        files.resume_closing(false, &mut canvas);
+        assert!(!files.should_close());
+        files.handle(next(&events), &mut canvas);
+        assert!(first.exists());
+        files.resume_closing(false, &mut canvas);
+        assert!(files.should_close());
+
+        // Stop it: closes at once.
+        files.close = false;
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(folder.join("second.png"))),
+            &mut canvas,
+        );
+        files.request(Action::Update, &mut canvas);
+        assert_eq!(files.export_question, Some(Action::Update));
+        files.answer_export_close(Action::Update, Some(false), &mut canvas);
+        assert_eq!(files.export_status(), None);
+        assert_eq!(files.export_question, None);
+        files.end();
+    }
+
+    #[test]
+    fn closing_while_saving_closes_once_the_save_ends() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("save-close");
+        canvas.file_mut().path = Some(folder.join("drawing.ugurugu"));
+        canvas.edit(Session::add_layer).unwrap();
+        files.save(&mut canvas);
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.message(), Some(tr("close-waits")));
+        files.resume_closing(false, &mut canvas);
+        assert!(!files.should_close());
+        files.handle(next(&events), &mut canvas);
+        assert!(!canvas.session().is_dirty());
+        files.resume_closing(false, &mut canvas);
+        assert!(files.should_close());
+        files.end();
     }
 
     #[test]

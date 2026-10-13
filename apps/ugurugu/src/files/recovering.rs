@@ -335,3 +335,31 @@ fn every_tab_s_unsaved_work_is_written_and_a_closed_tab_s_removed() {
     assert_eq!(tabs(), ["tab-1"]);
     files.end();
 }
+
+#[test]
+fn as_the_session_ends_every_tab_s_unsaved_work_is_written_at_once() {
+    let root = Root::new("files-session-end");
+    let (mut files, mut canvas, _events) = setup(&root);
+    canvas.edit(Session::add_layer).unwrap();
+    canvas.open_tab(Document::new([8, 8]), true).unwrap();
+    canvas.edit(Session::add_layer).unwrap();
+    canvas.edit(Session::add_layer).unwrap();
+    // Edited a moment ago: nothing is due yet.
+    files.keep_recovery(&mut canvas, Instant::now());
+    let (written, on_disk) = channel();
+    files.keep_for_session_end(&mut canvas, written);
+    on_disk
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the work is on disk");
+    let own = folder(&files);
+    for (tab, layers) in [(0, 2), (1, 3)] {
+        let (document, _) = ugu_io::read::read(std::io::BufReader::new(
+            File::open(recovery::tab_folder(&own, tab).join("1.ugurugu")).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(document.layers.len(), layers);
+    }
+    // Nothing is removed: the next start asks about it.
+    drop(files);
+    assert!(recovery::tab_folder(&own, 1).join("1.ugurugu").exists());
+}

@@ -14,6 +14,7 @@ use std::thread::JoinHandle;
 use egui_winit::accesskit_winit;
 use ugu_win::instance::{DocumentReceiver, StartLock};
 use ugu_win::pointer::PointerInput;
+use ugu_win::session::SessionEnd;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -29,6 +30,9 @@ use crate::settings::Store;
 pub const WINDOW_CLASS: &str = "Ugurugu 3";
 /// Taken by every start; see [`ugu_win::instance`].
 pub const START_LOCK: &str = r"Local\Ugurugu 3 start";
+/// How long the session end waits for unsaved work to be written. Windows
+/// offers to end apps that take longer than about five seconds.
+const SESSION_END_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// Which window a start may hand its document to: one of the same
 /// executable with the same settings and recovery folders, so that test runs
@@ -84,6 +88,8 @@ struct Session {
     // pointer subclasses (comctl32) sit on top of AccessKit's, which replaces
     // the window procedure directly, and all go before the window.
     _documents: DocumentReceiver,
+    /// Keeps unsaved work for recovery when Windows ends the session.
+    _session_end: Option<SessionEnd>,
     pointer: PointerInput,
     /// UI Automation provider; it must live on the thread that owns the
     /// window, so egui's tree updates are sent here from the render thread.
@@ -239,6 +245,24 @@ impl Session {
         // SAFETY: as for the pointer subclass above.
         let documents = unsafe { DocumentReceiver::install(hwnd, &instance_key(), open) }
             .map_err(|error| format!("cannot receive documents from later starts: {error}"))?;
+        let to_keep = to_render.clone();
+        let ending = move || {
+            let (written, on_disk) = mpsc::channel();
+            if to_keep.send(ToRender::SessionEnding(written)).is_ok() {
+                // Dropped unanswered when there is nothing to write to.
+                match on_disk.recv_timeout(SESSION_END_WAIT) {
+                    Ok(()) => tracing::info!("unsaved work kept for recovery as the session ends"),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        tracing::warn!("unsaved work was not on disk in time as the session ended");
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {}
+                }
+            }
+        };
+        // SAFETY: as for the pointer subclass above.
+        let session_end = unsafe { SessionEnd::install(hwnd, ending) }
+            .inspect_err(|error| tracing::warn!(error, "cannot hear the session end"))
+            .ok();
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -275,6 +299,7 @@ impl Session {
 
         Ok(Self {
             _documents: documents,
+            _session_end: session_end,
             pointer,
             accessibility,
             window,
