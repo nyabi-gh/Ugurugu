@@ -246,6 +246,8 @@ motion-break-range = Break range
 # Colour
 color-dock = Color
 color-current = Current color
+color-field-square = HSV Square
+color-field-triangle = HSV Triangle
 color-pair = Current color { $current }, previous color { $previous }
 color-pair-tip = Current and previous color. Click the rear swatch to swap.
 color-history = Color history

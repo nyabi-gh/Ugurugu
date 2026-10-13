@@ -246,6 +246,8 @@ motion-break-range = 끊김 범위
 # Colour
 color-dock = 색상
 color-current = 현재 색상
+color-field-square = HSV 사각 필드
+color-field-triangle = HSV 삼각 필드
 color-pair = 현재 색상 { $current }, 이전 색상 { $previous }
 color-pair-tip = 현재 색상과 이전 색상입니다. 뒤쪽 색상 칸을 누르면 서로 바뀝니다.
 color-history = 색상 기록

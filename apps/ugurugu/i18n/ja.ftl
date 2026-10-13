@@ -246,6 +246,8 @@ motion-break-range = 途切れ範囲
 # Colour
 color-dock = 色
 color-current = 現在の色
+color-field-square = HSV四角フィールド
+color-field-triangle = HSV三角フィールド
 color-pair = 現在の色 { $current }、前の色 { $previous }
 color-pair-tip = 現在の色と前の色です。後ろの色をクリックすると入れ替わります。
 color-history = カラー履歴

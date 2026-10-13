@@ -7,6 +7,30 @@
 
 use serde_json::{Map, Value, json};
 
+/// The saturation and value field inside the colour panel's hue ring, as
+/// 2.2.13's colour wheel offered them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColorField {
+    #[default]
+    Square,
+    Triangle,
+}
+
+impl ColorField {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Square => "square",
+            Self::Triangle => "triangle",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        [Self::Square, Self::Triangle]
+            .into_iter()
+            .find(|field| field.key() == key)
+    }
+}
+
 /// The panels that can be moved, in the Window menu's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Panel {
@@ -112,6 +136,7 @@ pub struct Layout {
     /// their place and come back to it.
     pub closed: Vec<Panel>,
     pub animation_bar: bool,
+    pub color_field: ColorField,
 }
 
 impl Default for Layout {
@@ -132,6 +157,7 @@ impl Default for Layout {
             floating: Vec::new(),
             closed: Vec::new(),
             animation_bar: true,
+            color_field: ColorField::default(),
         }
     }
 }
@@ -337,6 +363,7 @@ impl Layout {
             "floating": floating,
             "closed": self.closed.iter().map(|panel| panel.key()).collect::<Vec<_>>(),
             "animationBar": self.animation_bar,
+            "colorField": self.color_field.key(),
         })
     }
 }
@@ -431,6 +458,12 @@ fn read(value: &Value) -> Option<Layout> {
         floating,
         closed,
         animation_bar: object.get("animationBar")?.as_bool()?,
+        // Not in settings written before the triangle came back.
+        color_field: object
+            .get("colorField")
+            .and_then(Value::as_str)
+            .and_then(ColorField::from_key)
+            .unwrap_or_default(),
     })
 }
 
@@ -466,10 +499,18 @@ mod tests {
         layout.left.width = 222.0;
         layout.right.collapsed = true;
         layout.animation_bar = false;
+        layout.color_field = ColorField::Triangle;
         let text = layout.to_json().to_string();
         let read = Layout::parse(&serde_json::from_str(&text).unwrap());
         assert_eq!(read, layout);
         assert!(every_panel_once(&read));
+    }
+
+    #[test]
+    fn a_layout_from_before_the_triangle_keeps_the_square() {
+        let mut value = Layout::default().to_json();
+        value.as_object_mut().unwrap().remove("colorField");
+        assert_eq!(Layout::parse(&value), Layout::default());
     }
 
     #[test]

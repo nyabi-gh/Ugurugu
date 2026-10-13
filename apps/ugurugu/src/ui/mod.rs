@@ -1352,7 +1352,9 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
 }
 
 pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
-    panels.color.show(ui, canvas);
+    panels
+        .color
+        .show(ui, canvas, &mut panels.layout.color_field);
 }
 
 pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas) {

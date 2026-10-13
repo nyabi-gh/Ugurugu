@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! The colour dock, after 2.2.13's `ColorWheel` and `ColorPairSwatch`: a
-//! hue ring around a saturation and value square, and the current colour
-//! over the previous one. 2.2.13's triangle field is left for later. Unlike
+//! hue ring around a saturation and value square or triangle, and the
+//! current colour over the previous one. Unlike
 //! 2.2.13, whose wheel takes only the pointer, the colour's `#AARRGGBB` can
 //! be typed, so that a colour can be chosen from the keyboard.
 
@@ -13,7 +13,8 @@ use ugu_core::ops::Rgba8;
 
 use crate::canvas::Canvas;
 use crate::i18n::{tr, tr_with};
-use crate::theme;
+use crate::layout::ColorField;
+use crate::{theme, widgets};
 
 use super::history::hex;
 
@@ -101,6 +102,49 @@ fn on_ring(center: Pos2, hue: f32, radius: f32) -> Pos2 {
     center + egui::vec2(angle.cos() * radius, -angle.sin() * radius)
 }
 
+/// The triangle's corners inside a ring of `inner` radius: the hue at the
+/// right, white at the top left and black at the bottom left, as 2.2.13's.
+fn triangle(center: Pos2, inner: f32) -> [Pos2; 3] {
+    let up = inner * 3f32.sqrt() * 0.5;
+    [
+        center + egui::vec2(inner, 0.0),
+        center + egui::vec2(-inner * 0.5, -up),
+        center + egui::vec2(-inner * 0.5, up),
+    ]
+}
+
+/// How much of the hue, white and black corners make saturation `s` and
+/// value `v`: a tint is hue and white, a shade takes black.
+fn weights(s: f32, v: f32) -> [f32; 3] {
+    [v * s, v * (1.0 - s), 1.0 - v]
+}
+
+/// Saturation and value at `point`, slid onto the triangle when outside it
+/// so that a drag past an edge follows the edge.
+fn saturation_value(point: Pos2, [a, b, c]: [Pos2; 3]) -> [f32; 2] {
+    let denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+    let first = ((b.y - c.y) * (point.x - c.x) + (c.x - b.x) * (point.y - c.y)) / denominator;
+    let second = ((c.y - a.y) * (point.x - c.x) + (a.x - c.x) * (point.y - c.y)) / denominator;
+    let clamped = [first, second, 1.0 - first - second].map(|weight| weight.max(0.0));
+    let total: f32 = clamped.iter().sum();
+    let [hue, white, _] = clamped.map(|weight| weight / total);
+    let value = (hue + white).clamp(0.0, 1.0);
+    let saturation = if value > 0.0 {
+        (hue / value).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    [saturation, value]
+}
+
+fn blend(corners: [Pos2; 3], weights: [f32; 3]) -> Pos2 {
+    let mut point = Pos2::ZERO;
+    for (corner, weight) in corners.iter().zip(weights) {
+        point += corner.to_vec2() * weight;
+    }
+    point
+}
+
 impl ColorDock {
     /// Makes the colour shown last the previous one when the pen colour was
     /// changed elsewhere: by the eyedropper, the history or a restore, as
@@ -115,7 +159,7 @@ impl ColorDock {
         self.seen = Some(color);
     }
 
-    pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas) {
+    pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, shape: &mut ColorField) {
         let color = canvas.tools().color;
         self.follow(color);
         let [r, g, b, alpha] = color.0.map(|channel| f32::from(channel) / 255.0);
@@ -139,6 +183,7 @@ impl ColorDock {
         let inner = outer - thickness - RING_GAP;
         let half = inner / std::f32::consts::SQRT_2;
         let square = Rect::from_center_size(center, Vec2::splat(half * 2.0));
+        let corners = triangle(center, inner);
         let painter = ui.painter();
 
         let mut ring = Mesh::default();
@@ -166,7 +211,33 @@ impl ColorDock {
 
         let mut field = Mesh::default();
         const CELLS: u32 = 16;
-        for row in 0..=CELLS {
+        if *shape == ColorField::Triangle {
+            // Rows from the hue corner, each colour exact at its vertex.
+            let mut first_of_row = Vec::new();
+            for a in 0..=CELLS {
+                first_of_row.push(field.vertices.len() as u32);
+                for b in 0..=CELLS - a {
+                    let (hue, white) = (a as f32 / CELLS as f32, b as f32 / CELLS as f32);
+                    let value = hue + white;
+                    let saturation = if value > 0.0 { hue / value } else { 0.0 };
+                    field.vertices.push(Vertex {
+                        pos: blend(corners, [hue, white, 1.0 - value]),
+                        uv: WHITE_UV,
+                        color: color32(hsv_to_rgb([hsv[0], saturation, value])),
+                    });
+                }
+            }
+            for a in 0..CELLS {
+                let (row, next) = (first_of_row[a as usize], first_of_row[a as usize + 1]);
+                for b in 0..CELLS - a {
+                    field.add_triangle(row + b, row + b + 1, next + b);
+                    if b + 1 < CELLS - a {
+                        field.add_triangle(row + b + 1, next + b + 1, next + b);
+                    }
+                }
+            }
+        }
+        for row in (0..=CELLS).filter(|_| *shape == ColorField::Square) {
             for column in 0..=CELLS {
                 let (s, v) = (
                     column as f32 / CELLS as f32,
@@ -201,6 +272,8 @@ impl ColorDock {
             if self.dragging_ring {
                 let offset = pointer - center;
                 hsv[0] = (f32::atan2(-offset.y, offset.x) / std::f32::consts::TAU).rem_euclid(1.0);
+            } else if *shape == ColorField::Triangle {
+                [hsv[1], hsv[2]] = saturation_value(pointer, corners);
             } else {
                 hsv[1] = ((pointer.x - square.left()) / square.width()).clamp(0.0, 1.0);
                 hsv[2] = (1.0 - (pointer.y - square.top()) / square.height()).clamp(0.0, 1.0);
@@ -211,10 +284,13 @@ impl ColorDock {
             painter.circle_stroke(at, MARKER, Stroke::new(1.6, Color32::WHITE));
         };
         marker(on_ring(center, hsv[0], outer - thickness * 0.5));
-        marker(egui::pos2(
-            square.left() + square.width() * hsv[1],
-            square.top() + square.height() * (1.0 - hsv[2]),
-        ));
+        marker(match shape {
+            ColorField::Square => egui::pos2(
+                square.left() + square.width() * hsv[1],
+                square.top() + square.height() * (1.0 - hsv[2]),
+            ),
+            ColorField::Triangle => blend(corners, weights(hsv[1], hsv[2])),
+        });
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, tr("color-current"))
         });
@@ -234,6 +310,16 @@ impl ColorDock {
             self.previous = Some(from);
         }
 
+        ui.add_space(theme::space::S);
+        widgets::segmented(
+            ui,
+            shape,
+            &[
+                (ColorField::Square, tr("color-field-square")),
+                (ColorField::Triangle, tr("color-field-triangle")),
+            ],
+            2,
+        );
         ui.add_space(theme::space::S);
         ui.horizontal(|ui| {
             // The current colour over the previous one; the rear one swaps.
@@ -324,6 +410,29 @@ impl ColorDock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_triangle_gives_saturation_and_value_as_2_2_13_s() {
+        let corners = triangle(Pos2::new(100.0, 100.0), 60.0);
+        let close = |[s, v]: [f32; 2], [ws, wv]: [f32; 2]| {
+            assert!((s - ws).abs() < 1e-4 && (v - wv).abs() < 1e-4, "{s} {v}");
+        };
+        close(saturation_value(corners[0], corners), [1.0, 1.0]);
+        close(saturation_value(corners[1], corners), [0.0, 1.0]);
+        // Black has no saturation to speak of.
+        assert!(saturation_value(corners[2], corners)[1].abs() < 1e-4);
+        for [s, v] in [[0.3, 0.8], [0.9, 0.2], [0.5, 0.5]] {
+            close(
+                saturation_value(blend(corners, weights(s, v)), corners),
+                [s, v],
+            );
+        }
+        // Past the hue corner the drag stays on it.
+        close(
+            saturation_value(corners[0] + egui::vec2(40.0, 0.0), corners),
+            [1.0, 1.0],
+        );
+    }
 
     #[test]
     fn hsv_round_trips_through_rgb() {
