@@ -63,7 +63,16 @@ function Get-InstalledVersion([string] $Root = $installRoot) {
 function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        $value = & $Condition
+        # A window still starting can let UI Automation time out; that is
+        # not there yet, not a failure.
+        try {
+            $value = & $Condition
+        } catch {
+            $cause = $_.Exception
+            while ($cause.InnerException) { $cause = $cause.InnerException }
+            if ($cause -isnot [TimeoutException]) { throw }
+            $value = $null
+        }
         if ($value) {
             return $value
         }
