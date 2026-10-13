@@ -219,7 +219,8 @@ impl Exporting {
                 move || {
                     crate::files::remove_stale_temporaries(&path);
                     let started = std::time::Instant::now();
-                    let outcome = match job {
+                    // A panic, which the panic hook records, still ends the export.
+                    let run = std::panic::AssertUnwindSafe(|| match job {
                         Job::Still { frame } => still(document, frame, &path, &renders, &cancel),
                         Job::Animation {
                             format,
@@ -237,7 +238,10 @@ impl Exporting {
                             &cancel,
                             &done,
                         ),
-                    };
+                    });
+                    let outcome = std::panic::catch_unwind(run).unwrap_or_else(|_| {
+                        Outcome::Failed(crate::i18n::tr("file-job-failed").to_owned())
+                    });
                     tracing::info!(
                         ms = started.elapsed().as_secs_f64() * 1000.0,
                         ?job,

@@ -217,22 +217,32 @@ impl Session {
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
             .spawn(move || {
-                let error = RenderThread::create(
-                    render_window,
-                    Links {
-                        surface_source,
-                        tree_sink,
-                        to_self,
-                        hwnd,
-                    },
-                    egui_ctx,
-                    egui_state,
-                    open_at_start,
-                    early_gpu,
-                    settings,
-                )
-                .and_then(|render| render.run(&messages))
-                .err();
+                // A panic must still end the event loop, or the window stays
+                // open with nothing to answer it.
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    RenderThread::create(
+                        render_window,
+                        Links {
+                            surface_source,
+                            tree_sink,
+                            to_self,
+                            hwnd,
+                        },
+                        egui_ctx,
+                        egui_state,
+                        open_at_start,
+                        early_gpu,
+                        settings,
+                    )
+                    .and_then(|render| render.run(&messages))
+                }));
+                let error = match ran {
+                    Ok(result) => result.err(),
+                    Err(panic) => Some(format!(
+                        "the render thread panicked: {}",
+                        panic_message(panic.as_ref())
+                    )),
+                };
                 let _ = proxy.send_event(UiEvent::RenderStopped(error));
             })
             .map_err(|error| format!("cannot start the render thread: {error}"))?;
@@ -347,6 +357,14 @@ impl ApplicationHandler<UiEvent> for App {
         }
         event_loop.set_control_flow(ControlFlow::Wait);
     }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("no message")
 }
 
 /// The document named on the command line as an absolute path in Windows's
