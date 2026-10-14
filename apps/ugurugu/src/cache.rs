@@ -58,7 +58,7 @@ pub struct Preview {
 pub enum Rendered {
     Split {
         key: Key,
-        split: Split,
+        split: Box<Split>,
         /// The split put together.
         display: Pixmap,
     },
@@ -316,7 +316,7 @@ impl Renders {
     /// Renders `frame` of `document` for export, after the canvas's own
     /// work; waits for it. `None` when the worker has stopped.
     pub fn export(&self, document: Arc<Document>, frame: i64) -> Option<Pixmap> {
-        let plan = RenderPlan::new(&document, Purpose::Export);
+        let plan = RenderPlan::new(&document, Purpose::Export, frame);
         self.render(document, plan, frame)
     }
 
@@ -419,7 +419,7 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             );
             done(Rendered::Split {
                 key,
-                split,
+                split: Box::new(split),
                 display,
             });
         }
@@ -428,7 +428,7 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             let [width, height] =
                 scaled_size(document.canvas, preview.shrink).map(|edge| edge as u16);
             let mut pixels = Pixmap::new(width, height);
-            let plan = RenderPlan::new(document, Purpose::Display);
+            let plan = RenderPlan::new(document, Purpose::Display, i64::from(frame));
             let finished = renderer.render_scaled(
                 document,
                 &plan,
@@ -630,7 +630,7 @@ mod tests {
             ));
             queue.exports.push_back(Job::Export {
                 document: state.document.clone(),
-                plan: RenderPlan::new(&state.document, Purpose::Export),
+                plan: RenderPlan::new(&state.document, Purpose::Export, 0),
                 frame: 0,
                 reply,
             });

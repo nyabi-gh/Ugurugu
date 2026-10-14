@@ -473,7 +473,8 @@ impl DocumentRenderer {
             background: ops::Rgba8([0, 0, 0, 0]),
             ..document.clone()
         };
-        let plan = RenderPlan::new(&alone, Purpose::Display);
+        // Thumbnails show what is drawn, where it is drawn.
+        let plan = RenderPlan::new(&alone, Purpose::Display, 0).in_place();
         let [width, height] = scaled_size(alone.canvas, shrink).map(|edge| edge as u16);
         let mut pixmap = Pixmap::new(width, height);
         let kept = std::mem::take(&mut self.cache);
@@ -519,7 +520,7 @@ impl DocumentRenderer {
         purpose: Purpose,
         pixmap: &mut Pixmap,
     ) {
-        let plan = RenderPlan::new(document, purpose);
+        let plan = RenderPlan::new(document, purpose, frame);
         self.render_plan(document, &plan, frame, None, pixmap);
     }
 
@@ -555,6 +556,17 @@ impl DocumentRenderer {
         let [width, height] = size.map(|edge| edge as u16);
         assert_eq!([pixmap.width(), pixmap.height()], [width, height]);
         let frame = frame_in_cycle(frame, document.frames);
+        assert!(
+            !plan.animated || plan.frame == frame,
+            "the plan was made for another frame"
+        );
+        let scaled;
+        let plan = if shrink == 1 {
+            plan
+        } else {
+            scaled = plan.scaled(shrink);
+            &scaled
+        };
         self.masks.next_render();
         let edge = self.tile_edge;
         if self.over_budget(document, plan, shrink) {
@@ -565,7 +577,7 @@ impl DocumentRenderer {
         }
         let detail = self.detail;
         self.cache.retain(|id, cached| {
-            plan.moves(*id).is_some()
+            (plan.moves(*id).is_some() || plan.cels.contains(id))
                 && cached.surface.size() == size
                 && cached.surface.edge() == edge
                 && cached.detail == detail
@@ -1661,17 +1673,18 @@ fn reach(
 }
 
 /// Bytes the surfaces of `plan`'s layers take at most when drawn at
-/// 1/`shrink` on tiles of `edge` pixels.
+/// 1/`shrink` on tiles of `edge` pixels, with the cels other frames show,
+/// which are kept for them.
 pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edge: u32) -> usize {
     let empty = TiledSurface::new(scaled_size(document.canvas, shrink), edge);
     plan.layers
         .iter()
-        .filter_map(
-            |(id, _)| match document.layer(*id).map(|layer| &layer.kind) {
-                Some(LayerKind::Paint(paint)) => Some(paint),
-                _ => None,
-            },
-        )
+        .map(|(id, _)| id)
+        .chain(&plan.cels)
+        .filter_map(|id| match document.layer(*id).map(|layer| &layer.kind) {
+            Some(LayerKind::Paint(paint)) => Some(paint),
+            _ => None,
+        })
         .map(|paint| {
             let mut bounds = Vec::new();
             let mut size = paint.initial_size;
@@ -2590,7 +2603,7 @@ mod tests {
         let (cut, kept) = (with(false), with(true));
         for shrink in [1, 2, 4] {
             let draw = |document: &Document| {
-                let plan = RenderPlan::new(document, Purpose::Display);
+                let plan = RenderPlan::new(document, Purpose::Display, 0);
                 let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
                 let mut pixmap = Pixmap::new(width, height);
                 DocumentRenderer::new(4).render_scaled(
@@ -3687,7 +3700,7 @@ mod tests {
         frame: i64,
         revisions: &LayerRevisions,
     ) -> usize {
-        let plan = RenderPlan::new(document, Purpose::Display);
+        let plan = RenderPlan::new(document, Purpose::Display, 0);
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixmap = Pixmap::new(width, height);
         renderer.render_plan(document, &plan, frame, Some(revisions), &mut pixmap);
@@ -3755,7 +3768,7 @@ mod tests {
     fn a_stopped_render_keeps_nothing_half_drawn() {
         let document = many_layers();
         let revisions = LayerRevisions::default();
-        let plan = RenderPlan::new(&document, Purpose::Display);
+        let plan = RenderPlan::new(&document, Purpose::Display, 0);
         for threads in [0, 8] {
             let stop = Arc::new(AtomicBool::new(true));
             let mut renderer = DocumentRenderer::new(threads);
@@ -3807,7 +3820,7 @@ mod tests {
             (reframed_work(true), 10.0),
         ];
         for (document, limit) in cases {
-            let plan = RenderPlan::new(&document, Purpose::Display);
+            let plan = RenderPlan::new(&document, Purpose::Display, 0);
             let full = render(&document, 2, 0);
             for shrink in [2, 4] {
                 let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
@@ -3835,7 +3848,7 @@ mod tests {
             (many_layers(), 20.0),
         ];
         for (document, limit) in cases {
-            let plan = RenderPlan::new(&document, Purpose::Display);
+            let plan = RenderPlan::new(&document, Purpose::Display, 0);
             let full = render(&document, 2, 0);
             for shrink in [2, 4] {
                 let size = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
@@ -3866,7 +3879,7 @@ mod tests {
         let document = with_layers(&document, &[below, above]);
         let revisions = LayerRevisions::default();
         let mut renderer = DocumentRenderer::new(0);
-        let plan = RenderPlan::new(&document, Purpose::Display);
+        let plan = RenderPlan::new(&document, Purpose::Display, 0);
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixmap = Pixmap::new(width, height);
         renderer.set_detail(FULL_DETAIL * 2);
@@ -3933,7 +3946,7 @@ mod tests {
         // Surfaces of another document, with the same layer ids, are kept.
         let other = many_layers();
         let mut renderer = DocumentRenderer::new(0);
-        let plan = RenderPlan::new(&other, Purpose::Display);
+        let plan = RenderPlan::new(&other, Purpose::Display, 0);
         let revisions = LayerRevisions::default();
         let mut full = Pixmap::new(96, 48);
         renderer.render_plan(&other, &plan, 1, Some(&revisions), &mut full);
@@ -3951,7 +3964,7 @@ mod tests {
         let mut expected = Pixmap::new(48, 24);
         DocumentRenderer::new(0).render_scaled(
             &alone,
-            &RenderPlan::new(&alone, Purpose::Display),
+            &RenderPlan::new(&alone, Purpose::Display, 0),
             0,
             None,
             2,
@@ -3991,8 +4004,8 @@ mod tests {
         opaque.background = Rgba8([250, 245, 235, 255]);
         for document in [document, &opaque] {
             let plans = [
-                RenderPlan::new(document, Purpose::Display),
-                RenderPlan::reference(document, crate::plan::Reference::Visible),
+                RenderPlan::new(document, Purpose::Display, 0),
+                RenderPlan::reference(document, crate::plan::Reference::Visible, 0),
             ];
             for plan in &plans {
                 over_the_budget_as(document, plan);

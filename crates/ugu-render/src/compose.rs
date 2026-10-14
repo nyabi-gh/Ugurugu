@@ -31,6 +31,7 @@ use crate::raster::{PixelRect, document_level};
 use crate::stream::Held;
 use crate::stroke::{self, Pen, Resampler};
 use crate::tile::TiledSurface;
+use crate::transform::Moved;
 
 /// `a·b/255` as Vello's u8 pipeline rounds it.
 fn mul(a: u8, b: u8) -> u8 {
@@ -111,6 +112,9 @@ pub struct Split {
     /// The paint layer of each source, in order; `None` when sources were
     /// put together ahead of time.
     pub layers: Option<Vec<LayerId>>,
+    /// Where the edited layer's pixels are shown on this frame; `None`
+    /// where they are drawn.
+    pub moved: Option<Moved>,
 }
 
 impl Split {
@@ -222,6 +226,15 @@ impl Split {
         Some(rect)
     }
 
+    /// The pixels of the shown image that a change to the edited layer
+    /// within `rect` can reach, in a canvas of `size`.
+    pub fn shown(&self, rect: PixelRect, size: [u32; 2]) -> Option<PixelRect> {
+        match &self.moved {
+            Some(moved) => moved.reach(rect, size),
+            None => Some(rect),
+        }
+    }
+
     fn sources(&self) -> Vec<Source<'_>> {
         self.sources
             .iter()
@@ -249,11 +262,16 @@ impl DocumentRenderer {
         revisions: Option<&LayerRevisions>,
         display: &mut Pixmap,
     ) -> Option<Split> {
-        let plan = RenderPlan::new(document, Purpose::Display);
+        let plan = RenderPlan::new(document, Purpose::Display, frame);
         let cycle = ugu_core::motion::frame_in_cycle(frame, document.frames);
+        let moved = plan.steps.iter().find_map(|step| match step {
+            crate::plan::Step::Paint(id, composite) if *id == layer => composite.moved,
+            _ => None,
+        });
         if self.over_budget(document, &plan, 1) {
             let program = self.reduced(document, &plan, cycle, layer)?;
             let split = Split {
+                moved,
                 layer,
                 frame: cycle,
                 puts: program.puts,
@@ -291,6 +309,7 @@ impl DocumentRenderer {
         // renderer does not keep a share of them.
         self.forget(layer);
         Some(Split {
+            moved,
             layer,
             frame: cycle,
             edited: plan.layers.iter().position(|(id, _)| *id == layer),
@@ -566,6 +585,7 @@ mod tests {
     use ugu_core::document::LayerKind;
     use ugu_core::edit::Change;
     use ugu_core::history::History;
+    use ugu_core::keys::{Ease, Key, Pose};
     use ugu_core::ops::{Blend, Motion, MotionStyle, Rgba8, Wobble};
     use ugu_core::selection::{Combine, Selection, Shape};
     use ugu_core::store::{Brush, BrushEngine, Point};
@@ -890,7 +910,7 @@ mod tests {
     }
 
     fn paint_layers(history: &History) -> Vec<LayerId> {
-        RenderPlan::new(history.document(), Purpose::Display)
+        RenderPlan::new(history.document(), Purpose::Display, 0)
             .layers
             .iter()
             .map(|(id, _)| *id)
@@ -917,7 +937,7 @@ mod tests {
             let (split, _) = split(&history, ids[0], frame);
             let references = ids.iter().map(|id| Reference::Layer(*id));
             for reference in references.chain([Reference::Marked, Reference::Visible]) {
-                let plan = RenderPlan::reference(document, reference);
+                let plan = RenderPlan::reference(document, reference, 0);
                 let mut drawn = canvas(document);
                 DocumentRenderer::new(0).render_plan(document, &plan, frame, None, &mut drawn);
                 let mut read = canvas(document);
@@ -936,12 +956,12 @@ mod tests {
         }
         // The background is left out, and nothing marked reads as nothing.
         let mut marked_only = canvas(document);
-        let plan = RenderPlan::reference(document, Reference::Marked);
+        let plan = RenderPlan::reference(document, Reference::Marked, 0);
         DocumentRenderer::new(0).render_plan(document, &plan, 0, None, &mut marked_only);
         assert_eq!(&marked_only.data_as_u8_slice()[..4], &[0; 4]);
         change(&mut history, marked, |layer| layer.reference = false);
         assert!(
-            RenderPlan::reference(history.document(), Reference::Marked)
+            RenderPlan::reference(history.document(), Reference::Marked, 0)
                 .layers
                 .is_empty()
         );
@@ -1017,7 +1037,7 @@ mod tests {
                         .unwrap();
                     let mut renderer = DocumentRenderer::new(0);
                     let mut full = canvas(history.document());
-                    let plan = RenderPlan::new(history.document(), Purpose::Display);
+                    let plan = RenderPlan::new(history.document(), Purpose::Display, 0);
                     renderer.render_plan(history.document(), &plan, 4, None, &mut full);
                     let Held::Tiles(stamped) = &split.sources[split.edited.unwrap()] else {
                         unreachable!("a paint layer's pixels are tiles");
@@ -1094,7 +1114,7 @@ mod tests {
                         .unwrap();
                     let mut renderer = DocumentRenderer::new(0);
                     let mut full = canvas(history.document());
-                    let plan = RenderPlan::new(history.document(), Purpose::Display);
+                    let plan = RenderPlan::new(history.document(), Purpose::Display, 0);
                     renderer.render_plan(history.document(), &plan, 4, None, &mut full);
                     let Held::Tiles(stamped) = &split.sources[split.edited.unwrap()] else {
                         unreachable!("a paint layer's pixels are tiles");
@@ -1114,13 +1134,19 @@ mod tests {
 
     #[test]
     fn over_the_budget_the_split_keeps_every_layer_editable() {
-        for history in histories() {
+        for history in histories().into_iter().chain(animated_histories()) {
             over_the_budget(history);
         }
     }
 
     fn over_the_budget(mut history: History) {
-        for layer in paint_layers(&history) {
+        // The layers shown on the frame edited.
+        let shown: Vec<LayerId> = RenderPlan::new(history.document(), Purpose::Display, 4)
+            .layers
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        for layer in shown {
             let mut display = canvas(history.document());
             let mut renderer = DocumentRenderer::new(4);
             renderer.set_surface_budget(0);
@@ -1206,7 +1232,7 @@ mod tests {
                             .unwrap();
                         let mut renderer = DocumentRenderer::new(0);
                         let mut full = canvas(moved.document());
-                        let plan = RenderPlan::new(moved.document(), Purpose::Display);
+                        let plan = RenderPlan::new(moved.document(), Purpose::Display, 0);
                         renderer.render_plan(moved.document(), &plan, 4, None, &mut full);
                         let Held::Tiles(shown_layer) = &split.sources[split.edited.unwrap()] else {
                             unreachable!("a paint layer's pixels are tiles");
@@ -1363,5 +1389,278 @@ mod tests {
             .map(|(a, b)| u64::from(a.abs_diff(*b)))
             .sum();
         (most, sum as f64 / a.len() as f64)
+    }
+
+    fn pose(frame: u32, offset: [f64; 2], rotation: f64, scale: f64, flip: bool) -> Key {
+        Key {
+            frame,
+            pose: Pose {
+                offset,
+                rotation,
+                scale,
+                flip,
+            },
+            ease: Ease::Linear,
+        }
+    }
+
+    fn set_keys(history: &mut History, id: LayerId, pivot: [f64; 2], keys: &[Key]) {
+        history
+            .edit("Keys", |document| {
+                command::update_layer(document, id, |layer| {
+                    layer.keys_mut().pivot = pivot;
+                    for key in keys {
+                        layer.keys_mut().set(*key);
+                    }
+                })
+                .unwrap()
+            })
+            .unwrap();
+    }
+
+    /// `history` with keys on every kind of layer: the first layer turns and
+    /// moves by fractions of a pixel, the Multiply base moves by whole
+    /// pixels under the layer clipped to it, and the Screen group flips and
+    /// scales. The group's layer goes into an animation folder with a second
+    /// cel shown from frame 2.
+    fn animated(mut history: History) -> History {
+        let ids: Vec<LayerId> = history
+            .document()
+            .layers
+            .iter()
+            .map(|layer| layer.id)
+            .collect();
+        let (first, middle, group) = (ids[0], ids[1], ids[3]);
+        set_keys(
+            &mut history,
+            first,
+            [60.0, 40.0],
+            &[
+                pose(0, [0.0, 0.0], 0.0, 1.0, false),
+                pose(4, [7.3, -2.6], 23.0, 1.1, false),
+            ],
+        );
+        set_keys(
+            &mut history,
+            middle,
+            [0.0, 0.0],
+            &[
+                pose(1, [6.0, -3.0], 0.0, 1.0, false),
+                pose(5, [-4.0, 2.0], 90.0, 1.0, false),
+            ],
+        );
+        set_keys(
+            &mut history,
+            group,
+            [50.0, 30.0],
+            &[
+                pose(0, [0.0, 0.0], 0.0, 1.0, true),
+                pose(3, [3.0, 1.5], -10.0, 0.8, false),
+            ],
+        );
+        let LayerKind::Group(content) = &history.document().layer(group).unwrap().kind else {
+            unreachable!("the fixture's group")
+        };
+        let top = content.children[0].id;
+        let mut folder = LayerId(0);
+        history
+            .edit("Folder", |document| {
+                let (id, changes) =
+                    command::make_animation_folder(document, top, "Walk".to_owned()).unwrap();
+                folder = id;
+                changes
+            })
+            .unwrap();
+        let mut cel = LayerId(0);
+        history
+            .edit("Cel", |document| {
+                let (id, changes) =
+                    command::new_cel(document, folder, 2, "Cel".to_owned()).unwrap();
+                cel = id;
+                changes
+            })
+            .unwrap();
+        history
+            .edit("Draw", |document| {
+                let line = stroke([20.0, 10.0], [90.0, 70.0], [250, 120, 0, 255], 7);
+                command::draw(document, cel, line, false, None)
+            })
+            .unwrap();
+        history
+    }
+
+    fn animated_histories() -> Vec<History> {
+        histories().into_iter().map(animated).collect()
+    }
+
+    #[test]
+    fn keyed_layers_and_cels_draw_alike_on_every_path_and_thread_count() {
+        for history in animated_histories() {
+            let document = history.document();
+            for frame in [0, 1, 2, 3, 6, 29] {
+                let full = render(document, frame);
+                for threads in [1, 8] {
+                    let mut threaded = canvas(document);
+                    DocumentRenderer::new(threads).render(
+                        document,
+                        frame,
+                        Purpose::Display,
+                        &mut threaded,
+                    );
+                    assert!(
+                        threaded.data_as_u8_slice() == full.data_as_u8_slice(),
+                        "frame {frame}, {threads} threads"
+                    );
+                }
+                let mut streamed = canvas(document);
+                let mut renderer = DocumentRenderer::new(4);
+                renderer.set_surface_budget(0);
+                renderer.render(document, frame, Purpose::Display, &mut streamed);
+                assert!(
+                    streamed.data_as_u8_slice() == full.data_as_u8_slice(),
+                    "frame {frame} streamed"
+                );
+                let mut exported = canvas(document);
+                DocumentRenderer::new(2).render(document, frame, Purpose::Export, &mut exported);
+                assert!(exported.data_as_u8_slice() == full.data_as_u8_slice());
+            }
+            // The keys and the folder do move things.
+            assert!(
+                render(document, 0).data_as_u8_slice() != render(document, 3).data_as_u8_slice()
+            );
+        }
+    }
+
+    #[test]
+    fn the_split_of_a_moved_layer_puts_back_the_frame_in_any_pieces() {
+        for history in animated_histories() {
+            let document = history.document();
+            for frame in [0, 2, 3] {
+                let full = render(document, frame);
+                for layer in RenderPlan::new(document, Purpose::Display, frame)
+                    .layers
+                    .iter()
+                    .map(|(id, _)| *id)
+                {
+                    let (split, display) = split(&history, layer, frame);
+                    assert!(display.data_as_u8_slice() == full.data_as_u8_slice());
+                    let mut pieces = canvas(document);
+                    let [w, h] = document.canvas;
+                    for rect in [[0, 0, w, h / 3], [0, h / 3, w / 2, h], [w / 2, h / 3, w, h]] {
+                        composite(&split, None, rect, &mut pieces);
+                    }
+                    assert!(
+                        pieces.data_as_u8_slice() == full.data_as_u8_slice(),
+                        "{layer:?} frame {frame}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_stroke_on_a_moved_layer_changes_only_what_the_split_says_it_reaches() {
+        for history in animated_histories() {
+            let mut history = history;
+            let first = history.document().layers[0].id;
+            let frame = 3;
+            let (mut split, mut shown) = split(&history, first, frame);
+            assert!(split.moved.is_some());
+            let new = stroke([30.0, 30.0], [70.0, 50.0], [20, 20, 220, 255], 77);
+            let document = history.document();
+            let changed = split
+                .stamp(
+                    &mut Stamp::default(),
+                    &new,
+                    false,
+                    layer_wobble(document, first),
+                    document.frames,
+                    None,
+                )
+                .unwrap();
+            let reach = split.shown(changed, document.canvas).unwrap();
+            composite(&split, None, reach, &mut shown);
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, first, new, false, None)
+                })
+                .unwrap();
+            let full = render(history.document(), frame);
+            let most = max_difference(&shown, &full);
+            assert!(most <= 2, "differs by {most}");
+        }
+    }
+
+    #[test]
+    fn a_live_stroke_on_a_moved_layer_is_shown_alike_in_any_pieces() {
+        let history = animated(history());
+        let document = history.document();
+        let first = document.layers[0].id;
+        let (split, _) = split(&history, first, 3);
+        let line = stroke([10.0, 10.0], [100.0, 60.0], [0, 0, 0, 255], 5);
+        let pen = crate::stroke::Pen::new(&line, layer_wobble(document, first), document.frames);
+        let mut live = LiveStroke::new([120, 80], pen, split.frame, [0, 0, 0, 255], false, None);
+        live.update(&line.points).unwrap();
+        let mut whole_shown = canvas(document);
+        composite(&split, Some(&live), whole(document), &mut whole_shown);
+        let mut pieces = canvas(document);
+        for rect in [[0, 0, 61, 80], [61, 0, 120, 80]] {
+            composite(&split, Some(&live), rect, &mut pieces);
+        }
+        assert!(pieces.data_as_u8_slice() == whole_shown.data_as_u8_slice());
+        let (_, without) = self::split(&history, first, 3);
+        assert!(without.data_as_u8_slice() != whole_shown.data_as_u8_slice());
+    }
+
+    #[test]
+    fn cels_and_still_layers_are_drawn_once_over_a_loop() {
+        let mut history = animated(history());
+        let mut settings = history.document().settings();
+        settings.wobble = Wobble::classic(0.0);
+        history
+            .edit("Still", |_| vec![Change::SetSettings(settings)])
+            .unwrap();
+        for id in paint_layers(&history) {
+            history
+                .edit("Still", |document| {
+                    command::update_layer(document, id, |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            paint.wobble = None;
+                        }
+                    })
+                    .unwrap()
+                })
+                .unwrap();
+        }
+        let document = history.document();
+        let mut renderer = DocumentRenderer::new(2);
+        let mut drawn = Vec::new();
+        for round in 0..2 {
+            for frame in 0..document.frames {
+                let frame = i64::from(frame);
+                let plan = RenderPlan::new(document, Purpose::Display, frame);
+                let mut pixmap = canvas(document);
+                renderer.render_plan(
+                    document,
+                    &plan,
+                    frame,
+                    Some(history.layer_revisions()),
+                    &mut pixmap,
+                );
+                if round == 1 {
+                    drawn.push(renderer.layers_drawn());
+                }
+            }
+        }
+        assert!(drawn.iter().all(|count| *count == 0), "{drawn:?}");
+    }
+
+    #[test]
+    #[should_panic(expected = "another frame")]
+    fn a_plan_with_keys_is_drawn_only_on_its_frame() {
+        let history = animated(history());
+        let document = history.document();
+        let plan = RenderPlan::new(document, Purpose::Display, 1);
+        DocumentRenderer::new(0).render_plan(document, &plan, 2, None, &mut canvas(document));
     }
 }

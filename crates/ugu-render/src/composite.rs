@@ -18,6 +18,7 @@ use crate::compose::src_over;
 use crate::plan::{Composite, RenderPlan, Step};
 use crate::raster::PixelRect;
 use crate::tile::TiledSurface;
+use crate::transform::{self, Moved};
 
 use crate::tile::Pixel;
 
@@ -107,6 +108,27 @@ pub enum Source<'a> {
 }
 
 impl<'a> Source<'a> {
+    /// Its size; `None` for nothing.
+    pub fn size(self) -> Option<[u32; 2]> {
+        match self {
+            Self::Tiles(surface) => Some(surface.size()),
+            Self::Whole(pixmap) => Some([u32::from(pixmap.width()), u32::from(pixmap.height())]),
+            Self::Empty => None,
+        }
+    }
+
+    /// The pixel at `x`, `y`, which must be inside it.
+    pub fn pixel(self, x: u32, y: u32) -> Pixel {
+        match self {
+            Self::Tiles(surface) => surface.pixel(x, y),
+            Self::Whole(pixmap) => {
+                pixmap.data_as_u8_slice().as_chunks::<4>().0
+                    [y as usize * usize::from(pixmap.width()) + x as usize]
+            }
+            Self::Empty => [0; 4],
+        }
+    }
+
     /// The parts of row `y` within `left..right` with pixels, each as where
     /// it starts in the span and its pixels.
     fn parts(self, y: usize, left: usize, right: usize, mut each: impl FnMut(usize, &'a [Pixel])) {
@@ -339,6 +361,16 @@ impl Row<'_, '_> {
                 Put::Over(composite) => {
                     let source = self.sources[next];
                     let level = &mut levels[depth];
+                    let touch = overlay
+                        .filter(|overlay| overlay.source == next)
+                        .map(|overlay| overlay.apply);
+                    if let Some(moved) = &composite.moved {
+                        let row = transform::row(source, moved, self.y, left, right, touch);
+                        let whole = std::iter::once((0, row.as_slice()));
+                        over(level, whole, *composite, self.needed[index], span);
+                        next += 1;
+                        continue;
+                    }
                     match overlay.filter(|overlay| overlay.source == next) {
                         Some(overlay) => {
                             let mut row = source.row(self.y, left, right);
@@ -433,7 +465,7 @@ pub enum Kept {
 }
 
 impl Kept {
-    fn source(&self) -> Source<'_> {
+    pub fn source(&self) -> Source<'_> {
         match self {
             Self::Tiles(surface) => Source::Tiles(surface),
             Self::Whole(pixmap) => Source::Whole(pixmap),
@@ -451,7 +483,14 @@ pub struct Stream {
     needed: Vec<bool>,
     /// The step to run next.
     at: usize,
-    levels: Vec<(Pixmap, Option<(Kept, u8)>)>,
+    levels: Vec<(Pixmap, Option<KeptBase>)>,
+}
+
+/// A base `Stream` keeps: its pixels, opacity level and move.
+struct KeptBase {
+    kept: Kept,
+    opacity: u8,
+    moved: Option<Moved>,
 }
 
 impl Stream {
@@ -501,8 +540,11 @@ impl Stream {
             }
             Put::Base(opacity) => {
                 let source = source.expect("a source for the step");
-                self.levels.last_mut().expect("the document level").1 =
-                    Some((source, opacity_level(opacity)));
+                self.levels.last_mut().expect("the document level").1 = Some(KeptBase {
+                    kept: source,
+                    opacity: opacity_level(opacity),
+                    moved: None,
+                });
             }
         }
     }
@@ -543,14 +585,29 @@ impl Stream {
                     let y = *first + offset;
                     let mut level = Level {
                         row: line.to_vec(),
-                        base: base_ref
-                            .map(|(kept, opacity)| (kept.source().row(y, 0, width), *opacity)),
+                        base: base_ref.map(|base| {
+                            let source = base.kept.source();
+                            let row = match &base.moved {
+                                Some(moved) => transform::row(source, moved, y, 0, width, None),
+                                None => source.row(y, 0, width),
+                            };
+                            (row, base.opacity)
+                        }),
                     };
-                    let mut parts = Vec::new();
-                    source
-                        .source()
-                        .parts(y, 0, width, |start, part| parts.push((start, part)));
-                    over(&mut level, parts.into_iter(), composite, false, width);
+                    match &composite.moved {
+                        Some(moved) => {
+                            let row = transform::row(source.source(), moved, y, 0, width, None);
+                            let whole = std::iter::once((0, row.as_slice()));
+                            over(&mut level, whole, composite, false, width);
+                        }
+                        None => {
+                            let mut parts = Vec::new();
+                            source
+                                .source()
+                                .parts(y, 0, width, |start, part| parts.push((start, part)));
+                            over(&mut level, parts.into_iter(), composite, false, width);
+                        }
+                    }
                     line.copy_from_slice(&level.row);
                 }
             }
@@ -566,7 +623,11 @@ impl Stream {
         }
         drop(stripes);
         if !composite.clipped {
-            *base = keep.then(|| (source, opacity_level(composite.opacity)));
+            *base = keep.then(|| KeptBase {
+                kept: source,
+                opacity: opacity_level(composite.opacity),
+                moved: composite.moved,
+            });
         }
     }
 }
@@ -645,6 +706,7 @@ mod tests {
                 blend: Blend::Normal,
                 opacity: 1.0,
                 clipped,
+                moved: None,
             })
         };
         let puts = [
@@ -657,6 +719,7 @@ mod tests {
                 blend: Blend::Normal,
                 opacity: 1.0,
                 clipped: false,
+                moved: None,
             }),
             over(true),
             over(false),

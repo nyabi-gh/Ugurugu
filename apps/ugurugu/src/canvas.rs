@@ -911,7 +911,7 @@ impl Canvas {
                 self.tab.requested = None;
                 self.tab.held = None;
                 self.tab.display = display;
-                self.tab.split = Some((key, split));
+                self.tab.split = Some((key, *split));
                 self.tab.preview = None;
                 self.tab.text_preview = None;
                 self.upload_all();
@@ -1388,7 +1388,7 @@ impl Canvas {
             Reads::Marked => Reference::Marked,
             Reads::Visible => Reference::Visible,
         };
-        let plan = RenderPlan::reference(document, reference);
+        let plan = RenderPlan::reference(document, reference, self.tab.session.frame());
         if plan.layers.is_empty() {
             return false;
         }
@@ -1791,7 +1791,7 @@ impl Canvas {
 /// budget for memory as it is now beside the layers' own surfaces, which the
 /// renderer keeps; at least 2. Also the surfaces' budget.
 fn frames_ahead(document: &Document, shrink: u32) -> (u32, usize) {
-    let plan = RenderPlan::new(document, Purpose::Display);
+    let plan = RenderPlan::new(document, Purpose::Display, 0);
     let estimate = surface_estimate(document, &plan, shrink, TILE_EDGE);
     let budget = Budget::now(estimate as u64);
     let surfaces = estimate.min(budget.surfaces);
@@ -2654,7 +2654,7 @@ mod tests {
     }
 
     fn layer_render(document: &Document, layer: LayerId, frame: i64) -> Pixmap {
-        let plan = RenderPlan::reference(document, Reference::Layer(layer));
+        let plan = RenderPlan::reference(document, Reference::Layer(layer), frame);
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let mut pixels = Pixmap::new(width, height);
         ugu_render::document::DocumentRenderer::new(0).render_plan(

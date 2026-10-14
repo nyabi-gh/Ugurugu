@@ -30,7 +30,7 @@ pub struct CopiedPixels {
 impl CopiedPixels {
     /// Draws them, cut to the selection's bounds, as straight RGBA.
     pub fn image(&self) -> Image {
-        let plan = RenderPlan::reference(&self.document, Reference::Layer(self.layer));
+        let plan = RenderPlan::reference(&self.document, Reference::Layer(self.layer), self.frame);
         let [canvas_width, canvas_height] = self.document.canvas.map(|edge| edge as u16);
         let mut pixels = Pixmap::new(canvas_width, canvas_height);
         DocumentRenderer::new(crate::cache::worker_threads()).render_plan(

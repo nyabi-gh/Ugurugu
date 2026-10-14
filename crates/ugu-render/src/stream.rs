@@ -174,7 +174,12 @@ impl DocumentRenderer {
                 .iter()
                 .rposition(|node| !node.composite().clipped)
         {
-            let kept = self.alone(run, &siblings[base])?;
+            let mut kept = self.alone(run, &siblings[base])?;
+            // The base is cut to where it is shown.
+            if let Some(moved) = siblings[base].composite().moved {
+                let size = scaled_size(run.document.canvas, run.shrink);
+                kept = Kept::Whole(crate::transform::whole(kept.source(), &moved, size));
+            }
             program
                 .puts
                 .push(Put::Base(siblings[base].composite().opacity));
@@ -210,11 +215,7 @@ impl DocumentRenderer {
                     index += 1;
                 }
                 let together = self.stream(run, &rest[start..index], None)?;
-                program.puts.push(Put::Over(Composite {
-                    blend: Blend::Normal,
-                    opacity: 1.0,
-                    clipped: false,
-                }));
+                program.puts.push(Put::Over(Composite::PLAIN));
                 program.sources.push(Held::Whole(Arc::new(together)));
             } else {
                 let kept = self.alone(run, node)?;

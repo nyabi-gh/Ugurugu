@@ -21,4 +21,5 @@ pub mod raster;
 pub mod stream;
 pub mod stroke;
 pub mod tile;
+pub mod transform;
 pub mod view;

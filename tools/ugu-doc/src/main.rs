@@ -21,6 +21,13 @@
 //!   brushes pens and puts in the middle of every layer a crop to 7/8 of the
 //!   canvas around its middle, a smooth resample to 3/4, or both one after
 //!   the other, to measure what canvas changes cost to draw.
+//! - `ugu-doc animate <in.ugurugu> <out.ugurugu> <keyed> <cels>`: gives the
+//!   first `keyed` paint layers keys and makes the first one an animation
+//!   folder of `cels` copies, to measure what keys and cels cost to draw.
+//! - `ugu-doc play <file.ugurugu> <threads>`: draws every frame three times
+//!   over as playback does, reusing layers whose pixels are as before, and
+//!   prints the time per frame of the first loop and of the later ones and
+//!   what the kept surfaces take.
 //! - `ugu-doc sparse <in.ugurugu> <out.ugurugu>`: gathers each layer's strokes into
 //!   a fifth of the canvas, for work that leaves most of a layer empty.
 //! - `ugu-doc moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy>`: adds to the
@@ -61,7 +68,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -86,6 +93,10 @@ fn main() -> ExitCode {
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
         ["render", file] => render(Path::new(file), 8, None),
+        ["play", file, threads] => threads
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|threads| play(Path::new(file), threads)),
         ["gif", file, out, percent] => percent
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -116,6 +127,10 @@ fn main() -> ExitCode {
             _ => Err(USAGE.to_owned()),
         },
         ["reframe", from, to, which] => reframe(Path::new(from), Path::new(to), which),
+        ["animate", from, to, keyed, cels] => match (keyed.parse(), cels.parse()) {
+            (Ok(keyed), Ok(cels)) => animate(Path::new(from), Path::new(to), keyed, cels),
+            _ => Err(USAGE.to_owned()),
+        },
         ["stop", file] => stop(Path::new(file)),
         ["digest", file, threads] => threads
             .parse()
@@ -337,6 +352,130 @@ fn to_pens(document: &mut Document) {
 }
 
 /// Puts canvas changes in the middle of every layer; see the module notes.
+fn play(path: &Path, threads: u16) -> Result<(), String> {
+    use ugu_core::history::History;
+    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::plan::RenderPlan;
+
+    let history = History::new(open(path)?, true);
+    let document = history.document();
+    let plans: Vec<RenderPlan> = (0..i64::from(document.frames))
+        .map(|frame| RenderPlan::new(document, Purpose::Display, frame))
+        .collect();
+    let [width, height] = document.canvas.map(|edge| edge as u16);
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    let mut renderer = DocumentRenderer::new(threads);
+    set_budget(&mut renderer);
+    let (mut first, mut later, mut drawn) = (Vec::new(), Vec::new(), 0);
+    for round in 0..3 {
+        for (frame, plan) in (0..).zip(&plans) {
+            let started = Instant::now();
+            renderer.render_plan(
+                document,
+                plan,
+                frame,
+                Some(history.layer_revisions()),
+                &mut pixmap,
+            );
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if round == 0 {
+                first.push(ms);
+            } else {
+                later.push(ms);
+                drawn += renderer.layers_drawn();
+            }
+        }
+    }
+    println!("{threads} threads: first loop {}", percentiles(&mut first));
+    println!(
+        "  later loops {}, {drawn} layers drawn again",
+        percentiles(&mut later)
+    );
+    println!(
+        "  kept surfaces {:.0} MiB, peak working set {:.0} MiB",
+        renderer.surface_bytes() as f64 / (1024.0 * 1024.0),
+        peak_working_set_mib()
+    );
+    Ok(())
+}
+
+/// Gives the first `keyed` paint layers keys that move, turn and shrink them
+/// by fractions of a pixel on every frame but the first, and makes the
+/// first paint layer an animation folder of `cels` cels, each a copy of it
+/// shown for an equal share of the frames.
+fn animate(from: &Path, to: &Path, keyed: usize, cels: u32) -> Result<(), String> {
+    use ugu_core::command;
+    use ugu_core::edit::commit;
+    use ugu_core::keys::{Ease, Key, Pose, expose};
+
+    fn paint_ids(layers: &[Layer], out: &mut Vec<LayerId>) {
+        for layer in layers {
+            match &layer.kind {
+                LayerKind::Paint(_) => out.push(layer.id),
+                LayerKind::Group(group) => paint_ids(&group.children, out),
+            }
+        }
+    }
+
+    let mut document = open(from)?;
+    let mut ids = Vec::new();
+    paint_ids(&document.layers, &mut ids);
+    let failed = |error: ugu_core::edit::EditError| error.to_string();
+    let centre = document.canvas.map(|edge| f64::from(edge) / 2.0);
+    let half = document.frames / 2;
+    for id in ids.iter().take(keyed) {
+        let changes = command::update_layer(&document, *id, |layer| {
+            let keys = layer.keys_mut();
+            keys.pivot = centre;
+            keys.set(Key {
+                frame: 0,
+                pose: Pose::REST,
+                ease: Ease::Smooth,
+            });
+            keys.set(Key {
+                frame: half,
+                pose: Pose {
+                    offset: [64.3, -20.7],
+                    rotation: 12.0,
+                    scale: 0.9,
+                    flip: false,
+                },
+                ease: Ease::Smooth,
+            });
+        })
+        .map_err(failed)?;
+        commit(&mut document, changes).map_err(failed)?;
+    }
+    if cels > 0 {
+        let first = *ids.first().ok_or("no paint layer")?;
+        let (folder, changes) =
+            command::make_animation_folder(&document, first, "Cels".to_owned()).map_err(failed)?;
+        commit(&mut document, changes).map_err(failed)?;
+        let mut copies = vec![first];
+        for number in 1..cels {
+            let (copy, changes) =
+                command::duplicate_layer(&document, first, format!("Cel {number}"))
+                    .map_err(failed)?;
+            commit(&mut document, changes).map_err(failed)?;
+            copies.push(copy);
+        }
+        let changes = command::update_layer(&document, folder, |layer| {
+            if let LayerKind::Group(group) = &mut layer.kind {
+                let exposures = group.cels.get_or_insert_with(Vec::new);
+                for (index, cel) in copies.iter().enumerate() {
+                    let frame = index as u32 * document.frames / cels;
+                    expose(exposures, frame, Some(*cel));
+                }
+            }
+        })
+        .map_err(failed)?;
+        commit(&mut document, changes).map_err(failed)?;
+    }
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)?;
+    info(to)
+}
+
 fn reframe(from: &Path, to: &Path, which: &str) -> Result<(), String> {
     let mut document = open(from)?;
     to_pens(&mut document);
@@ -918,7 +1057,11 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|shrink| shrink.is_power_of_two())
         .unwrap_or(1);
-    let plan = RenderPlan::new(&document, Purpose::Display);
+    // Made ahead, so the times are of drawing alone.
+    let plans: Vec<RenderPlan> = (0..i64::from(document.frames))
+        .map(|frame| RenderPlan::new(&document, Purpose::Display, frame))
+        .collect();
+    let plan = &plans[0];
     let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut renderer = DocumentRenderer::new(threads);
@@ -930,9 +1073,9 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     let mut first = 0.0;
     for round in 0..3 {
-        for frame in 0..i64::from(document.frames) {
+        for (frame, plan) in (0..).zip(&plans) {
             let started = Instant::now();
-            renderer.render_scaled(&document, &plan, frame, None, shrink, &mut pixmap);
+            renderer.render_scaled(&document, plan, frame, None, shrink, &mut pixmap);
             let ms = started.elapsed().as_secs_f64() * 1000.0;
             if round == 0 && frame == 0 {
                 first = ms;
@@ -962,7 +1105,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     );
     let estimates: Vec<String> = [1, 2, 4, 8]
         .map(|shrink| {
-            let bytes = surface_estimate(&document, &plan, shrink, TILE_EDGE);
+            let bytes = surface_estimate(&document, plan, shrink, TILE_EDGE);
             format!("1/{shrink} {:.0}", bytes as f64 / (1024.0 * 1024.0))
         })
         .into();
@@ -1024,7 +1167,6 @@ fn digest(path: &Path, threads: u16) -> Result<(), String> {
     use ugu_render::plan::RenderPlan;
 
     let document = open(path)?;
-    let plan = RenderPlan::new(&document, Purpose::Display);
     let mut renderer = DocumentRenderer::new(threads);
     set_budget(&mut renderer);
     let mut hash = Sha256::new();
@@ -1032,6 +1174,7 @@ fn digest(path: &Path, threads: u16) -> Result<(), String> {
         let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
         let mut pixmap = vello_cpu::Pixmap::new(width, height);
         for frame in 0..i64::from(document.frames) {
+            let plan = RenderPlan::new(&document, Purpose::Display, frame);
             renderer.render_scaled(&document, &plan, frame, None, shrink, &mut pixmap);
             hash.update(pixmap.data_as_u8_slice());
         }
@@ -1068,18 +1211,18 @@ fn layers(path: &Path, threads: usize) -> Result<(), String> {
     }
 
     let document = open(path)?;
-    let plan = RenderPlan::new(&document, Purpose::Display);
+    let plan = RenderPlan::new(&document, Purpose::Display, 0);
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let mut costs = Vec::new();
     for (id, _) in &plan.layers {
         let mut alone = document.clone();
         keep_only(&mut alone.layers, *id);
-        let alone_plan = RenderPlan::new(&alone, Purpose::Display);
         let mut renderer = DocumentRenderer::new(0);
         let mut stages = [Vec::new(), Vec::new(), Vec::new()];
         for round in 0..3 {
             for frame in 0..i64::from(alone.frames) {
+                let alone_plan = RenderPlan::new(&alone, Purpose::Display, frame);
                 renderer.render_scaled(&alone, &alone_plan, frame, None, 1, &mut pixmap);
                 if round > 0 {
                     let timings = renderer.timings();
@@ -1153,7 +1296,7 @@ fn stop(path: &Path) -> Result<(), String> {
     use ugu_render::plan::RenderPlan;
 
     let document = open(path)?;
-    let plan = RenderPlan::new(&document, Purpose::Display);
+    let plan = RenderPlan::new(&document, Purpose::Display, 0);
     let [width, height] = document.canvas.map(|edge| edge as u16);
     let mut pixmap = vello_cpu::Pixmap::new(width, height);
     let flag = Arc::new(AtomicBool::new(false));
@@ -1164,6 +1307,9 @@ fn stop(path: &Path) -> Result<(), String> {
     renderer.render_plan(&document, &plan, 0, None, &mut pixmap);
     let whole = started.elapsed();
     let rounds = 40;
+    let plans: Vec<RenderPlan> = (0..rounds)
+        .map(|round| RenderPlan::new(&document, Purpose::Display, i64::from(round)))
+        .collect();
     let mut waits = Vec::new();
     for round in 0..rounds {
         flag.store(false, Ordering::Relaxed);
@@ -1174,7 +1320,8 @@ fn stop(path: &Path) -> Result<(), String> {
                 flag.store(true, Ordering::Relaxed);
                 Instant::now()
             });
-            renderer.render_plan(&document, &plan, i64::from(round), None, &mut pixmap);
+            let frame = i64::from(round);
+            renderer.render_plan(&document, &plans[round as usize], frame, None, &mut pixmap);
             let returned = Instant::now();
             let set = setter.join().expect("the stop setter ran");
             returned.checked_duration_since(set)
@@ -1202,7 +1349,7 @@ fn splits(document: &Document, threads: u16) {
     use ugu_render::plan::RenderPlan;
 
     let mut history = History::new(document.clone(), true);
-    let layers: Vec<LayerId> = RenderPlan::new(document, Purpose::Display)
+    let layers: Vec<LayerId> = RenderPlan::new(document, Purpose::Display, 0)
         .layers
         .iter()
         .map(|(id, _)| *id)

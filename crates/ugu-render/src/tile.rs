@@ -10,6 +10,18 @@ use vello_cpu::Pixmap;
 /// Premultiplied RGBA8.
 pub type Pixel = [u8; 4];
 
+/// A surface's pixels as they are kept.
+pub(crate) struct Backing<'a> {
+    /// Over the span of tiles reached.
+    pub pixmap: &'a Pixmap,
+    /// Where the pixmap starts.
+    pub origin: [u32; 2],
+    /// Which tiles of the grid hold anything, row by row.
+    pub reached: &'a [bool],
+    pub columns: u32,
+    pub edge: u32,
+}
+
 #[derive(Clone, Debug)]
 pub struct TiledSurface {
     size: [u32; 2],
@@ -196,6 +208,41 @@ impl TiledSurface {
                 ))
             })
         })
+    }
+
+    /// The pixels held, for reading many at random; `None` when nothing
+    /// is drawn.
+    pub(crate) fn backing(&self) -> Option<Backing<'_>> {
+        let pixmap = self.pixmap.as_ref()?;
+        let (origin, _) = self.area(self.span);
+        Some(Backing {
+            pixmap,
+            origin,
+            reached: &self.reached,
+            columns: self.grid[0],
+            edge: self.edge,
+        })
+    }
+
+    /// The pixel at `x`, `y`, inside the surface; transparent where nothing
+    /// reached.
+    pub fn pixel(&self, x: u32, y: u32) -> Pixel {
+        let [column, row] = [x / self.edge, y / self.edge];
+        let Some(pixmap) = self.pixmap.as_ref() else {
+            return [0; 4];
+        };
+        let [left, top, right, bottom] = self.span;
+        if column < left
+            || column >= right
+            || row < top
+            || row >= bottom
+            || !self.reached[(row * self.grid[0] + column) as usize]
+        {
+            return [0; 4];
+        }
+        let index = (y - top * self.edge) as usize * usize::from(pixmap.width())
+            + (x - left * self.edge) as usize;
+        pixmap.data_as_u8_slice().as_chunks::<4>().0[index]
     }
 
     /// The whole surface as a pixmap.
