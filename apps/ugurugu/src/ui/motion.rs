@@ -19,15 +19,35 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     let shown = session.pose(layer);
     let key = session.key_here(layer);
     widgets::panel_heading(ui, tr("motion"));
-    ui.label(
-        egui::RichText::new(if key.is_some() {
-            tr("motion-keyed")
-        } else {
-            tr("motion-unkeyed")
+    // As tall either way, so that what follows holds still while playing
+    // through frames with and without keys.
+    let width = ui.available_width();
+    let tallest = [tr("motion-keyed"), tr("motion-unkeyed")]
+        .map(|text| {
+            ui.painter()
+                .layout(
+                    text.to_owned(),
+                    egui::FontId::proportional(theme::SMALL),
+                    theme::muted(),
+                    width,
+                )
+                .size()
+                .y
         })
-        .size(theme::SMALL)
-        .color(theme::muted()),
-    );
+        .into_iter()
+        .fold(0.0, f32::max);
+    ui.allocate_ui(egui::vec2(width, tallest), |ui| {
+        ui.set_min_height(tallest);
+        ui.label(
+            egui::RichText::new(if key.is_some() {
+                tr("motion-keyed")
+            } else {
+                tr("motion-unkeyed")
+            })
+            .size(theme::SMALL)
+            .color(theme::muted()),
+        );
+    });
     let mut pose = shown;
     let mut fields = Vec::new();
     let mut row = |ui: &mut egui::Ui,
@@ -211,5 +231,42 @@ mod tests {
         );
         assert!(canvas.edit(|session| session.undo()).unwrap());
         assert!(canvas.session().key_here(layer).is_none(), "one step");
+    }
+    #[test]
+    fn the_settings_keep_their_place_on_frames_with_and_without_a_key() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let keys = Keymap::default();
+        let mut canvas = Canvas::new(Document::new([400, 300]), |_| {});
+        canvas.set_tool(Tool::Move).unwrap();
+        let place = |canvas: &mut Canvas| {
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(260.0, 600.0))),
+                    ..RawInput::default()
+                },
+                |ui| settings(ui, canvas, &keys),
+            );
+            output.textures_delta.clear();
+            let tree = output.platform_output.accesskit_update.unwrap();
+            tree.nodes
+                .iter()
+                .find(|(_, node)| node.label().is_some_and(|label| label == tr("key-next")))
+                .and_then(|(_, node)| node.bounds())
+                .unwrap()
+        };
+        // Twice, as egui settles a new layout on its second pass.
+        place(&mut canvas);
+        let unkeyed = place(&mut canvas);
+        canvas.toggle_key();
+        assert!(
+            canvas
+                .session()
+                .key_here(canvas.session().current_layer())
+                .is_some()
+        );
+        place(&mut canvas);
+        let keyed = place(&mut canvas);
+        assert_eq!(unkeyed, keyed);
     }
 }
