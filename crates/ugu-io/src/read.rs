@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use ugu_core::document::{Document, DocumentError, Group, Layer, LayerId, LayerKind};
+use ugu_core::keys::{Ease, Exposure, Key, Keys, Pose};
 use ugu_core::ops::{
     Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
     StrokeId, Wobble,
@@ -178,7 +179,11 @@ pub fn read_with<R: Read + Seek>(
             manifest.render_revision
         )));
     }
-    if let Some(feature) = manifest.required.first() {
+    if let Some(feature) = manifest
+        .required
+        .iter()
+        .find(|feature| !FEATURES.contains(&feature.as_str()))
+    {
         return Err(ReadError::Newer(format!("feature {feature}")));
     }
     let id = parse_hex::<16>(&manifest.document_id).ok_or_else(|| corrupt("document id"))?;
@@ -522,6 +527,30 @@ fn sampling(dto: SamplingDto) -> Sampling {
     }
 }
 
+fn keys(dto: Option<&KeysDto>) -> Keys {
+    dto.map_or_else(Keys::default, |dto| Keys {
+        pivot: dto.pivot,
+        keys: dto
+            .keys
+            .iter()
+            .map(|key| Key {
+                frame: key.frame,
+                pose: Pose {
+                    offset: key.offset,
+                    rotation: key.rotation,
+                    scale: key.scale,
+                    flip: key.flip,
+                },
+                ease: match key.ease {
+                    EaseDto::Linear => Ease::Linear,
+                    EaseDto::Smooth => Ease::Smooth,
+                    EaseDto::Hold => Ease::Hold,
+                },
+            })
+            .collect(),
+    })
+}
+
 fn layer(dto: &LayerDto) -> Result<Layer, ReadError> {
     let kind = match (&dto.paint, &dto.group) {
         (Some(paint), None) => LayerKind::Paint(PaintLayer {
@@ -531,12 +560,22 @@ fn layer(dto: &LayerDto) -> Result<Layer, ReadError> {
             clip_to_below: paint.clip_to_below,
             wobble: paint.wobble.as_ref().map(wobble),
             initial_size: paint.initial_size,
+            keys: keys(paint.keys.as_ref()),
         }),
         (None, Some(group)) => LayerKind::Group(Group {
             opacity: group.opacity,
             blend: blend(group.blend),
             clip_to_below: group.clip_to_below,
             children: group.children.iter().map(layer).collect::<Result<_, _>>()?,
+            keys: keys(group.keys.as_ref()),
+            cels: group.cels.as_ref().map(|cels| {
+                cels.iter()
+                    .map(|exposure| Exposure {
+                        frame: exposure.frame,
+                        cel: exposure.cel.map(LayerId),
+                    })
+                    .collect()
+            }),
         }),
         _ => {
             return Err(corrupt(format!(

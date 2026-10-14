@@ -1452,6 +1452,7 @@ impl Builder {
                 clip_to_below: false,
                 wobble: None,
                 initial_size: canvas,
+                keys: Default::default(),
             }),
         )
     }
@@ -1464,6 +1465,8 @@ impl Builder {
                 blend,
                 clip_to_below: false,
                 children,
+                cels: None,
+                keys: Default::default(),
             }),
         )
     }

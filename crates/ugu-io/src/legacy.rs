@@ -587,6 +587,8 @@ impl<'a> Importer<'a> {
                             placed,
                             depth + 1,
                         )?,
+                        cels: None,
+                        keys: Default::default(),
                     })
                 }
                 "paint" => LayerKind::Paint(self.paint(dto, blend)?),
@@ -666,6 +668,7 @@ impl<'a> Importer<'a> {
             clip_to_below: dto.clip_to_layer_below,
             wobble,
             initial_size,
+            keys: Default::default(),
         })
     }
 

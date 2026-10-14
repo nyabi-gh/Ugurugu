@@ -717,6 +717,38 @@ mod tests {
             paint.blend = crate::ops::Blend::Multiply;
         });
         assert_eq!(revisions(&history), drawn);
+        // Nor do keys, which only move the pixels, or a folder's exposures.
+        set(&mut history, &|paint| {
+            paint.keys.set(crate::keys::Key {
+                frame: 3,
+                pose: crate::keys::Pose {
+                    rotation: 30.0,
+                    ..crate::keys::Pose::REST
+                },
+                ease: crate::keys::Ease::Smooth,
+            });
+        });
+        assert_eq!(revisions(&history), drawn);
+        let (folder, changes) =
+            crate::command::make_animation_folder(history.document(), second, "F".to_owned())
+                .unwrap();
+        // Moving a layer into a group draws it again, as any move does.
+        history.edit("Folder", |_| changes).unwrap();
+        let folded = revisions(&history);
+        history
+            .edit("Expose", |document| {
+                update_layer(document, folder, |layer| {
+                    if let LayerKind::Group(group) = &mut layer.kind {
+                        crate::keys::expose(group.cels.as_mut().unwrap(), 2, None);
+                    }
+                })
+                .unwrap()
+            })
+            .unwrap();
+        assert_eq!(revisions(&history), folded);
+        history.undo().unwrap();
+        history.undo().unwrap();
+        history.undo().unwrap();
         set(&mut history, &|paint| {
             paint.wobble = Some(Wobble::classic(0.0))
         });

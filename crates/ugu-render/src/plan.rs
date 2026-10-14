@@ -213,6 +213,7 @@ mod tests {
                 clip_to_below: false,
                 wobble: None,
                 initial_size: [8, 8],
+                keys: Default::default(),
             }),
         }
     }
@@ -228,6 +229,8 @@ mod tests {
                 blend: Blend::Normal,
                 clip_to_below: false,
                 children,
+                cels: None,
+                keys: Default::default(),
             }),
         }
     }

@@ -7,6 +7,7 @@
 //! validation checks only what the types cannot: limits, unique ids and the
 //! canvas each paint layer ends on.
 
+use crate::keys::{Exposure, Keys};
 use crate::ops::{Blend, Motion, Op, PaintLayer, Rgba8, Wobble};
 use crate::store::{Store, StoreError};
 
@@ -72,6 +73,10 @@ pub struct Group {
     pub clip_to_below: bool,
     /// Bottom first.
     pub children: Vec<Layer>,
+    pub keys: Keys,
+    /// Makes the group an animation folder: on each frame only the child
+    /// exposed then is shown.
+    pub cels: Option<Vec<Exposure>>,
 }
 
 impl Layer {
@@ -116,6 +121,9 @@ pub enum DocumentError {
     Section(LayerId),
     /// An operation refers to a stroke, mask or image that is not stored.
     MissingData(LayerId),
+    /// Keys or exposures are out of order, past the last frame or outside
+    /// the limits, or an exposure shows a layer outside its folder.
+    Animation(LayerId),
     Store(StoreError),
 }
 
@@ -140,6 +148,7 @@ impl std::fmt::Display for DocumentError {
             Self::TooManyOperations(count) => write!(f, "{count} operations is over the limit"),
             Self::Section(id) => write!(f, "layer {} has an invalid isolated section", id.0),
             Self::MissingData(id) => write!(f, "layer {} refers to data that is not stored", id.0),
+            Self::Animation(id) => write!(f, "layer {} has invalid keys or exposures", id.0),
             Self::Store(error) => error.fmt(f),
         }
     }
@@ -169,6 +178,7 @@ impl Document {
                     clip_to_below: false,
                     wobble: None,
                     initial_size: canvas,
+                    keys: Keys::default(),
                 }),
             }],
             store: Store::default(),
@@ -202,6 +212,7 @@ impl Document {
         self.store.check_totals().map_err(DocumentError::Store)?;
         let mut walk = Walk {
             canvas: self.canvas,
+            frames: self.frames,
             store: &self.store,
             ids: std::collections::HashSet::new(),
             operations: 0,
@@ -244,6 +255,7 @@ fn check_opacity(id: LayerId, opacity: f32) -> Result<(), DocumentError> {
 
 struct Walk<'a> {
     canvas: [u32; 2],
+    frames: u32,
     store: &'a Store,
     ids: std::collections::HashSet<LayerId>,
     operations: usize,
@@ -264,6 +276,9 @@ impl Walk<'_> {
             }
             if layer.name.chars().count() > limits::LAYER_NAME_CHARS {
                 return Err(DocumentError::LayerName(layer.id));
+            }
+            if !crate::keys::check(layer, self.frames) {
+                return Err(DocumentError::Animation(layer.id));
             }
             match &layer.kind {
                 LayerKind::Group(group) => {
@@ -368,6 +383,7 @@ mod tests {
                 clip_to_below: false,
                 wobble: None,
                 initial_size: size,
+                keys: Keys::default(),
             }),
         }
     }
@@ -383,6 +399,8 @@ mod tests {
                 blend: Blend::Normal,
                 clip_to_below: false,
                 children,
+                keys: Keys::default(),
+                cels: None,
             }),
         }
     }

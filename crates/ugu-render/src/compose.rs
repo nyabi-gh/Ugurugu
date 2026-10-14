@@ -802,6 +802,8 @@ mod tests {
             blend: Blend::Screen,
             clip_to_below: false,
             children: vec![history.document().layer(top).unwrap().clone()],
+            cels: None,
+            keys: Default::default(),
         });
         history
             .edit("Group", |_| {

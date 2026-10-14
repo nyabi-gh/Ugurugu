@@ -7,7 +7,8 @@
 //! committed, which checks it and applies all of it or none.
 
 use crate::document::{Document, Group, Layer, LayerId, LayerKind};
-use crate::edit::{Change, EditError};
+use crate::edit::{Change, EditError, Settings};
+use crate::keys::{self, Exposure, Keys};
 use crate::ops::{self, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
 use crate::store::{FreeIds, Store, Stroke};
 
@@ -142,6 +143,7 @@ pub fn add_paint_layer(
             clip_to_below: false,
             wobble: None,
             initial_size: document.canvas,
+            keys: Keys::default(),
         }),
     };
     (
@@ -154,8 +156,36 @@ pub fn add_paint_layer(
     )
 }
 
-pub fn remove_layer(id: LayerId) -> Vec<Change> {
-    vec![Change::RemoveLayer(id)]
+/// Removes `id`, and its exposures when it is a cel.
+pub fn remove_layer(document: &Document, id: LayerId) -> Vec<Change> {
+    let mut changes: Vec<Change> = unexpose(document, id, None).into_iter().collect();
+    changes.push(Change::RemoveLayer(id));
+    changes
+}
+
+/// When `id` is a cel, its folder with the exposures of `id` shown as
+/// `instead`, or taken away with `None`.
+fn unexpose(document: &Document, id: LayerId, instead: Option<LayerId>) -> Option<Change> {
+    let (Some(parent), _) = document.position(id)? else {
+        return None;
+    };
+    let mut folder = document.layer(parent)?.clone();
+    let LayerKind::Group(Group {
+        cels: Some(cels), ..
+    }) = &mut folder.kind
+    else {
+        return None;
+    };
+    let before = cels.clone();
+    match instead {
+        Some(other) => {
+            for exposure in cels.iter_mut().filter(|each| each.cel == Some(id)) {
+                exposure.cel = Some(other);
+            }
+        }
+        None => cels.retain(|exposure| exposure.cel != Some(id)),
+    }
+    (*cels != before).then_some(Change::ReplaceLayer(folder))
 }
 
 /// A copy of the paint layer `id` right above it, named `name`. The copy
@@ -198,14 +228,20 @@ pub fn move_layer(
         .layer(id)
         .ok_or(EditError::NoSuchLayer(id))?
         .clone();
-    Ok(vec![
+    let leaves = document.position(id).map(|(from, _)| from) != Some(parent);
+    let mut changes: Vec<Change> = unexpose(document, id, None)
+        .filter(|_| leaves)
+        .into_iter()
+        .collect();
+    changes.extend([
         Change::RemoveLayer(id),
         Change::InsertLayer {
             parent,
             index,
             layer,
         },
-    ])
+    ]);
+    Ok(changes)
 }
 
 /// Puts `child` in a new, empty-styled group that takes its place.
@@ -228,19 +264,99 @@ pub fn wrap_in_group(
             blend: Blend::Normal,
             clip_to_below: false,
             children: vec![document.layer(child).expect("found above").clone()],
+            keys: Keys::default(),
+            cels: None,
         }),
     };
-    Ok((
-        id,
-        vec![
-            Change::RemoveLayer(child),
-            Change::InsertLayer {
-                parent,
-                index,
-                layer: group,
-            },
-        ],
-    ))
+    // A cel's group takes its place on the frames it was shown.
+    let repointed = unexpose(document, child, Some(id));
+    let mut changes: Vec<Change> = repointed.into_iter().collect();
+    changes.extend([
+        Change::RemoveLayer(child),
+        Change::InsertLayer {
+            parent,
+            index,
+            layer: group,
+        },
+    ]);
+    Ok((id, changes))
+}
+
+/// Puts `child` in a new animation folder that takes its place and shows
+/// it from the first frame.
+pub fn make_animation_folder(
+    document: &Document,
+    child: LayerId,
+    name: String,
+) -> Result<(LayerId, Vec<Change>), EditError> {
+    let (id, mut changes) = wrap_in_group(document, child, name)?;
+    let Some(Change::InsertLayer { layer, .. }) = changes.last_mut() else {
+        unreachable!("the group goes in last");
+    };
+    if let LayerKind::Group(group) = &mut layer.kind {
+        group.cels = Some(vec![Exposure {
+            frame: 0,
+            cel: Some(child),
+        }]);
+    }
+    Ok((id, changes))
+}
+
+/// An empty paint cel `name` on top of `folder`, shown from `frame`.
+pub fn new_cel(
+    document: &Document,
+    folder: LayerId,
+    frame: u32,
+    name: String,
+) -> Result<(LayerId, Vec<Change>), EditError> {
+    let mut layer = document
+        .layer(folder)
+        .ok_or(EditError::NoSuchLayer(folder))?
+        .clone();
+    let LayerKind::Group(Group {
+        cels: Some(cels),
+        children,
+        ..
+    }) = &mut layer.kind
+    else {
+        return Err(EditError::NotGroup(folder));
+    };
+    let (id, added) = add_paint_layer(document, None, 0, name);
+    let Some(Change::InsertLayer { layer: cel, .. }) = added.into_iter().next() else {
+        unreachable!("one layer is added");
+    };
+    children.push(cel);
+    keys::expose(cels, frame, Some(id));
+    Ok((id, vec![Change::ReplaceLayer(layer)]))
+}
+
+/// Changes the document's settings; keys and exposures past a shorter loop
+/// go with it.
+pub fn set_settings(document: &Document, settings: Settings) -> Vec<Change> {
+    let mut changes = Vec::new();
+    if settings.frames < document.frames {
+        each_layer(&document.layers, &mut |layer| {
+            if let Some(trimmed) = keys::trimmed(layer, settings.frames) {
+                changes.push(Change::ReplaceLayer(trimmed));
+                return false;
+            }
+            true
+        });
+    }
+    changes.push(Change::SetSettings(settings));
+    changes
+}
+
+/// Visits layers outermost first; `visit` returns whether to go into a
+/// group.
+fn each_layer(layers: &[Layer], visit: &mut impl FnMut(&Layer) -> bool) {
+    for layer in layers {
+        if visit(layer)
+            && let LayerKind::Group(group) = &layer.kind
+        {
+            each_layer(&group.children, visit);
+        }
+    }
 }
 
 /// Puts `group`'s children in its place, in the same order. The group's own
@@ -252,7 +368,8 @@ pub fn ungroup(document: &Document, group: LayerId) -> Result<Vec<Change>, EditE
     let Some(LayerKind::Group(content)) = document.layer(group).map(|layer| &layer.kind) else {
         return Err(EditError::NotGroup(group));
     };
-    let mut changes = vec![Change::RemoveLayer(group)];
+    let mut changes: Vec<Change> = unexpose(document, group, None).into_iter().collect();
+    changes.push(Change::RemoveLayer(group));
     changes.extend(content.children.iter().enumerate().map(|(offset, child)| {
         Change::InsertLayer {
             parent,
@@ -350,6 +467,12 @@ pub fn merge_down(document: &Document, above: LayerId) -> Result<Vec<Change>, Ed
     else {
         return Err(EditError::CannotMerge);
     };
+    if parent
+        .and_then(|parent| document.layer(parent)?.cels())
+        .is_some()
+    {
+        return Err(EditError::Merge(ops::MergeRefusal::Animated));
+    }
     if upper.visible != lower.visible || upper.reference != lower.reference {
         return Err(EditError::CannotMerge);
     }
@@ -368,12 +491,48 @@ pub fn merge_down(document: &Document, above: LayerId) -> Result<Vec<Change>, Ed
 
 /// Changes the canvas size; content keeps its pixels and moves by `offset`.
 pub fn crop_canvas(document: &Document, offset: [i32; 2], size: [u32; 2]) -> Vec<Change> {
-    canvas_change(document, size, Op::Crop { offset, size })
+    let shift = offset.map(f64::from);
+    let point = |[x, y]: [f64; 2]| [x + shift[0], y + shift[1]];
+    let mut changes = rekeyed(document, &point, &|offset| offset);
+    changes.extend(canvas_change(document, size, Op::Crop { offset, size }));
+    changes
 }
 
 /// Resizes the image: everything drawn so far is resampled to `size`.
 pub fn resample_image(document: &Document, size: [u32; 2], sampling: Sampling) -> Vec<Change> {
-    canvas_change(document, size, Op::Resample { size, sampling })
+    let factor: [f64; 2] =
+        std::array::from_fn(|axis| f64::from(size[axis]) / f64::from(document.canvas[axis]));
+    let scale = |[x, y]: [f64; 2]| [x * factor[0], y * factor[1]];
+    let mut changes = rekeyed(document, &scale, &scale);
+    changes.extend(canvas_change(
+        document,
+        size,
+        Op::Resample { size, sampling },
+    ));
+    changes
+}
+
+/// The keyed layers with their pivots moved by `point` and their key
+/// offsets by `offset`, as what they move goes with a canvas change.
+fn rekeyed(
+    document: &Document,
+    point: &dyn Fn([f64; 2]) -> [f64; 2],
+    offset: &dyn Fn([f64; 2]) -> [f64; 2],
+) -> Vec<Change> {
+    let mut changes = Vec::new();
+    each_layer(&document.layers, &mut |layer| {
+        if !layer.keys().is_empty() {
+            let mut copy = layer.clone();
+            let keys = copy.keys_mut();
+            keys.pivot = point(keys.pivot);
+            for key in &mut keys.keys {
+                key.pose.offset = offset(key.pose.offset);
+            }
+            changes.push(Change::ReplaceLayer(copy));
+        }
+        true
+    });
+    changes
 }
 
 fn canvas_change(document: &Document, size: [u32; 2], op: Op) -> Vec<Change> {
@@ -580,6 +739,7 @@ mod tests {
                 clip_to_below: false,
                 wobble: None,
                 initial_size: [64, 64],
+                keys: Default::default(),
             }),
         };
         let group = Layer {
@@ -592,6 +752,8 @@ mod tests {
                 blend: Blend::Normal,
                 clip_to_below: false,
                 children: vec![nested],
+                cels: None,
+                keys: Default::default(),
             }),
         };
         commit(
@@ -633,6 +795,8 @@ mod tests {
                     blend: Blend::Normal,
                     clip_to_below: false,
                     children: Vec::new(),
+                    cels: None,
+                    keys: Default::default(),
                 }),
             };
             let index = if parent.is_none() { 1 } else { 0 };
@@ -750,5 +914,201 @@ mod tests {
             merge_down(&document, LayerId(2)),
             Err(EditError::Merge(ops::MergeRefusal::Clipping))
         );
+    }
+
+    fn key(frame: u32, x: f64) -> crate::keys::Key {
+        crate::keys::Key {
+            frame,
+            pose: crate::keys::Pose {
+                offset: [x, 0.0],
+                ..crate::keys::Pose::REST
+            },
+            ease: crate::keys::Ease::Linear,
+        }
+    }
+
+    /// Layers 1, 2, 3 with 2 and 3 in a folder showing 2 from frame 0 and 3
+    /// from frame 5.
+    fn with_folder() -> (Document, LayerId) {
+        let mut document = three_layers();
+        let (folder, changes) =
+            make_animation_folder(&document, LayerId(2), "Walk".to_owned()).unwrap();
+        commit(&mut document, changes).unwrap();
+        let changes = move_to_group(&document, LayerId(3), Some(folder)).unwrap();
+        commit(&mut document, changes).unwrap();
+        let changes = update_layer(&document, folder, |layer| {
+            if let LayerKind::Group(group) = &mut layer.kind {
+                keys::expose(group.cels.as_mut().unwrap(), 5, Some(LayerId(3)));
+            }
+        })
+        .unwrap();
+        commit(&mut document, changes).unwrap();
+        (document, folder)
+    }
+
+    fn cels(document: &Document, folder: LayerId) -> Vec<(u32, Option<u32>)> {
+        document
+            .layer(folder)
+            .unwrap()
+            .cels()
+            .unwrap()
+            .iter()
+            .map(|exposure| (exposure.frame, exposure.cel.map(|id| id.0)))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_folder_shows_its_layer_and_new_cels_show_from_their_frame() {
+        let (mut document, folder) = with_folder();
+        assert_eq!(cels(&document, folder), [(0, Some(2)), (5, Some(3))]);
+        let before = document.clone();
+        let (cel, changes) = new_cel(&document, folder, 8, "Cel".to_owned()).unwrap();
+        let outcome = commit(&mut document, changes).unwrap();
+        assert_eq!(document.position(cel), Some((Some(folder), 2)));
+        assert_eq!(
+            cels(&document, folder),
+            [(0, Some(2)), (5, Some(3)), (8, Some(cel.0))]
+        );
+        undo(&mut document, outcome);
+        assert_eq!(document, before);
+        assert_eq!(
+            new_cel(&document, LayerId(1), 0, String::new()),
+            Err(EditError::NotGroup(LayerId(1)))
+        );
+    }
+
+    #[test]
+    fn a_cel_taken_out_of_its_folder_takes_its_exposures_with_it() {
+        let (document, folder) = with_folder();
+        let mut removed = document.clone();
+        let outcome = run(&mut removed, |document| remove_layer(document, LayerId(3))).unwrap();
+        assert_eq!(cels(&removed, folder), [(0, Some(2))]);
+        undo(&mut removed, outcome);
+        assert_eq!(removed, document);
+
+        let mut moved = document.clone();
+        run(&mut moved, |document| {
+            move_to_group(document, LayerId(3), None).unwrap()
+        })
+        .unwrap();
+        assert_eq!(cels(&moved, folder), [(0, Some(2))]);
+        // Moving within the folder keeps them.
+        let mut reordered = document.clone();
+        run(&mut reordered, |document| {
+            move_layer(document, LayerId(3), Some(folder), 0).unwrap()
+        })
+        .unwrap();
+        assert_eq!(cels(&reordered, folder), [(0, Some(2)), (5, Some(3))]);
+    }
+
+    #[test]
+    fn a_cel_put_in_a_group_is_shown_through_the_group() {
+        let (mut document, folder) = with_folder();
+        let (group, changes) = wrap_in_group(&document, LayerId(3), "G".to_owned()).unwrap();
+        commit(&mut document, changes).unwrap();
+        assert_eq!(cels(&document, folder), [(0, Some(2)), (5, Some(group.0))]);
+        run(&mut document, |document| ungroup(document, group).unwrap()).unwrap();
+        assert_eq!(cels(&document, folder), [(0, Some(2))]);
+        assert_eq!(document.validate(), Ok(()));
+    }
+
+    #[test]
+    fn keyed_layers_and_cels_are_not_merged_down() {
+        let (document, _) = with_folder();
+        assert_eq!(
+            merge_down(&document, LayerId(3)),
+            Err(EditError::Merge(ops::MergeRefusal::Animated))
+        );
+        let mut keyed = three_layers();
+        run(&mut keyed, |document| {
+            update_layer(document, LayerId(2), |layer| {
+                layer.keys_mut().set(key(0, 3.0))
+            })
+            .unwrap()
+        })
+        .unwrap();
+        for upper in [LayerId(2), LayerId(3)] {
+            assert_eq!(
+                merge_down(&keyed, upper),
+                Err(EditError::Merge(ops::MergeRefusal::Animated))
+            );
+        }
+    }
+
+    #[test]
+    fn fewer_frames_drop_the_keys_and_exposures_past_them_in_one_step() {
+        let (mut document, folder) = with_folder();
+        run(&mut document, |document| {
+            update_layer(document, LayerId(1), |layer| {
+                layer.keys_mut().set(key(0, 1.0));
+                layer.keys_mut().set(key(20, 2.0));
+            })
+            .unwrap()
+        })
+        .unwrap();
+        let before = document.clone();
+        let mut settings = document.settings();
+        settings.frames = 5;
+        let outcome = run(&mut document, |document| set_settings(document, settings)).unwrap();
+        assert_eq!(document.frames, 5);
+        assert_eq!(cels(&document, folder), [(0, Some(2))]);
+        assert_eq!(document.layer(LayerId(1)).unwrap().keys().keys.len(), 1);
+        undo(&mut document, outcome);
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn keys_past_the_last_frame_or_showing_another_layer_are_invalid() {
+        let mut document = three_layers();
+        document.layers[0].keys_mut().set(key(30, 1.0));
+        assert_eq!(
+            document.validate(),
+            Err(crate::document::DocumentError::Animation(LayerId(1)))
+        );
+        let (mut document, folder) = with_folder();
+        let changes = update_layer(&document, folder, |layer| {
+            if let LayerKind::Group(group) = &mut layer.kind {
+                keys::expose(group.cels.as_mut().unwrap(), 9, Some(LayerId(1)));
+            }
+        })
+        .unwrap();
+        assert!(matches!(
+            commit(&mut document, changes),
+            Err(EditError::Document(_))
+        ));
+        let mut wild = three_layers();
+        let mut far = key(0, 40_000.0);
+        far.pose.scale = 1.0;
+        wild.layers[0].keys_mut().set(far);
+        assert!(wild.validate().is_err());
+    }
+
+    #[test]
+    fn a_canvas_change_carries_pivots_and_moves_with_what_is_drawn() {
+        let mut document = three_layers();
+        run(&mut document, |document| {
+            update_layer(document, LayerId(1), |layer| {
+                layer.keys_mut().pivot = [10.0, 20.0];
+                layer.keys_mut().set(key(0, 4.0));
+            })
+            .unwrap()
+        })
+        .unwrap();
+        let mut cropped = document.clone();
+        run(&mut cropped, |document| {
+            crop_canvas(document, [3, -2], [64, 64])
+        })
+        .unwrap();
+        let keys = cropped.layer(LayerId(1)).unwrap().keys().clone();
+        assert_eq!(keys.pivot, [13.0, 18.0]);
+        assert_eq!(keys.keys[0].pose.offset, [4.0, 0.0]);
+        run(&mut document, |document| {
+            resample_image(document, [128, 32], Sampling::Smooth)
+        })
+        .unwrap();
+        let keys = document.layer(LayerId(1)).unwrap().keys().clone();
+        assert_eq!(keys.pivot, [20.0, 10.0]);
+        assert_eq!(keys.keys[0].pose.offset, [8.0, 0.0]);
+        assert_eq!(document.validate(), Ok(()));
     }
 }

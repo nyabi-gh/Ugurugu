@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT: &str = "ugurugu-document";
 pub const SCHEMA: u32 = 1;
 pub const RENDER_REVISION: u32 = 1;
+/// Features a file may require, each named in the manifest when the
+/// document uses it, so that readers without it refuse the file as newer.
+pub const KEYS_FEATURE: &str = "keys";
+pub const CELS_FEATURE: &str = "cels";
+pub const FEATURES: [&str; 2] = [KEYS_FEATURE, CELS_FEATURE];
 
 pub const MANIFEST: &str = "manifest.json";
 pub const DOCUMENT: &str = "document.json";
@@ -107,6 +112,9 @@ pub struct PaintDto {
     pub wobble: Option<WobbleDto>,
     pub initial_size: [u32; 2],
     pub ops: Vec<OpDto>,
+    /// Left out without keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<KeysDto>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -116,6 +124,48 @@ pub struct GroupDto {
     pub blend: BlendDto,
     pub clip_to_below: bool,
     pub children: Vec<LayerDto>,
+    /// Left out without keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<KeysDto>,
+    /// An animation folder's exposures; left out for a plain group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cels: Option<Vec<ExposureDto>>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeysDto {
+    pub pivot: [f64; 2],
+    pub keys: Vec<KeyDto>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyDto {
+    pub frame: u32,
+    pub offset: [f64; 2],
+    /// Degrees, clockwise.
+    pub rotation: f64,
+    pub scale: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+    pub ease: EaseDto,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EaseDto {
+    Linear,
+    Smooth,
+    Hold,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExposureDto {
+    pub frame: u32,
+    /// The child shown; `null` for nothing.
+    pub cel: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

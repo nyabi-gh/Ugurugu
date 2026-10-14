@@ -18,6 +18,8 @@ const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 const CLEAR: [f32; 4] = [0.0; 4];
+/// Frames that keys loop over.
+const LOOP: u32 = 8;
 
 /// Premultiplied pixels, row-major.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +64,17 @@ impl Surface {
         if let Some(index) = self.index(x, y) {
             self.pixels[index] = value;
         }
+    }
+
+    /// Moved right and down by `by`, transparent where nothing moves in.
+    fn shifted(&self, by: [i32; 2]) -> Self {
+        let mut moved = Self::new(self.size);
+        for y in 0..self.size[1] as i32 {
+            for x in 0..self.size[0] as i32 {
+                moved.set(x, y, self.at(x - by[0], y - by[1]));
+            }
+        }
+        moved
     }
 
     fn draw(&mut self, other: &Surface, opacity: f32) {
@@ -283,7 +296,7 @@ impl World {
         let size = self.size_of(layers);
         let mut result = Surface::new(size);
         result.pixels.fill(background);
-        self.children(layers, frame, &mut result);
+        self.children(layers, frame, [0, 0], &mut result);
         result
     }
 
@@ -294,7 +307,9 @@ impl World {
         }
     }
 
-    fn children(&self, layers: &[Layer], frame: u32, result: &mut Surface) {
+    /// `shift` is how far the groups holding `layers` move them on `frame`;
+    /// keys here only move by whole pixels.
+    fn children(&self, layers: &[Layer], frame: u32, shift: [i32; 2], result: &mut Surface) {
         let mut base: Option<(Surface, f32)> = None;
         for layer in layers {
             let (blend, opacity, clipped) = match &layer.kind {
@@ -307,11 +322,22 @@ impl World {
                 }
                 continue;
             }
+            let own = layer
+                .keys()
+                .pose(frame, LOOP)
+                .map_or([0, 0], |pose| pose.offset.map(|value| value as i32));
+            let shift = [shift[0] + own[0], shift[1] + own[1]];
             let mut image = match &layer.kind {
-                LayerKind::Paint(paint) => self.layer(paint, frame),
+                LayerKind::Paint(paint) => self.layer(paint, frame).shifted(shift),
                 LayerKind::Group(group) => {
                     let mut surface = Surface::new(result.size);
-                    self.children(&group.children, frame, &mut surface);
+                    let shown: Vec<Layer> = group
+                        .children
+                        .iter()
+                        .filter(|child| group.shows(child.id, frame))
+                        .cloned()
+                        .collect();
+                    self.children(&shown, frame, shift, &mut surface);
                     surface
                 }
             };
@@ -359,6 +385,7 @@ fn layer(ops: Vec<Op>, size: [u32; 2]) -> PaintLayer {
         clip_to_below: false,
         wobble: Some(STILL),
         initial_size: size,
+        keys: Default::default(),
     }
 }
 
@@ -719,6 +746,8 @@ fn a_group_is_drawn_on_its_own_surface() {
                     paint.blend = Blend::Multiply
                 }),
             ],
+            cels: None,
+            keys: Default::default(),
         }),
     };
     let black = [0.0, 0.0, 0.0, 1.0];
@@ -764,4 +793,112 @@ fn blend_modes_follow_the_w3c_formulas() {
         blend_over(Blend::Multiply, source.map(|c| c * 0.5), backdrop),
         [0.45, 0.15, 0.25, 1.0],
     );
+}
+
+fn keyed(mut layer: Layer, keys: &[(u32, i32)]) -> Layer {
+    for &(frame, x) in keys {
+        layer.keys_mut().set(crate::keys::Key {
+            frame,
+            pose: crate::keys::Pose {
+                offset: [f64::from(x), 0.0],
+                ..crate::keys::Pose::REST
+            },
+            ease: crate::keys::Ease::Hold,
+        });
+    }
+    layer
+}
+
+fn group_of(id: u32, children: Vec<Layer>, cels: Option<Vec<crate::keys::Exposure>>) -> Layer {
+    Layer {
+        id: LayerId(id),
+        name: String::new(),
+        visible: true,
+        reference: false,
+        kind: LayerKind::Group(Group {
+            opacity: 1.0,
+            blend: Blend::Normal,
+            clip_to_below: false,
+            children,
+            keys: Default::default(),
+            cels,
+        }),
+    }
+}
+
+#[test]
+fn a_key_moves_a_layer_and_a_group_key_moves_each_layer_it_holds() {
+    let mut world = World::default();
+    let red = world.stroke([0, 0, 1, 1], RED);
+    let blue = world.stroke([0, 0, 1, 1], BLUE);
+    let group = keyed(
+        group_of(
+            10,
+            vec![
+                shown(1, &[red], [6, 1]),
+                keyed(shown(2, &[blue], [6, 1]), &[(0, 2)]),
+            ],
+            None,
+        ),
+        &[(0, 1), (4, 3)],
+    );
+    let at = |frame| {
+        let result = world.tree(std::slice::from_ref(&group), frame, CLEAR);
+        (0..6).map(|x| result.at(x, 0)).collect::<Vec<_>>()
+    };
+    // Frame 0: the group moves both by 1, the blue layer by 2 more.
+    assert_eq!(at(0), [CLEAR, RED, CLEAR, BLUE, CLEAR, CLEAR]);
+    // Frame 5 holds the second key: what moves out of the canvas is gone.
+    assert_eq!(at(5), [CLEAR, CLEAR, CLEAR, RED, CLEAR, BLUE]);
+}
+
+#[test]
+fn a_layer_clipped_to_a_moved_base_is_cut_where_the_base_moved_to() {
+    let mut world = World::default();
+    let red = world.stroke([0, 0, 1, 1], RED);
+    let blue = world.stroke([0, 0, 3, 1], BLUE);
+    let layers = [
+        keyed(shown(1, &[red], [3, 1]), &[(0, 2)]),
+        clipped(shown(2, &[blue], [3, 1])),
+    ];
+    let result = world.tree(&layers, 0, CLEAR);
+    assert_eq!(
+        [result.at(0, 0), result.at(1, 0), result.at(2, 0)],
+        [CLEAR, CLEAR, BLUE]
+    );
+}
+
+#[test]
+fn an_animation_folder_shows_the_cel_exposed_on_each_frame() {
+    use crate::keys::Exposure;
+    let mut world = World::default();
+    let red = world.stroke([0, 0, 1, 1], RED);
+    let blue = world.stroke([1, 0, 2, 1], BLUE);
+    let exposures = vec![
+        Exposure {
+            frame: 2,
+            cel: Some(LayerId(1)),
+        },
+        Exposure {
+            frame: 4,
+            cel: Some(LayerId(2)),
+        },
+        Exposure {
+            frame: 6,
+            cel: None,
+        },
+    ];
+    let folder = group_of(
+        10,
+        vec![shown(1, &[red], [2, 1]), shown(2, &[blue], [2, 1])],
+        Some(exposures),
+    );
+    let at = |frame| {
+        let result = world.tree(std::slice::from_ref(&folder), frame, CLEAR);
+        [result.at(0, 0), result.at(1, 0)]
+    };
+    assert_eq!(at(0), [CLEAR, CLEAR]);
+    assert_eq!(at(2), [RED, CLEAR]);
+    assert_eq!(at(5), [CLEAR, BLUE]);
+    assert_eq!(at(7), [CLEAR, CLEAR]);
 }

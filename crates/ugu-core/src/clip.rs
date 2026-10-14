@@ -192,6 +192,7 @@ pub fn place_image(
                 clip_to_below: false,
                 wobble: None,
                 initial_size: document.canvas,
+                keys: Default::default(),
             }),
         },
     });

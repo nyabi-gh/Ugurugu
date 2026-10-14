@@ -196,6 +196,8 @@ fn a_layer_in_a_hidden_group_refuses_to_draw() {
             blend: ugu_core::ops::Blend::Normal,
             clip_to_below: false,
             children: vec![inner],
+            cels: None,
+            keys: Default::default(),
         }),
     });
     // The layer inside the group is current from the start.

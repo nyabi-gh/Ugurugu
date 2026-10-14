@@ -173,8 +173,11 @@ pub(crate) fn sample() -> Document {
                     clip_to_below: true,
                     wobble: None,
                     initial_size: [64, 48],
+                    keys: Default::default(),
                 }),
             }],
+            cels: None,
+            keys: Default::default(),
         }),
     });
     // Stroke 2 is kept for undo but used by no operation.
@@ -593,4 +596,125 @@ fn files_of_earlier_versions_are_recognised() {
         read_bytes(b"GIF89a".to_vec()),
         Err(ReadError::NotAnArchive(_))
     ));
+}
+
+/// The sample with keys on its first paint layer, which is also put in an
+/// animation folder with an empty frame.
+fn animated() -> Document {
+    use ugu_core::keys::{Ease, Key, Pose};
+    let mut document = sample();
+    let paint = document
+        .layers
+        .iter()
+        .find(|layer| matches!(layer.kind, LayerKind::Paint(_)))
+        .unwrap()
+        .id;
+    let (folder, changes) =
+        ugu_core::command::make_animation_folder(&document, paint, "Walk".to_owned()).unwrap();
+    ugu_core::edit::commit(&mut document, changes).unwrap();
+    let changes = ugu_core::command::update_layer(&document, folder, |layer| {
+        if let LayerKind::Group(group) = &mut layer.kind {
+            ugu_core::keys::expose(group.cels.as_mut().unwrap(), 7, None);
+        }
+        layer.keys_mut().pivot = [0.5, 1e-3];
+        layer.keys_mut().set(Key {
+            frame: 4,
+            pose: Pose {
+                offset: [-3.25, 0.1],
+                rotation: 33.3,
+                scale: 0.75,
+                flip: true,
+            },
+            ease: Ease::Smooth,
+        });
+    })
+    .unwrap();
+    ugu_core::edit::commit(&mut document, changes).unwrap();
+    let changes = ugu_core::command::update_layer(&document, paint, |layer| {
+        for (frame, ease) in [(0, Ease::Linear), (9, Ease::Hold)] {
+            layer.keys_mut().set(Key {
+                frame,
+                pose: Pose {
+                    offset: [f64::from(frame), 0.0],
+                    ..Pose::REST
+                },
+                ease,
+            });
+        }
+    })
+    .unwrap();
+    ugu_core::edit::commit(&mut document, changes).unwrap();
+    assert_eq!(document.validate(), Ok(()));
+    document
+}
+
+fn manifest_of(bytes: &[u8]) -> String {
+    let manifest = entries(bytes)
+        .into_iter()
+        .find(|(name, _)| name == MANIFEST)
+        .unwrap()
+        .1;
+    String::from_utf8(manifest).unwrap()
+}
+
+#[test]
+fn keys_and_exposures_read_back_and_are_named_as_required() {
+    let document = animated();
+    let bytes = written(&document);
+    let (read, _) = read_bytes(bytes.clone()).unwrap();
+    assert!(read.layers == document.layers, "layers differ");
+    assert!(
+        manifest_of(&bytes).ends_with(r#""required":["keys","cels"]}"#),
+        "{}",
+        manifest_of(&bytes)
+    );
+    // Without them, nothing about them is written.
+    let plain = written(&sample());
+    assert!(manifest_of(&plain).ends_with(r#""required":[]}"#));
+    let json = entries(&plain)
+        .into_iter()
+        .find(|(name, _)| name == DOCUMENT)
+        .unwrap()
+        .1;
+    let json = String::from_utf8(json).unwrap();
+    assert!(!json.contains("keys") && !json.contains("cels"), "{json}");
+}
+
+#[test]
+fn keys_alone_require_only_keys_and_unknown_features_stay_refused() {
+    let mut document = sample();
+    document.layers[0].keys_mut().set(ugu_core::keys::Key {
+        frame: 1,
+        pose: ugu_core::keys::Pose::REST,
+        ease: ugu_core::keys::Ease::Linear,
+    });
+    let bytes = written(&document);
+    assert!(manifest_of(&bytes).ends_with(r#""required":["keys"]}"#));
+    assert!(read_bytes(bytes).unwrap().0.layers == document.layers);
+    let unknown = with_json(
+        MANIFEST,
+        r#""required":[]"#,
+        r#""required":["keys","rigs"]"#,
+    );
+    assert!(matches!(read_bytes(unknown), Err(ReadError::Newer(_))));
+}
+
+#[test]
+fn keys_past_the_last_frame_are_refused_as_corrupt() {
+    let bytes = written(&animated());
+    let late = entries(&bytes)
+        .into_iter()
+        .map(|(name, data)| {
+            let data = if name == DOCUMENT {
+                String::from_utf8(data)
+                    .unwrap()
+                    .replacen(r#"{"frame":9,"#, r#"{"frame":99,"#, 1)
+                    .into_bytes()
+            } else {
+                data
+            };
+            (name, data)
+        })
+        .collect::<Vec<_>>();
+    assert!(read_bytes(archive(&late)).is_err());
 }

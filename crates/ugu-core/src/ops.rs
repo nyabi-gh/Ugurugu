@@ -260,6 +260,7 @@ pub struct PaintLayer {
     pub wobble: Option<Wobble>,
     /// The canvas size before the first operation.
     pub initial_size: [u32; 2],
+    pub keys: crate::keys::Keys,
 }
 
 impl PaintLayer {
@@ -298,6 +299,8 @@ pub enum MergeRefusal {
     CanvasEpoch,
     /// A crop or resample in the upper layer would also move the lower layer.
     CanvasChange,
+    /// Either layer has keys, or both are cels of an animation folder.
+    Animated,
 }
 
 /// Merges `above` into `below`, keeping the appearance of every frame.
@@ -306,6 +309,9 @@ pub enum MergeRefusal {
 /// and the merged layer is opaque Normal. Operations added after the merge
 /// act on both sections' result.
 pub fn merge_down(below: &PaintLayer, above: &PaintLayer) -> Result<PaintLayer, MergeRefusal> {
+    if !below.keys.is_empty() || !above.keys.is_empty() {
+        return Err(MergeRefusal::Animated);
+    }
     if below.blend != Blend::Normal || above.blend != Blend::Normal {
         return Err(MergeRefusal::Blend);
     }
@@ -340,5 +346,6 @@ pub fn merge_down(below: &PaintLayer, above: &PaintLayer) -> Result<PaintLayer, 
         clip_to_below: false,
         wobble: below.wobble,
         initial_size: below.initial_size,
+        keys: crate::keys::Keys::default(),
     })
 }

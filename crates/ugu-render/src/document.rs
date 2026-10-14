@@ -2407,6 +2407,7 @@ mod tests {
             clip_to_below: false,
             wobble: Some(Wobble::classic(0.0)),
             initial_size: [96, 48],
+            keys: Default::default(),
         };
         update(&mut paint);
         Layer {
@@ -2429,6 +2430,8 @@ mod tests {
                 blend,
                 clip_to_below: false,
                 children,
+                cels: None,
+                keys: Default::default(),
             }),
         }
     }
@@ -3920,6 +3923,8 @@ mod tests {
                     blend: Blend::Screen,
                     clip_to_below: false,
                     children,
+                    cels: None,
+                    keys: Default::default(),
                 }),
             }];
             document

@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::io::{Seek, Write};
 
 use ugu_core::document::{Document, Layer, LayerId, LayerKind};
+use ugu_core::keys::{Ease, Keys};
 use ugu_core::ops::{AssetId, Blend, MaskId, MotionStyle, Op, Sampling, StrokeId, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Point, TipShape};
 use zip::CompressionMethod;
@@ -49,6 +50,38 @@ impl From<zip::result::ZipError> for WriteError {
     }
 }
 
+/// The features `document` uses that older readers lack.
+fn required(document: &Document) -> Vec<String> {
+    let (keyed, folders) = document.is_animated();
+    [(keyed, KEYS_FEATURE), (folders, CELS_FEATURE)]
+        .into_iter()
+        .filter(|(used, _)| *used)
+        .map(|(_, name)| name.to_owned())
+        .collect()
+}
+
+fn keys(keys: &Keys) -> Option<KeysDto> {
+    (!keys.is_empty()).then(|| KeysDto {
+        pivot: keys.pivot,
+        keys: keys
+            .keys
+            .iter()
+            .map(|key| KeyDto {
+                frame: key.frame,
+                offset: key.pose.offset,
+                rotation: key.pose.rotation,
+                scale: key.pose.scale,
+                flip: key.pose.flip,
+                ease: match key.ease {
+                    Ease::Linear => EaseDto::Linear,
+                    Ease::Smooth => EaseDto::Smooth,
+                    Ease::Hold => EaseDto::Hold,
+                },
+            })
+            .collect(),
+    })
+}
+
 /// Writes `document` to `out` and returns `out`. `document_id` names the
 /// document across saves, for recovery.
 pub fn write<W: Write + Seek>(
@@ -74,7 +107,7 @@ pub fn write_with<W: Write + Seek>(
         schema: SCHEMA,
         render_revision: RENDER_REVISION,
         document_id: hex(&document_id),
-        required: Vec::new(),
+        required: required(document),
     };
     let dto = DocumentDto {
         canvas: document.canvas,
@@ -287,6 +320,7 @@ fn layer(layer: &Layer) -> LayerDto {
                 wobble: paint.wobble.map(wobble),
                 initial_size: paint.initial_size,
                 ops: paint.ops.iter().map(op).collect(),
+                keys: keys(&paint.keys),
             }),
             None,
         ),
@@ -297,6 +331,15 @@ fn layer(layer: &Layer) -> LayerDto {
                 blend: blend(group.blend),
                 clip_to_below: group.clip_to_below,
                 children: group.children.iter().map(self::layer).collect(),
+                keys: keys(&group.keys),
+                cels: group.cels.as_ref().map(|cels| {
+                    cels.iter()
+                        .map(|exposure| ExposureDto {
+                            frame: exposure.frame,
+                            cel: exposure.cel.map(|id| id.0),
+                        })
+                        .collect()
+                }),
             }),
         ),
     };

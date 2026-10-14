@@ -486,9 +486,9 @@ impl Session {
         if !self.can_remove_layer() {
             return Ok(Outcome::NoChange);
         }
-        let outcome = self
-            .history_mut()?
-            .edit("Delete layer", |_| command::remove_layer(id))?;
+        let outcome = self.history_mut()?.edit("Delete layer", |document| {
+            command::remove_layer(document, id)
+        })?;
         self.keep_layer_valid();
         Ok(outcome)
     }
