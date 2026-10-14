@@ -26,6 +26,8 @@ use crate::widgets;
 
 const ROW: f32 = 56.0;
 const INDENT: f32 = 14.0;
+/// `widgets::icon_button`'s side for a 16pt glyph.
+const DELETE_SIDE: f32 = 16.0 + 8.0;
 const THUMB: Vec2 = Vec2::new(48.0, 32.0);
 const BLENDS: [Blend; 4] = [
     Blend::Normal,
@@ -801,14 +803,26 @@ impl LayerDock {
                 report(refusal, canvas.edit(|session| session.move_layer(-1)));
             }
             // Apart from the rest at the far end, so it is not hit by mistake.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(theme::space::XS);
-                if widgets::icon_button(ui, Glyph::Delete, 16.0, tr("layer-delete"), removable)
-                    .clicked()
-                {
-                    report(refusal, canvas.edit(Session::remove_layer));
-                }
-            });
+            // A right-to-left layout with no room left starts at the cursor
+            // and grows back over the buttons before it, so it is used only
+            // when the button fits; otherwise the button follows the rest.
+            let delete = |ui: &mut Ui| {
+                widgets::icon_button(ui, Glyph::Delete, 16.0, tr("layer-delete"), removable)
+            };
+            let fits = ui.available_width() >= theme::space::M + DELETE_SIDE + theme::space::XS;
+            let deleted = if fits {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(theme::space::XS);
+                    delete(ui)
+                })
+                .inner
+            } else {
+                ui.add_space(theme::space::M);
+                delete(ui)
+            };
+            if deleted.clicked() {
+                report(refusal, canvas.edit(Session::remove_layer));
+            }
         });
     }
 
@@ -1046,4 +1060,46 @@ fn move_by_drop(session: &mut Session, id: LayerId, target: Drop) -> Result<Outc
         return Ok(Outcome::NoChange);
     }
     session.move_layer_to(id, parent, index)
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Pos2, RawInput, Rect, vec2};
+    use ugu_core::document::Document;
+
+    use super::*;
+
+    #[test]
+    fn delete_never_covers_the_other_layer_buttons() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
+        let mut dock = LayerDock::default();
+        let mut refusal = None;
+        for width in (150..=460).step_by(10).map(|width| width as f32) {
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.allocate_ui(vec2(width, 100.0), |ui| {
+                        dock.buttons(ui, &mut canvas, &mut refusal);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            let tree = output.platform_output.accesskit_update.unwrap();
+            let bounds = |name: &str| {
+                tree.nodes
+                    .iter()
+                    .find(|(_, node)| node.label().is_some_and(|label| label == name))
+                    .and_then(|(_, node)| node.bounds())
+                    .unwrap_or_else(|| panic!("no {name} at {width}"))
+            };
+            let down = bounds(tr("layer-down"));
+            let delete = bounds(tr("layer-delete"));
+            assert!(delete.x0 >= down.x1, "at {width}: {down:?} and {delete:?}");
+        }
+    }
 }
