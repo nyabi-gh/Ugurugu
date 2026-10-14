@@ -186,8 +186,9 @@ pub fn clipboard_chord(
 }
 
 /// Alt pressed and let go with nothing in between, which goes to the menus
-/// as F10 does, as in Windows and 2.2.13. Another key, or a press of the
-/// pen or mouse (Alt picks a colour or takes from a selection), cancels it.
+/// as F10 does, as in Windows and 2.2.13. Another key, or the pen or mouse
+/// pressing, dragging or letting go (Alt picks a colour, takes from a
+/// selection or draws a shape from its centre), cancels it.
 #[derive(Default)]
 pub struct AltTap {
     armed: bool,
@@ -442,13 +443,18 @@ impl Default for Keymap {
 }
 
 impl Keymap {
-    /// A key held by two actions, as a settings file edited by hand may
-    /// have, stays with the first in `Action::ALL`. An alias goes to the
-    /// first action naming it while no action has it as its key.
+    /// A key held by two actions goes to the one it was chosen for over a
+    /// default, so that a default a new version adds does not take a key
+    /// chosen before; between two chosen, as a settings file edited by hand
+    /// may have, or two defaults, to the first in `Action::ALL`. An alias
+    /// goes to the first action naming it while no action has it as its key.
     pub fn new(shortcuts: &Shortcuts) -> Self {
         let mut primary = vec![None; Action::ALL.len()];
         let mut actions: HashMap<Chord, Action> = HashMap::new();
-        for &action in Action::ALL {
+        let (chosen, defaults): (Vec<Action>, Vec<Action>) = Action::ALL
+            .iter()
+            .partition(|action| shortcuts.changed.contains_key(action));
+        for action in chosen.into_iter().chain(defaults) {
             let Some(key) = shortcuts.key(action) else {
                 continue;
             };
@@ -676,11 +682,22 @@ mod tests {
 
     #[test]
     fn a_key_given_twice_by_hand_stays_with_the_first_action() {
-        let shortcuts = Shortcuts::parse(&serde_json::json!({"brush": "Ctrl+N"}));
+        let shortcuts =
+            Shortcuts::parse(&serde_json::json!({"brush": "Ctrl+N", "eraser": "Ctrl+N"}));
         let keymap = Keymap::new(&shortcuts);
-        assert_eq!(keymap.action(ctrl(Key::N)), Some(Action::New));
-        assert_eq!(keymap.key(Action::Brush), None);
+        assert_eq!(keymap.action(ctrl(Key::N)), Some(Action::Brush));
+        assert_eq!(keymap.key(Action::Eraser), None);
+        assert_eq!(keymap.key(Action::New), None);
         assert_eq!(keymap.action(plain(Key::B)), None);
+    }
+
+    #[test]
+    fn a_key_chosen_before_a_new_default_takes_it_stays_chosen() {
+        // U, given to the shape tool in 3.1.0, chosen for an action in 3.0.
+        let shortcuts = Shortcuts::parse(&serde_json::json!({"exportToolPreset": "U"}));
+        let keymap = Keymap::new(&shortcuts);
+        assert_eq!(keymap.action(plain(Key::U)), Some(Action::ExportTools));
+        assert_eq!(keymap.key(Action::Shape), None);
     }
 
     #[test]

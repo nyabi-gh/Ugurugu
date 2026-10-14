@@ -355,6 +355,10 @@ pub struct Files {
     confirm: Option<Action>,
     /// Asking whether closing or updating stops the export under way.
     export_question: Option<Action>,
+    /// What to tell once, as a dialog with its title, until it is closed:
+    /// what the start found, which a file opened at once must not wipe from
+    /// the status bar.
+    told: Option<(String, String)>,
     /// Closing or updating asked for while a save, a read or a dialog was
     /// under way, and whether it also waits for the export to end.
     closing: Option<(Action, bool)>,
@@ -461,6 +465,7 @@ impl Files {
             owner,
             confirm: None,
             export_question: None,
+            told: None,
             closing: None,
             after_save: None,
             saves_started: 0,
@@ -1636,9 +1641,13 @@ impl Files {
                     Outcome::Cancelled => self.say(tr("export-canceled").to_owned()),
                     Outcome::Failed(error) => {
                         self.fail(format!("{}: {error}", tr("export-failed")));
-                        // Left open to say so and to export again.
+                        // Left open to say so and to export again, also
+                        // while asked whether to close once it is done.
                         if let Some((_, true)) = self.closing {
                             self.closing = None;
+                        }
+                        if let Some(action) = self.export_question.take() {
+                            self.forget(action);
                         }
                     }
                 }
@@ -1904,6 +1913,35 @@ impl Files {
             Some(Answer::Later) => drop(self.found.pop_front()),
             None => {}
         }
+    }
+
+    /// Tells `text` in a dialog titled `title` once nothing is asked.
+    pub fn tell(&mut self, title: String, text: String) {
+        self.told = Some((title, text));
+    }
+
+    /// The dialog for what `tell` was given, once nothing else is asked;
+    /// whether it is shown.
+    pub fn show_told(&mut self, ctx: &egui::Context, asking: bool) -> bool {
+        let Some((title, text)) = &self.told else {
+            return false;
+        };
+        if asking || self.asking() {
+            return false;
+        }
+        let mut close = false;
+        let modal = widgets::dialog(ctx, "told", 420.0, title, Some(text), |ui| {
+            widgets::dialog_buttons(ui, |ui| {
+                if widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, true).clicked()
+                {
+                    close = true;
+                }
+            });
+        });
+        if close || modal.should_close() {
+            self.told = None;
+        }
+        true
     }
 
     /// The question about closing while an export runs, while one is open.
@@ -2987,6 +3025,32 @@ mod tests {
         files.answer_export_close(Action::Update, Some(false), &mut canvas);
         assert_eq!(files.export_status(), None);
         assert_eq!(files.export_question, None);
+        files.end();
+    }
+
+    #[test]
+    fn an_export_failing_while_closing_is_asked_about_keeps_the_window_open() {
+        let (mut files, mut canvas, _events) = setup();
+        let folder = folder("export-close-failed");
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(folder.join("first.png"))),
+            &mut canvas,
+        );
+        files.request(Action::Close, &mut canvas);
+        assert_eq!(files.export_question, Some(Action::Close));
+        let number = files.exporting.as_ref().unwrap().number;
+        files.handle(
+            FileEvent::Exported {
+                number,
+                path: folder.join("first.png"),
+                outcome: Outcome::Failed("disk full".to_owned()),
+            },
+            &mut canvas,
+        );
+        assert_eq!(files.export_question, None);
+        assert!(files.message().unwrap().starts_with(tr("export-failed")));
+        files.resume_closing(false, &mut canvas);
+        assert!(!files.should_close());
         files.end();
     }
 

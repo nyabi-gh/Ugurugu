@@ -45,6 +45,7 @@ export-close-text = 지금 닫으면 내보내기가 취소됩니다.
 export-close-wait = 끝나면 닫기
 export-close-stop = 중지하고 닫기
 close-after-export = 내보내기가 끝나면 닫습니다
+settings-set-aside-title = 기본 설정으로 시작
 settings-set-aside = 설정을 읽을 수 없어 기본값으로 시작했습니다. 이전 파일은 { $name }(으)로 남겨 두었습니다
 close-waits = 저장이나 열기가 끝나면 닫습니다
 tab-failed = 새 탭을 열 수 없습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다

@@ -66,7 +66,8 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     files.confirm(ui.ctx(), canvas);
     files.ask_export_close(ui.ctx(), canvas);
     files.ask_recovery(ui.ctx(), canvas);
-    let telling = crate::logs::tell_about_crashes(ui.ctx(), files.asking());
+    let mut telling = crate::logs::tell_about_crashes(ui.ctx(), files.asking());
+    telling |= files.show_told(ui.ctx(), telling);
     files.ask_update(ui.ctx(), telling, canvas);
     files.resume_closing(telling, canvas);
     files.ask_animation(ui.ctx(), canvas);

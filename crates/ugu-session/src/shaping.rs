@@ -75,9 +75,17 @@ pub fn outline(
     let mut delta = [end[0] - start[0], end[1] - start[1]];
     if settings.shape == Shape::Line {
         if drag.constrain {
-            let length = delta[0].hypot(delta[1]);
-            let angle = (delta[1].atan2(delta[0]) / FRAC_PI_4).round() * FRAC_PI_4;
-            delta = [length * angle.cos(), length * angle.sin()];
+            // Along the nearest multiple of 45°, keeping the drag's reach
+            // along it, so that a drag between pixel centres ends on one.
+            let steps = (delta[1].atan2(delta[0]) / FRAC_PI_4).round() as i32;
+            delta = match steps.rem_euclid(4) {
+                0 => [delta[0], 0.0],
+                2 => [0.0, delta[1]],
+                _ => {
+                    let reach = delta[0].abs().max(delta[1].abs());
+                    [reach * delta[0].signum(), reach * delta[1].signum()]
+                }
+            };
         }
         let from = if drag.centred {
             [start[0] - delta[0], start[1] - delta[1]]
@@ -346,12 +354,15 @@ mod tests {
         };
         let square = outline(settings(Shape::Ellipse), [10.0, 10.0], [40.0, 20.0], shift);
         assert_eq!(bounds(&square).map(f64::round), [10.0, 10.0, 40.0, 40.0]);
-        let line = outline(settings(Shape::Line), [0.0, 0.0], [30.0, 4.0], shift);
-        let end = *line.last().unwrap();
-        assert!(
-            end[1].abs() < 1e-9 && (end[0] - 30.26).abs() < 0.01,
-            "{end:?}"
-        );
+        for (to, end) in [
+            ([30.0, 4.0], [30.0, 0.0]),
+            ([-3.0, -25.0], [0.0, -25.0]),
+            ([20.0, -17.0], [20.0, -20.0]),
+            ([-12.0, 14.0], [-14.0, 14.0]),
+        ] {
+            let line = outline(settings(Shape::Line), [0.0, 0.0], to, shift);
+            assert_eq!(*line.last().unwrap(), end, "{to:?}");
+        }
         let alt = Drag {
             constrain: false,
             centred: true,

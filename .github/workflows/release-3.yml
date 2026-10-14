@@ -172,6 +172,8 @@ jobs:
       # never replaced or removed there: GitHub would forget its download
       # count, which the download badge sums.
       - name: Publish the update packages
+        # With pipefail, so a list that cannot be read stops the step.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -210,6 +212,10 @@ jobs:
           if grep -q '^releases\..*\.json ' <<< "$published"; then
             listed=$(gh release download updates --pattern 'releases.*.json' --output - \
               | jq -r '.Assets[].Version' | sort -V | tail -n 1)
+            if [[ -z "$listed" ]]; then
+              echo "The published update list names no version"
+              exit 1
+            fi
             if [[ "$(printf '%s\n' "$listed" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
               echo "The update lists name $listed, newer than $version, and are kept"
               exit 0

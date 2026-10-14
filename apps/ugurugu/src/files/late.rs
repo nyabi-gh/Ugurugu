@@ -72,6 +72,30 @@ fn edits_made_while_saving_before_closing_are_asked_about_again() {
 }
 
 #[test]
+fn what_is_told_at_start_outlasts_opening_a_document() {
+    let root = Root::new("told-at-start");
+    let path = root.0.join("opened.ugurugu");
+    ugu_io::save::save(
+        &Document::new([9, 9]),
+        [7; 16],
+        &path,
+        &ugu_win::file::replace_file,
+    )
+    .unwrap();
+    let (mut files, mut canvas, events) = setup();
+    files.tell(
+        "Default settings".to_owned(),
+        "The settings could not be read".to_owned(),
+    );
+    files.open_path(path, &mut canvas);
+    files.handle(next(&events), &mut canvas);
+    assert_eq!(canvas.session().document().canvas, [9, 9]);
+    let told = files.told.as_ref().map(|(_, text)| text.as_str());
+    assert_eq!(told, Some("The settings could not be read"));
+    files.end();
+}
+
+#[test]
 fn a_document_read_while_the_shown_one_is_edited_opens_beside_it() {
     let root = Root::new("late-open");
     let path = root.0.join("other.ugurugu");

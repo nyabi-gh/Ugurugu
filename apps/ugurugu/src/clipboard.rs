@@ -51,7 +51,7 @@ impl Clipboard {
             .name("clipboard".to_owned())
             .spawn(move || {
                 for job in jobs {
-                    events(run(job));
+                    events(run_answering(job, run));
                 }
             })
             .expect("cannot start the clipboard thread");
@@ -124,6 +124,20 @@ impl Clipboard {
     }
 }
 
+/// Runs `job`; one that panics is answered as failed, which the panic hook
+/// has recorded, so the copy or paste waiting for it goes on and the thread
+/// takes the next.
+fn run_answering(job: Job, run: impl FnOnce(Job) -> ClipboardEvent) -> ClipboardEvent {
+    let failed = match &job {
+        Job::Write(_) => ClipboardEvent::Written(Err("the copy could not be drawn".to_owned())),
+        Job::Read { generation, .. } => ClipboardEvent::Read(
+            *generation,
+            Err("the clipboard could not be read".to_owned()),
+        ),
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(job))).unwrap_or(failed)
+}
+
 fn run(job: Job) -> ClipboardEvent {
     let started = std::time::Instant::now();
     match job {
@@ -173,6 +187,16 @@ fn run(job: Job) -> ClipboardEvent {
 mod tests {
     use super::*;
     use ugu_core::document::Document;
+
+    #[test]
+    fn a_job_that_panics_is_answered_as_failed() {
+        let read = Job::Read {
+            fit: [8, 8],
+            generation: 7,
+        };
+        let answer = run_answering(read, |_| panic!("drawing failed"));
+        assert!(matches!(answer, ClipboardEvent::Read(7, Err(_))));
+    }
 
     #[test]
     fn a_copy_other_apps_do_not_get_is_said() {

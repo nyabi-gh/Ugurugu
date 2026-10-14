@@ -392,10 +392,13 @@ impl RenderThread {
         );
         if let Some(kept) = render.settings.take_set_aside() {
             let name = kept.file_name().unwrap_or_default().to_string_lossy();
-            render.files.fail(crate::i18n::tr_with(
-                "settings-set-aside",
-                &crate::i18n::args([("name", name.into_owned())]),
-            ));
+            render.files.tell(
+                crate::i18n::tr("settings-set-aside-title").to_owned(),
+                crate::i18n::tr_with(
+                    "settings-set-aside",
+                    &crate::i18n::args([("name", name.into_owned())]),
+                ),
+            );
         }
         if let Some(path) = open_at_start {
             render.files.open_path(path, &mut render.canvas);
@@ -638,14 +641,7 @@ impl RenderThread {
                         .route(events, pixels_per_point, modifiers, pan_held, |position| {
                             canvas.contains(position) && !under_egui(position)
                         });
-                if routed
-                    .canvas
-                    .iter()
-                    .any(|input| matches!(input, CanvasInput::Begin(..)))
-                    || routed.egui.iter().any(|event| {
-                        matches!(event, egui::Event::PointerButton { pressed: true, .. })
-                    })
-                {
+                if routed.uses_buttons() {
                     self.alt_tap.cancel();
                 }
                 self.egui_state.egui_input_mut().events.extend(routed.egui);

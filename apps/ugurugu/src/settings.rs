@@ -399,7 +399,7 @@ pub fn default_path() -> Option<PathBuf> {
 /// The settings at `path`, and where a file there that held none was moved
 /// to, so that writing the defaults does not lose it.
 fn load(path: &Path) -> (Settings, Option<PathBuf>) {
-    let text = match std::fs::read_to_string(path) {
+    let text = match read_text(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return (Settings::default(), None);
@@ -410,7 +410,7 @@ fn load(path: &Path) -> (Settings, Option<PathBuf>) {
             return (Settings::default(), None);
         }
     };
-    if let Some(settings) = Settings::read(&text) {
+    if let Some(settings) = text.as_deref().and_then(Settings::read) {
         return (settings, None);
     }
     match set_aside(path) {
@@ -423,6 +423,12 @@ fn load(path: &Path) -> (Settings, Option<PathBuf>) {
             (Settings::default(), None)
         }
     }
+}
+
+/// The file at `path` as text; `None` when it is not UTF-8, which holds no
+/// settings either, as Notepad's UTF-16 or ANSI.
+fn read_text(path: &Path) -> std::io::Result<Option<String>> {
+    Ok(String::from_utf8(std::fs::read(path)?).ok())
 }
 
 /// Moves the file at `path` beside it, named for now, and says where.
@@ -452,11 +458,14 @@ fn write_changes_over(
     }
     let _lock = lock(path)?;
     let current = settings.to_object();
-    let on_disk = match std::fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
-            Ok(Value::Object(object)) => Some(object),
-            _ => None,
-        },
+    let on_disk = match read_text(path) {
+        Ok(Some(text)) => {
+            match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
+                Ok(Value::Object(object)) => Some(object),
+                _ => None,
+            }
+        }
+        Ok(None) => None,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
@@ -844,6 +853,36 @@ mod tests {
             .filter(|name| name.starts_with("settings-unreadable-"))
             .collect();
         assert_eq!(kept_again.len(), 2, "{names:?}");
+        assert!(Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
+    }
+
+    #[test]
+    fn a_file_that_is_not_utf_8_is_kept_as_an_unreadable_one() {
+        let folder = Folder::new("not-utf-8");
+        let path = folder.settings();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // As Notepad saves it in UTF-16.
+        let utf16: Vec<u8> = [0xff, 0xfe]
+            .into_iter()
+            .chain(
+                "{\"language\": \"ko\"}"
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes),
+            )
+            .collect();
+        std::fs::write(&path, &utf16).unwrap();
+        let mut store = Store::open(Some(path.clone()));
+        let kept = store.take_set_aside().expect("the file is kept");
+        assert_eq!(std::fs::read(&kept).unwrap(), utf16);
+        store.change(|settings| settings.pixel_grid = false);
+        drop(store);
+        assert!(!Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
+
+        // Turned so while the window runs: kept before it is written over.
+        let mut store = Store::open(Some(path.clone()));
+        std::fs::write(&path, &utf16).unwrap();
+        store.change(|settings| settings.pixel_grid = true);
+        drop(store);
         assert!(Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
     }
 

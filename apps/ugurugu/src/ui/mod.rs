@@ -414,20 +414,23 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         );
         settings.opacity = opacity / 100.0;
     }
-    let mut stabilization = settings.stabilizer * 100.0;
-    slider_row(
-        ui,
-        tr("stabilization"),
-        tr("stabilization-name"),
-        &mut stabilization,
-        0.0..=100.0,
-        "%",
-        0,
-    );
-    settings.stabilizer = stabilization / 100.0;
+    // A shape is not drawn by hand, so nothing steadies it.
+    if tool != Tool::Shape {
+        let mut stabilization = settings.stabilizer * 100.0;
+        slider_row(
+            ui,
+            tr("stabilization"),
+            tr("stabilization-name"),
+            &mut stabilization,
+            0.0..=100.0,
+            "%",
+            0,
+        );
+        settings.stabilizer = stabilization / 100.0;
+    }
     // A pixel brush never antialiases. Unlike 2.2.13's, whose erasers
     // always antialias, an eraser has the choice too.
-    if matches!(tool, Tool::Pen | Tool::Eraser) && !pixel {
+    if matches!(tool, Tool::Pen | Tool::Eraser | Tool::Shape) && !pixel {
         widgets::check_row(
             ui,
             tr("antialiasing"),
@@ -441,8 +444,6 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     }
 }
 
-/// The selection tool's mode and shapes, as 2.2.13's area select panel;
-/// painting also shows how fills look.
 /// Which shape the shape tool drags out, and its corners.
 fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     use ugu_session::{Shape, ShapeSettings};
@@ -490,6 +491,8 @@ fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     ui.add_space(theme::space::S);
 }
 
+/// The selection tool's mode and shapes, as 2.2.13's area select panel;
+/// painting also shows how fills look.
 fn selection_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     widgets::panel_heading(ui, tr("lasso-mode"));
     let mut paints = canvas.tools().lasso_paints;

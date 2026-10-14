@@ -45,6 +45,7 @@ export-close-text = 今閉じると書き出しがキャンセルされます。
 export-close-wait = 終了後に閉じる
 export-close-stop = 中止して閉じる
 close-after-export = 書き出しが終わると閉じます
+settings-set-aside-title = 既定の設定で開始
 settings-set-aside = 設定を読み込めなかったため既定値で始めました。以前のファイルは{ $name }として残してあります
 close-waits = 保存または読み込みが終わると閉じます
 tab-failed = 新しいタブを開けませんでした。詳細は設定 > 情報のログフォルダーにあります

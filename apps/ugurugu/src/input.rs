@@ -78,6 +78,23 @@ pub struct Routed {
     pub eraser_end: Option<bool>,
 }
 
+impl Routed {
+    /// Whether the pen or mouse pressed, dragged or let go: Alt held then
+    /// is for that, as the shape tool's centre or the selection's subtract,
+    /// not a tap for the menus.
+    pub fn uses_buttons(&self) -> bool {
+        self.canvas.iter().any(|input| {
+            matches!(
+                input,
+                CanvasInput::Begin(..) | CanvasInput::Extend(..) | CanvasInput::End(..)
+            )
+        }) || self
+            .egui
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerButton { pressed: true, .. }))
+    }
+}
+
 impl InputRouter {
     /// `starts_on_canvas` decides, for a press at a physical position,
     /// whether the canvas owns the gesture instead of the UI. A primary
@@ -344,6 +361,32 @@ mod tests {
         ));
         assert!(matches!(routed.canvas[1], CanvasInput::Extend(..)));
         assert!(matches!(routed.canvas[2], CanvasInput::End(..)));
+    }
+
+    #[test]
+    fn a_drag_or_release_on_the_canvas_uses_the_buttons() {
+        let mut router = InputRouter::default();
+        let pressed = route(
+            &mut router,
+            vec![samples(1, vec![sample(150.0, Buttons::PRIMARY, 1)])],
+        );
+        assert!(pressed.uses_buttons());
+        // Alt pressed now, between the press and these.
+        let dragged = route(
+            &mut router,
+            vec![samples(1, vec![sample(160.0, Buttons::PRIMARY, 2)])],
+        );
+        assert!(dragged.uses_buttons());
+        let released = route(
+            &mut router,
+            vec![samples(1, vec![sample(160.0, Buttons::empty(), 3)])],
+        );
+        assert!(released.uses_buttons());
+        let hovered = route(
+            &mut router,
+            vec![samples(1, vec![sample(170.0, Buttons::empty(), 4)])],
+        );
+        assert!(!hovered.uses_buttons());
     }
 
     #[test]

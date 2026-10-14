@@ -212,6 +212,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 | 단축키는 동작 표 하나(`apps/ugurugu/src/shortcuts.rs`, 메뉴의 모든 동작). 기본과 다른 키만 2.2.13 PortableText 꼴로 저장, 충돌 거절, 수식키 정확 비교, Space·Tab·수식키 혼자 불가, 메뉴가 열리면 단축키를 보내지 않는다 | 메뉴 동작만 | egui `consume_key`가 남는 수식키를 무시했다 | M5-5 |
 | 기본 키는 3.0 키(Ctrl+Shift+S, Ctrl+Q, Ctrl+Shift+E, Ctrl+T, Ctrl+Shift+T)이고, 2.2.13이 쓰던 Windows 표준 키(Alt+Backspace, Ctrl+Shift+Z, Shift+Delete, Ctrl/Shift+Insert, Ctrl+=)는 별칭 | 다른 기본 키 | — | M5-5 |
 | 꺼진 동작의 단축키는 키를 가져가지 않는다 | 같음 | — | M5-14 |
+| 두 동작이 같은 키를 가지면 사용자가 고른 쪽이 기본값보다 먼저 가진다(둘 다 골랐거나 둘 다 기본값이면 `Action::ALL`의 앞쪽) | 앞쪽 | 새 판이 더한 기본 단축키(3.1.0 도형 U)가 전 판에서 고른 키를 가져가지 않게 | 2026-10-14 |
 | 키보드 전용 조작: F10·Alt 단독·Alt+F/E/V/T/W, 메뉴 ←→, 대화상자 첫 컨트롤 포커스와 닫을 때 되돌림, 도크 경계 ←→. 색 도크 `#AARRGGBB` 입력 칸. 메뉴 항목 접근 글자는 없다 | 색 휠은 포인터 전용, 접근 글자 있음 | 키보드만으로 색을 고른다 | M5-14 |
 | 접근성은 UI Automation 노출(모든 조작 요소에 이름)과 키보드 조작까지. Narrator 청취 검증은 범위 밖, egui TextEdit SetValue 미지원은 받아들인다 | — | UIA는 자동 시험·돋보기·음성 액세스에 쓰인다 | scope, m0-close 4절 |
 | 도움말 메뉴(F1 도움말 창, 업데이트 확인, 정보). 도움말 창은 메인 창 가운데 | 같음 | — | M6-5, M6-11 |
