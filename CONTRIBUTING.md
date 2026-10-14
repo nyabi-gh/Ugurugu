@@ -55,4 +55,5 @@ are at the `v2.2.13` tag.
 - Add a release note to `release-notes/<version>.en.md` when the change is
   user visible. Release notes are written in English only. End each entry
   with the issues it answers and the pull requests that made it, in
-  parentheses, issues first: `(#64, #66)`. GitHub links them in the release.
+  parentheses, issues first: `(#64, #66)`. GitHub links them in the release
+  and adds its list of the pull requests merged since the previous one.

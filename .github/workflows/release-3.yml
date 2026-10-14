@@ -232,10 +232,13 @@ jobs:
           gh release upload updates "${lists[@]}" --clobber
           gh release upload updates artifacts/releases.*.json --clobber
 
+      # The written notes, then GitHub's list of the pull requests merged
+      # since the previous release and the full changelog link.
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
+          generate_release_notes: true
           files: artifacts/*-Setup.exe
 
       # A release made with this job's token starts no workflow, so its
