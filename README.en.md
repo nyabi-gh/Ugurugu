@@ -21,7 +21,7 @@ Save your moving drawings as GIF or WebP and share them anywhere.
 
 > [!NOTE]
 > Ugurugu 3.0 is for Windows. On macOS, please keep using 2.2.13.
-> `.ugu` files made in 2.x open in 3.0 as they are.
+> `.ugu` files saved in 2.1.0 or later open in 3.0. Save older ones again in 2.2.13 first.
 
 ## Download
 
