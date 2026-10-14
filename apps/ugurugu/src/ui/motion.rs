@@ -137,7 +137,8 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
             (Glyph::Key, tr("key-add"))
         };
         let tip = widgets::with_key(text, &keys.text(Action::ToggleKey));
-        if widgets::text_icon_button(ui, glyph, text, &tip).clicked() {
+        let others = [tr("key-add"), tr("key-remove")];
+        if widgets::text_icon_button_as_wide(ui, glyph, text, &tip, &others).clicked() {
             canvas.toggle_key();
         }
         let tip = widgets::with_key(tr("key-previous"), &keys.text(Action::PreviousKey));

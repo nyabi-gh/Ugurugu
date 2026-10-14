@@ -223,13 +223,39 @@ pub fn icon_toggle(
 /// A flat button with a small glyph and its text beside it, as 2.2.13's
 /// status bar and animation bar buttons.
 pub fn text_icon_button(ui: &mut Ui, glyph: Glyph, text: &str, tip: &str) -> Response {
+    text_icon_button_as_wide(ui, glyph, text, tip, &[])
+}
+
+/// `text_icon_button` as wide as with the widest of `others` too, for a
+/// button whose text changes in place.
+pub fn text_icon_button_as_wide(
+    ui: &mut Ui,
+    glyph: Glyph,
+    text: &str,
+    tip: &str,
+    others: &[&str],
+) -> Response {
+    let measure = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(
+                text.to_owned(),
+                FontId::proportional(theme::BODY),
+                theme::text(),
+            )
+            .size()
+            .x
+    };
+    let widest = others
+        .iter()
+        .map(|other| measure(other))
+        .fold(0.0, f32::max);
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
         FontId::proportional(theme::BODY),
         theme::text(),
     );
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(6.0 + 16.0 + 4.0 + galley.size().x + 6.0, 24.0),
+        egui::vec2(6.0 + 16.0 + 4.0 + galley.size().x.max(widest) + 6.0, 24.0),
         Sense::click(),
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
