@@ -58,7 +58,7 @@ fn source_box(canvas: &Canvas) -> Option<([f64; 4], Affine)> {
     Some(([left, top, left + width, top + height], pending.transform))
 }
 
-fn handle_point([left, top, right, bottom]: [f64; 4], [x, y]: [i8; 2]) -> [f64; 2] {
+pub(super) fn handle_point([left, top, right, bottom]: [f64; 4], [x, y]: [i8; 2]) -> [f64; 2] {
     let pick = |low: f64, high: f64, at: i8| match at {
         -1 => low,
         1 => high,
@@ -364,10 +364,16 @@ impl Canvas {
         if *shown != key || split.layer != pending.layer {
             return;
         }
+        // On a layer moved on this frame, in its own pixels.
+        let Some((selection, transform)) = pending.in_layer(self.tab.session.layer_transform())
+        else {
+            return;
+        };
+        let view = view.filter(|_| split.moved.is_none());
         let threads =
             std::thread::available_parallelism().map_or(1, |count| count.get().min(8)) as u16;
         if self.tab.preview.is_none() {
-            let Some(moving) = split.begin_move(pending.selection.mask(), threads) else {
+            let Some(moving) = split.begin_move(selection.mask(), threads) else {
                 return;
             };
             self.tab.preview = Some(Preview {
@@ -378,7 +384,7 @@ impl Canvas {
         }
         let preview = self.tab.preview.as_mut().expect("made above");
         let wanted = (
-            pending.transform,
+            transform,
             self.tab.session.sampling(self.tools.transform_sampling),
             pending.keep_source,
         );

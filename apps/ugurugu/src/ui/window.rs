@@ -167,6 +167,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
             ants = super::selection_overlay(ui, canvas);
             super::text_overlay(ui, canvas);
             super::pick_cursor(ui, canvas);
+            super::pose_overlay(ui, canvas);
             super::brush_cursor(ui, canvas);
             super::selection_actions(ui, canvas, panels);
             let ppp = f64::from(ui.ctx().pixels_per_point());

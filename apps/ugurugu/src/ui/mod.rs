@@ -16,11 +16,13 @@ mod history;
 #[cfg(test)]
 mod keyboard;
 mod layers;
+mod motion;
 mod resize;
 mod restyle;
 mod settings;
 mod tabs;
 mod text;
+mod timeline;
 mod window;
 
 use crate::i18n::args;
@@ -311,6 +313,12 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         (Tool::Text, Action::Text, Glyph::Text, "tool-text-rail"),
         (Tool::Shape, Action::Shape, Glyph::Shape, "tool-shape-rail"),
         (
+            Tool::Move,
+            Action::MoveLayer,
+            Glyph::MoveLayer,
+            "tool-move-rail",
+        ),
+        (
             Tool::Eyedropper,
             Action::Eyedropper,
             Glyph::Eyedropper,
@@ -354,6 +362,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         Tool::Select => return selection_settings(ui, canvas),
         Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
         Tool::Text => return text::settings(ui, canvas),
+        Tool::Move => return motion::settings(ui, canvas, &panels.keys),
         Tool::Eyedropper => {
             ui.label(
                 egui::RichText::new(tr("eyedropper-hint"))
@@ -379,7 +388,8 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         | Tool::Fill
         | Tool::Text
         | Tool::Eyedropper
-        | Tool::Shape => tr("brush-size"),
+        | Tool::Shape
+        | Tool::Move => tr("brush-size"),
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -675,7 +685,7 @@ pub fn selection_overlay(
         ants(ui, canvas, &lasso_path(lasso), phase);
     }
     if let Some(corners) = canvas.transform_box() {
-        transform_box(ui, canvas, &corners);
+        transform_box(ui, canvas, &corners, |at| canvas.grip_at(at));
     }
     let moved = session
         .pending()
@@ -913,9 +923,21 @@ fn corners_on_screen(ui: &egui::Ui, canvas: &Canvas, rect: [f64; 4]) -> [egui::P
         .map(|corner| to_screen(ui, canvas, corner))
 }
 
+/// The move tool's box around the current layer as the frame shows it.
+pub fn pose_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
+    if let Some(corners) = canvas.pose_box() {
+        transform_box(ui, canvas, &corners, |at| canvas.pose_grip_at(at));
+    }
+}
+
 /// The box's sides and handles, and the pointer shape for what a drag from
-/// under the pointer would do.
-fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
+/// under the pointer would do, as `grip_at` says for a client point.
+fn transform_box(
+    ui: &mut egui::Ui,
+    canvas: &Canvas,
+    corners: &[[f64; 2]; 8],
+    grip_at: impl Fn([f64; 2]) -> Option<Grip>,
+) {
     let points = corners.map(|corner| to_screen(ui, canvas, corner));
     let painter = ui.painter();
     painter.add(egui::Shape::closed_line(
@@ -938,7 +960,7 @@ fn transform_box(ui: &mut egui::Ui, canvas: &Canvas, corners: &[[f64; 2]; 8]) {
     else {
         return;
     };
-    let icon = match canvas.grip_at([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)]) {
+    let icon = match grip_at([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)]) {
         Some(Grip::Move) => egui::CursorIcon::Move,
         Some(Grip::Rotate) => egui::CursorIcon::Alias,
         Some(Grip::Scale(handle)) => {
@@ -1438,16 +1460,21 @@ pub fn layers(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     layers.show(ui, canvas, refusal);
 }
 
-/// The animation bar: play, the frame and frame count, the scrubber and the
-/// playback speed.
+/// The animation bar: play, the frame and frame count, the animation
+/// buttons, the scrubber and the playback speed, over the timeline's rows.
 pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     // With the wobble animation off in the settings, as 2.2.13's timeline.
     ui.add_enabled_ui(canvas.animation_allowed(), |ui| {
-        animation_controls(ui, canvas, panels)
+        let track = animation_controls(ui, canvas, panels);
+        if !canvas.is_playing() {
+            ui.add_space(theme::space::XS);
+            timeline::rows(ui, canvas, panels, track);
+        }
     });
 }
 
-fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+/// The bar's controls; returns the scrubber's span.
+fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) -> egui::Rangef {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         let playing = canvas.is_playing();
@@ -1508,10 +1535,12 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             widgets::number(ui, &mut count, low..=high, "", 0, 46.0, tr("frame-count"))
                 .on_hover_text(tr("frame-count"));
 
+        animation_buttons(ui, canvas, panels);
         let right = 46.0 + 30.0 + 90.0 + 30.0;
         let width = (ui.available_width() - right).max(160.0);
         let current = frame_in_cycle(canvas.session().frame(), frames);
-        if let Some(chosen) = scrubber(ui, current, frames, canvas.is_playing(), width) {
+        let (chosen, track) = scrubber(ui, current, frames, canvas.is_playing(), width);
+        if let Some(chosen) = chosen {
             if canvas.is_playing() {
                 canvas.toggle_playback();
             }
@@ -1546,7 +1575,64 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
         if hide.clicked() {
             panels.layout.animation_bar = false;
         }
-    });
+        track
+    })
+    .inner
+}
+
+/// Onion skin, the key on this frame, a new animation folder and a new cel.
+fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+    let keys = &panels.keys;
+    let onion = canvas.onion_skin();
+    let tip = widgets::with_key(tr("onion-skin"), &keys.text(Action::OnionSkin));
+    let response =
+        widgets::icon_button_tip(ui, Glyph::OnionSkin, 20.0, tr("onion-skin"), &tip, true);
+    if onion {
+        ui.painter().rect_stroke(
+            response.rect,
+            egui::CornerRadius::same(theme::radius::CONTROL),
+            egui::Stroke::new(1.0, theme::accent_ink()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if response.clicked() {
+        canvas.set_onion_skin(!onion);
+    }
+    let keyed = canvas
+        .session()
+        .key_here(canvas.session().current_layer())
+        .is_some();
+    let text = if keyed {
+        tr("key-remove")
+    } else {
+        tr("key-add")
+    };
+    let tip = widgets::with_key(text, &keys.text(Action::ToggleKey));
+    if widgets::icon_button_tip(ui, Glyph::Key, 20.0, text, &tip, true).clicked() {
+        canvas.toggle_key();
+    }
+    let tip = widgets::with_key(
+        tr("animation-folder-make"),
+        &keys.text(Action::AnimationFolder),
+    );
+    let folder = widgets::icon_button_tip(
+        ui,
+        Glyph::AnimationFolder,
+        20.0,
+        tr("animation-folder-make"),
+        &tip,
+        canvas.session().pending().is_none(),
+    );
+    if folder.clicked() {
+        let result = canvas.edit(Session::make_animation_folder);
+        panels.report(result);
+    }
+    let in_folder = canvas.session().folder().is_some();
+    let tip = widgets::with_key(tr("cel-new"), &panels.keys.text(Action::NewCel));
+    if widgets::icon_button_tip(ui, Glyph::NewCel, 20.0, tr("cel-new"), &tip, in_folder).clicked() {
+        let result = canvas.edit(Session::new_cel);
+        panels.report(result);
+    }
 }
 
 /// One slot per frame along a track. Returns the frame clicked or dragged
@@ -1557,7 +1643,7 @@ fn scrubber(
     frames: u32,
     playing: bool,
     width: f32,
-) -> Option<u32> {
+) -> (Option<u32>, egui::Rangef) {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::click_and_drag());
     let track = rect.shrink2(egui::vec2(0.0, 2.5));
@@ -1637,7 +1723,7 @@ fn scrubber(
             chosen = Some((i64::from(current) + step).rem_euclid(i64::from(frames)) as u32);
         }
     }
-    chosen.filter(|&frame| frame != current)
+    (chosen.filter(|&frame| frame != current), track.x_range())
 }
 
 /// The status bar: the last message on the left; the pointer, zoom and fit

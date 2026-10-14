@@ -8,10 +8,18 @@ use crate::i18n::tr;
 use crate::theme;
 
 /// Each section's heading and paragraphs.
-const SECTIONS: [(&str, &[&str]); 4] = [
+const SECTIONS: [(&str, &[&str]); 5] = [
     (
         "help-start",
         &["help-start-draw", "help-start-pixel", "help-start-export"],
+    ),
+    (
+        "help-animate",
+        &[
+            "help-animate-keys",
+            "help-animate-cels",
+            "help-animate-onion",
+        ],
     ),
     (
         "help-files",

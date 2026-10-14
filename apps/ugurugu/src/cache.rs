@@ -28,6 +28,7 @@ use ugu_render::stream::Held;
 use vello_cpu::Pixmap;
 
 use crate::budget::Budget;
+use crate::canvas::OnionKey;
 
 /// Which state of which open document a render shows. Revisions start
 /// again with each document opened, so they alone could match a render of
@@ -36,6 +37,8 @@ use crate::budget::Budget;
 pub struct Version {
     pub document: u64,
     pub revision: u64,
+    /// Counts the poses dragged out but not yet keyed; 0 when none is.
+    pub posed: u64,
 }
 
 /// What a split shows.
@@ -74,6 +77,10 @@ pub enum Rendered {
         document: u64,
         thumbnails: Vec<(LayerId, u64, Pixmap)>,
     },
+    Onion {
+        key: OnionKey,
+        pixels: Pixmap,
+    },
 }
 
 /// Thumbnails fit in this many pixels, twice the layer list's size.
@@ -97,12 +104,15 @@ enum Job {
         reply: Sender<Pixmap>,
     },
     Thumbnails(u64, Vec<(LayerId, u64)>, Arc<Document>),
+    /// The frames, with whether each is before the one shown.
+    Onion(OnionKey, Vec<(i64, bool)>, Arc<Document>),
 }
 
 /// What the worker is doing now.
 #[derive(Clone, Copy, PartialEq)]
 enum Running {
     Split,
+    Onion,
     Frame(Version, u32, Preview),
     Export,
     Thumbnails,
@@ -111,6 +121,7 @@ enum Running {
 #[derive(Default)]
 struct Queue {
     split: Option<(Key, Snapshot)>,
+    onion: Option<Job>,
     frames: VecDeque<(Version, u32, Preview, Snapshot)>,
     exports: VecDeque<Job>,
     /// The newest list of thumbnails wanted.
@@ -215,6 +226,7 @@ impl CacheWorker {
                     let mut queue = worker.queue.lock().expect("queue lock");
                     queue.running = None;
                     let idle = queue.split.is_none()
+                        && queue.onion.is_none()
                         && queue.frames.is_empty()
                         && queue.exports.is_empty()
                         && queue.thumbnails.is_none();
@@ -262,6 +274,15 @@ impl CacheWorker {
     ) {
         self.shared
             .request_frames(version, frames, snapshot, preview);
+    }
+
+    /// Replaces the onion skin waiting to be drawn: `folder` of `document`
+    /// alone on `frames`, each with whether it is before the frame shown.
+    pub fn request_onion(&self, key: OnionKey, frames: Vec<(i64, bool)>, document: Arc<Document>) {
+        let shared = &self.shared;
+        let mut queue = shared.queue.lock().expect("queue lock");
+        queue.onion = Some(Job::Onion(key, frames, document));
+        shared.wake.notify_one();
     }
 
     /// Replaces the thumbnails waiting to be drawn: `layers` of `document`
@@ -349,6 +370,7 @@ fn next(shared: &Shared) -> Option<Job> {
         if queue.quit {
             // Nothing shows them any more.
             queue.split = None;
+            queue.onion = None;
             queue.frames.clear();
             queue.thumbnails = None;
             if queue.exports.is_empty() && queue.askers == 0 {
@@ -357,6 +379,8 @@ fn next(shared: &Shared) -> Option<Job> {
         }
         let job = if let Some((key, snapshot)) = queue.split.take() {
             Some((Running::Split, Job::Split(key, snapshot)))
+        } else if let Some(job) = queue.onion.take() {
+            Some((Running::Onion, job))
         } else if let Some((version, frame, preview, snapshot)) = queue.frames.pop_front() {
             Some((
                 Running::Frame(version, frame, preview),
@@ -468,6 +492,19 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             }
             tracing::debug!(ms = ms(), "export frame rendered");
             let _ = reply.send(pixels);
+        }
+        Job::Onion(key, frames, document) => {
+            let mut drawn = Vec::new();
+            for (frame, before) in frames {
+                let Some(pixels) = renderer.render_alone(&document, key.folder, frame) else {
+                    tracing::debug!(ms = ms(), "onion skin stopped");
+                    return None;
+                };
+                drawn.push((pixels, before));
+            }
+            let pixels = crate::canvas::tint_onion(&drawn, document.canvas);
+            tracing::debug!(ms = ms(), "onion skin rendered");
+            done(Rendered::Onion { key, pixels });
         }
         Job::Thumbnails(generation, layers, document) => {
             let mut thumbnails = Vec::new();
@@ -618,6 +655,7 @@ mod tests {
         let version = Version {
             document: 0,
             revision: 0,
+            posed: 0,
         };
         let state = snapshot(Document::new([8, 8]));
         {
@@ -650,6 +688,7 @@ mod tests {
                 Job::Frame(..) => "frame",
                 Job::Export { .. } => "export",
                 Job::Thumbnails(..) => "thumbnails",
+                Job::Onion(..) => "onion",
             })
             .collect();
         assert_eq!(order, ["split", "frame", "export", "thumbnails"]);
@@ -669,6 +708,7 @@ mod tests {
         let version = Version {
             document: 0,
             revision: 0,
+            posed: 0,
         };
         shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2, full(1)));
         // A list that still has the frame keeps it going; one without it, or

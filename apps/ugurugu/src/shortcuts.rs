@@ -117,6 +117,7 @@ impl Chord {
             Key::Plus => "+",
             Key::Minus => "-",
             Key::Comma => ",",
+            Key::Period => ".",
             Key::Equals => "=",
             Key::Escape => "Esc",
             key => key.name(),
@@ -311,6 +312,14 @@ actions! {
     ResetTurn "resetCanvasRotation" "view-turn-reset" [] [];
     Mirror "mirrorCanvas" "view-mirror" [plain(Key::M)] [];
     Animate "play" "view-animate" [plain(Key::P)] [];
+    PreviousFrame "previousFrame" "frame-previous" [plain(Key::Comma)] [];
+    NextFrame "nextFrame" "frame-next" [plain(Key::Period)] [];
+    PreviousKey "previousKey" "key-previous" [shift(Key::Comma)] [];
+    NextKey "nextKey" "key-next" [shift(Key::Period)] [];
+    ToggleKey "toggleKey" "key-toggle" [plain(Key::K)] [];
+    OnionSkin "onionSkin" "onion-skin" [plain(Key::O)] [];
+    AnimationFolder "animationFolder" "animation-folder-make" [] [];
+    NewCel "newCel" "cel-new" [ctrl_shift(Key::N)] [];
     Brush "brush" "tool-brush" [plain(Key::B)] [];
     Eraser "eraser" "tool-eraser" [plain(Key::E)] [];
     Select "lasso" "tool-select" [plain(Key::L)] [];
@@ -319,6 +328,7 @@ actions! {
     Text "text" "tool-text" [plain(Key::T)] [];
     Eyedropper "eyedropper" "tool-eyedropper" [plain(Key::I)] [];
     Shape "shape" "tool-shape" [plain(Key::U)] [];
+    MoveLayer "moveLayer" "tool-move" [plain(Key::V)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];
     NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];

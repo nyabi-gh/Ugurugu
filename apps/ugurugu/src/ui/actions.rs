@@ -79,6 +79,15 @@ pub const VIEW: &[Entry] = &[
     Do(A::Mirror),
     Gap,
     Do(A::Animate),
+    Do(A::PreviousFrame),
+    Do(A::NextFrame),
+    Do(A::PreviousKey),
+    Do(A::NextKey),
+    Do(A::ToggleKey),
+    Do(A::OnionSkin),
+    Gap,
+    Do(A::AnimationFolder),
+    Do(A::NewCel),
 ];
 
 pub const TOOLS: &[Entry] = &[
@@ -90,6 +99,7 @@ pub const TOOLS: &[Entry] = &[
     Do(A::Text),
     Do(A::Eyedropper),
     Do(A::Shape),
+    Do(A::MoveLayer),
     Gap,
     Do(A::ImportTools),
     Do(A::ExportTools),
@@ -134,6 +144,7 @@ pub fn tool(action: Action) -> Option<Tool> {
         A::Text => Tool::Text,
         A::Eyedropper => Tool::Eyedropper,
         A::Shape => Tool::Shape,
+        A::MoveLayer => Tool::Move,
         _ => return None,
     })
 }
@@ -181,8 +192,17 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         // As 2.2.13: without the animation there is nothing to animate.
         A::Animate | A::ExportGif | A::ExportWebP => canvas.animation_allowed(),
         A::NextTab | A::PreviousTab => canvas.tab_count() > 1,
+        A::ToggleKey => paint_or_group(canvas),
+        A::NewCel => session.folder().is_some(),
+        A::AnimationFolder => paint_or_group(canvas) && session.pending().is_none(),
         _ => true,
     }
+}
+
+/// Whether the current layer is a paint layer or a group, which keys move.
+fn paint_or_group(canvas: &Canvas) -> bool {
+    let session = canvas.session();
+    session.document().layer(session.current_layer()).is_some()
 }
 
 /// Whether a menu shows it as on, for those that turn something on.
@@ -195,6 +215,7 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     }
     match action {
         A::Animate => Some(canvas.is_playing()),
+        A::OnionSkin => Some(canvas.onion_skin()),
         A::Mirror => Some(canvas.is_mirrored()),
         A::PixelMode => Some(canvas.session().pixel_mode()),
         _ => None,
@@ -360,6 +381,20 @@ pub fn run(
         A::ResetTurn => canvas.turn_to(0.0),
         A::Mirror => canvas.set_mirrored(!canvas.is_mirrored()),
         A::Animate => canvas.toggle_playback(),
+        A::PreviousFrame => canvas.step_frame(-1),
+        A::NextFrame => canvas.step_frame(1),
+        A::PreviousKey => canvas.step_key(-1),
+        A::NextKey => canvas.step_key(1),
+        A::ToggleKey => canvas.toggle_key(),
+        A::OnionSkin => canvas.set_onion_skin(!canvas.onion_skin()),
+        A::AnimationFolder => {
+            let result = canvas.edit(Session::make_animation_folder);
+            panels.report(result);
+        }
+        A::NewCel => {
+            let result = canvas.edit(Session::new_cel);
+            panels.report(result);
+        }
         A::ResetLayout => panels.set_layout(Layout::default()),
         A::Brush
         | A::Eraser
@@ -369,6 +404,7 @@ pub fn run(
         | A::Text
         | A::Eyedropper
         | A::Shape
+        | A::MoveLayer
         | A::AnimationBar
         | A::ToolSettings
         | A::WobbleDock

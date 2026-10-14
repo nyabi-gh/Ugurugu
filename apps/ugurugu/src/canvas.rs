@@ -42,13 +42,16 @@ use crate::input::{CanvasInput, Gesture};
 
 mod clipboard;
 mod cursor;
+mod onion;
 mod picking;
+mod posing;
 mod text;
 mod transform;
 mod view;
 
 pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
+pub use onion::{OnionKey, tint as tint_onion};
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
@@ -111,6 +114,13 @@ enum Interaction {
     MovingText {
         start: [f64; 2],
         base: [f64; 2],
+    },
+    /// Dragging the current layer's pose with the move tool from `start`
+    /// (document pixels), where it had `base`.
+    Posing {
+        grip: Grip,
+        start: [f64; 2],
+        base: ugu_core::keys::Pose,
     },
     /// Picking up colours with the eyedropper.
     Picking,
@@ -181,6 +191,9 @@ struct Tab {
     /// The canvas area when another tab was last shown instead, to move a
     /// placed view by as much as the area has changed since.
     left_area: Option<[i32; 4]>,
+    /// Counts the poses dragged out, so each is rendered.
+    posed: u64,
+    onion: onion::Onion,
 }
 
 impl Tab {
@@ -209,6 +222,8 @@ impl Tab {
             thumbnails: HashMap::new(),
             thumbnails_asked: false,
             left_area: None,
+            posed: 0,
+            onion: onion::Onion::default(),
         }
     }
 
@@ -227,6 +242,7 @@ impl Tab {
         self.resume_playback = false;
         self.playback = None;
         self.snapshot = None;
+        self.onion = onion::Onion::default();
         self.thumbnails.clear();
         self.thumbnails_asked = false;
         self.placed = false;
@@ -285,6 +301,8 @@ pub struct Canvas {
     animation_allowed: bool,
     /// Counts documents opened, so renders of an earlier one are told apart.
     generations: u64,
+    /// Whether the frames around are shown faintly.
+    onion_skin: bool,
 }
 
 /// A cache worker handing its renders to `done`.
@@ -342,6 +360,7 @@ impl Canvas {
             notice: None,
             animation_allowed: true,
             generations: 0,
+            onion_skin: false,
         }
     }
 
@@ -776,6 +795,11 @@ impl Canvas {
         Version {
             document: self.tab.generation,
             revision: self.tab.session.revision(),
+            posed: if self.tab.session.posing().is_some() {
+                self.tab.posed
+            } else {
+                0
+            },
         }
     }
 
@@ -809,6 +833,13 @@ impl Canvas {
 
     fn snapshot(&mut self) -> Snapshot {
         let revision = self.tab.session.revision();
+        // A pose being dragged out is shown; once keyed it is the revision.
+        if self.tab.session.posing().is_some() {
+            return Snapshot {
+                document: Arc::new(self.tab.session.shown_document().into_owned()),
+                layers: Arc::new(self.tab.session.layer_revisions().clone()),
+            };
+        }
         match &self.tab.snapshot {
             Some((at, snapshot)) if *at == revision => snapshot.clone(),
             _ => {
@@ -876,6 +907,7 @@ impl Canvas {
         self.refresh_preview();
         self.refresh_text_preview();
         self.sync_thumbnails();
+        self.sync_onion();
         if self.tab.playback.is_some() {
             return;
         }
@@ -911,6 +943,10 @@ impl Canvas {
                 self.tab.requested = None;
                 self.tab.held = None;
                 self.tab.display = display;
+                let [width, height] = self.tab.session.document().canvas;
+                self.tab
+                    .onion
+                    .cover(&mut self.tab.display, [0, 0, width, height]);
                 self.tab.split = Some((key, *split));
                 self.tab.preview = None;
                 self.tab.text_preview = None;
@@ -933,6 +969,11 @@ impl Canvas {
                     && playback.preview == preview
                 {
                     playback.frames.insert(frame, pixels);
+                }
+            }
+            Rendered::Onion { key, pixels } => {
+                if key.version.document == self.tab.generation {
+                    self.adopt_onion(key, pixels);
                 }
             }
             Rendered::Thumbnails {
@@ -1125,9 +1166,15 @@ impl Canvas {
         }
     }
 
-    /// Puts `rect` of the display back together, with the stroke being drawn.
+    /// Puts back together the part of the display that pixels `rect` of
+    /// the split's layer reach where the frame shows it, with the stroke
+    /// being drawn and the onion skin.
     fn recomposite(&mut self, rect: Option<PixelRect>) {
         let (Some(rect), Some((_, split))) = (rect, &self.tab.split) else {
+            return;
+        };
+        let canvas = self.tab.session.document().canvas;
+        let Some(rect) = split.shown(rect, canvas) else {
             return;
         };
         let live = match &self.interaction {
@@ -1135,6 +1182,7 @@ impl Canvas {
             _ => None,
         };
         composite(split, live, rect, &mut self.tab.display);
+        self.tab.onion.cover(&mut self.tab.display, rect);
         self.upload = union(self.upload, Some(rect));
     }
 
@@ -1162,6 +1210,10 @@ impl Canvas {
             {
                 self.sample_count += 1;
                 self.begin_transform_drag(sample.position);
+            }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Move => {
+                self.sample_count += 1;
+                self.begin_pose_drag(sample.position);
             }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Select => {
                 self.sample_count += 1;
@@ -1211,6 +1263,7 @@ impl Canvas {
                         self.tab.session.extend_selection(point);
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
+                    Interaction::Posing { .. } => self.drag_pose(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Picking => self.pick(sample.position),
                     Interaction::Turning { .. } | Interaction::Zooming { .. } => {
@@ -1243,6 +1296,10 @@ impl Canvas {
                         }
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
+                    posing @ Interaction::Posing { .. } => {
+                        self.interaction = posing;
+                        self.end_pose_drag(sample.position);
+                    }
                     moving @ Interaction::MovingText { .. } => {
                         self.interaction = moving;
                         self.drag_text(sample.position);
@@ -1287,6 +1344,9 @@ impl Canvas {
             Interaction::Transforming { base, .. } => {
                 self.tab.session.set_transform(base);
                 self.refresh_preview();
+            }
+            Interaction::Posing { .. } => {
+                self.tab.session.cancel_pose();
             }
             Interaction::MovingText { base, .. } => {
                 if let Some(outline) = self
@@ -1534,6 +1594,10 @@ impl Canvas {
             }
             Err(StrokeRefused::NoLayer) => {
                 self.notice = Some(self.no_paint_layer().to_owned());
+                return;
+            }
+            Err(StrokeRefused::OutsideSelection) => {
+                self.notice = Some(tr("draw-outside-selection").to_owned());
                 return;
             }
         }
@@ -2925,5 +2989,162 @@ mod tests {
         canvas.apply(draw(press(151.0, 101.0)));
         canvas.apply(CanvasInput::End(press(151.0, 101.0)));
         assert_eq!(pen(&canvas), ugu_core::ops::Rgba8([0, 0, 255, 255]));
+    }
+
+    fn animated_canvas() -> (super::Canvas, std::sync::mpsc::Receiver<Rendered>) {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        settle(&mut canvas, &renders);
+        (canvas, renders)
+    }
+
+    fn full_render(canvas: &super::Canvas) -> Pixmap {
+        let document = canvas.session().document();
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut full = Pixmap::new(width, height);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            document,
+            canvas.session().frame(),
+            ugu_render::document::Purpose::Display,
+            &mut full,
+        );
+        full
+    }
+
+    fn stroke_through(canvas: &mut super::Canvas, points: &[[f64; 2]]) {
+        let at = |canvas: &super::Canvas, [x, y]: [f64; 2]| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let first = at(canvas, points[0]);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, first));
+        for point in &points[1..] {
+            let sample = at(canvas, *point);
+            canvas.apply(CanvasInput::Extend(sample));
+        }
+        let last = at(canvas, *points.last().unwrap());
+        canvas.apply(CanvasInput::End(last));
+    }
+
+    #[test]
+    fn a_stroke_on_a_moved_layer_shows_where_the_full_render_draws_it() {
+        let (mut canvas, renders) = animated_canvas();
+        canvas.set_pose(ugu_core::keys::Pose {
+            offset: [13.5, 7.25],
+            rotation: 20.0,
+            scale: 0.8,
+            flip: false,
+        });
+        settle(&mut canvas, &renders);
+        assert!(canvas.tab.split.as_ref().unwrap().1.moved.is_some());
+        stroke_through(&mut canvas, &[[20.0, 20.0], [60.0, 45.0], [100.0, 30.0]]);
+        let full = full_render(&canvas);
+        let most = max_difference(canvas.display(), &full);
+        assert!(most <= 2, "differs by {most}");
+        // The stroke went into the layer's own pixels: on screen it starts
+        // where the pen did.
+        let stroke = canvas
+            .session()
+            .document()
+            .store
+            .strokes
+            .values()
+            .next()
+            .unwrap();
+        let first = stroke.points[0];
+        let shown = canvas
+            .session()
+            .layer_transform()
+            .unwrap()
+            .apply([f64::from(first.x), f64::from(first.y)]);
+        assert!((shown[0] - 20.0).abs() < 0.01 && (shown[1] - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_move_tool_shows_a_pose_as_it_is_dragged_and_keys_it_on_release() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[30.0, 40.0], [60.0, 40.0]]);
+        settle(&mut canvas, &renders);
+        canvas.set_tool(Tool::Move).unwrap();
+        let revision = canvas.session().revision();
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let begin = at(&canvas, 60.0, 45.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        let moved = at(&canvas, 70.0, 50.0);
+        canvas.apply(CanvasInput::Extend(moved));
+        assert_eq!(canvas.session().revision(), revision);
+        settle(&mut canvas, &renders);
+        let mut shifted = Document::new([120, 90]);
+        shifted.layers = canvas.session().shown_document().layers.clone();
+        shifted.store = canvas.session().document().store.clone();
+        let mut expected = Pixmap::new(120, 90);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            &shifted,
+            0,
+            ugu_render::document::Purpose::Display,
+            &mut expected,
+        );
+        assert!(canvas.display().data_as_u8_slice() == expected.data_as_u8_slice());
+        canvas.apply(CanvasInput::End(moved));
+        let layer = canvas.session().current_layer();
+        let key = canvas.session().key_here(layer).unwrap();
+        let near =
+            |offset: [f64; 2]| (offset[0] - 10.0).abs() < 1e-6 && (offset[1] - 5.0).abs() < 1e-6;
+        assert!(near(key.pose.offset), "{:?}", key.pose.offset);
+        assert_eq!(
+            canvas.session().undo_label(),
+            Some("Move layer on this frame")
+        );
+        // Esc during a drag puts the layer back.
+        let begin = at(&canvas, 70.0, 50.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        let away = at(&canvas, 90.0, 50.0);
+        canvas.apply(CanvasInput::Extend(away));
+        canvas.escape();
+        assert!(canvas.session().posing().is_none());
+        assert!(near(canvas.session().key_here(layer).unwrap().pose.offset));
+    }
+
+    #[test]
+    fn an_onion_skin_shows_the_cels_around_on_screen_only() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[20.0, 20.0], [100.0, 70.0]]);
+        canvas
+            .edit(ugu_session::Session::make_animation_folder)
+            .unwrap();
+        canvas.step_frame(1);
+        canvas.edit(ugu_session::Session::new_cel).unwrap();
+        settle(&mut canvas, &renders);
+        let full = full_render(&canvas);
+        assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
+        canvas.set_onion_skin(true);
+        let started = std::time::Instant::now();
+        while canvas.display().data_as_u8_slice() == full.data_as_u8_slice() {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the onion skin shows"
+            );
+            if let Ok(rendered) = renders.recv_timeout(Duration::from_millis(100)) {
+                canvas.adopt(rendered);
+            }
+            canvas.sync();
+        }
+        // Frame 0's stroke shows faintly in red, before this frame.
+        let pixel = |pixmap: &Pixmap| {
+            let index = (60 * 120 + 85) * 4;
+            pixmap.data_as_u8_slice()[index..index + 4].to_vec()
+        };
+        let tinted = pixel(canvas.display());
+        assert!(tinted[0] > tinted[2], "{tinted:?}");
+        // What is exported and read is the frame alone.
+        assert!(full_render(&canvas).data_as_u8_slice() == full.data_as_u8_slice());
+        canvas.set_onion_skin(false);
+        assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
     }
 }

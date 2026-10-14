@@ -43,6 +43,26 @@ pub enum Glyph {
     Cancel = 31,
     Shape = 32,
     MergeDown = 33,
+    /// A keyframe.
+    Key = 34,
+    KeyPrevious = 35,
+    KeyNext = 36,
+    /// The layer move tool.
+    MoveLayer = 37,
+    OnionSkin = 38,
+    AnimationFolder = 39,
+    NewCel = 40,
+}
+
+/// A diamond, as a key is drawn on a timeline.
+fn diamond(centre: [f64; 2], radius: f64) -> Points {
+    let [x, y] = centre;
+    vec![
+        [x, y - radius],
+        [x + radius, y],
+        [x, y + radius],
+        [x - radius, y],
+    ]
 }
 
 type Points = Vec<[f64; 2]>;
@@ -297,6 +317,55 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[12.0, 3.4], [12.0, 14.0]]);
             lines.push(vec![[6.6, 9.0], [12.0, 14.4], [17.4, 9.0]]);
             lines.push(vec![[4.6, 19.8], [19.4, 19.8]]);
+        }
+        Glyph::Key => shapes.fills.push(diamond([12.0, 12.0], 6.4)),
+        Glyph::KeyPrevious => {
+            lines.push(vec![[10.4, 6.4], [4.8, 12.0], [10.4, 17.6]]);
+            shapes.fills.push(diamond([16.2, 12.0], 4.2));
+        }
+        Glyph::KeyNext => {
+            lines.push(vec![[13.6, 6.4], [19.2, 12.0], [13.6, 17.6]]);
+            shapes.fills.push(diamond([7.8, 12.0], 4.2));
+        }
+        Glyph::MoveLayer => {
+            // Arrows out four ways.
+            lines.push(vec![[4.0, 12.0], [20.0, 12.0]]);
+            lines.push(vec![[12.0, 4.0], [12.0, 20.0]]);
+            for (tip, travel) in [
+                ([20.0, 12.0], 0.0),
+                ([12.0, 4.0], 90.0),
+                ([4.0, 12.0], 180.0),
+                ([12.0, 20.0], 270.0),
+            ] {
+                arrow_head(&mut shapes, tip, travel, 3.6);
+            }
+        }
+        Glyph::OnionSkin => {
+            // The frame shown between the faint ones before and after.
+            lines.push(circle([6.6, 12.0], 4.0, 20));
+            lines.push(circle([17.4, 12.0], 4.0, 20));
+            shapes.fills.push(circle([12.0, 12.0], 4.4, 20));
+        }
+        Glyph::AnimationFolder => {
+            lines.push(vec![
+                [3.6, 6.6],
+                [9.4, 6.6],
+                [11.2, 8.8],
+                [20.4, 8.8],
+                [20.4, 18.8],
+                [3.6, 18.8],
+                [3.6, 6.6],
+            ]);
+            shapes
+                .fills
+                .push(vec![[10.0, 11.4], [15.4, 13.8], [10.0, 16.2]]);
+        }
+        Glyph::NewCel => {
+            // A sheet with a plus at its corner.
+            lines.push(vec![[5.0, 4.4], [14.6, 4.4], [14.6, 12.4]]);
+            lines.push(vec![[5.0, 4.4], [5.0, 19.6], [12.4, 19.6]]);
+            lines.push(vec![[17.6, 13.4], [17.6, 21.0]]);
+            lines.push(vec![[13.8, 17.2], [21.4, 17.2]]);
         }
         Glyph::Shape => {
             // A square, and a circle over its corner.

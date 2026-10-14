@@ -698,6 +698,92 @@ Step 'Shapes and the round pixel pencil' {
     $detail
 }
 
+# Where the dark pixels inside $Paper are on the screen now: their middle
+# along x and how many, counting every second pixel each way; and how many
+# pixels are reddish, as an onion skin's frames before.
+function Get-Ink($Process, $Paper) {
+    [Native]::MoveTo($Paper.Right + 40, $Paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+    $sum = 0; $count = 0; $red = 0
+    for ($y = $Paper.Top + 2; $y -lt $Paper.Bottom - 2; $y += 2) {
+        for ($x = $Paper.Left + 2; $x -lt $Paper.Right - 2; $x += 2) {
+            $c = $bitmap.GetPixel($x, $y)
+            if ($c.R + $c.G + $c.B -lt 200) { $sum += $x; $count++ }
+            elseif ($c.R -gt $c.B + 25 -and $c.R -gt $c.G + 25) { $red++ }
+        }
+    }
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    $centre = if ($count) { [int]($sum / $count) } else { -1 }
+    [pscustomobject]@{ Centre = $centre; Count = $count; Red = $red }
+}
+
+Step 'Keyframes' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Draw-Stroke $process
+    $w = $paper.Right - $paper.Left
+    $x = [int](($paper.Left + $paper.Right) / 2)
+    $y = [int](($paper.Top + $paper.Bottom) / 2)
+    $drawn = Get-Ink $process $paper
+    # Frame 1: dragged right with the move tool.
+    Send-Keys $process 'v'
+    [Native]::Drag(@($x, ($x + [int]($w * 0.12)), ($x + [int]($w * 0.25))), @($y, $y, $y))
+    $first = Get-Ink $process $paper
+    # Frame 16: dragged back left.
+    for ($i = 0; $i -lt 15; $i++) { Send-Keys $process '.' }
+    $frame = Get-Value $process 'Current frame'
+    [Native]::Drag(@($x, ($x - [int]($w * 0.12)), ($x - [int]($w * 0.25))), @($y, $y, $y))
+    $later = Get-Ink $process $paper
+    $row = Test-Named $process 'Keys of Layer 1: 2'
+    $shot = Save-Screen 'keyframes'
+    # Halfway between, on frame 8, the drawing is between the two.
+    for ($i = 0; $i -lt 8; $i++) { Send-Keys $process ',' }
+    $between = Get-Ink $process $paper
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $detail = "ink middle x: drawn $($drawn.Centre), frame 1 $($first.Centre), frame $frame $($later.Centre), frame 8 $($between.Centre); timeline row $row; $shot"
+    $moved = $first.Centre - $drawn.Centre
+    if ($frame -ne 16 -or -not $row -or $moved -lt $w * 0.2 -or [Math]::Abs($later.Centre - $drawn.Centre) -gt $w * 0.05 -or
+        -not ($between.Centre -gt $later.Centre -and $between.Centre -lt $first.Centre)) {
+        throw $detail
+    }
+    $detail
+}
+
+Step 'Cels and onion skin' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Draw-Stroke $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Invoke-Named $process 'Make animation folder'
+    for ($i = 0; $i -lt 3; $i++) { Send-Keys $process '.' }
+    Send-Keys $process '^+n'
+    Send-Keys $process 'b'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.8))),
+        @(($paper.Top + [int]($h * 0.2)), ($paper.Top + [int]($h * 0.25))))
+    $row = Test-Named $process 'Cels of Animation 1, Cel 3 on this frame'
+    $plain = Get-Ink $process $paper
+    Send-Keys $process 'o'
+    Start-Sleep -Milliseconds 800
+    $onion = Get-Ink $process $paper
+    $shot = Save-Screen 'cels-onion-skin'
+    for ($i = 0; $i -lt 3; $i++) { Send-Keys $process ',' }
+    $back = Test-Named $process 'Cels of Animation 1, Layer 1 on this frame'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $detail = "cel row on frame 4 $row, back on frame 1 $back; red pixels without onion skin $($plain.Red), with $($onion.Red); $shot"
+    if (-not ($row -and $back) -or $onion.Red -le $plain.Red + 20) {
+        throw $detail
+    }
+    $detail
+}
+
 # Presses the control whose name starts with the words for $Key, without a
 # trailing ellipsis: menu items carry their shortcut after the label.
 function Invoke-Word($Process, $Words, [string] $Key) {
@@ -741,6 +827,17 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'tool-text' = { param($p) Send-Keys $p 't' }
             'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
             'tool-shape' = { param($p) Send-Keys $p 'u' }
+            'tool-move-timeline' = {
+                param($p)
+                $paper = Draw-Stroke $p
+                Send-Keys $p 'v'
+                $x = [int](($paper.Left + $paper.Right) / 2)
+                $y = [int](($paper.Top + $paper.Bottom) / 2)
+                [Native]::Drag(@($x, ($x + 60)), @($y, ($y + 20)))
+                Invoke-Word $p $words 'menu-view'
+                Invoke-Word $p $words 'animation-folder-make'
+                Send-Keys $p 'o'
+            }
             'pixel-mode' = { param($p) Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'pixel-mode' }
             'settings-general' = { param($p) Send-Keys $p '^,' }
             'settings-drawing' = { param($p) Send-Keys $p '^,'; Invoke-Named $p $words['settings-drawing'] }

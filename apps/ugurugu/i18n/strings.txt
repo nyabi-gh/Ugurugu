@@ -531,3 +531,40 @@ type-webp | WebP images (*.webp) | WebP 이미지 (*.webp) | WebP画像 (*.webp)
 type-tools | Ugurugu tool presets (*.ugurugu-tools) | Ugurugu 도구 프리셋 (*.ugurugu-tools) | Uguruguツールプリセット (*.ugurugu-tools)
 type-image | Image files | 이미지 파일 | 画像ファイル
 file-job-failed | an unexpected error stopped it; the log folder in Settings > About has the details | 예기치 않은 오류로 멈췄습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다 | 予期しないエラーで止まりました。詳細は設定 > 情報のログフォルダーにあります
+
+# Animation: keys, animation folders and onion skin
+tool-move | &Move layer | 레이어 이동(&M) | レイヤー移動(&M)
+tool-move-rail | Move layer | 레이어 이동 | レイヤー移動
+move-hint | Drag the box to move the layer on this frame, a handle to scale it, or outside to turn it (Shift snaps to 15°). Each change keys this frame; frames between keys follow. | 상자를 끌면 이 프레임에서 레이어를 옮기고, 손잡이를 끌면 크기를, 바깥을 끌면 회전을 바꿉니다(Shift는 15° 단위). 바꿀 때마다 이 프레임에 키가 생기고 키 사이 프레임은 따라 움직입니다. | ボックスをドラッグするとこのフレームでレイヤーを移動し、ハンドルで拡大縮小、外側で回転します（Shift で 15° 刻み）。変更するたびにこのフレームにキーができ、キーの間のフレームはそれに沿って動きます。
+motion | Motion on this frame | 이 프레임의 움직임 | このフレームの動き
+motion-keyed | This frame has a key. | 이 프레임에 키가 있습니다. | このフレームにキーがあります。
+motion-unkeyed | No key on this frame: changing a value adds one. | 이 프레임에는 키가 없습니다. 값을 바꾸면 키가 생깁니다. | このフレームにキーはありません。値を変えるとキーができます。
+motion-x | X | X | X
+motion-y | Y | Y | Y
+motion-rotation | Rotation | 회전 | 回転
+motion-scale | Scale | 크기 | 拡大率
+motion-flip | Flip horizontally | 좌우 반전 | 左右反転
+ease | Easing to the next key | 다음 키까지 | 次のキーまで
+ease-linear | Linear | 일정하게 | 一定
+ease-smooth | Smooth | 부드럽게 | なめらか
+ease-hold | Hold | 멈춤 | 停止
+key-toggle | Add or remove &key | 키 추가/삭제(&K) | キーの追加/削除(&K)
+key-add | Add key | 키 추가 | キーを追加
+key-remove | Remove key | 키 삭제 | キーを削除
+key-previous | Previous key | 이전 키 | 前のキー
+key-next | Next key | 다음 키 | 次のキー
+frame-previous | Previous frame | 이전 프레임 | 前のフレーム
+frame-next | Next frame | 다음 프레임 | 次のフレーム
+onion-skin | &Onion skin | 어니언 스킨(&O) | オニオンスキン(&O)
+animation-folder-make | Make animation &folder | 애니메이션 폴더 만들기(&F) | アニメーションフォルダーを作成(&F)
+cel-new | New &cel | 새 셀(&C) | 新規セル(&C)
+cel-empty | Nothing (empty frame) | 비우기(빈 프레임) | なし（空のフレーム）
+pose-failed | The layer could not be moved on this frame. | 이 프레임에서 레이어를 옮기지 못했습니다. | このフレームでレイヤーを移動できませんでした。
+draw-outside-selection | The selection is outside this layer as it is on this frame. | 선택 영역이 이 프레임에서 이 레이어 밖에 있습니다. | 選択範囲がこのフレームでのこのレイヤーの外にあります。
+timeline-keys-name | Keys of %1: %2 | %1의 키: %2개 | %1のキー：%2個 | args=layer,count
+timeline-no-key | Right-click a key to change it. | 키를 오른쪽 클릭해 바꾸세요. | キーを右クリックして変更します。
+timeline-cels-name | Cels of %1, %2 on this frame | %1의 셀, 이 프레임은 %2 | %1のセル、このフレームは%2 | args=folder,cel
+help-animate | Moving drawings | 움직이게 하기 | 動かす
+help-animate-keys | To move a drawing back and forth, choose Move layer (V) and drag the layer on frame 1, go to a later frame and drag it again: each drag keys that frame, and the frames between follow, looping back to the first key. | 그림을 오가게 하려면 레이어 이동(V)을 고르고 1프레임에서 레이어를 끈 뒤, 뒤의 프레임으로 가서 다시 끄세요. 끌 때마다 그 프레임에 키가 생기고 사이 프레임은 따라 움직이며 끝에서 첫 키로 돌아옵니다. | 絵を行き来させるには、レイヤー移動（V）を選んで1フレーム目でレイヤーをドラッグし、後のフレームに移ってもう一度ドラッグします。ドラッグするたびにそのフレームにキーができ、間のフレームはそれに沿って動き、最後は最初のキーに戻ります。
+help-animate-cels | To draw each frame anew, make an animation folder from the layer (View menu). Drawing on a frame without a cel adds one; the timeline under the animation bar shows which cel each frame shows. | 프레임마다 새로 그리려면 레이어로 애니메이션 폴더를 만드세요(보기 메뉴). 셀이 없는 프레임에 그리면 셀이 생기고, 애니메이션 막대 아래 타임라인에 프레임마다 보이는 셀이 나옵니다. | フレームごとに描き直すには、レイヤーからアニメーションフォルダーを作ります（表示メニュー）。セルのないフレームに描くとセルができ、アニメーションバーの下のタイムラインに各フレームのセルが表示されます。
+help-animate-onion | Onion skin (O) shows the frames before and after faintly, red before and blue after, to draw the next pose against. | 어니언 스킨(O)은 앞뒤 프레임을 흐리게, 앞은 붉게 뒤는 푸르게 보여 줍니다. 다음 동작을 그릴 때 참고하세요. | オニオンスキン（O）は前後のフレームを薄く、前を赤く後ろを青く表示します。次のポーズを描くときの目安にします。

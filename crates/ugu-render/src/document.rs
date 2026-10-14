@@ -483,6 +483,22 @@ impl DocumentRenderer {
         pixmap
     }
 
+    /// Layer `id` alone on `frame` as `RenderPlan::alone` says, over
+    /// transparency, with the canvas size; the surfaces kept for reuse are
+    /// left as they were. `None` when the stop flag ended it.
+    pub fn render_alone(&mut self, document: &Document, id: LayerId, frame: i64) -> Option<Pixmap> {
+        let plan = RenderPlan::alone(document, id, frame);
+        let [width, height] = document.canvas.map(|edge| edge as u16);
+        let mut pixmap = Pixmap::new(width, height);
+        if plan.layers.is_empty() {
+            return Some(pixmap);
+        }
+        let kept = std::mem::take(&mut self.cache);
+        let finished = self.render_plan(document, &plan, frame, None, &mut pixmap);
+        self.cache = kept;
+        finished.then_some(pixmap)
+    }
+
     /// Uses tiles of `edge` pixels, a multiple of 4, instead of `TILE_EDGE`.
     pub fn set_tile_edge(&mut self, edge: u32) {
         self.tile_edge = edge;
