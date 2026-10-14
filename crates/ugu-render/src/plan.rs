@@ -135,6 +135,35 @@ impl RenderPlan {
         plan
     }
 
+    /// `id` alone on `frame`, where its keys and its groups' keys put it,
+    /// at full opacity, Normal and unclipped, over transparency: a frame of
+    /// an onion skin. Has no layers when `id` is missing or not shown.
+    pub fn alone(document: &Document, id: LayerId, frame: i64) -> Self {
+        let mut plan = Self {
+            purpose: Purpose::Reference,
+            steps: Vec::new(),
+            layers: Vec::new(),
+            frame: frame_in_cycle(frame, document.frames),
+            animated: false,
+            cels: Vec::new(),
+        };
+        let (Some(layer), Some(path)) = (document.layer(id), document.ancestors(id)) else {
+            return plan;
+        };
+        if !layer.visible {
+            return plan;
+        }
+        let outer = path
+            .iter()
+            .rev()
+            .filter_map(|group| group.keys().at(plan.frame, document.frames))
+            .reduce(|inner, outer| inner.then(outer));
+        plan.add_one(layer, Composite::PLAIN, document, false, outer);
+        plan.cels
+            .retain(|id| plan.layers.iter().all(|(drawn, _)| drawn != id));
+        plan
+    }
+
     /// The plan for surfaces drawn at 1/`shrink` of the canvas size.
     pub fn scaled(&self, shrink: u32) -> Self {
         let scale = |composite: &Composite| Composite {
@@ -219,40 +248,53 @@ impl RenderPlan {
                 continue;
             }
             has_base |= !clipped;
-            let own = layer.keys().at(self.frame, document.frames);
-            self.animated |= !layer.keys().is_empty();
-            let moved = match (own, outer) {
-                (Some(own), Some(outer)) => Some(own.then(outer)),
-                (own, outer) => own.or(outer),
-            };
-            let mut composite = Composite {
+            let composite = Composite {
                 blend,
                 opacity,
                 clipped,
                 moved: None,
             };
-            match &layer.kind {
-                LayerKind::Paint(paint) => {
-                    let wobble = paint.wobble.unwrap_or(document.wobble);
-                    let moves = moves(&paint.ops, &document.store, document.wobble, wobble);
-                    composite.moved = moved.and_then(|moved| Moved::new(moved, document.pixel));
-                    self.layers.push((layer.id, moves));
-                    self.steps.push(Step::Paint(layer.id, composite));
+            self.add_one(layer, composite, document, references, outer);
+        }
+    }
+
+    /// Adds `layer`, going over what is below as `composite` says, held by
+    /// groups that move it by `outer`.
+    fn add_one(
+        &mut self,
+        layer: &Layer,
+        mut composite: Composite,
+        document: &Document,
+        references: bool,
+        outer: Option<Affine>,
+    ) {
+        let own = layer.keys().at(self.frame, document.frames);
+        self.animated |= !layer.keys().is_empty();
+        let moved = match (own, outer) {
+            (Some(own), Some(outer)) => Some(own.then(outer)),
+            (own, outer) => own.or(outer),
+        };
+        match &layer.kind {
+            LayerKind::Paint(paint) => {
+                let wobble = paint.wobble.unwrap_or(document.wobble);
+                let moves = moves(&paint.ops, &document.store, document.wobble, wobble);
+                composite.moved = moved.and_then(|moved| Moved::new(moved, document.pixel));
+                self.layers.push((layer.id, moves));
+                self.steps.push(Step::Paint(layer.id, composite));
+            }
+            LayerKind::Group(group) => {
+                if group.is_folder() {
+                    self.animated = true;
+                    collect_paint(&group.children, &mut self.cels);
                 }
-                LayerKind::Group(group) => {
-                    if group.is_folder() {
-                        self.animated = true;
-                        collect_paint(&group.children, &mut self.cels);
-                    }
-                    let shown: Vec<&Layer> = group
-                        .children
-                        .iter()
-                        .filter(|child| group.shows(child.id, self.frame))
-                        .collect();
-                    self.steps.push(Step::Begin(layer.id));
-                    self.add(&shown, document, references, moved);
-                    self.steps.push(Step::End(layer.id, composite));
-                }
+                let shown: Vec<&Layer> = group
+                    .children
+                    .iter()
+                    .filter(|child| group.shows(child.id, self.frame))
+                    .collect();
+                self.steps.push(Step::Begin(layer.id));
+                self.add(&shown, document, references, moved);
+                self.steps.push(Step::End(layer.id, composite));
             }
         }
     }
@@ -593,5 +635,33 @@ mod tests {
         assert_eq!(at(7), (vec![5], vec![1, 2, 3]));
         // Frames loop.
         assert_eq!(at(30 + 4), at(4));
+    }
+
+    #[test]
+    fn a_layer_alone_keeps_its_moves_and_drops_how_it_is_put_together() {
+        let mut inner = keyed(group(11, vec![paint(2), hidden(paint(3))]), 4.0);
+        if let LayerKind::Group(content) = &mut inner.kind {
+            content.opacity = 0.3;
+            content.blend = Blend::Screen;
+        }
+        let document = document(vec![paint(1), keyed(group(10, vec![inner]), 10.0)]);
+        let plan = RenderPlan::alone(&document, LayerId(11), 0);
+        assert_eq!(plan.purpose, Purpose::Reference);
+        assert_eq!(plan.steps.first(), Some(&Step::Begin(LayerId(11))));
+        assert_eq!(
+            plan.steps.last(),
+            Some(&Step::End(LayerId(11), Composite::PLAIN))
+        );
+        assert_eq!(moved_by(&plan), [(2, Some(14.0))]);
+        assert!(
+            RenderPlan::alone(&document, LayerId(3), 0)
+                .layers
+                .is_empty()
+        );
+        assert!(
+            RenderPlan::alone(&document, LayerId(99), 0)
+                .layers
+                .is_empty()
+        );
     }
 }
