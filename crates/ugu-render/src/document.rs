@@ -3500,6 +3500,29 @@ mod tests {
     }
 
     #[test]
+    fn straight_strokes_without_wobble_draw_and_erase() {
+        let mut document = Document::new([96, 72]);
+        document.background = Rgba8([0, 0, 0, 0]);
+        document.wobble = Wobble::classic(0.0);
+        // Samples between two points lie on one line, all as wide.
+        let across = [(8.0, 8.0, 1.0), (88.0, 32.0, 1.0)];
+        let under = line(&mut document, 8.0, 88.0, 20.0, RED, true);
+        let eraser = ugu_core::brush::find("hard-eraser").unwrap().brush;
+        let rub = brushed(&mut document, eraser, 6.0, [0, 0, 0, 255], &across);
+        let pen = ugu_core::brush::find("ink-pen").unwrap().brush;
+        let drawn = brushed(&mut document, pen, 6.0, BLUE, &across);
+        let erase = Op::Erase {
+            stroke: rub,
+            clip: None,
+        };
+        let erased = render(&with_ops(&document, vec![paint(under), erase]), 0, 0);
+        assert_eq!(at(&erased, 48, 20), [0, 0, 0, 0]);
+        assert_eq!(at(&erased, 24, 20), RED);
+        let drawn = render(&with_ops(&document, vec![paint(drawn)]), 0, 0);
+        assert_eq!(at(&drawn, 48, 20), BLUE);
+    }
+
+    #[test]
     fn a_soft_airbrush_fades_from_the_middle() {
         let mut document = Document::new([80, 80]);
         document.background = Rgba8([0, 0, 0, 0]);

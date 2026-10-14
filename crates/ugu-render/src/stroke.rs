@@ -473,10 +473,15 @@ fn run(path: &mut BezPath, centers: &[[f64; 2]], radii: &[f64], halves: &[[Optio
         };
         let [a0, a1, b0, b1] = chords[index];
         let inside = |([x, y], offset): Half, [px, py]: [f64; 2]| x * px + y * py >= offset;
+        // Where the second edge crosses the first chord, from the chord ends
+        // the tests below put on either side of it. Samples in a line make
+        // the edges parallel but for rounding, so they have no crossing of
+        // their own to solve for.
         let corner = || {
-            let (([ax, ay], ad), ([bx, by], bd)) = (first, second);
-            let det = ax * by - ay * bx;
-            [(ad * by - bd * ay) / det, (ax * bd - bx * ad) / det]
+            let ([x, y], offset) = second;
+            let [from, to] = [a0, a1].map(|[px, py]| x * px + y * py - offset);
+            let t = from / (from - to);
+            [a0[0] + (a1[0] - a0[0]) * t, a0[1] + (a1[1] - a0[1]) * t]
         };
         let both_b = inside(first, b0) && inside(first, b1);
         match (inside(second, a0), inside(second, a1)) {
