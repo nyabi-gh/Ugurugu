@@ -165,3 +165,16 @@
 | B3-116 | CI가 놓치는 검사 | (1) 라이선스 머리말 검사는 `*.rs`·`*.js`만 본다. CONTRIBUTING은 Python·PowerShell 도구에도 같은 줄을 요구한다(2026-10-14에 빠진 파일은 없음). (2) `.ftl`이 `strings.txt`에서 다시 만든 결과와 같은지 CI가 보지 않는다(2026-10-14 499개 메시지 일치). `strings_to_ftl.py --check` 같은 경로를 더한다. (3) CI는 debug 시험과 release 빌드만 돌리고 release 시험은 로컬에서만 돈다. release에서만 드러난 오류가 있었다(evidence.md 43절 캔버스 크기 대화상자). CI 시간(약 20분)을 보고 전체 또는 묶음을 더한다 | `.github/workflows/ci.yml`, `tools/strings_to_ftl.py` | 3.1.0 종합 검토 N03 |
 | B3-117 | Cargo 의존성 갱신 주기 | Dependabot은 GitHub Actions만 매달 본다. Cargo 의존성은 정해진 검토 주기가 없다. 자동 major 갱신보다 호환 묶음을 native 목록·회귀 화소·성능 기준선과 함께 확인하는 주기를 정한다. B3-44·B3-45·B3-72를 그때 같이 본다 | `.github/dependabot.yml`, `Cargo.toml` | 3.1.0 종합 검토 9.3절 |
 | B3-118 | `files.rs`의 상태 전이 나누기 | `files.rs`(3,142행)에 파일 작업자, 저장 상태, 복구, 대화상자, 내보내기 질문이 모인다. 파일만 쪼개면 같은 가변 상태를 공유해 이해 비용이 줄지 않으므로, "질문 대기 → 특정 탭의 편집 확정 → 저장 요청 → 특정 상태의 응답 → 닫기·업데이트" 전이를 먼저 그리고 대화상자 표시·작업자 메시지·탭의 저장·복구 상태를 나눈다. 탭 id·저장 당시 상태·요청 id가 만나는 곳에는 타입 구분을 더한다. 닫는 조건: 늦은 저장 응답, 질문 중 탭 전환, 닫기 취소, 같은 경로로 저장, 내보내기 중 업데이트가 전과 같이 동작 | `apps/ugurugu/src/files.rs`, `canvas.rs` | 검토 4절, 3.1.0 종합 검토 6절 |
+
+## 12. 3.2.0 애니메이션에서 뒤로 미룬 것
+
+계획(`docs/rust/plan-animation.md`, 지운 뒤에는 커밋 `d0506ba`에 있음) 9절과 구현하며 남긴 것. 정한 것은 decisions.md 4절 "키프레임과 애니메이션 폴더"와 ADR 8절에 있다.
+
+| ID | 항목 | 왜·영향 | 어디 | 출처 |
+|---|---|---|---|---|
+| B3-120 | 캔버스 밖 여백 | 레이어 표면이 캔버스 크기라 레이어를 옮기면 가장자리가 비어 들어온다. 캔버스 밖에서 들어오는 움직임에는 표면에 여백이 있어야 하고, 타일 계산·예산이 바뀐다 | `crates/ugu-render/src/document.rs` `reach` | 계획 4.5 |
+| B3-121 | 불투명도 키, 키가 같은 레이어 병합, 곡선 경로·베지어 보간 편집, 키 복사·붙여넣기, 셀 복사로 노출 채우기, 프레임 60 초과 | 사용자 결정 범위 밖(2026-10-14) | `crates/ugu-core/src/keys.rs` | 계획 9절 |
+| B3-122 | 중심(pivot) 고르기 UI | 첫 키의 중심은 캔버스 가운데로 정해진다. `Session::set_pivot`은 있지만 앱에서 옮길 수 없다. 그린 내용의 가운데로 두려면 렌더러가 내용 경계를 알려야 한다 | `apps/ugurugu/src/canvas/posing.rs` `default_pivot` | 3.2.0 구현 |
+| B3-123 | 어니언 스킨 설정과 캐시 | 앞·뒤 프레임 수(1)·불투명도(30%)·색이 상수다. 그림이 바뀔 때마다 폴더의 셀을 다시 그린다(셀 캐시를 쓰지 않음, 비용은 재지 않음) | `apps/ugurugu/src/canvas/onion.rs`, `crates/ugu-render/src/document.rs` `render_alone` | 3.2.0 구현 |
+| B3-124 | 움직인 레이어의 브러시 커서 크기와 큰 선택 끌기 | 브러시 커서는 레이어 크기 키를 곱하지 않고 문서 크기로 보인다. 움직인 레이어에서 큰 선택을 끄는 동안은 화면 해상도 미리보기(`Glance`) 대신 원본으로 그린다 | `apps/ugurugu/src/canvas/cursor.rs`, `canvas/transform.rs` `refresh_preview` | 3.2.0 구현 |
+| B3-125 | 움직인 레이어에서 그릴 때의 입력→표시 | headless pen-up만 쟀다(evidence.md 55절). Sandbox는 합성 입력이라 앱의 입력→표시 지연(latency-probe)은 사용자 PC에서 잰다 | `tools/latency-probe` | 계획 7절 |

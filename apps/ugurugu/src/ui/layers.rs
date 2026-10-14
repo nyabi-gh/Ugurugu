@@ -102,6 +102,9 @@ struct Row {
     reference: bool,
     /// For a paint layer, whether it wobbles.
     wobbles: Option<bool>,
+    /// Whether it has keys, and whether it is an animation folder.
+    keyed: bool,
+    folder: bool,
 }
 
 fn blend_name(blend: Blend) -> &'static str {
@@ -138,6 +141,8 @@ fn flatten(
                 }
                 LayerKind::Group(_) => None,
             },
+            keyed: !layer.keys().is_empty(),
+            folder: layer.cels().is_some(),
         });
         if let LayerKind::Group(group) = &layer.kind
             && !fold
@@ -153,6 +158,7 @@ fn merge_refusal(document: &Document, id: LayerId) -> Option<&'static str> {
         EditError::Merge(MergeRefusal::Blend | MergeRefusal::Clipping) => tr("merge-properties"),
         EditError::Merge(MergeRefusal::CanvasChange) => tr("merge-canvas-change"),
         EditError::Merge(MergeRefusal::CanvasEpoch) => tr("merge-epoch"),
+        EditError::Merge(MergeRefusal::Animated) => tr("merge-animated"),
         _ => {
             let paint = |id: LayerId| {
                 matches!(
@@ -570,6 +576,28 @@ impl LayerDock {
                 );
             }
             text_right = wobble.left() - 6.0;
+        }
+        // Marks, not buttons: moved by keys, and an animation folder.
+        for (shown, glyph, name) in [
+            (row.keyed, Glyph::Key, tr("layer-keyed")),
+            (
+                row.folder,
+                Glyph::AnimationFolder,
+                tr("layer-animation-folder"),
+            ),
+        ] {
+            if !shown {
+                continue;
+            }
+            let mark = Rect::from_center_size(
+                egui::pos2(text_right - 8.0, card.center().y),
+                Vec2::splat(14.0),
+            );
+            icons::paint(&painter, mark, glyph, dim(theme::muted()), 0.0);
+            ui.interact(mark, response.id.with(name), Sense::hover())
+                .on_hover_text(name)
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, name));
+            text_right = mark.left() - 4.0;
         }
 
         // "opacity %  blend" over the name, with badges before the name.

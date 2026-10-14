@@ -125,3 +125,14 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | 복구 설명 `recovery\<창 폴더>\tab-<n>\<0·1>.json` (M5-6, 탭마다는 문서 탭) | `format: "ugurugu.recovery"`, `version: 1` | `sequence`, `name`, `path`, `time`, `canvas`, `layer`(M6에 더함, 활성 레이어). 문서는 같은 칸의 `<0·1>.ugurugu`이고 두 세대를 번갈아 쓴다. 창 폴더는 실행하는 동안 `lock` 파일로 잠근다. 탭 전의 3.0이 창 폴더에 바로 쓴 `<0·1>`도 읽는다. 폴더는 `%LOCALAPPDATA%\Ugurugu Data\3\recovery`(`recovery.rs`) |
 | 설정 `%APPDATA%\Ugurugu\3\settings.json` (M5-3) | `format: "ugurugu.settings"`, `version: 1` | `language`, `accent`, `wobbleAnimation`, `pixelGrid`, `defaultSaveFolder`, `exportSize`, `checkForUpdates`, `updateChecked`, `tools`(도구 상태, 필압 켬·끔은 `tools.tablet.pressure`), `colorHistory`, `shortcuts`(기본과 다른 키만), `panels`(도크 배치), `window`(`left`·`top`·`right`·`bottom`·`maximized`, 닫을 때의 창, 작업 영역 픽셀). 기본값인 선택 키는 쓰지 않는다. 모르는 키는 지우지 않고 다시 쓴다. 여러 창은 `settings.json.lock`으로 차례를 지키고 바꾼 최상위 키만 덮어쓴다(decisions.md UI·단축키·번역). `settings.rs` |
 | 도구 프리셋 `*.ugurugu-tools` (M5-10) | `format: "ugurugu.tools"`, `version: 1` | `tools`(설정의 `tools`와 같은 글, `tablet` 제외)와 `motion`(`amount`, `style`, `poses`, `detail`, `linked`, `randomness`, `broken`, `breakAmount`, `breakRange`). 1MiB 상한, 모르는 키는 무시하고 있는 값만 덮어쓴다. 2.2.13 `.wwpreset`은 읽지 않는다. `settings/preset.rs` |
+
+## 8. 3.2.0 키프레임·애니메이션 폴더 (2026-10-14)
+
+3.2.0은 schema 1에 선택 필드 둘을 더한다. 쓰지 않으면 생략해 3.1까지의 문서는 바이트가 그대로이고, 쓴 문서는 manifest `required`에 기능 이름을 넣어 3.1 이하가 "새 판에서 만든 파일"로 거절하게 한다(`deny_unknown_fields`만으로는 "손상된 파일"이 된다). 읽기는 `required`에 아는 이름(`ugu_io::format::FEATURES`)만 있을 때 연다. `render_revision`은 1 그대로다(키·셀 없는 문서의 화소는 바뀌지 않음). 필드 이름은 `crates/ugu-io/src/format.rs`, 의미는 `crates/ugu-core/src/keys.rs`와 decisions.md 4절 "키프레임과 애니메이션 폴더"다.
+
+| 위치 | 필드 | `required` | 내용 |
+|---|---|---|---|
+| `paint`·`group` | `keys` | `"keys"` | `pivot`(문서 px [x, y]), `keys`(프레임 순): `frame`(0 ≤ frame < 문서 프레임 수, 프레임마다 하나), `offset`(px, ±32767), `rotation`(도, 시계 방향, ±3600), `scale`(0.05~20), `flip`(켜졌을 때만 씀), `ease`(`linear`·`smooth`·`hold`, 이 키에서 다음 키까지) |
+| `group` | `cels` | `"cels"` | 애니메이션 폴더의 노출표(프레임 순): `frame`, `cel`(그 그룹의 바로 아래 자식 id, `null`은 빈 프레임). 다음 노출 전까지 유지, 첫 노출 전 프레임은 마지막 노출 |
+
+키가 있는 레이어의 화소는 그 프레임의 자세를 중심에 대해 크기·반전 → 회전 → 이동 순으로 적용한 위치에 그린다. 그룹의 키는 안의 레이어마다 자기 키 뒤에 곱한다(그룹 결과를 재샘플하지 않음). 검증 위반은 `DocumentError::Animation`이다.

@@ -1070,4 +1070,19 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 | ② | 15.5~15.6 | 1.0 / 1.7 |
 | ② 키 14개 | 39.8~39.9 | 2.1~2.2 / 5.0 |
 
-**결론:** 키·셀이 없는 문서는 바이트와 시간이 그대로다. 움직인 레이어는 표면을 다시 그리지 않고 합성 때 행마다 샘플링하므로 비용이 레이어 수 × 캔버스 크기에 비례하고(2048²당 약 2ms), pen-up은 8ms 목표 안이다. 앱의 입력→표시는 2단계(세션·앱)에서 Sandbox로 본다. 코드: `crates/ugu-render/src/transform.rs`(샘플러), `plan.rs`(프레임별 plan), `composite.rs`(`Put::Over`·`Stream`), `tools/ugu-doc`(`animate`, `play`, `UGU_FRAME`).
+**결론:** 키·셀이 없는 문서는 바이트와 시간이 그대로다. 움직인 레이어는 표면을 다시 그리지 않고 합성 때 행마다 샘플링하므로 비용이 레이어 수 × 캔버스 크기에 비례하고(2048²당 약 2ms), pen-up은 8ms 목표 안이다. 앱의 입력→표시는 재지 않았다(backlog B3-125). 코드: `crates/ugu-render/src/transform.rs`(샘플러), `plan.rs`(프레임별 plan), `composite.rs`(`Put::Over`·`Stream`), `tools/ugu-doc`(`animate`, `play`, `UGU_FRAME`).
+
+## 56. 애니메이션 GUI (Windows Sandbox, 2026-10-14, 진행 중)
+
+**방법:** `rust/animation-app`의 release 빌드(`a3438dc`)로 `gui.ps1`의 "Keyframes"(이동 도구로 1·16프레임에 끌기, 잉크 가운데 x 비교), "Cels and onion skin"(폴더·새 셀·어니언 스킨의 붉은 화소 수)과 기존 "Layer buttons", "Transform box cursors", "Tab moves the keyboard focus through the controls"를 돌렸다.
+
+**결과:**
+
+| 단계 | 결과 |
+|---|---|
+| Layer buttons, Transform box cursors, Tab 순회 | 통과 |
+| Keyframes | 실패. 이동 도구 설정·타임라인 키 행("Keys of Layer 1: 2")·새 아이콘은 보이지만, 캔버스 폭의 25%를 끈 것이 X −12.3px(약 8 화면 px)로만 들어가 잉크 가운데가 863 → 864 → 853 |
+| Cels and onion skin | 실패. 시작 때 `Find-Paper`가 문서를 찾지 못함(앞 단계의 강제 종료 뒤) |
+| 첫 회 두 단계 | 실패. 단계가 `Draw-Stroke` 정의보다 앞에 있어서였고 옮겼다 |
+
+**결론:** 아직 통과하지 않았다. Keyframes의 원인은 찾지 않았다(가설: 합성 끌기의 중간 점이 적어 `drag_pose`가 마지막 위치를 받지 못하거나, 놓을 때의 위치가 다르게 들어온다). 다음에 앱 로그와 단위 시험으로 확인한다. 단위 시험 `the_move_tool_shows_a_pose_as_it_is_dragged_and_keys_it_on_release`는 같은 끌기를 통과한다.

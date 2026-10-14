@@ -287,6 +287,7 @@ merge-no-paint-below | No paint layer is directly below | 바로 아래에 페�
 merge-properties | Both layers must use matching safe properties, and no clipping layer may rest on this one | 두 레이어가 동일한 안전 속성을 사용해야 하며, 이 레이어 위에 클리핑 레이어가 없어야 합니다 | 両方のレイヤーで一致する安全なプロパティが必要で、このレイヤーの上にクリッピングレイヤーがあってはいけません
 merge-canvas-change | This layer resizes the canvas or erased merged artwork, so merging would change the picture | 이 레이어는 캔버스 크기를 바꾸거나 합쳐진 그림을 지운 적이 있어 병합하면 그림이 달라집니다 | このレイヤーはキャンバスサイズを変更するか、結合済みの絵を消したことがあるため、結合すると絵が変わります
 merge-epoch | The layers use incompatible canvas histories | 레이어의 캔버스 기록이 서로 호환되지 않습니다 | レイヤーのキャンバス履歴に互換性がありません
+merge-animated | Layers moved by keys, and cels of an animation folder, are not merged | 키로 움직이는 레이어와 애니메이션 폴더의 셀은 병합하지 않습니다 | キーで動くレイヤーとアニメーションフォルダーのセルは結合しません
 merge-limit | The merged layer would exceed the stroke limit | 병합한 레이어가 선 개수 한도를 초과합니다 | 結合後のレイヤーがストローク数の上限を超えます
 blend-mode | BLEND MODE | 합성 모드 | ブレンドモード
 blend-mode-name | Layer blend mode | 레이어 합성 모드 | レイヤーのブレンドモード
@@ -568,3 +569,5 @@ help-animate | Moving drawings | 움직이게 하기 | 動かす
 help-animate-keys | To move a drawing back and forth, choose Move layer (V) and drag the layer on frame 1, go to a later frame and drag it again: each drag keys that frame, and the frames between follow, looping back to the first key. | 그림을 오가게 하려면 레이어 이동(V)을 고르고 1프레임에서 레이어를 끈 뒤, 뒤의 프레임으로 가서 다시 끄세요. 끌 때마다 그 프레임에 키가 생기고 사이 프레임은 따라 움직이며 끝에서 첫 키로 돌아옵니다. | 絵を行き来させるには、レイヤー移動（V）を選んで1フレーム目でレイヤーをドラッグし、後のフレームに移ってもう一度ドラッグします。ドラッグするたびにそのフレームにキーができ、間のフレームはそれに沿って動き、最後は最初のキーに戻ります。
 help-animate-cels | To draw each frame anew, make an animation folder from the layer (View menu). Drawing on a frame without a cel adds one; the timeline under the animation bar shows which cel each frame shows. | 프레임마다 새로 그리려면 레이어로 애니메이션 폴더를 만드세요(보기 메뉴). 셀이 없는 프레임에 그리면 셀이 생기고, 애니메이션 막대 아래 타임라인에 프레임마다 보이는 셀이 나옵니다. | フレームごとに描き直すには、レイヤーからアニメーションフォルダーを作ります（表示メニュー）。セルのないフレームに描くとセルができ、アニメーションバーの下のタイムラインに各フレームのセルが表示されます。
 help-animate-onion | Onion skin (O) shows the frames before and after faintly, red before and blue after, to draw the next pose against. | 어니언 스킨(O)은 앞뒤 프레임을 흐리게, 앞은 붉게 뒤는 푸르게 보여 줍니다. 다음 동작을 그릴 때 참고하세요. | オニオンスキン（O）は前後のフレームを薄く、前を赤く後ろを青く表示します。次のポーズを描くときの目安にします。
+layer-keyed | Moved by keys | 키로 움직임 | キーで動く
+layer-animation-folder | Animation folder | 애니메이션 폴더 | アニメーションフォルダー

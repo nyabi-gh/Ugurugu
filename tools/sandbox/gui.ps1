@@ -698,6 +698,23 @@ Step 'Shapes and the round pixel pencil' {
     $detail
 }
 
+# Presses the control whose name starts with the words for $Key, without a
+# trailing ellipsis: menu items carry their shortcut after the label.
+function Invoke-Word($Process, $Words, [string] $Key) {
+    Invoke-Named $Process ($Words[$Key].TrimEnd([char]0x2026)) -Prefix
+}
+
+# Draws a stroke across the middle of the document.
+function Draw-Stroke($Process) {
+    $paper = Find-Paper $Process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $Process 'b'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.5)), ($paper.Left + [int]($w * 0.8))),
+        @(($paper.Top + [int]($h * 0.6)), ($paper.Top + [int]($h * 0.3)), ($paper.Top + [int]($h * 0.6))))
+    $paper
+}
+
 # Where the dark pixels inside $Paper are on the screen now: their middle
 # along x and how many, counting every second pixel each way; and how many
 # pixels are reddish, as an onion skin's frames before.
@@ -782,23 +799,6 @@ Step 'Cels and onion skin' {
         throw $detail
     }
     $detail
-}
-
-# Presses the control whose name starts with the words for $Key, without a
-# trailing ellipsis: menu items carry their shortcut after the label.
-function Invoke-Word($Process, $Words, [string] $Key) {
-    Invoke-Named $Process ($Words[$Key].TrimEnd([char]0x2026)) -Prefix
-}
-
-# Draws a stroke across the middle of the document.
-function Draw-Stroke($Process) {
-    $paper = Find-Paper $Process
-    $w = $paper.Right - $paper.Left
-    $h = $paper.Bottom - $paper.Top
-    Send-Keys $Process 'b'
-    [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.5)), ($paper.Left + [int]($w * 0.8))),
-        @(($paper.Top + [int]($h * 0.6)), ($paper.Top + [int]($h * 0.3)), ($paper.Top + [int]($h * 0.6))))
-    $paper
 }
 
 # Photographs every panel, menu and dialog in each of $Languages; the files
