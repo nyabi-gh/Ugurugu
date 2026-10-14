@@ -163,14 +163,40 @@ impl Session {
             seed: 0,
         };
         let contours = &placed.outline.contours;
+        // Laid out on screen, then taken into the layer's own pixels.
+        let back = self
+            .layer_transform()
+            .and_then(|transform| transform.inverse());
+        let fill = style
+            .filled
+            .then(|| text::coverage(contours, placed.at, self.document().canvas))
+            .flatten();
+        let mut strokes = text::strokes(contours, placed.at, &template, placed.seed);
+        if let Some(back) = back {
+            for stroke in &mut strokes {
+                let points: Vec<_> = stroke
+                    .points
+                    .iter()
+                    .map(|point| {
+                        let [x, y] = back.apply([f64::from(point.x), f64::from(point.y)]);
+                        ugu_core::store::Point {
+                            x: x as f32,
+                            y: y as f32,
+                            ..*point
+                        }
+                    })
+                    .collect();
+                stroke.points = Arc::from(points);
+            }
+        }
         Some(TextDrawing {
             layer: placed.layer,
-            fill: style
-                .filled
-                .then(|| text::coverage(contours, placed.at, self.document().canvas))
-                .flatten(),
-            strokes: text::strokes(contours, placed.at, &template, placed.seed),
-            clip: self.clip(),
+            fill: fill.and_then(|fill| match back {
+                Some(back) => fill.transformed(back),
+                None => Some(fill),
+            }),
+            strokes,
+            clip: self.clip().and_then(|clip| self.in_layer(&clip)),
             antialias: style.pen.antialias && !self.pixel_mode(),
         })
     }

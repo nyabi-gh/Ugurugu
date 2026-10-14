@@ -2358,3 +2358,203 @@ fn a_shape_in_pixel_mode_runs_through_pixel_centres() {
     let ends = [stroke.points[0].x, stroke.points.last().unwrap().x];
     assert_eq!(ends, [3.5, 20.5]);
 }
+
+fn moved_by(x: f64) -> ugu_core::keys::Pose {
+    ugu_core::keys::Pose {
+        offset: [x, 0.0],
+        ..ugu_core::keys::Pose::REST
+    }
+}
+
+#[test]
+fn drawing_on_a_moved_layer_goes_into_its_own_pixels() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    // Moved 30 right on frame 0, back where it is drawn on frame 10.
+    session.set_pose(layer, moved_by(30.0), [0.0, 0.0]).unwrap();
+    session.set_frame(10).unwrap();
+    session.set_pose(layer, moved_by(0.0), [0.0, 0.0]).unwrap();
+    session.set_frame(0).unwrap();
+    assert_eq!(session.to_layer([50.0, 50.0]), [20.0, 50.0]);
+    draw(&mut session, &tools, 40.0, 80.0);
+    let stroke = session.document().store.strokes.values().next().unwrap();
+    let xs: Vec<f32> = stroke.points.iter().map(|point| point.x).collect();
+    assert_eq!(xs[0], 10.0);
+    assert_eq!(*xs.last().unwrap(), 50.0);
+    // On frame 10 the layer, and so the stroke, is shown where it is drawn.
+    assert_eq!(session.document().transform(layer, 10), None);
+}
+
+#[test]
+fn a_selection_cuts_a_moved_layer_where_it_is_shown() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    session
+        .set_pose(layer, moved_by(100.0), [0.0, 0.0])
+        .unwrap();
+    session.history_mut().unwrap().select(
+        "Select",
+        Selection::of_shape(
+            &ugu_core::selection::Shape::Rectangle([110.0, 0.0], [150.0, 100.0]),
+            [200, 100],
+        ),
+    );
+    session.begin_stroke(&tools, at(120.0, 50.0, 0.0)).unwrap();
+    let clip = session.live().unwrap().clip.clone().unwrap();
+    assert_eq!(clip.mask().bounds[0], 10);
+    session.cancel_stroke();
+    // A selection over none of its pixels refuses the stroke.
+    session.history_mut().unwrap().select(
+        "Select",
+        Selection::of_shape(
+            &ugu_core::selection::Shape::Rectangle([0.0, 0.0], [50.0, 100.0]),
+            [200, 100],
+        ),
+    );
+    assert_eq!(
+        session.begin_stroke(&tools, at(20.0, 50.0, 0.0)),
+        Err(StrokeRefused::OutsideSelection)
+    );
+}
+
+#[test]
+fn a_pose_keys_the_frame_shown_and_toggling_takes_it_away() {
+    let mut session = session();
+    let layer = session.current_layer();
+    session.set_frame(4).unwrap();
+    session
+        .set_pose(layer, moved_by(8.0), [100.0, 50.0])
+        .unwrap();
+    let keys = session.document().layer(layer).unwrap().keys().clone();
+    assert_eq!(keys.pivot, [100.0, 50.0]);
+    assert_eq!(keys.keys.len(), 1);
+    assert_eq!(keys.keys[0].frame, 4);
+    assert_eq!(session.undo_label(), Some("Move layer on this frame"));
+    // A later pose keeps the first pivot.
+    session.set_frame(9).unwrap();
+    session.set_pose(layer, moved_by(2.0), [0.0, 0.0]).unwrap();
+    assert_eq!(
+        session.document().layer(layer).unwrap().keys().pivot,
+        [100.0, 50.0]
+    );
+    // Toggling on a frame without a key keys the pose shown there.
+    session.set_frame(6).unwrap();
+    let shown = session.pose(layer);
+    session.toggle_key(layer, [0.0, 0.0]).unwrap();
+    assert_eq!(session.key_here(layer).unwrap().pose, shown);
+    session.toggle_key(layer, [0.0, 0.0]).unwrap();
+    assert!(session.key_here(layer).is_none());
+    assert_eq!(session.neighbour_key(1), Some(9));
+    assert_eq!(session.neighbour_key(-1), Some(4));
+}
+
+#[test]
+fn a_dragged_pose_shows_until_it_is_keyed_or_dropped() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let revision = session.revision();
+    session.drag_pose(layer, moved_by(5.0));
+    assert_eq!(session.pose(layer), moved_by(5.0));
+    assert!(session.shown_document().transform(layer, 0).is_some());
+    assert!(session.document().transform(layer, 0).is_none());
+    assert_eq!(session.revision(), revision);
+    assert!(session.cancel_pose());
+    assert_eq!(session.pose(layer), ugu_core::keys::Pose::REST);
+    session.drag_pose(layer, moved_by(5.0));
+    session.end_pose([0.0, 0.0]).unwrap();
+    assert_eq!(session.pose(layer), moved_by(5.0));
+    assert!(session.posing().is_none());
+}
+
+#[test]
+fn a_new_pivot_keeps_every_key_where_it_puts_the_layer() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let pose = ugu_core::keys::Pose {
+        offset: [3.0, -2.0],
+        rotation: 30.0,
+        scale: 1.5,
+        flip: true,
+    };
+    session.set_pose(layer, pose, [10.0, 10.0]).unwrap();
+    let before = session.document().transform(layer, 0).unwrap();
+    session.set_pivot(layer, [80.0, 40.0]).unwrap();
+    let after = session.document().transform(layer, 0).unwrap();
+    for point in [[0.0, 0.0], [50.0, 70.0]] {
+        let [a, b] = [before.apply(point), after.apply(point)];
+        assert!((a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn cels_follow_the_frame_and_an_empty_frame_gets_a_new_cel_to_draw_on() {
+    let mut session = session();
+    let tools = Tools::default();
+    let first = session.current_layer();
+    session.make_animation_folder().unwrap();
+    let folder = session.folder().unwrap();
+    assert_eq!(session.current_layer(), first);
+    // Frame 5 shows nothing: the folder becomes current.
+    session.set_frame(5).unwrap();
+    session.expose(None).unwrap();
+    assert_eq!(session.current_layer(), folder);
+    session.set_frame(0).unwrap();
+    assert_eq!(session.current_layer(), folder);
+    session.select_layer(first).unwrap();
+    session.set_frame(6).unwrap();
+    assert_eq!(session.current_layer(), folder);
+    // Drawing there adds a cel shown from frame 6, without asking.
+    draw(&mut session, &tools, 10.0, 40.0);
+    let cel = session.current_layer();
+    assert_ne!(cel, first);
+    assert_eq!(session.exposed(folder), Some(cel));
+    assert_eq!(session.undo_label(), Some("Draw"));
+    session.set_frame(2).unwrap();
+    assert_eq!(session.current_layer(), first);
+    session.set_frame(7).unwrap();
+    assert_eq!(session.current_layer(), cel);
+    // New cel on another frame.
+    session.set_frame(12).unwrap();
+    session.new_cel().unwrap();
+    let third = session.current_layer();
+    assert_eq!(session.exposed(folder), Some(third));
+    assert_eq!(session.document().validate(), Ok(()));
+}
+
+#[test]
+fn fewer_frames_drop_the_keys_past_them_in_the_same_step() {
+    let mut session = session();
+    let layer = session.current_layer();
+    session.set_frame(25).unwrap();
+    session.set_pose(layer, moved_by(3.0), [0.0, 0.0]).unwrap();
+    let document = session.document();
+    let (fps, wobble) = (document.frames_per_second, document.wobble);
+    session.set_animation(10, fps, wobble).unwrap();
+    assert!(session.document().layer(layer).unwrap().keys().is_empty());
+    session.undo().unwrap();
+    assert_eq!(
+        session.document().layer(layer).unwrap().keys().keys.len(),
+        1
+    );
+}
+
+#[test]
+fn a_bucket_on_a_moved_layer_fills_its_own_pixels_under_the_click() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    session.set_pose(layer, moved_by(50.0), [0.0, 0.0]).unwrap();
+    // A reference of the layer alone in its own pixels: transparent.
+    let reference = vec![[0u8; 4]; 200 * 100];
+    session
+        .bucket(&tools, [60.0, 50.0], Some(&reference))
+        .unwrap();
+    let Op::Fill { coverage, .. } = ops(&session, layer)[0] else {
+        panic!("a fill");
+    };
+    let mask = &session.document().store.masks[&coverage];
+    // The whole layer is one area; it is filled where it is drawn.
+    assert_eq!(mask.bounds, [0, 0, 200, 100]);
+}

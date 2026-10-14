@@ -5,10 +5,12 @@
 //! drawn, the current layer and frame, and the history that every change
 //! goes through. The tools are the window's, handed in when an edit starts.
 //!
-//! Input reaches the session in document pixels. A stroke is held here until
-//! the pen lifts and is then committed as one edit; a cancelled stroke leaves
-//! nothing behind.
+//! Input reaches the session in document pixels; what is drawn goes into the
+//! current layer's own pixels, taken back through its move on the frame
+//! shown. A stroke is held here until the pen lifts and is then committed as
+//! one edit; a cancelled stroke leaves nothing behind.
 
+mod animating;
 mod clipboard;
 mod filling;
 mod placing;
@@ -27,9 +29,10 @@ use ugu_core::command;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind, limits};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::history::{History, LayerRevisions, StateId};
-use ugu_core::ops::{Rgba8, Sampling, Wobble};
+use ugu_core::ops::{Affine, Rgba8, Sampling, Wobble};
 use ugu_core::store::{self, Brush, BrushEngine, Point, Stroke};
 
+pub use crate::animating::Posing;
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
@@ -52,6 +55,8 @@ pub enum Tool {
     Text,
     Eyedropper,
     Shape,
+    /// Moves, turns and scales the current layer on the frame shown.
+    Move,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -105,6 +110,9 @@ pub enum StrokeRefused {
     HiddenLayer,
     /// The pending transform or placed text cannot be applied first.
     Pending,
+    /// The selection covers none of the current layer's own pixels on this
+    /// frame.
+    OutsideSelection,
 }
 
 /// The stroke being drawn.
@@ -114,12 +122,15 @@ pub struct LiveStroke {
     pub erase: bool,
     /// Everything of the stroke but its points.
     pub template: Stroke,
+    /// In the layer's own pixels.
     pub points: Vec<Point>,
     /// Set when the last point was replaced rather than added, so a display
     /// that drew it must draw from the point before.
     pub replaced_last: bool,
-    /// The selection the stroke is cut to.
+    /// The selection the stroke is cut to, in the layer's own pixels.
     pub clip: Option<Arc<Selection>>,
+    /// From document pixels to the layer's, as when the stroke began.
+    to_layer: Option<Affine>,
     stabilizer: Stabilizer,
     /// The pressure setting when the stroke began, which it keeps.
     uses_pressure: bool,
@@ -171,6 +182,7 @@ pub struct Session {
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
+    posing: Option<Posing>,
 }
 
 /// The window's tools as last handed in with `Session::use_tools`, for the
@@ -203,6 +215,7 @@ impl Session {
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
+            posing: None,
         };
         session.use_tools(&Tools::default());
         session
@@ -280,12 +293,15 @@ impl Session {
         self.frame
     }
 
-    /// Any frame number; the document's frames repeat.
+    /// Any frame number; the document's frames repeat. A cel being edited
+    /// gives way to the one its folder shows on the new frame.
     pub fn set_frame(&mut self, frame: i64) -> Result<(), EditError> {
         if frame != self.frame {
             self.settle()?;
+            self.posing = None;
         }
         self.frame = frame;
+        self.follow_cel();
         Ok(())
     }
 
@@ -313,8 +329,23 @@ impl Session {
     /// as they leave it.
     pub fn begin_stroke(&mut self, tools: &Tools, input: InputPoint) -> Result<(), StrokeRefused> {
         self.live = None;
-        self.can_paint()?;
+        // A folder draws on its cel, which may not be there yet.
+        if self.folder() != Some(self.layer) {
+            self.can_paint()?;
+        }
         self.settle().map_err(|_| StrokeRefused::Pending)?;
+        self.draw_on_cel().map_err(|_| StrokeRefused::NoLayer)?;
+        self.can_paint()?;
+        let clip = match self.clip() {
+            Some(selection) => Some(
+                self.in_layer(&selection)
+                    .ok_or(StrokeRefused::OutsideSelection)?,
+            ),
+            None => None,
+        };
+        let to_layer = self
+            .layer_transform()
+            .and_then(|transform| transform.inverse());
         let settings = *tools.stroke(self.pixel_mode());
         let erase = tools.tool == Tool::Eraser;
         self.strokes_started += 1;
@@ -347,7 +378,7 @@ impl Session {
             },
             seed: self.seeds.hash_one(self.strokes_started),
         };
-        let position = clamp_position(input.position);
+        let position = clamp_position(into(to_layer, input.position));
         self.live = Some(LiveStroke {
             layer: self.layer,
             erase,
@@ -357,7 +388,8 @@ impl Session {
                 pressure(input.pressure, tools.uses_pressure),
             )],
             replaced_last: false,
-            clip: self.clip(),
+            clip,
+            to_layer,
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
             uses_pressure: tools.uses_pressure,
             shaping: None,
@@ -374,9 +406,10 @@ impl Session {
         if live.points.len() >= store::limits::POINTS_PER_STROKE {
             return false;
         }
-        let position = live
-            .stabilizer
-            .update(clamp_position(input.position), input.time);
+        let position = live.stabilizer.update(
+            clamp_position(into(live.to_layer, input.position)),
+            input.time,
+        );
         let last = live.points.last().expect("a stroke starts with a point");
         if distance(position, last) < MIN_POINT_DISTANCE {
             return false;
@@ -399,7 +432,8 @@ impl Session {
             ..input
         });
         let mut live = self.live.take().expect("still drawing");
-        live.finish(clamp_position(input.position), carried);
+        let end = into(live.to_layer, input.position);
+        live.finish(clamp_position(end), carried);
         self.commit(live)
     }
 
@@ -723,9 +757,11 @@ impl Session {
         if settings == self.document().settings() {
             return Ok(Outcome::NoChange);
         }
-        self.history_mut()?.edit("Animation settings", |_| {
-            vec![ugu_core::edit::Change::SetSettings(settings)]
-        })
+        let outcome = self.history_mut()?.edit("Animation settings", |document| {
+            command::set_settings(document, settings)
+        })?;
+        self.follow_cel();
+        Ok(outcome)
     }
 
     /// After undo, redo or removal the current layer may be gone.
@@ -770,6 +806,11 @@ fn top_paint_layer(layers: &[Layer]) -> Option<LayerId> {
         LayerKind::Paint(_) => Some(layer.id),
         LayerKind::Group(group) => top_paint_layer(&group.children),
     })
+}
+
+/// `position` through `transform`, if there is one.
+fn into(transform: Option<Affine>, position: [f64; 2]) -> [f64; 2] {
+    transform.map_or(position, |transform| transform.apply(position))
 }
 
 fn clamp_position(position: [f64; 2]) -> [f64; 2] {

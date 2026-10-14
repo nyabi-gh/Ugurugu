@@ -24,6 +24,9 @@ impl Session {
     pub fn copy(&mut self) -> Result<Arc<Clip>, FillError> {
         self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
+        let selection = self
+            .in_layer(&selection)
+            .ok_or(FillError::OutsideSelection)?;
         clip::copy(self.document(), self.layer, selection)
             .map(Arc::new)
             .ok_or(FillError::NoLayer)

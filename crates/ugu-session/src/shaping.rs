@@ -257,13 +257,15 @@ impl Session {
             return false;
         };
         let end = snapped(position, shaping.pixel);
+        // Dragged out on screen, then taken into the layer's own pixels.
+        let to_layer = live.to_layer;
         let mut points: Vec<_> = outline(shaping.settings, shaping.start, end, drag)
             .into_iter()
-            .map(|position| point(crate::clamp_position(position), 1.0))
+            .map(|position| point(crate::clamp_position(crate::into(to_layer, position)), 1.0))
             .collect();
         points.truncate(store::limits::POINTS_PER_STROKE);
         if points.is_empty() {
-            points.push(point(shaping.start, 1.0));
+            points.push(point(crate::into(to_layer, shaping.start), 1.0));
         }
         if points == live.points {
             return false;

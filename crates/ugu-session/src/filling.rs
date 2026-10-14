@@ -117,11 +117,23 @@ impl Session {
     ) -> Result<bool, FillError> {
         self.live = None;
         self.lasso = None;
-        let Some(seed) = self.pixel(position) else {
+        // The current layer alone is read in its own pixels.
+        let own = tools.fill.reads == Reads::Current;
+        let Some(seed) = self.pixel(if own {
+            self.to_layer(position)
+        } else {
+            position
+        }) else {
             // Off the canvas, as a click with the selection tool.
             return Ok(combine == Combine::Replace && self.history_mut()?.select("Deselect", None));
         };
-        let area = match self.area(seed, reference, &tools.fill) {
+        let area = self
+            .area(seed, reference, &tools.fill)
+            .and_then(|area| match own {
+                true => self.shown_from_layer(area).ok_or(FillError::NothingThere),
+                false => Ok(area),
+            });
+        let area = match area {
             Ok(area) => area,
             Err(error) => {
                 if combine == Combine::Replace {
@@ -150,30 +162,59 @@ impl Session {
         reference: Option<&[[u8; 4]]>,
     ) -> Result<Outcome, FillError> {
         self.live = None;
-        let Some(seed) = self.pixel(position) else {
+        let Some(clicked) = self.pixel(position) else {
             return Ok(Outcome::NoChange);
         };
-        self.paintable()?;
         self.settle()?;
-        if self
-            .selection()
-            .is_some_and(|selection| !selection.mask().contains(seed[0] as i32, seed[1] as i32))
-        {
+        self.draw_on_cel()?;
+        self.paintable()?;
+        if self.selection().is_some_and(|selection| {
+            !selection
+                .mask()
+                .contains(clicked[0] as i32, clicked[1] as i32)
+        }) {
             return Err(FillError::OutsideSelection);
         }
-        let area = self.area(seed, reference, &tools.fill)?;
-        self.commit_fill(tools, &area, self.clip())
+        // The current layer alone is read in its own pixels, anything else
+        // as shown.
+        let area = if tools.fill.reads == Reads::Current {
+            let seed = self
+                .pixel(self.to_layer(position))
+                .ok_or(FillError::NothingThere)?;
+            Arc::new(self.area(seed, reference, &tools.fill)?)
+        } else {
+            let area = Arc::new(self.area(clicked, reference, &tools.fill)?);
+            self.in_layer(&area).ok_or(FillError::NothingThere)?
+        };
+        let clip = self.layer_clip()?;
+        self.commit_fill(tools, &area, clip)
+    }
+
+    /// The selection, if it cuts anything away, in the current layer's own
+    /// pixels on this frame.
+    pub(crate) fn layer_clip(&self) -> Result<Option<Arc<Selection>>, FillError> {
+        match self.clip() {
+            Some(selection) => self
+                .in_layer(&selection)
+                .map(Some)
+                .ok_or(FillError::OutsideSelection),
+            None => Ok(None),
+        }
     }
 
     /// Fills the selection on the current layer with the brush colour.
     pub fn fill_selection(&mut self, tools: &Tools) -> Result<Outcome, FillError> {
         self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
+        self.draw_on_cel()?;
         self.paintable()?;
         // Cut to the selection too, so the softened edge stays inside the
         // marching ants.
-        let clip = Some(selection.clone()).filter(|selection| !selection.covers_canvas());
-        self.commit_fill(tools, &selection, clip)
+        let clip = self.layer_clip()?;
+        let coverage = self
+            .in_layer(&selection)
+            .ok_or(FillError::OutsideSelection)?;
+        self.commit_fill(tools, &coverage, clip)
     }
 
     /// Fills `shape`'s pixels cut to the selection: the selection tool in
@@ -183,12 +224,18 @@ impl Session {
         tools: &Tools,
         shape: Option<Selection>,
     ) -> Result<Outcome, FillError> {
-        self.paintable()?;
         let Some(shape) = shape else {
+            self.paintable()?;
             return Ok(Outcome::NoChange);
         };
         self.settle()?;
-        self.commit_fill(tools, &shape, self.clip())
+        self.draw_on_cel()?;
+        self.paintable()?;
+        let Some(shape) = self.in_layer(&Arc::new(shape)) else {
+            return Ok(Outcome::NoChange);
+        };
+        let clip = self.layer_clip()?;
+        self.commit_fill(tools, &shape, clip)
     }
 
     pub(crate) fn paintable(&self) -> Result<(), FillError> {
@@ -196,6 +243,7 @@ impl Session {
             crate::StrokeRefused::NoLayer => FillError::NoLayer,
             crate::StrokeRefused::HiddenLayer => FillError::HiddenLayer,
             crate::StrokeRefused::Pending => FillError::Pending,
+            crate::StrokeRefused::OutsideSelection => FillError::OutsideSelection,
         })
     }
 

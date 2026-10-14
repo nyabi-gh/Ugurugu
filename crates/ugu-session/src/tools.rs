@@ -135,7 +135,8 @@ impl Brushes {
             | Tool::Fill
             | Tool::Text
             | Tool::Eyedropper
-            | Tool::Shape => &self.pen,
+            | Tool::Shape
+            | Tool::Move => &self.pen,
         }
     }
 
@@ -148,7 +149,8 @@ impl Brushes {
             | Tool::Fill
             | Tool::Text
             | Tool::Eyedropper
-            | Tool::Shape => &mut self.pen,
+            | Tool::Shape
+            | Tool::Move => &mut self.pen,
         }
     }
 
@@ -164,7 +166,8 @@ impl Brushes {
             | Tool::Fill
             | Tool::Text
             | Tool::Eyedropper
-            | Tool::Shape => &mut self.pen,
+            | Tool::Shape
+            | Tool::Move => &mut self.pen,
         };
         if settings.preset.id == preset.id {
             return;

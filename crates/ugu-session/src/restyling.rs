@@ -15,7 +15,10 @@ impl Session {
     pub fn touched(&self) -> Result<Touched, FillError> {
         self.restylable()?;
         let selection = self.selection().ok_or(FillError::NoSelection)?;
-        Ok(restyle::touched(self.document(), self.layer, selection))
+        let selection = self
+            .in_layer(selection)
+            .ok_or(FillError::OutsideSelection)?;
+        Ok(restyle::touched(self.document(), self.layer, &selection))
     }
 
     /// Gives what the selection touches on the current layer `style`, as
@@ -23,6 +26,9 @@ impl Session {
     pub fn restyle_selected(&mut self, style: Style) -> Result<Outcome, FillError> {
         self.restylable()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
+        let selection = self
+            .in_layer(&selection)
+            .ok_or(FillError::OutsideSelection)?;
         self.live = None;
         self.lasso = None;
         let layer = self.layer;

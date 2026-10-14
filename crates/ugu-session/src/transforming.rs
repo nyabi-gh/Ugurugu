@@ -108,8 +108,9 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         let sampling = self.sampling(self.style.sampling);
+        let moved = self.layer_transform();
         let outcome = match self.history.group("Transform selection", |group| {
-            transform_into(group, &pending, sampling)
+            transform_into(group, &pending, sampling, moved)
         }) {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -165,6 +166,9 @@ impl Session {
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
         let layer = self.layer;
+        let Some(selection) = self.in_layer(&selection) else {
+            return Ok(Outcome::NoChange);
+        };
         Ok(self.history.group("Delete", |group| {
             let mask = selecting::stored_mask(group, &selection)?;
             group.apply(|document| command::clear_selection(document, layer, mask))
@@ -190,7 +194,8 @@ impl Session {
             && pending.transform != Affine::IDENTITY
         {
             let sampling = self.sampling(self.style.sampling);
-            scratch.group("", |group| transform_into(group, pending, sampling))?;
+            let moved = self.layer_transform();
+            scratch.group("", |group| transform_into(group, pending, sampling, moved))?;
         }
         if let Some(drawing) = self.text_drawing() {
             let color = self.style.text.color;
@@ -200,23 +205,42 @@ impl Session {
     }
 }
 
-/// The steps that put `pending` in the document; the selection follows it.
+impl Pending {
+    /// The selection and transform in the pixels of a layer that `moved`
+    /// shows elsewhere on this frame: what is selected on screen, and the
+    /// move on screen undone in the layer's own pixels. `None` when the
+    /// selection covers none of them.
+    pub fn in_layer(&self, moved: Option<Affine>) -> Option<(Arc<Selection>, Affine)> {
+        let Some(moved) = moved else {
+            return Some((self.selection.clone(), self.transform));
+        };
+        let back = moved.inverse()?;
+        let selection = Arc::new(self.selection.transformed(back)?);
+        Some((selection, moved.then(self.transform).then(back)))
+    }
+}
+
+/// The steps that put `pending` in the document, on a layer `moved` shows
+/// elsewhere on this frame; the selection follows it on screen.
 fn transform_into(
     group: &mut Group<'_>,
     pending: &Pending,
     sampling: Sampling,
+    moved: Option<Affine>,
 ) -> Result<(), EditError> {
-    let mask = selecting::stored_mask(group, &pending.selection)?;
-    group.apply(|document| {
-        command::transform_selection(
-            document,
-            pending.layer,
-            mask,
-            pending.transform,
-            sampling,
-            pending.keep_source,
-        )
-    })?;
+    if let Some((selection, transform)) = pending.in_layer(moved) {
+        let mask = selecting::stored_mask(group, &selection)?;
+        group.apply(|document| {
+            command::transform_selection(
+                document,
+                pending.layer,
+                mask,
+                transform,
+                sampling,
+                pending.keep_source,
+            )
+        })?;
+    }
     group.select(pending.selection.transformed(pending.transform));
     Ok(())
 }
