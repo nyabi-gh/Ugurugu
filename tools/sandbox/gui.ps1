@@ -132,6 +132,39 @@ public static class Native
         return dark;
     }
 
+    // Drags from (x0, y0) to (x1, y1) in `moves` moves about 1 ms apart, as
+    // a 1000 Hz mouse reports, holds, and returns the ms from the last move
+    // until the rectangle shows dark pixels, or -1 after `timeoutMs`.
+    public static long DragAndWait(int x0, int y0, int x1, int y1, int moves, int x, int y, int w, int h, int timeoutMs)
+    {
+        var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var graphics = System.Drawing.Graphics.FromImage(bitmap);
+        Glide(x0, y0);
+        System.Threading.Thread.Sleep(50);
+        Down();
+        var tick = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 1; i <= moves; i++)
+        {
+            Glide(x0 + (x1 - x0) * i / moves, y0 + (y1 - y0) * i / moves);
+            while (tick.Elapsed.TotalMilliseconds < i) { }
+        }
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long shown = -1;
+        while (clock.ElapsedMilliseconds < timeoutMs)
+        {
+            if (Dark(bitmap, graphics, x, y) > 0)
+            {
+                shown = clock.ElapsedMilliseconds;
+                break;
+            }
+        }
+        System.Threading.Thread.Sleep(100);
+        Up();
+        graphics.Dispose();
+        bitmap.Dispose();
+        return shown;
+    }
+
     public static int DarkIn(int x, int y, int w, int h)
     {
         using (var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
@@ -298,6 +331,29 @@ function Invoke-Named($Process, [string] $Name, [switch] $Prefix) {
     } else {
         $pattern.Select()
     }
+    Start-Sleep -Milliseconds 500
+}
+
+# Types $Text into the field named $Name and presses Enter.
+function Set-Field($Process, [string] $Name, [string] $Text) {
+    $element = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+        $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+        foreach ($found in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
+            $pattern = $null
+            if ($found.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+                return , $found
+            }
+        }
+    } 15 "a field named '$Name'"
+    $box = $element.Current.BoundingRectangle
+    [Native]::Glide([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2))
+    [Native]::Down()
+    [Native]::Up()
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    [Windows.Forms.SendKeys]::SendWait($Text)
+    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 500
 }
 
@@ -638,6 +694,67 @@ Step 'Pressing during playback keeps the frame shown' {
         throw "flashed with $($flashed -join ', '); $($lines -join ' // '); $shot"
     }
     "$($lines -join ' // '); $shot"
+}
+
+# Issue #51: a large shape dragged with a fast mouse shows its last size
+# soon after the pointer stops (evidence 58).
+Step 'A dragged shape keeps up with the pointer' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $process 'u'
+    Invoke-Named $process 'Ellipse'
+    $x0 = $paper.Left + [int]($w * 0.05)
+    $y0 = $paper.Top + [int]($h * 0.05)
+    $x1 = $paper.Left + [int]($w * 0.95)
+    $y1 = $paper.Top + [int]($h * 0.95)
+    # The far right of the ellipse at its last size, which no smaller one reaches.
+    $edge = @(($x1 - 6), ([int](($y0 + $y1) / 2) - 6), 12, 12)
+    $before = [Native]::DarkIn($edge[0], $edge[1], $edge[2], $edge[3])
+    $times = foreach ($run in 1..3) {
+        $ms = [Native]::DragAndWait($x0, $y0, $x1, $y1, 1500, $edge[0], $edge[1], $edge[2], $edge[3], 5000)
+        Send-Keys $process '^z'
+        Start-Sleep -Milliseconds 500
+        $ms
+    }
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "paper $w x $h, dark before $before, last size shown after (ms): $($times -join ', ')"
+    if ($before -gt 0 -or ($times | Where-Object { $_ -lt 0 -or $_ -gt 150 })) {
+        throw $detail
+    }
+    $detail
+}
+
+# Issue #24: one round pixel pencil dot of 40 px at 100%, 75% and 300%, to
+# compare with how another app shows its round pixel brush.
+Step 'Round pixel dots at several zooms' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    Invoke-Named $process 'Edit'
+    Invoke-Named $process 'Pixel mode'
+    Start-Sleep -Milliseconds 500
+    Send-Keys $process 'b'
+    Invoke-Named $process 'Round Pixel Pencil'
+    Set-Field $process 'Brush size' '40'
+    $size = Get-Value $process 'Brush size'
+    $words = Read-Words 'en'
+    Set-Field $process $words['canvas-zoom-percent'] '100'
+    $paper = Find-Paper $process
+    $x = [int](($paper.Left + $paper.Right) / 2)
+    $y = [int](($paper.Top + $paper.Bottom) / 2)
+    [Native]::Drag(@($x, $x), @($y, $y))
+    $shots = foreach ($zoom in 100, 75, 300) {
+        Set-Field $process $words['canvas-zoom-percent'] "$zoom"
+        $shown = Get-Value $process $words['canvas-zoom-percent']
+        [Native]::MoveTo(5, 5)
+        Start-Sleep -Milliseconds 300
+        "$shown%: $(Save-Screen "round-dot-$zoom")"
+    }
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    "brush size $size; $($shots -join '; ')"
 }
 
 Step 'Pixel mode from the Edit menu' {
