@@ -87,7 +87,7 @@ impl Moved {
 
 /// Changes a source's pixel at `x`, `y` before it is read, such as a stroke
 /// being drawn on it.
-pub type Touch<'a> = &'a dyn Fn(usize, usize, &mut Pixel);
+pub type Touch<'a> = &'a (dyn Fn(usize, usize, &mut Pixel) + Sync);
 
 /// Row `y` within `left..right` of `source` moved by `moved`.
 pub fn row(

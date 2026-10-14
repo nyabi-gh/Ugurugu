@@ -325,23 +325,32 @@ impl DocumentRenderer {
 /// being drawn, `None` for none) on the edited layer first.
 pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out: &mut Pixmap) {
     let sources = split.sources();
+    let [left, top, right, bottom] = rect;
+    // Thread start-up outweighs the work below about this many pixels.
+    let threads = if (right - left) * (bottom - top) > 65_536 {
+        std::thread::available_parallelism().map_or(1, |count| count.get().min(8))
+    } else {
+        1
+    };
     match (live, split.edited) {
         (Some(live), Some(source)) => {
-            let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| live.apply(x, y, pixel);
+            let painting = live.painting();
+            let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| painting.apply(x, y, pixel);
             let overlay = Overlay {
                 source,
                 apply: &apply,
             };
-            composite::evaluate_with(&split.puts, split.background, &sources, rect, out, &overlay);
+            composite::evaluate_with(
+                &split.puts,
+                split.background,
+                &sources,
+                rect,
+                out,
+                threads,
+                &overlay,
+            );
         }
         _ => {
-            let [left, top, right, bottom] = rect;
-            // Thread start-up outweighs the work below about this many pixels.
-            let threads = if (right - left) * (bottom - top) > 65_536 {
-                std::thread::available_parallelism().map_or(1, |count| count.get().min(8))
-            } else {
-                1
-            };
             composite::evaluate(
                 &split.puts,
                 split.background,

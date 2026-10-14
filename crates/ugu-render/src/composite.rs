@@ -214,6 +214,42 @@ pub fn evaluate(
     threads: usize,
     stop: Option<&AtomicBool>,
 ) -> bool {
+    run(puts, background, sources, rect, out, threads, stop, None)
+}
+
+/// `evaluate` with `overlay` on its source.
+pub fn evaluate_with(
+    puts: &[Put],
+    background: Option<Pixel>,
+    sources: &[Source<'_>],
+    rect: PixelRect,
+    out: &mut Pixmap,
+    threads: usize,
+    overlay: &Overlay<'_>,
+) {
+    run(
+        puts,
+        background,
+        sources,
+        rect,
+        out,
+        threads,
+        None,
+        Some(overlay),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run(
+    puts: &[Put],
+    background: Option<Pixel>,
+    sources: &[Source<'_>],
+    rect: PixelRect,
+    out: &mut Pixmap,
+    threads: usize,
+    stop: Option<&AtomicBool>,
+    overlay: Option<&Overlay<'_>>,
+) -> bool {
     let width = usize::from(out.width());
     let [left, top, right, bottom] = rect.map(|value| value as usize);
     if left >= right || top >= bottom {
@@ -234,7 +270,7 @@ pub fn evaluate(
                 span: [left, right],
                 y,
             };
-            row.evaluate(levels, None);
+            row.evaluate(levels, overlay);
             line.copy_from_slice(&levels[0].row);
         }
     };
@@ -277,38 +313,7 @@ pub struct Overlay<'a> {
     /// The source's place in the sources.
     pub source: usize,
     /// Changes the source's pixel at `x`, `y`.
-    pub apply: &'a dyn Fn(usize, usize, &mut Pixel),
-}
-
-/// `evaluate` on the calling thread, with `overlay` on its source.
-pub fn evaluate_with(
-    puts: &[Put],
-    background: Option<Pixel>,
-    sources: &[Source<'_>],
-    rect: PixelRect,
-    out: &mut Pixmap,
-    overlay: &Overlay<'_>,
-) {
-    let width = usize::from(out.width());
-    let [left, top, right, bottom] = rect.map(|value| value as usize);
-    if left >= right || top >= bottom {
-        return;
-    }
-    let needed = bases_needed(puts);
-    let mut levels = Vec::new();
-    let pixels = out.data_as_u8_slice_mut().as_chunks_mut::<4>().0;
-    for y in top..bottom {
-        let row = Row {
-            puts,
-            needed: &needed,
-            background,
-            sources,
-            span: [left, right],
-            y,
-        };
-        row.evaluate(&mut levels, Some(overlay));
-        pixels[y * width + left..y * width + right].copy_from_slice(&levels[0].row);
-    }
+    pub apply: crate::transform::Touch<'a>,
 }
 
 /// One row of a program run.

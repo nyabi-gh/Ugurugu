@@ -96,6 +96,9 @@ enum Interaction {
         /// Dragged out with the shape tool, its points all replaced as it
         /// changes.
         shape: bool,
+        /// The shape was dragged since `live` was made; it is made again
+        /// once per frame, as only the last drag shows.
+        moved: bool,
     },
     Panning {
         last: [f64; 2],
@@ -1275,7 +1278,9 @@ impl Canvas {
             CanvasInput::End(sample) => {
                 self.sample_count += 1;
                 match std::mem::replace(&mut self.interaction, Interaction::Idle) {
-                    Interaction::Drawing { live, rect, shape } => {
+                    Interaction::Drawing {
+                        live, rect, shape, ..
+                    } => {
                         let before = self.key();
                         let point = self.input_point(&sample);
                         let outcome = if shape {
@@ -1608,6 +1613,7 @@ impl Canvas {
             live: Box::new(stroke),
             rect,
             shape,
+            moved: false,
         };
         self.recomposite(rect);
     }
@@ -1633,16 +1639,31 @@ impl Canvas {
         .with_clip(live.clip.as_ref().map(|selection| selection.mask().clone()))
     }
 
-    /// Drags the shape to `sample` and shows it anew where it was and is.
+    /// Drags the shape to `sample`; the next frame shows it.
     fn drag_shape(&mut self, sample: &PointerSample) {
         let point = self.to_document(sample.position);
-        if !self.tab.session.drag_shape(point, self.shape_drag()) {
-            return;
+        let drag = self.shape_drag();
+        if self.tab.session.drag_shape(point, drag)
+            && let Interaction::Drawing { moved, .. } = &mut self.interaction
+        {
+            *moved = true;
         }
+    }
+
+    /// Shows the dragged shape anew where it was and is.
+    fn show_shape(&mut self) {
+        let Interaction::Drawing {
+            shape: true,
+            moved: true,
+            ..
+        } = self.interaction
+        else {
+            return;
+        };
         let Interaction::Drawing {
             live: old,
             rect: was,
-            shape: true,
+            ..
         } = std::mem::replace(&mut self.interaction, Interaction::Idle)
         else {
             unreachable!("dragging a shape");
@@ -1653,6 +1674,7 @@ impl Canvas {
             live: Box::new(stroke),
             rect,
             shape: true,
+            moved: false,
         };
         self.recomposite(union(was, rect));
     }
@@ -1795,6 +1817,7 @@ impl Canvas {
     /// The display pixels changed since the last call; all of them when
     /// other pixels are shown than at the last call.
     pub fn take_upload(&mut self) -> Option<PixelRect> {
+        self.show_shape();
         let (pixels, shrink, origin) = self.shown();
         let size = [pixels.width(), pixels.height()];
         let now = Some((size, shrink, origin));
@@ -2856,12 +2879,19 @@ mod tests {
         };
         let begin = at(&canvas, 10.0, 10.0);
         canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
-        let far = at(&canvas, 110.0, 80.0);
-        canvas.apply(CanvasInput::Extend(far));
-        assert!(canvas.display().data_as_u8_slice() != blank.data_as_u8_slice());
+        let begun = canvas.display().clone();
+        // Drags between two frames are drawn once, at the frame (issue #51).
+        for x in [60.0, 90.0, 110.0] {
+            let sample = at(&canvas, x, 80.0);
+            canvas.apply(CanvasInput::Extend(sample));
+        }
+        assert!(canvas.display().data_as_u8_slice() == begun.data_as_u8_slice());
+        canvas.take_upload();
+        assert!(canvas.display().data_as_u8_slice() != begun.data_as_u8_slice());
         // Shrunk, it leaves nothing where it was.
         let near = at(&canvas, 40.0, 30.0);
         canvas.apply(CanvasInput::Extend(near));
+        canvas.take_upload();
         let shown = canvas.display();
         for y in 50..90u16 {
             for x in 60..120u16 {
@@ -2891,6 +2921,56 @@ mod tests {
             &mut full,
         );
         assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
+    }
+
+    /// Issue #51: the time a frame of a large wobbly shape drag takes to
+    /// show, with one pointer sample a frame or 16 (a 1000 Hz mouse at
+    /// 60 Hz), beside the same drag drawn freehand.
+    #[test]
+    #[ignore = "measurement; run with --release --ignored --nocapture"]
+    fn shape_drag_frame_cost() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([1920, 1080]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 1920, 1080]);
+        settle(&mut canvas, &renders);
+        canvas.brushes_mut().pen.width = 40.0;
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        for tool in [Tool::Shape, Tool::Pen] {
+            for per_frame in [1u32, 16] {
+                canvas.set_tool(tool).unwrap();
+                canvas.tools_mut().shape.shape = ugu_session::Shape::Ellipse;
+                let begin = at(&canvas, 100.0, 100.0);
+                canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+                let frames = 120;
+                let mut times = Vec::new();
+                for frame in 0..frames {
+                    let started = std::time::Instant::now();
+                    for sample in 1..=per_frame {
+                        let t =
+                            f64::from(frame * per_frame + sample) / f64::from(frames * per_frame);
+                        let sample = at(&canvas, 100.0 + 1700.0 * t, 100.0 + 850.0 * t);
+                        canvas.apply(CanvasInput::Extend(sample));
+                    }
+                    canvas.take_upload();
+                    times.push(started.elapsed().as_secs_f64() * 1000.0);
+                }
+                canvas.apply(CanvasInput::End(at(&canvas, 1800.0, 950.0)));
+                let total: f64 = times.iter().sum();
+                times.sort_by(f64::total_cmp);
+                println!(
+                    "{tool:?} {per_frame}/frame: {frames} frames, total {total:.0} ms, \
+                     median {:.2} ms, max {:.2} ms",
+                    times[times.len() / 2],
+                    times[times.len() - 1]
+                );
+                canvas.edit(|session| session.undo()).unwrap();
+            }
+        }
     }
 
     // Synthetic pen input cannot carry the eraser end (Windows drops the pen

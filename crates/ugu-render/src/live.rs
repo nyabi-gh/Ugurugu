@@ -354,16 +354,51 @@ impl LiveStroke {
     }
 
     /// The pixel at `x`, `y`: the tail's where it lies, else the settled one.
+    fn size(&self) -> [u32; 2] {
+        [self.coverage.width(), self.coverage.height()].map(u32::from)
+    }
+
+    /// What the stroke shows so far, which threads can read together.
+    pub fn painting(&self) -> Painting<'_> {
+        Painting {
+            coverage: &self.coverage,
+            tail: self.tail.as_ref(),
+            clip: self.clip.as_ref(),
+            dabs: self.dabs.is_some(),
+            antialias: self.pen.brush.antialias,
+            line: self.line,
+            erase: self.erase,
+        }
+    }
+
+    /// Draws the stroke on a layer pixel at `x`, `y`.
+    pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
+        self.painting().apply(x, y, layer);
+    }
+}
+
+/// A [`LiveStroke`]'s pixels and how they paint.
+pub struct Painting<'a> {
+    coverage: &'a Pixmap,
+    tail: Option<&'a (PixelRect, Pixmap)>,
+    clip: Option<&'a Mask>,
+    dabs: bool,
+    antialias: bool,
+    line: [u8; 4],
+    erase: bool,
+}
+
+impl Painting<'_> {
     fn pixel(&self, x: usize, y: usize) -> [u8; 4] {
         let (x32, y32) = (x as u32, y as u32);
-        let (pixels, at) = match &self.tail {
+        let (pixels, at) = match self.tail {
             Some(([left, top, right, bottom], tail))
                 if (*left..*right).contains(&x32) && (*top..*bottom).contains(&y32) =>
             {
                 let at = ((y32 - top) * u32::from(tail.width()) + x32 - left) as usize;
                 (tail, at)
             }
-            _ => (&self.coverage, y * usize::from(self.coverage.width()) + x),
+            _ => (self.coverage, y * usize::from(self.coverage.width()) + x),
         };
         pixels.data_as_u8_slice()[at * 4..at * 4 + 4]
             .try_into()
@@ -372,7 +407,7 @@ impl LiveStroke {
 
     fn cover(&self, x: usize, y: usize) -> u8 {
         let cover = self.pixel(x, y)[3];
-        match self.pen.brush.antialias {
+        match self.antialias {
             true => cover,
             // Vello paints an aliased pixel whose coverage is over the
             // threshold.
@@ -382,15 +417,11 @@ impl LiveStroke {
     }
 
     /// Draws the stroke on a layer pixel at `x`, `y`.
-    fn size(&self) -> [u32; 2] {
-        [self.coverage.width(), self.coverage.height()].map(u32::from)
-    }
-
     pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
-        if !inside(self.clip.as_ref(), x, y) {
+        if !inside(self.clip, x, y) {
             return;
         }
-        if self.dabs.is_some() {
+        if self.dabs {
             let pixel = self.pixel(x, y);
             if pixel[3] == 0 {
             } else if self.erase {
@@ -529,7 +560,7 @@ mod tests {
     fn live_coverage(live: &LiveStroke) -> Vec<u8> {
         (0..120)
             .flat_map(|y| (0..200).map(move |x| (x, y)))
-            .map(|(x, y)| live.cover(x, y))
+            .map(|(x, y)| live.painting().cover(x, y))
             .collect()
     }
 
@@ -765,7 +796,7 @@ mod tests {
             for y in 0..120 {
                 for x in 0..200 {
                     let expected = &whole[(y * 200 + x) * 4..(y * 200 + x) * 4 + 4];
-                    assert_eq!(live.pixel(x, y), expected, "{id} at {x}, {y}");
+                    assert_eq!(live.painting().pixel(x, y), expected, "{id} at {x}, {y}");
                     if expected[3] > 0 {
                         let (x, y) = (x as u32, y as u32);
                         assert!(x >= left && x < right && y >= top && y < bottom);
