@@ -136,6 +136,9 @@ pub struct Layout {
     /// their place and come back to it.
     pub closed: Vec<Panel>,
     pub animation_bar: bool,
+    /// Keys, animation folders, the onion skin and the move layer tool are
+    /// shown; a drawing that has keys or folders turns them on.
+    pub animation_tools: bool,
     pub color_field: ColorField,
 }
 
@@ -157,6 +160,7 @@ impl Default for Layout {
             floating: Vec::new(),
             closed: Vec::new(),
             animation_bar: true,
+            animation_tools: false,
             color_field: ColorField::default(),
         }
     }
@@ -363,6 +367,7 @@ impl Layout {
             "floating": floating,
             "closed": self.closed.iter().map(|panel| panel.key()).collect::<Vec<_>>(),
             "animationBar": self.animation_bar,
+            "animationTools": self.animation_tools,
             "colorField": self.color_field.key(),
         })
     }
@@ -458,6 +463,11 @@ fn read(value: &Value) -> Option<Layout> {
         floating,
         closed,
         animation_bar: object.get("animationBar")?.as_bool()?,
+        // Not in settings written before 3.2.0.
+        animation_tools: object
+            .get("animationTools")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         // Not in settings written before the triangle came back.
         color_field: object
             .get("colorField")
@@ -499,6 +509,7 @@ mod tests {
         layout.left.width = 222.0;
         layout.right.collapsed = true;
         layout.animation_bar = false;
+        layout.animation_tools = true;
         layout.color_field = ColorField::Triangle;
         let text = layout.to_json().to_string();
         let read = Layout::parse(&serde_json::from_str(&text).unwrap());
@@ -511,6 +522,17 @@ mod tests {
         let mut value = Layout::default().to_json();
         value.as_object_mut().unwrap().remove("colorField");
         assert_eq!(Layout::parse(&value), Layout::default());
+    }
+
+    #[test]
+    fn settings_from_before_3_2_have_the_animation_tools_off() {
+        let layout = Layout {
+            animation_tools: true,
+            ..Layout::default()
+        };
+        let mut value = layout.to_json();
+        value.as_object_mut().unwrap().remove("animationTools");
+        assert!(!Layout::parse(&value).animation_tools);
     }
 
     #[test]

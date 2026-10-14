@@ -91,6 +91,8 @@ view-mirror | Flip canvas horizontally | 캔버스 좌우반전 | キャンバ�
 view-mirror-tip | Temporarily flip the canvas horizontally | 캔버스를 임시로 좌우 반전 | キャンバスを一時的に左右反転
 canvas-rotation | Canvas rotation angle | 캔버스 회전 각도 | キャンバスの回転角度
 view-animate | &Animate preview | 미리보기 재생(&A) | プレビューを再生(&A)
+view-animation-tools | Animation tool&s | 애니메이션 도구(&S) | アニメーションツール(&S)
+view-animation-tools-tip | Shows keys, animation folders, the onion skin and the Move layer tool. A drawing that has keys or animation folders always shows them. | 키, 애니메이션 폴더, 어니언 스킨, 레이어 이동 도구를 보여 줍니다. 키나 애니메이션 폴더가 있는 그림에서는 늘 보입니다. | キー、アニメーションフォルダー、オニオンスキン、レイヤー移動ツールを表示します。キーやアニメーションフォルダーがある絵では常に表示されます。
 window-next-tab | Next tab | 다음 탭 | 次のタブ
 window-previous-tab | Previous tab | 이전 탭 | 前のタブ
 window-animation-bar | Show &animation bar | 애니메이션 바 표시(&A) | アニメーションバーを表示(&A)
@@ -566,6 +568,7 @@ timeline-keys-name | Keys of %1: %2 | %1의 키: %2개 | %1のキー：%2個 | a
 timeline-no-key | Right-click a key to change it. | 키를 오른쪽 클릭해 바꾸세요. | キーを右クリックして変更します。
 timeline-cels-name | Cels of %1, %2 on this frame | %1의 셀, 이 프레임은 %2 | %1のセル、このフレームは%2 | args=folder,cel
 help-animate | Moving drawings | 움직이게 하기 | 動かす
+help-animate-tools | Keys, animation folders and the onion skin are off at first: turn them on with View → Animation tools. A drawing that has them shows them by itself. | 키, 애니메이션 폴더, 어니언 스킨은 처음에 꺼져 있습니다. 보기 → 애니메이션 도구로 켜세요. 이미 그것을 쓴 그림에서는 저절로 보입니다. | キー、アニメーションフォルダー、オニオンスキンは最初はオフです。表示 → アニメーションツールでオンにしてください。それらを使った絵では自動で表示されます。
 help-animate-keys | To move a drawing back and forth, choose Move layer (V) and drag the layer on frame 1, go to a later frame and drag it again: each drag keys that frame, and the frames between follow, looping back to the first key. | 그림을 오가게 하려면 레이어 이동(V)을 고르고 1프레임에서 레이어를 끈 뒤, 뒤의 프레임으로 가서 다시 끄세요. 끌 때마다 그 프레임에 키가 생기고 사이 프레임은 따라 움직이며 끝에서 첫 키로 돌아옵니다. | 絵を行き来させるには、レイヤー移動（V）を選んで1フレーム目でレイヤーをドラッグし、後のフレームに移ってもう一度ドラッグします。ドラッグするたびにそのフレームにキーができ、間のフレームはそれに沿って動き、最後は最初のキーに戻ります。
 help-animate-cels | To draw each frame anew, make an animation folder from the layer (View menu). Drawing on a frame without a cel adds one; the timeline under the animation bar shows which cel each frame shows. | 프레임마다 새로 그리려면 레이어로 애니메이션 폴더를 만드세요(보기 메뉴). 셀이 없는 프레임에 그리면 셀이 생기고, 애니메이션 막대 아래 타임라인에 프레임마다 보이는 셀이 나옵니다. | フレームごとに描き直すには、レイヤーからアニメーションフォルダーを作ります（表示メニュー）。セルのないフレームに描くとセルができ、アニメーションバーの下のタイムラインに各フレームのセルが表示されます。
 help-animate-onion | Onion skin (O) shows the frames before and after faintly, red before and blue after, to draw the next pose against. | 어니언 스킨(O)은 앞뒤 프레임을 흐리게, 앞은 붉게 뒤는 푸르게 보여 줍니다. 다음 동작을 그릴 때 참고하세요. | オニオンスキン（O）は前後のフレームを薄く、前を赤く後ろを青く表示します。次のポーズを描くときの目安にします。

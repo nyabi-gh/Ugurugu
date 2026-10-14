@@ -704,6 +704,23 @@ function Invoke-Word($Process, $Words, [string] $Key) {
     Invoke-Named $Process ($Words[$Key].TrimEnd([char]0x2026)) -Prefix
 }
 
+# Turns on View > Animation tools, which start off; the settings file a
+# step before saved may have them on already.
+function Enable-AnimationTools($Process, [string] $Language = 'en') {
+    $words = Read-Words $Language
+    Invoke-Word $Process $words 'menu-view'
+    $name = $words['view-animation-tools']
+    $item = Find-Pattern $Process $name @([Windows.Automation.SelectionItemPattern]::Pattern,
+        [Windows.Automation.TogglePattern]::Pattern)
+    $on = if ($item -is [Windows.Automation.SelectionItemPattern]) { $item.Current.IsSelected }
+        else { $item.Current.ToggleState -eq [Windows.Automation.ToggleState]::On }
+    if ($on) {
+        Send-Keys $Process '{ESC}'
+    } else {
+        Invoke-Named $Process $name
+    }
+}
+
 # Draws a stroke across the middle of the document.
 function Draw-Stroke($Process) {
     $paper = Find-Paper $Process
@@ -742,6 +759,7 @@ function Get-Ink($Process, $Paper) {
 Step 'Keyframes' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App
+    Enable-AnimationTools $process
     $paper = Draw-Stroke $process
     $w = $paper.Right - $paper.Left
     $x = [int](($paper.Left + $paper.Right) / 2)
@@ -775,6 +793,7 @@ Step 'Keyframes' {
 Step 'Cels and onion skin' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App
+    Enable-AnimationTools $process
     $paper = Draw-Stroke $process
     $w = $paper.Right - $paper.Left
     $h = $paper.Bottom - $paper.Top
@@ -808,6 +827,7 @@ Step 'Animation icons at 100%' {
     try {
         Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
         $process = Start-App
+        Enable-AnimationTools $process
         [void](Draw-Stroke $process)
         Invoke-Named $process 'Make animation folder'
         Send-Keys $process 'v'
@@ -849,6 +869,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'tool-shape' = { param($p) Send-Keys $p 'u' }
             'tool-move-timeline' = {
                 param($p)
+                Enable-AnimationTools $p $language
                 $paper = Draw-Stroke $p
                 Send-Keys $p 'v'
                 $x = [int](($paper.Left + $paper.Right) / 2)

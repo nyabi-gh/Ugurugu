@@ -300,8 +300,8 @@ pub fn quick_access(
     });
 }
 
-/// The tool rail.
-pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
+/// The tool rail; the move layer tool only with the animation tools.
+pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap, animation_tools: bool) {
     ui.spacing_mut().item_spacing.y = 2.0;
     let tool = canvas.tool();
     for (each, action, glyph, key) in [
@@ -325,6 +325,9 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
             "tool-eyedropper-rail",
         ),
     ] {
+        if each == Tool::Move && !animation_tools {
+            continue;
+        }
         let shortcut = keys.text(action);
         if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
             canvas.choose_tool(each);
@@ -1466,7 +1469,7 @@ pub fn animation_bar(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     // With the wobble animation off in the settings, as 2.2.13's timeline.
     ui.add_enabled_ui(canvas.animation_allowed(), |ui| {
         let track = animation_controls(ui, canvas, panels);
-        if !canvas.is_playing() {
+        if !canvas.is_playing() && panels.layout.animation_tools {
             ui.add_space(theme::space::XS);
             timeline::rows(ui, canvas, panels, track);
         }
@@ -1535,7 +1538,9 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             widgets::number(ui, &mut count, low..=high, "", 0, 46.0, tr("frame-count"))
                 .on_hover_text(tr("frame-count"));
 
-        animation_buttons(ui, canvas, panels);
+        if panels.layout.animation_tools {
+            animation_buttons(ui, canvas, panels);
+        }
         let right = 46.0 + 30.0 + 90.0 + 30.0;
         let width = (ui.available_width() - right).max(160.0);
         let current = frame_in_cycle(canvas.session().frame(), frames);

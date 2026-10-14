@@ -16,6 +16,7 @@ const SECTIONS: [(&str, &[&str]); 5] = [
     (
         "help-animate",
         &[
+            "help-animate-tools",
             "help-animate-keys",
             "help-animate-cels",
             "help-animate-onion",

@@ -59,6 +59,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     let mut canvas_area = [0; 4];
     let mut ants = None;
     panels.follow_document(canvas);
+    super::actions::sync_animation_tools(canvas, &mut panels.layout);
     panels.focus.begin(ui.ctx());
     // Before the widgets run, so focus is what the key was pressed in.
     super::shortcuts(ui.ctx(), canvas, files, clipboard, panels, typed);
@@ -132,7 +133,9 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .resizable(false)
         .exact_size(48.0)
         .frame(bar(theme::chrome(), 4, 8))
-        .show(ui, |ui| super::rail(ui, canvas, &panels.keys));
+        .show(ui, |ui| {
+            super::rail(ui, canvas, &panels.keys, panels.layout.animation_tools)
+        });
     super::dock_areas(ui, canvas, panels, probe);
     if panels.layout.animation_bar {
         egui::Panel::bottom("animation bar")

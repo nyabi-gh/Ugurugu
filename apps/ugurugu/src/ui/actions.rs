@@ -81,6 +81,8 @@ pub const VIEW: &[Entry] = &[
     Do(A::Animate),
     Do(A::PreviousFrame),
     Do(A::NextFrame),
+    Gap,
+    Do(A::AnimationTools),
     Do(A::PreviousKey),
     Do(A::NextKey),
     Do(A::ToggleKey),
@@ -167,9 +169,27 @@ fn is_open(layout: &Layout, panel: Option<Panel>) -> bool {
     panel.map_or(layout.animation_bar, |panel| layout.is_open(panel))
 }
 
+/// Whether the menus show it: the animation tools only when they are on.
+fn shown(action: Action, layout: &Layout) -> bool {
+    layout.animation_tools
+        || !matches!(
+            action,
+            A::PreviousKey
+                | A::NextKey
+                | A::ToggleKey
+                | A::OnionSkin
+                | A::AnimationFolder
+                | A::NewCel
+                | A::MoveLayer
+        )
+}
+
 /// Whether it can run now. A key runs it only then, as 2.2.13's disabled
 /// actions ignore their keys.
-fn enabled(action: Action, canvas: &Canvas) -> bool {
+fn enabled(action: Action, canvas: &Canvas, layout: &Layout) -> bool {
+    if !shown(action, layout) {
+        return false;
+    }
     let session = canvas.session();
     let selected = session.selection().is_some();
     let pending = session.pending().is_some();
@@ -195,7 +215,31 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         A::ToggleKey => has_layer(canvas),
         A::NewCel => session.folder().is_some(),
         A::AnimationFolder => has_layer(canvas) && session.pending().is_none(),
+        // A drawing that moves keeps them on, so it can be seen why.
+        A::AnimationTools => !animated(canvas),
         _ => true,
+    }
+}
+
+/// Whether the drawing has keys or animation folders.
+pub fn animated(canvas: &Canvas) -> bool {
+    let (keys, folders) = canvas.session().document().is_animated();
+    keys || folders
+}
+
+/// Turns the animation tools on for a drawing that has keys or folders,
+/// and leaves the move tool when they are off.
+pub fn sync_animation_tools(canvas: &mut Canvas, layout: &mut Layout) {
+    if !layout.animation_tools && animated(canvas) {
+        layout.animation_tools = true;
+    }
+    if !layout.animation_tools {
+        if canvas.tool() == Tool::Move {
+            canvas.choose_tool(Tool::Pen);
+        }
+        if canvas.onion_skin() {
+            canvas.set_onion_skin(false);
+        }
     }
 }
 
@@ -216,6 +260,7 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
     match action {
         A::Animate => Some(canvas.is_playing()),
         A::OnionSkin => Some(canvas.onion_skin()),
+        A::AnimationTools => Some(layout.animation_tools),
         A::Mirror => Some(canvas.is_mirrored()),
         A::PixelMode => Some(canvas.session().pixel_mode()),
         _ => None,
@@ -241,6 +286,7 @@ fn tip(action: Action) -> Option<&'static str> {
         A::ResetTurn => "view-turn-reset-tip",
         A::Mirror => "view-mirror-tip",
         A::PixelMode => "pixel-mode-tip",
+        A::AnimationTools => "view-animation-tools-tip",
         _ => return None,
     }))
 }
@@ -256,7 +302,7 @@ pub fn items(
     let width = entries
         .iter()
         .filter_map(|entry| match *entry {
-            Do(action) => Some(crate::widgets::menu_item_width(
+            Do(action) if shown(action, &panels.layout) => Some(crate::widgets::menu_item_width(
                 ui,
                 label(action, canvas),
                 &panels.keys.text(action),
@@ -266,18 +312,24 @@ pub fn items(
         .fold(crate::widgets::MENU_WIDTH, f32::max);
     for entry in entries {
         let &Do(action) = entry else {
+            if !gap_shown(entries, entry, &panels.layout) {
+                continue;
+            }
             let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 9.0), egui::Sense::hover());
             ui.painter()
                 .hline(rect.x_range(), rect.center().y, crate::widgets::rule());
             continue;
         };
+        if !shown(action, &panels.layout) {
+            continue;
+        }
         let mut response = crate::widgets::menu_item(
             ui,
             width,
             label(action, canvas),
             &panels.keys.text(action),
             checked(action, canvas, &panels.layout),
-            enabled(action, canvas),
+            enabled(action, canvas, &panels.layout),
         );
         if let Some(tip) = tip(action) {
             response = response.on_hover_text(tip);
@@ -290,6 +342,19 @@ pub fn items(
         }
     }
     chosen
+}
+
+/// Whether the gap `entry` of `entries` shows: not with nothing shown after
+/// it before the next gap or the end.
+fn gap_shown(entries: &[Entry], entry: &Entry, layout: &Layout) -> bool {
+    let at = entries
+        .iter()
+        .position(|each| std::ptr::eq(each, entry))
+        .expect("one of them");
+    entries[at + 1..]
+        .iter()
+        .take_while(|each| matches!(each, Do(_)))
+        .any(|each| matches!(each, Do(action) if shown(*action, layout)))
 }
 
 pub fn run(
@@ -396,6 +461,10 @@ pub fn run(
             panels.report(result);
         }
         A::ResetLayout => panels.set_layout(Layout::default()),
+        A::AnimationTools => {
+            panels.layout.animation_tools = !panels.layout.animation_tools;
+            sync_animation_tools(canvas, &mut panels.layout);
+        }
         A::Brush
         | A::Eraser
         | A::Select
@@ -426,7 +495,7 @@ pub fn shortcuts(
     panels: &mut Panels,
     typed: &[Chord],
 ) {
-    for (chord, action) in take_pressed(ctx, &panels.keys, typed, canvas) {
+    for (chord, action) in take_pressed(ctx, &panels.keys, &panels.layout, typed, canvas) {
         // The IME test counts these.
         tracing::debug!("canvas {}", chord.text());
         run(action, canvas, files, clipboard, panels);
@@ -440,6 +509,7 @@ pub fn shortcuts(
 fn take_pressed(
     ctx: &egui::Context,
     keys: &Keymap,
+    layout: &Layout,
     typed: &[Chord],
     canvas: &Canvas,
 ) -> Vec<(Chord, Action)> {
@@ -468,7 +538,10 @@ fn take_pressed(
                 return true;
             };
             let chord = Chord::new(modifiers, key);
-            let Some(action) = keys.action(chord).filter(|&action| enabled(action, canvas)) else {
+            let Some(action) = keys
+                .action(chord)
+                .filter(|&action| enabled(action, canvas, layout))
+            else {
                 return true;
             };
             pressed.push((chord, action));
@@ -478,7 +551,7 @@ fn take_pressed(
     pressed.extend(typed.iter().filter_map(|&chord| {
         let action = keys
             .action(chord)
-            .filter(|&action| enabled(action, canvas))?;
+            .filter(|&action| enabled(action, canvas, layout))?;
         Some((chord, action))
     }));
     pressed
@@ -503,6 +576,38 @@ fn was_typing(ctx: &egui::Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_animation_tools_show_when_on_or_when_the_drawing_moves() {
+        let mut canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
+        let mut layout = Layout::default();
+        assert!(!layout.animation_tools);
+        for action in [
+            A::ToggleKey,
+            A::NewCel,
+            A::OnionSkin,
+            A::MoveLayer,
+            A::NextKey,
+        ] {
+            assert!(!shown(action, &layout));
+            assert!(!enabled(action, &canvas, &layout), "{action:?} by its key");
+        }
+        assert!(enabled(A::Animate, &canvas, &layout));
+        assert!(enabled(A::NextFrame, &canvas, &layout));
+        // Turned on, the move tool can be chosen; off again, it is left.
+        layout.animation_tools = true;
+        canvas.choose_tool(Tool::Move);
+        canvas.set_onion_skin(true);
+        layout.animation_tools = false;
+        sync_animation_tools(&mut canvas, &mut layout);
+        assert_eq!(canvas.tool(), Tool::Pen);
+        assert!(!canvas.onion_skin());
+        // A drawing with a key turns them on, and keeps them on.
+        canvas.toggle_key();
+        sync_animation_tools(&mut canvas, &mut layout);
+        assert!(layout.animation_tools);
+        assert!(!enabled(A::AnimationTools, &canvas, &layout));
+    }
 
     #[test]
     fn the_menus_hold_every_action_but_escape_once() {
@@ -547,10 +652,16 @@ mod tests {
         }
         let mut taken = Vec::new();
         let mut output = ctx.run_ui(input, |ui| {
-            taken = take_pressed(ui.ctx(), &Keymap::default(), typed, canvas)
-                .into_iter()
-                .map(|(_, action)| action)
-                .collect();
+            taken = take_pressed(
+                ui.ctx(),
+                &Keymap::default(),
+                &Layout::default(),
+                typed,
+                canvas,
+            )
+            .into_iter()
+            .map(|(_, action)| action)
+            .collect();
             let mut text = String::new();
             let field = ui.text_edit_singleline(&mut text);
             if focus_text {
@@ -623,10 +734,16 @@ mod tests {
             });
         }
         let mut output = ctx.run_ui(input, |ui| {
-            taken = take_pressed(ui.ctx(), &Keymap::default(), &copy, &canvas)
-                .into_iter()
-                .map(|(_, action)| action)
-                .collect();
+            taken = take_pressed(
+                ui.ctx(),
+                &Keymap::default(),
+                &Layout::default(),
+                &copy,
+                &canvas,
+            )
+            .into_iter()
+            .map(|(_, action)| action)
+            .collect();
             left = ui.input(|input| {
                 [
                     egui::Key::Z,

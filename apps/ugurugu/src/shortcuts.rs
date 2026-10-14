@@ -312,6 +312,7 @@ actions! {
     ResetTurn "resetCanvasRotation" "view-turn-reset" [] [];
     Mirror "mirrorCanvas" "view-mirror" [plain(Key::M)] [];
     Animate "play" "view-animate" [plain(Key::P)] [];
+    AnimationTools "animationTools" "view-animation-tools" [] [];
     PreviousFrame "previousFrame" "frame-previous" [plain(Key::Comma)] [];
     NextFrame "nextFrame" "frame-next" [plain(Key::Period)] [];
     PreviousKey "previousKey" "key-previous" [shift(Key::Comma)] [];
