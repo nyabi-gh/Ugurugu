@@ -53,4 +53,6 @@ are at the `v2.2.13` tag.
   Japanese translations, then generate the `.ftl` files with
   `python -X utf8 tools/strings_to_ftl.py`. Do not edit the `.ftl` files by hand.
 - Add a release note to `release-notes/<version>.en.md` when the change is
-  user visible. Release notes are written in English only.
+  user visible. Release notes are written in English only. End each entry
+  with the issues it answers and the pull requests that made it, in
+  parentheses, issues first: `(#64, #66)`. GitHub links them in the release.
