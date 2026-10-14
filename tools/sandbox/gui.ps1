@@ -402,6 +402,31 @@ Step 'Exe and window icons' {
     "exe icon $($bitmap.Width)x$($bitmap.Height) in exe-icon.png; title bar and taskbar in $shot"
 }
 
+# At 100% so the buttons under the layer list are on the screen.
+Step 'Layer buttons' {
+    $env:UGURUGU_UI_SCALE = '100'
+    try {
+        $process = Start-App
+        Invoke-Named $process 'Add layer'
+        Invoke-Named $process 'Duplicate layer'
+        $copied = Test-Named $process 'Layer 2 copy'
+        $shot = Save-Screen 'layer-buttons'
+        Invoke-Named $process 'Merge with layer below'
+        $merged = -not (Test-Named $process 'Layer 2 copy')
+        Invoke-Named $process 'Delete layer'
+        $deleted = -not (Test-Named $process 'Layer 2')
+    } finally {
+        Remove-Item Env:UGURUGU_UI_SCALE
+        # The edits leave a project to save or restore.
+        Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    }
+    if (-not ($copied -and $merged -and $deleted)) {
+        throw "copied $copied, merged $merged, deleted $deleted; $shot"
+    }
+    "duplicated, merged down and deleted by name; $shot"
+}
+
 Step 'Help window' {
     $process = Start-App
     Send-Keys $process '{F1}'

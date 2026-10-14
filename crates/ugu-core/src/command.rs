@@ -158,6 +158,35 @@ pub fn remove_layer(id: LayerId) -> Vec<Change> {
     vec![Change::RemoveLayer(id)]
 }
 
+/// A copy of the paint layer `id` right above it, named `name`. The copy
+/// draws the same stored strokes, masks and images as the original; a later
+/// edit of either stores what it changes under new ids.
+pub fn duplicate_layer(
+    document: &Document,
+    id: LayerId,
+    name: String,
+) -> Result<(LayerId, Vec<Change>), EditError> {
+    let (parent, index) = document.position(id).ok_or(EditError::NoSuchLayer(id))?;
+    let source = document.layer(id).ok_or(EditError::NoSuchLayer(id))?;
+    if !matches!(source.kind, LayerKind::Paint(_)) {
+        return Err(EditError::NotPaintLayer(id));
+    }
+    let copy = next_layer_id(document);
+    let layer = Layer {
+        id: copy,
+        name,
+        ..source.clone()
+    };
+    Ok((
+        copy,
+        vec![Change::InsertLayer {
+            parent,
+            index: index + 1,
+            layer,
+        }],
+    ))
+}
+
 /// Moves `id` to `index` in `parent`, counted after it is taken out.
 pub fn move_layer(
     document: &Document,

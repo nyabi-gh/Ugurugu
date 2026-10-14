@@ -189,6 +189,12 @@ fn groups_outside(layers: &[Layer], id: LayerId, groups: &mut Vec<(LayerId, Stri
     }
 }
 
+fn copy_name(name: &str) -> String {
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("name", name.to_owned());
+    tr_with("layer-copy-name", &args)
+}
+
 fn report(refusal: &mut Option<String>, result: Result<Outcome, EditError>) {
     match result {
         Ok(Outcome::Committed(_)) => *refusal = None,
@@ -742,6 +748,7 @@ impl LayerDock {
             .unwrap_or((0, 0));
         let merge_refused = merge_refusal(document, current);
         let removable = canvas.session().can_remove_layer();
+        let duplicable = canvas.session().can_duplicate_layer();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.add_space(theme::space::XS);
@@ -755,9 +762,25 @@ impl LayerDock {
             if text_button(ui, Glyph::Remove, "G", tr("layer-ungroup"), is_group).clicked() {
                 report(refusal, canvas.edit(Session::ungroup));
             }
+            // Making layers, then what a layer holds, then the order.
+            ui.add_space(theme::space::M);
+            if widgets::icon_button(
+                ui,
+                Glyph::Duplicate,
+                16.0,
+                tr("layer-duplicate"),
+                duplicable,
+            )
+            .clicked()
+            {
+                report(
+                    refusal,
+                    canvas.edit(|session| session.duplicate_layer(copy_name)),
+                );
+            }
             let merge = widgets::icon_button_tip(
                 ui,
-                Glyph::MoveDown,
+                Glyph::MergeDown,
                 16.0,
                 tr("layer-merge"),
                 merge_refused.unwrap_or(tr("layer-merge")),
@@ -766,11 +789,7 @@ impl LayerDock {
             if merge.clicked() {
                 report(refusal, canvas.edit(Session::merge_down));
             }
-            if widgets::icon_button(ui, Glyph::Remove, 16.0, tr("layer-delete"), removable)
-                .clicked()
-            {
-                report(refusal, canvas.edit(Session::remove_layer));
-            }
+            ui.add_space(theme::space::M);
             if widgets::icon_button(ui, Glyph::MoveUp, 16.0, tr("layer-up"), index + 1 < count)
                 .clicked()
             {
@@ -781,6 +800,15 @@ impl LayerDock {
             {
                 report(refusal, canvas.edit(|session| session.move_layer(-1)));
             }
+            // Apart from the rest at the far end, so it is not hit by mistake.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(theme::space::XS);
+                if widgets::icon_button(ui, Glyph::Delete, 16.0, tr("layer-delete"), removable)
+                    .clicked()
+                {
+                    report(refusal, canvas.edit(Session::remove_layer));
+                }
+            });
         });
     }
 

@@ -493,6 +493,41 @@ impl Session {
         Ok(outcome)
     }
 
+    pub fn can_duplicate_layer(&self) -> bool {
+        matches!(
+            self.document().layer(self.layer).map(|layer| &layer.kind),
+            Some(LayerKind::Paint(_))
+        )
+    }
+
+    /// Copies the current paint layer, pending edits applied, right above
+    /// it and makes the copy current. `name` makes the copy's name from the
+    /// original's.
+    pub fn duplicate_layer(
+        &mut self,
+        name: impl FnOnce(&str) -> String,
+    ) -> Result<Outcome, EditError> {
+        if !self.can_duplicate_layer() {
+            return Ok(Outcome::NoChange);
+        }
+        self.settle()?;
+        let source = self.layer;
+        let original = self
+            .document()
+            .layer(source)
+            .map_or("", |layer| &layer.name);
+        let name: String = name(original)
+            .chars()
+            .take(limits::LAYER_NAME_CHARS)
+            .collect();
+        let (copy, changes) = command::duplicate_layer(self.document(), source, name)?;
+        let outcome = self.history_mut()?.edit("Duplicate layer", |_| changes)?;
+        if let Outcome::Committed(_) = outcome {
+            self.layer = copy;
+        }
+        Ok(outcome)
+    }
+
     /// Moves the current layer up (`1`) or down (`-1`) among its siblings.
     pub fn move_layer(&mut self, by: isize) -> Result<Outcome, EditError> {
         self.settle()?;

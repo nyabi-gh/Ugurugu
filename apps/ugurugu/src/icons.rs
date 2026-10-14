@@ -42,6 +42,7 @@ pub enum Glyph {
     Confirm = 30,
     Cancel = 31,
     Shape = 32,
+    MergeDown = 33,
 }
 
 type Points = Vec<[f64; 2]>;
@@ -290,6 +291,12 @@ fn shapes(glyph: Glyph) -> Shapes {
         Glyph::Cancel => {
             lines.push(vec![[6.0, 6.0], [18.0, 18.0]]);
             lines.push(vec![[18.0, 6.0], [6.0, 18.0]]);
+        }
+        Glyph::MergeDown => {
+            // An arrow down onto the layer below.
+            lines.push(vec![[12.0, 3.4], [12.0, 14.0]]);
+            lines.push(vec![[6.6, 9.0], [12.0, 14.4], [17.4, 9.0]]);
+            lines.push(vec![[4.6, 19.8], [19.4, 19.8]]);
         }
         Glyph::Shape => {
             // A square, and a circle over its corner.

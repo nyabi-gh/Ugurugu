@@ -327,6 +327,77 @@ fn merging_down_makes_the_lower_layer_current() {
 }
 
 #[test]
+fn a_duplicate_draws_what_its_layer_does_right_above_it() {
+    let mut session = session();
+    let tools = Tools::default();
+    let first = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    session.add_layer().unwrap();
+    let source = session.current_layer();
+    draw(&mut session, &tools, 20.0, 80.0);
+    session
+        .update_layer(source, "Layer opacity", |layer| {
+            if let LayerKind::Paint(paint) = &mut layer.kind {
+                paint.opacity = 0.5;
+            }
+        })
+        .unwrap();
+    session.select_layer(first).unwrap();
+    session.select_layer(source).unwrap();
+
+    session
+        .duplicate_layer(|name| format!("{name} copy"))
+        .unwrap();
+    let copy = session.current_layer();
+    let layers = &session.document().layers;
+    assert_eq!(layers.len(), 3);
+    assert_eq!(layers[2].id, copy);
+    assert_eq!(layers[2].name, format!("{} copy", layers[1].name));
+    assert_eq!(layers[2].kind, layers[1].kind);
+    assert_eq!(ops(&session, copy), ops(&session, source));
+    assert_eq!(session.undo_label(), Some("Duplicate layer"));
+
+    // Drawing on the copy leaves the original as it was.
+    draw(&mut session, &tools, 30.0, 90.0);
+    assert_eq!(ops(&session, copy).len(), ops(&session, source).len() + 1);
+
+    session.undo().unwrap();
+    session.undo().unwrap();
+    assert_eq!(session.document().layers.len(), 2);
+    assert_eq!(session.current_layer(), source);
+}
+
+#[test]
+fn a_group_is_not_duplicated() {
+    let mut session = session();
+    session.add_group().unwrap();
+    let group = session.document().layers[0].id;
+    session.select_layer(group).unwrap();
+    assert!(!session.can_duplicate_layer());
+    assert_eq!(
+        session.duplicate_layer(|name| name.to_owned()).unwrap(),
+        Outcome::NoChange
+    );
+    assert_eq!(session.document().layers.len(), 1);
+}
+
+#[test]
+fn a_duplicates_name_is_cut_to_the_limit() {
+    let mut session = session();
+    let source = session.current_layer();
+    session
+        .update_layer(source, "Rename layer", |layer| {
+            layer.name = "가".repeat(limits::LAYER_NAME_CHARS);
+        })
+        .unwrap();
+    session
+        .duplicate_layer(|name| format!("{name} copy"))
+        .unwrap();
+    let copy = session.document().layer(session.current_layer()).unwrap();
+    assert_eq!(copy.name, "가".repeat(limits::LAYER_NAME_CHARS));
+}
+
+#[test]
 fn an_unchanged_property_is_no_edit() {
     let mut session = session();
     let layer = session.current_layer();

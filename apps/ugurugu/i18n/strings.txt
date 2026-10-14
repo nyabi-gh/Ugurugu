@@ -275,6 +275,8 @@ layers | Layers | 레이어 | レイヤー
 layer-add | Add layer | 레이어 추가 | レイヤーを追加
 layer-add-group | Add group containing the selected layer | 선택한 레이어를 포함하는 그룹 추가 | 選択したレイヤーを含むグループを追加
 layer-ungroup | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除
+layer-duplicate | Duplicate layer | 레이어 복제 | レイヤーを複製
+layer-copy-name | %1 copy | %1 사본 | %1のコピー | args=name
 layer-merge | Merge with layer below | 아래 레이어와 병합 | 下のレイヤーと結合
 layer-delete | Delete layer | 레이어 삭제 | レイヤーを削除
 layer-up | Move layer up | 레이어 위로 이동 | レイヤーを上へ移動
