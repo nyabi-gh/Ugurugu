@@ -1072,17 +1072,24 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **결론:** 키·셀이 없는 문서는 바이트와 시간이 그대로다. 움직인 레이어는 표면을 다시 그리지 않고 합성 때 행마다 샘플링하므로 비용이 레이어 수 × 캔버스 크기에 비례하고(2048²당 약 2ms), pen-up은 8ms 목표 안이다. 앱의 입력→표시는 재지 않았다(backlog B3-125). 코드: `crates/ugu-render/src/transform.rs`(샘플러), `plan.rs`(프레임별 plan), `composite.rs`(`Put::Over`·`Stream`), `tools/ugu-doc`(`animate`, `play`, `UGU_FRAME`).
 
-## 56. 애니메이션 GUI (Windows Sandbox, 2026-10-14, 진행 중)
+## 56. 애니메이션 GUI (Windows Sandbox, 2026-10-14)
 
-**방법:** `rust/animation-app`의 release 빌드(`a3438dc`)로 `gui.ps1`의 "Keyframes"(이동 도구로 1·16프레임에 끌기, 잉크 가운데 x 비교), "Cels and onion skin"(폴더·새 셀·어니언 스킨의 붉은 화소 수)과 기존 "Layer buttons", "Transform box cursors", "Tab moves the keyboard focus through the controls"를 돌렸다.
+**방법:** `rust/animation-app`의 release 빌드로 `gui.ps1`의 "Keyframes"(이동 도구로 1·16프레임에 끌기, 잉크 가운데 x 비교), "Cels and onion skin"(폴더·새 셀·어니언 스킨의 붉은 화소 수), "Animation icons at 100%"(100% UI 화면에서 새 아이콘을 잘라 봄)와 기존 "Layer buttons", "Transform box cursors", "Tab moves the keyboard focus through the controls"를 돌렸다.
 
 **결과:**
 
-| 단계 | 결과 |
+| 실행 | 결과 |
 |---|---|
-| Layer buttons, Transform box cursors, Tab 순회 | 통과 |
-| Keyframes | 실패. 이동 도구 설정·타임라인 키 행("Keys of Layer 1: 2")·새 아이콘은 보이지만, 캔버스 폭의 25%를 끈 것이 X −12.3px(약 8 화면 px)로만 들어가 잉크 가운데가 863 → 864 → 853 |
-| Cels and onion skin | 실패. 시작 때 `Find-Paper`가 문서를 찾지 못함(앞 단계의 강제 종료 뒤) |
-| 첫 회 두 단계 | 실패. 단계가 `Draw-Stroke` 정의보다 앞에 있어서였고 옮겼다 |
+| `a3438dc`: Layer buttons, Transform box cursors, Tab 순회 | 통과 |
+| `a3438dc`: Keyframes | 실패. 캔버스 폭의 25%를 끈 것이 X −12.3px로만 들어가 잉크 가운데가 863 → 864 → 853 |
+| `a3438dc`: Cels and onion skin | 실패. 시작 때 `Find-Paper`가 문서를 찾지 못함 |
+| 고친 뒤: Keyframes | 통과. 잉크 가운데 860 → 1프레임 1002 → 16프레임 858, 8프레임 942 |
+| 고친 뒤: Cels and onion skin | 통과. 4프레임에 셀 행, 1프레임으로 돌아옴, 붉은 화소 어니언 스킨 없이 0 · 켜고 503 |
+| 고친 뒤: Animation icons at 100% | 통과. 키(◆)·이전·다음 키·이동(사방 화살표)·애니메이션 폴더·새 셀은 16pt에서 구분됨. 어니언 스킨(가로로 붙은 원 셋)은 알약처럼 읽혀 양파 모양으로 바꾸고 다시 봄 |
 
-**결론:** 아직 통과하지 않았다. Keyframes의 원인은 찾지 않았다(가설: 합성 끌기의 중간 점이 적어 `drag_pose`가 마지막 위치를 받지 못하거나, 놓을 때의 위치가 다르게 들어온다). 다음에 앱 로그와 단위 시험으로 확인한다. 단위 시험 `the_move_tool_shows_a_pose_as_it_is_dragged_and_keys_it_on_release`는 같은 끌기를 통과한다.
+**원인:**
+
+- Keyframes: 이동 도구 설정 패널이 매 프레임 현재 자세를 f32 숫자 칸으로 왕복시킨 값이 f64 자세와 다르면 `set_pose`를 불렀다. 캔버스로 끄는 자세는 문서 px 소수라 첫 표본에서 키가 들어갔고, `Canvas::edit`가 진행 중인 상호작용을 `Idle`로 바꿔 끌기가 거기서 끝났다. 앱 시험(`a_drag_on_the_canvas_keys_where_it_ends_while_the_settings_show`)이 고치기 전에 184.6px 끌기를 6.15px로 키했다. 패널은 바꾼 칸만 반영하고, 캔버스가 끄는 자세는 키하지 않는다. `edit`가 끌기를 끊는 것은 backlog B3-126.
+- Cels and onion skin: 앞 단계에서 이동 도구를 고르자 settings 스레드가 패닉했다(설정 파일의 도구 이름 표에 이동 도구가 없음, `settings/tools.rs`). 다음 실행이 크래시 파일을 보고 띄운 "closed unexpectedly" 대화상자가 캔버스 가운데를 가렸다. 강제 종료는 원인이 아니었다.
+
+**결론:** 두 단계와 아이콘 확인이 통과했다. 합성 입력은 마우스이고 펜·터치로는 보지 않았다.

@@ -14,7 +14,7 @@ use ugu_session::{
     ToolSettings, Tools, is_pixel,
 };
 
-const TOOLS: [(Tool, &str); 8] = [
+const TOOLS: [(Tool, &str); 9] = [
     (Tool::Pen, "brush"),
     (Tool::Eraser, "eraser"),
     (Tool::Select, "select"),
@@ -23,6 +23,7 @@ const TOOLS: [(Tool, &str); 8] = [
     (Tool::Text, "text"),
     (Tool::Eyedropper, "eyedropper"),
     (Tool::Shape, "shape"),
+    (Tool::Move, "move"),
 ];
 const SHAPES: [(ShapeKind, &str); 3] = [
     (ShapeKind::Freehand, "freehand"),
@@ -484,6 +485,40 @@ mod tests {
         assert_eq!(parse(&to_json(&tools)), tools);
         assert_eq!(parse(&to_json(&Tools::default())), Tools::default());
         assert_eq!(parse(&Value::Null), Tools::default());
+    }
+
+    #[test]
+    fn every_tool_is_written_and_read_back() {
+        let every = [
+            Tool::Pen,
+            Tool::Eraser,
+            Tool::Select,
+            Tool::Wand,
+            Tool::Fill,
+            Tool::Text,
+            Tool::Eyedropper,
+            Tool::Shape,
+            Tool::Move,
+        ];
+        for tool in every {
+            // A new tool does not build here until it is listed above.
+            match tool {
+                Tool::Pen
+                | Tool::Eraser
+                | Tool::Select
+                | Tool::Wand
+                | Tool::Fill
+                | Tool::Text
+                | Tool::Eyedropper
+                | Tool::Shape
+                | Tool::Move => {}
+            }
+            let tools = Tools {
+                tool,
+                ..Tools::default()
+            };
+            assert_eq!(parse(&to_json(&tools)).tool, tool);
+        }
     }
 
     #[test]

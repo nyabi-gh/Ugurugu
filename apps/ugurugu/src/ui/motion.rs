@@ -4,7 +4,7 @@
 //! The move tool's settings: where the current layer is on the frame
 //! shown, as numbers, and its key there.
 
-use ugu_core::keys::{Ease, Pose, limits};
+use ugu_core::keys::{Ease, limits};
 
 use crate::canvas::Canvas;
 use crate::i18n::tr;
@@ -58,24 +58,34 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     );
     let mut flip = pose.flip;
     let flipped = widgets::check_row(ui, tr("motion-flip"), tr("motion-flip"), &mut flip);
-    pose = Pose {
-        offset: [f64::from(x), f64::from(y)],
-        rotation: f64::from(rotation),
-        scale: f64::from(scale) / 100.0,
-        flip,
-    };
+    // Only what was edited here is taken back: the fields hold f32, and a
+    // pose dragged on the canvas is not one.
+    let [moved_x, moved_y, turned, scaled] = [0, 1, 2, 3].map(|at| fields[at].changed());
+    if moved_x {
+        pose.offset[0] = f64::from(x);
+    }
+    if moved_y {
+        pose.offset[1] = f64::from(y);
+    }
+    if turned {
+        pose.rotation = f64::from(rotation);
+    }
+    if scaled {
+        pose.scale = f64::from(scale) / 100.0;
+    }
+    pose.flip = flip;
+    let changed = moved_x || moved_y || turned || scaled || flipped.changed();
     let dragging = fields.iter().any(egui::Response::dragged);
-    let ended = flipped.changed()
-        || fields.iter().any(|field| {
-            field.drag_stopped() || (field.changed() && !field.dragged()) || field.lost_focus()
-        });
-    if pose != shown {
+    let ended = fields
+        .iter()
+        .any(|field| field.drag_stopped() || field.lost_focus());
+    if changed {
         if dragging {
             canvas.preview_pose(pose);
         } else {
             canvas.set_pose(pose);
         }
-    } else if ended && canvas.session().posing().is_some() {
+    } else if ended && canvas.session().posing().is_some() && !canvas.posing_on_canvas() {
         canvas.set_pose(pose);
     }
 
@@ -128,4 +138,78 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
             .size(theme::SMALL)
             .color(theme::muted()),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Pos2, RawInput, Rect, vec2};
+    use ugu_core::document::Document;
+    use ugu_session::Tool;
+    use ugu_win::clock::Ticks;
+    use ugu_win::pointer::{Buttons, PointerKind, PointerSample};
+
+    use super::*;
+    use crate::input::{CanvasInput, Gesture};
+
+    fn at(x: f64, y: f64) -> PointerSample {
+        PointerSample {
+            position: [x, y],
+            pressure: None,
+            tilt: None,
+            twist: None,
+            buttons: Buttons::empty(),
+            in_contact: true,
+            inverted: false,
+            time: Ticks(0),
+            frame_id: 0,
+        }
+    }
+
+    #[test]
+    fn a_drag_on_the_canvas_keys_where_it_ends_while_the_settings_show() {
+        let ctx = egui::Context::default();
+        let keys = Keymap::default();
+        let mut canvas = Canvas::new(Document::new([400, 300]), |_| {});
+        canvas.set_tool(Tool::Move).unwrap();
+        let show = |canvas: &mut Canvas| {
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(300.0, 600.0))),
+                    ..RawInput::default()
+                },
+                |ui| settings(ui, canvas, &keys),
+            );
+            output.textures_delta.clear();
+        };
+        show(&mut canvas);
+        let start = [200.0, 150.0];
+        canvas.apply(CanvasInput::Begin(
+            Gesture::Draw,
+            PointerKind::Mouse,
+            at(start[0], start[1]),
+        ));
+        // Steps that land between f32 values, as a zoomed view's do.
+        let mut x = start[0];
+        for _ in 0..30 {
+            x += 4.0 / 0.65;
+            canvas.apply(CanvasInput::Extend(at(x, start[1])));
+            show(&mut canvas);
+        }
+        canvas.apply(CanvasInput::End(at(x, start[1])));
+        show(&mut canvas);
+        let layer = canvas.session().current_layer();
+        let key = canvas.session().key_here(layer).unwrap();
+        let moved = canvas.document_point([x, start[1]])[0] - canvas.document_point(start)[0];
+        assert!(
+            (key.pose.offset[0] - moved).abs() < 1e-3,
+            "{:?} for {moved}",
+            key.pose.offset
+        );
+        assert_eq!(
+            canvas.session().undo_label(),
+            Some("Move layer on this frame")
+        );
+        assert!(canvas.edit(|session| session.undo()).unwrap());
+        assert!(canvas.session().key_here(layer).is_none(), "one step");
+    }
 }

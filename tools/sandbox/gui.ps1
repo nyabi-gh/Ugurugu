@@ -801,6 +801,26 @@ Step 'Cels and onion skin' {
     $detail
 }
 
+# At 100% so the glyphs are seen at their real size: the move tool, keys,
+# onion skin, animation folder and new cel.
+Step 'Animation icons at 100%' {
+    $env:UGURUGU_UI_SCALE = '100'
+    try {
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+        $process = Start-App
+        [void](Draw-Stroke $process)
+        Invoke-Named $process 'Make animation folder'
+        Send-Keys $process 'v'
+        Start-Sleep -Milliseconds 500
+        $shot = Save-Screen 'animation-icons'
+    } finally {
+        Remove-Item Env:UGURUGU_UI_SCALE
+        Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    }
+    "move tool, key buttons, timeline and layer list; $shot"
+}
+
 # Photographs every panel, menu and dialog in each of $Languages; the files
 # are named with $Tag first.
 function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {

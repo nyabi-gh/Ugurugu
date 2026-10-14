@@ -341,10 +341,23 @@ fn shapes(glyph: Glyph) -> Shapes {
             }
         }
         Glyph::OnionSkin => {
-            // The frame shown between the faint ones before and after.
-            lines.push(circle([6.6, 12.0], 4.0, 20));
-            lines.push(circle([17.4, 12.0], 4.0, 20));
-            shapes.fills.push(circle([12.0, 12.0], 4.4, 20));
+            // An onion with one layer showing; three circles in a row
+            // read as a pill at 16 pt.
+            let mut right = quad([12.0, 3.0], [13.6, 8.2], [17.2, 10.6], 8);
+            right.extend(
+                quad([17.2, 10.6], [21.4, 13.6], [17.6, 18.6], 8)
+                    .into_iter()
+                    .skip(1),
+            );
+            right.extend(
+                quad([17.6, 18.6], [15.4, 20.8], [12.0, 20.8], 6)
+                    .into_iter()
+                    .skip(1),
+            );
+            let mut outline = right.clone();
+            outline.extend(right.iter().rev().skip(1).map(|[x, y]| [24.0 - x, *y]));
+            lines.push(outline);
+            lines.push(quad([12.0, 6.4], [16.6, 12.6], [13.2, 20.4], 10));
         }
         Glyph::AnimationFolder => {
             lines.push(vec![

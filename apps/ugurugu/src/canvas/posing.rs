@@ -71,6 +71,12 @@ impl Canvas {
         Some(if inside { Grip::Move } else { Grip::Rotate })
     }
 
+    /// Whether the pose shown is being dragged out on the canvas, not in
+    /// the move tool's settings.
+    pub fn posing_on_canvas(&self) -> bool {
+        matches!(self.interaction, Interaction::Posing { .. })
+    }
+
     pub(super) fn begin_pose_drag(&mut self, position: [f64; 2]) {
         self.notice = None;
         self.pause_playback();
