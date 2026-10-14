@@ -2524,6 +2524,49 @@ fn cels_follow_the_frame_and_an_empty_frame_gets_a_new_cel_to_draw_on() {
 }
 
 #[test]
+fn a_cel_added_to_draw_on_is_one_step_with_the_drawing_and_gone_without_it() {
+    let mut session = session();
+    let tools = Tools::default();
+    session.make_animation_folder().unwrap();
+    let folder = session.folder().unwrap();
+    session.set_frame(6).unwrap();
+    session.expose(None).unwrap();
+    let cels = |session: &Session| match &session.document().layer(folder).unwrap().kind {
+        LayerKind::Group(group) => group.children.len(),
+        LayerKind::Paint(_) => unreachable!(),
+    };
+    let label = session.undo_label().map(str::to_owned);
+    // A stroke given up leaves no cel and no step.
+    session.begin_stroke(&tools, at(10.0, 50.0, 0.0)).unwrap();
+    session.cancel_stroke();
+    assert_eq!(cels(&session), 1);
+    assert_eq!(session.undo_label().map(str::to_owned), label);
+    assert_eq!(session.current_layer(), folder);
+    // Nor does one refused, or a fill, outside the selection.
+    session.history_mut().unwrap().select(
+        "Select",
+        Selection::of_shape(
+            &ugu_core::selection::Shape::Rectangle([0.0, 0.0], [5.0, 5.0]),
+            [200, 100],
+        ),
+    );
+    assert_eq!(
+        session.bucket(&tools, [100.0, 50.0], None),
+        Err(FillError::OutsideSelection)
+    );
+    assert_eq!(cels(&session), 1);
+    assert_eq!(session.current_layer(), folder);
+    session.deselect().unwrap();
+    // One drawn is one step with its cel.
+    draw(&mut session, &tools, 10.0, 40.0);
+    assert_eq!(cels(&session), 2);
+    assert_eq!(session.undo_label(), Some("Draw"));
+    session.undo().unwrap();
+    assert_eq!(cels(&session), 1);
+    assert_eq!(session.undo_label(), Some("Deselect"));
+}
+
+#[test]
 fn fewer_frames_drop_the_keys_past_them_in_the_same_step() {
     let mut session = session();
     let layer = session.current_layer();

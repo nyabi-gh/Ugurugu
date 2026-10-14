@@ -309,6 +309,42 @@ impl History {
         Ok(Outcome::Committed(changes))
     }
 
+    /// Makes the newest undo step and the one before it one step, under
+    /// the newest one's label; `false` when there are not two.
+    pub fn join(&mut self) -> bool {
+        if self.undo.len() < 2 {
+            return false;
+        }
+        let newer = self.undo.pop_back().expect("two steps");
+        let older = self.undo.pop_back().expect("two steps");
+        self.undo_bytes -= newer.bytes + older.bytes;
+        let mut changes = newer.changes;
+        changes.extend(older.changes);
+        self.push_undo(Entry {
+            bytes: 0,
+            label: newer.label,
+            changes,
+            selection: older.selection.or(newer.selection),
+            before: older.before,
+            after: newer.after,
+        });
+        true
+    }
+
+    /// Undoes the newest step without keeping it to redo: a step made for
+    /// one that never came.
+    pub fn retract(&mut self) -> Result<bool, EditError> {
+        let Some(mut entry) = self.undo.pop_back() else {
+            return Ok(false);
+        };
+        self.undo_bytes -= entry.bytes;
+        if let Err(error) = self.reapply(&mut entry, true) {
+            self.push_undo(entry);
+            return Err(error);
+        }
+        Ok(true)
+    }
+
     /// Returns `false` when there is nothing to undo.
     pub fn undo(&mut self) -> Result<bool, EditError> {
         let Some(mut entry) = self.undo.pop_back() else {

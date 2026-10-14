@@ -54,7 +54,7 @@ impl Session {
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.paintable()?;
         self.settle()?;
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         self.pending = Some(Pending {
             layer: self.layer,

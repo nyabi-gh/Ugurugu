@@ -73,7 +73,7 @@ impl Session {
     }
 
     pub fn begin_selection(&mut self, kind: ShapeKind, position: [f64; 2], combine: Combine) {
-        self.live = None;
+        self.drop_live();
         self.lasso = Some(Lasso {
             kind,
             combine,

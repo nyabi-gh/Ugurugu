@@ -59,7 +59,7 @@ impl Session {
         ) -> (LayerId, Vec<Change>, Option<Selection>),
     ) -> Result<Outcome, EditError> {
         self.settle()?;
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         let (parent, index) = self
             .document()

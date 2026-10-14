@@ -115,7 +115,7 @@ impl Session {
         combine: Combine,
         reference: Option<&[[u8; 4]]>,
     ) -> Result<bool, FillError> {
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         // The current layer alone is read in its own pixels.
         let own = tools.fill.reads == Reads::Current;
@@ -161,33 +161,35 @@ impl Session {
         position: [f64; 2],
         reference: Option<&[[u8; 4]]>,
     ) -> Result<Outcome, FillError> {
-        self.live = None;
+        self.drop_live();
         let Some(clicked) = self.pixel(position) else {
             return Ok(Outcome::NoChange);
         };
         self.settle()?;
         self.draw_on_cel()?;
-        self.paintable()?;
-        if self.selection().is_some_and(|selection| {
-            !selection
-                .mask()
-                .contains(clicked[0] as i32, clicked[1] as i32)
-        }) {
-            return Err(FillError::OutsideSelection);
-        }
-        // The current layer alone is read in its own pixels, anything else
-        // as shown.
-        let area = if tools.fill.reads == Reads::Current {
-            let seed = self
-                .pixel(self.to_layer(position))
-                .ok_or(FillError::NothingThere)?;
-            Arc::new(self.area(seed, reference, &tools.fill)?)
-        } else {
-            let area = Arc::new(self.area(clicked, reference, &tools.fill)?);
-            self.in_layer(&area).ok_or(FillError::NothingThere)?
-        };
-        let clip = self.layer_clip()?;
-        self.commit_fill(tools, &area, clip)
+        self.with_cel(|session| {
+            session.paintable()?;
+            if session.selection().is_some_and(|selection| {
+                !selection
+                    .mask()
+                    .contains(clicked[0] as i32, clicked[1] as i32)
+            }) {
+                return Err(FillError::OutsideSelection);
+            }
+            // The current layer alone is read in its own pixels, anything
+            // else as shown.
+            let area = if tools.fill.reads == Reads::Current {
+                let seed = session
+                    .pixel(session.to_layer(position))
+                    .ok_or(FillError::NothingThere)?;
+                Arc::new(session.area(seed, reference, &tools.fill)?)
+            } else {
+                let area = Arc::new(session.area(clicked, reference, &tools.fill)?);
+                session.in_layer(&area).ok_or(FillError::NothingThere)?
+            };
+            let clip = session.layer_clip()?;
+            session.commit_fill(tools, &area, clip)
+        })
     }
 
     /// The selection, if it cuts anything away, in the current layer's own
@@ -207,14 +209,16 @@ impl Session {
         self.settle()?;
         let selection = self.selection().cloned().ok_or(FillError::NoSelection)?;
         self.draw_on_cel()?;
-        self.paintable()?;
-        // Cut to the selection too, so the softened edge stays inside the
-        // marching ants.
-        let clip = self.layer_clip()?;
-        let coverage = self
-            .in_layer(&selection)
-            .ok_or(FillError::OutsideSelection)?;
-        self.commit_fill(tools, &coverage, clip)
+        self.with_cel(|session| {
+            session.paintable()?;
+            // Cut to the selection too, so the softened edge stays inside
+            // the marching ants.
+            let clip = session.layer_clip()?;
+            let coverage = session
+                .in_layer(&selection)
+                .ok_or(FillError::OutsideSelection)?;
+            session.commit_fill(tools, &coverage, clip)
+        })
     }
 
     /// Fills `shape`'s pixels cut to the selection: the selection tool in
@@ -230,12 +234,14 @@ impl Session {
         };
         self.settle()?;
         self.draw_on_cel()?;
-        self.paintable()?;
-        let Some(shape) = self.in_layer(&Arc::new(shape)) else {
-            return Ok(Outcome::NoChange);
-        };
-        let clip = self.layer_clip()?;
-        self.commit_fill(tools, &shape, clip)
+        self.with_cel(|session| {
+            session.paintable()?;
+            let Some(shape) = session.in_layer(&Arc::new(shape)) else {
+                return Ok(Outcome::NoChange);
+            };
+            let clip = session.layer_clip()?;
+            session.commit_fill(tools, &shape, clip)
+        })
     }
 
     pub(crate) fn paintable(&self) -> Result<(), FillError> {

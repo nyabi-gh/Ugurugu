@@ -88,18 +88,26 @@ pub fn tint(frames: &[(Pixmap, bool)], size: [u32; 2]) -> Pixmap {
 }
 
 /// The frames an onion skin around `frame` of a loop of `frames` shows,
-/// farthest first, with whether each is before it.
+/// farthest first, with whether each is before it. A frame reached both
+/// ways round a short loop shows once, as the nearer, and before when as
+/// near.
 pub fn around(frame: u32, frames: u32) -> Vec<(i64, bool)> {
     let frame = i64::from(frame);
+    let frames = i64::from(frames);
+    let mut seen = vec![frame.rem_euclid(frames)];
     let mut wanted = Vec::new();
-    for step in (1..=i64::from(BEFORE.max(AFTER))).rev() {
-        if step <= i64::from(AFTER) && step < i64::from(frames) {
-            wanted.push((frame + step, false));
-        }
-        if step <= i64::from(BEFORE) && step < i64::from(frames) {
-            wanted.push((frame - step, true));
+    for step in 1..=i64::from(BEFORE.max(AFTER)) {
+        for (at, before, within) in [
+            (frame - step, true, step <= i64::from(BEFORE)),
+            (frame + step, false, step <= i64::from(AFTER)),
+        ] {
+            if within && !seen.contains(&at.rem_euclid(frames)) {
+                seen.push(at.rem_euclid(frames));
+                wanted.push((at, before));
+            }
         }
     }
+    wanted.reverse();
     wanted
 }
 
@@ -200,7 +208,8 @@ mod tests {
     #[test]
     fn the_frames_around_come_farthest_first_and_never_the_frame_itself() {
         assert_eq!(around(5, 30), [(6, false), (4, true)]);
-        assert_eq!(around(0, 2), [(1, false), (-1, true)]);
+        // In a loop of two, the other frame is before and after: once.
+        assert_eq!(around(0, 2), [(-1, true)]);
     }
 
     #[test]

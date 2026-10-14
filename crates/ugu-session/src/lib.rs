@@ -183,6 +183,9 @@ pub struct Session {
     seeds: RandomState,
     strokes_started: u64,
     posing: Option<Posing>,
+    /// The cel added for the stroke or fill under way, its folder and the
+    /// state the addition left.
+    made_cel: Option<(LayerId, StateId)>,
 }
 
 /// The window's tools as last handed in with `Session::use_tools`, for the
@@ -216,6 +219,7 @@ impl Session {
             seeds: RandomState::new(),
             strokes_started: 0,
             posing: None,
+            made_cel: None,
         };
         session.use_tools(&Tools::default());
         session
@@ -328,21 +332,18 @@ impl Session {
     /// transform or placed text first, so the stroke is cut to the selection
     /// as they leave it.
     pub fn begin_stroke(&mut self, tools: &Tools, input: InputPoint) -> Result<(), StrokeRefused> {
-        self.live = None;
+        self.drop_live();
         // A folder draws on its cel, which may not be there yet.
         if self.folder() != Some(self.layer) {
             self.can_paint()?;
         }
         self.settle().map_err(|_| StrokeRefused::Pending)?;
         self.draw_on_cel().map_err(|_| StrokeRefused::NoLayer)?;
-        self.can_paint()?;
-        let clip = match self.clip() {
-            Some(selection) => Some(
-                self.in_layer(&selection)
-                    .ok_or(StrokeRefused::OutsideSelection)?,
-            ),
-            None => None,
-        };
+        let clip = self.stroke_clip();
+        if clip.is_err() {
+            self.drop_cel();
+        }
+        let clip = clip?;
         let to_layer = self
             .layer_transform()
             .and_then(|transform| transform.inverse());
@@ -397,6 +398,19 @@ impl Session {
         Ok(())
     }
 
+    /// The selection a stroke on the current layer is cut to, in its own
+    /// pixels.
+    fn stroke_clip(&self) -> Result<Option<Arc<Selection>>, StrokeRefused> {
+        self.can_paint()?;
+        match self.clip() {
+            Some(selection) => self
+                .in_layer(&selection)
+                .map(Some)
+                .ok_or(StrokeRefused::OutsideSelection),
+            None => Ok(None),
+        }
+    }
+
     /// Returns whether the point was kept.
     pub fn extend_stroke(&mut self, input: InputPoint) -> bool {
         let Some(live) = self.live.as_mut() else {
@@ -445,12 +459,15 @@ impl Session {
         };
         let label = if live.erase { "Erase" } else { "Draw" };
         let color = stroke.color;
-        let outcome = self.history_mut()?.group(label, |group| {
-            let clip = match &live.clip {
-                Some(selection) => Some(selecting::stored_mask(group, selection)?),
-                None => None,
-            };
-            group.apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
+        let outcome = self.with_cel(|session| {
+            session.history_mut()?.group(label, |group| {
+                let clip = match &live.clip {
+                    Some(selection) => Some(selecting::stored_mask(group, selection)?),
+                    None => None,
+                };
+                group
+                    .apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
+            })
         })?;
         if !live.erase && matches!(outcome, Outcome::Committed(_)) {
             self.used.push(color);
@@ -459,13 +476,20 @@ impl Session {
     }
 
     pub fn cancel_stroke(&mut self) {
+        self.drop_live();
+    }
+
+    /// Ends the stroke under way without it, and the cel added for it.
+    pub(crate) fn drop_live(&mut self) {
         self.live = None;
+        self.drop_cel();
     }
 
     /// Cancels a pending transform or placed text, else undoes the last
     /// change.
     pub fn undo(&mut self) -> Result<bool, EditError> {
         self.live = None;
+        self.made_cel = None;
         self.lasso = None;
         if self.cancel_transform() || self.cancel_text() {
             return Ok(true);
@@ -478,7 +502,7 @@ impl Session {
     /// Cancels a pending transform or placed text, else redoes the last
     /// change undone.
     pub fn redo(&mut self) -> Result<bool, EditError> {
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         if self.cancel_transform() || self.cancel_text() {
             return Ok(true);

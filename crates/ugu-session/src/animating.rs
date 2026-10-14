@@ -338,10 +338,48 @@ impl Session {
         match self.exposed(folder) {
             Some(cel) => self.layer = cel,
             None => {
-                self.new_cel()?;
+                if let Outcome::Committed(_) = self.new_cel()? {
+                    self.made_cel = Some((folder, self.history.state()));
+                }
             }
         }
         Ok(())
+    }
+
+    /// Runs `act`, which draws on the cel `draw_on_cel` chose: a cel added
+    /// for it becomes one undo step with what `act` commits, and is taken
+    /// back when `act` commits nothing.
+    pub(crate) fn with_cel<E>(
+        &mut self,
+        act: impl FnOnce(&mut Self) -> Result<Outcome, E>,
+    ) -> Result<Outcome, E> {
+        let made = self
+            .made_cel
+            .take()
+            .filter(|(_, state)| *state == self.history.state());
+        let result = act(self);
+        if let Some(made) = made {
+            if let Ok(Outcome::Committed(_)) = result {
+                self.history.join();
+            } else {
+                self.made_cel = Some(made);
+                self.drop_cel();
+            }
+        }
+        result
+    }
+
+    /// Takes back the cel added for a stroke or fill that left nothing,
+    /// when nothing has changed since, and goes back to its folder.
+    pub(crate) fn drop_cel(&mut self) {
+        let Some((folder, state)) = self.made_cel.take() else {
+            return;
+        };
+        // A cel that cannot be taken back stays as its own step: undoing
+        // it would fail the same way.
+        if state == self.history.state() && matches!(self.history.retract(), Ok(true)) {
+            self.layer = folder;
+        }
     }
 }
 

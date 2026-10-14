@@ -283,6 +283,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         };
         if live.points.len() < 2 {
+            self.drop_cel();
             return Ok(Outcome::NoChange);
         }
         self.commit(live)

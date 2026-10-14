@@ -29,7 +29,7 @@ impl Session {
         let selection = self
             .in_layer(&selection)
             .ok_or(FillError::OutsideSelection)?;
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         let layer = self.layer;
         Ok(self.history.group("Edit stroke properties", |group| {

@@ -125,7 +125,7 @@ impl Session {
         }
         self.paintable()?;
         self.settle()?;
-        self.live = None;
+        self.drop_live();
         self.lasso = None;
         self.strokes_started += 1;
         self.placed = Some(Placed {

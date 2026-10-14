@@ -192,15 +192,15 @@ fn enabled(action: Action, canvas: &Canvas) -> bool {
         // As 2.2.13: without the animation there is nothing to animate.
         A::Animate | A::ExportGif | A::ExportWebP => canvas.animation_allowed(),
         A::NextTab | A::PreviousTab => canvas.tab_count() > 1,
-        A::ToggleKey => paint_or_group(canvas),
+        A::ToggleKey => has_layer(canvas),
         A::NewCel => session.folder().is_some(),
-        A::AnimationFolder => paint_or_group(canvas) && session.pending().is_none(),
+        A::AnimationFolder => has_layer(canvas) && session.pending().is_none(),
         _ => true,
     }
 }
 
-/// Whether the current layer is a paint layer or a group, which keys move.
-fn paint_or_group(canvas: &Canvas) -> bool {
+/// Whether there is a current layer: keys and folders take any.
+fn has_layer(canvas: &Canvas) -> bool {
     let session = canvas.session();
     session.document().layer(session.current_layer()).is_some()
 }
