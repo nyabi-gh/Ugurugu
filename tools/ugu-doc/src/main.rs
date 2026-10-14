@@ -1348,8 +1348,13 @@ fn splits(document: &Document, threads: u16) {
     use ugu_render::document::{DocumentRenderer, Purpose};
     use ugu_render::plan::RenderPlan;
 
+    // `UGU_FRAME` edits another frame, where keys may move the layers.
+    let frame: i64 = std::env::var("UGU_FRAME")
+        .ok()
+        .and_then(|frame| frame.parse().ok())
+        .unwrap_or(0);
     let mut history = History::new(document.clone(), true);
-    let layers: Vec<LayerId> = RenderPlan::new(document, Purpose::Display, 0)
+    let layers: Vec<LayerId> = RenderPlan::new(document, Purpose::Display, frame)
         .layers
         .iter()
         .map(|(id, _)| *id)
@@ -1362,7 +1367,7 @@ fn splits(document: &Document, threads: u16) {
     renderer.split(
         history.document(),
         layers[0],
-        0,
+        frame,
         Some(history.layer_revisions()),
         &mut display,
     );
@@ -1391,7 +1396,7 @@ fn splits(document: &Document, threads: u16) {
             .split(
                 history.document(),
                 layer,
-                0,
+                frame,
                 Some(history.layer_revisions()),
                 &mut display,
             )
@@ -1399,7 +1404,10 @@ fn splits(document: &Document, threads: u16) {
         later.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
         let frames = history.document().frames;
-        if let Some(rect) = split.stamp(&mut stamp, &stroke, false, wobble, frames, None) {
+        if let Some(rect) = split
+            .stamp(&mut stamp, &stroke, false, wobble, frames, None)
+            .and_then(|rect| split.shown(rect, history.document().canvas))
+        {
             composite(&split, None, rect, &mut display);
         }
         pen_ups.push(started.elapsed().as_secs_f64() * 1000.0);
