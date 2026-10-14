@@ -43,7 +43,7 @@ Press `F1` any time for help.
 ## What you can do
 
 - **Wobble** — choose how strongly and how your drawing moves, and let each layer move or stay still.
-- **Drawing** — pen, marker, airbrush and spray brushes with pen pressure, selections and transforms, and text.
+- **Drawing** — pen, marker, airbrush and spray brushes with pen pressure, lines and shapes, selections and transforms, and text.
 - **Pixel art** — draw crisp pixel art in pixel mode and export it enlarged.
 - **Tabs** — work on several drawings in one window.
 - **Make it yours** — arrange the panels, pick a light or dark theme and change any shortcut. If the app closes unexpectedly, your work comes back.
