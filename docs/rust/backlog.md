@@ -75,6 +75,7 @@
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
 | B3-128 | 도형 미리보기는 프레임마다 획 전체를 다시 만든다 | #72 뒤에도 끌린 도형은 프레임마다 외곽선 재표본·우글거림·경계 상자 래스터화를 한 스레드로 한다. 1920×1080을 거의 채운 40px 타원에서 프레임 최대 5.3ms(evidence 58). 느린 PC에서 프레임을 놓칠 수 있다(가설, 재지 않음). 후보: 커버리지 래스터화를 줄 단위로 나누기, 크기만 바뀐 도형의 재사용 | `apps/ugurugu/src/canvas.rs` `show_shape`, `crates/ugu-render/src/live.rs` | 이슈 #51, evidence 58 |
 | B3-129 | 픽셀 모드의 확대율 안내 | 100% 아래에서는 화소가 섞여 픽셀 칸이 보이지 않는다. 이슈 #24 사용자는 이것을 브러시 모양 차이로 보았다(evidence 59). 후보: 픽셀 모드 문서를 정수 배율로 맞춰 열기, 100% 아래에서 상태 표시줄에 안내. 사용자 결정 전 | `crates/ugu-render/src/view.rs`, `apps/ugurugu/src/canvas/view.rs` | 이슈 #24, evidence 59 |
+| B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60 |
 
 ## 6. 검토 보고서에서 남은 것
 
@@ -144,7 +145,7 @@
 | B3-94 | 태그 커밋의 CI가 취소되면 릴리스 실패 | 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `ci.yml`, `release-3.yml` | 검토 |
 | B3-95 | 같은 레이어가 같은 획 id를 두 번 쓸 때 재스타일 | 선택이 한쪽만 건드리면 `RemoveStroke`가 남은 참조 때문에 실패해 오류가 난다. 그런 상태로 가는 순서는 찾지 못했다(가설) | `crates/ugu-core/src/restyle.rs` | 검토 |
 | B3-96 | 채우기 기준 그림과 대기 변형 | 영역 클릭은 이제 대기 변형을 먼저 적용하고 기준 그림을 읽는다. 대기 글자도 같이 적용되므로, 배치 중인 글자를 둔 채 자동 선택을 쓰면 글자가 확정된다. 의도와 맞는지 사용자 확인 | `apps/ugurugu/src/canvas.rs` `click_area` | 검토 |
-| B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 시간 초과로 끝나는 일이 되풀이됐다(evidence.md 45절, 53절). 시험 스크립트의 `Wait-Until`은 시간 초과를 다시 시도하는데도 단계가 1초 안에 실패했으므로, 던져진 예외의 종류가 다를 수 있다(가설). 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절 |
+| B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 시간 초과로 끝나는 일이 되풀이됐다(evidence.md 45절, 53절, 60절). 시험 스크립트의 `Wait-Until`은 시간 초과를 다시 시도하는데도 단계가 1초 안에 실패했으므로, 던져진 예외의 종류가 다를 수 있다(가설). 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절 |
 
 ## 10. 2026-10-14 외부 검토에서 확인한 것
 
