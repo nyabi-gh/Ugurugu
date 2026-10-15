@@ -1268,3 +1268,19 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 
 바꾸기 전 3.2.1과 3.3.0 작업 뒤를 임시 시험의 다른 지표(채우기로 조금이라도 바뀐 선 화소)로 쟀을 때도 비슷했다(2px 안티앨리어싱 716 대 781): 3.3.0 작업의 회귀가 아니다.
 
+## 67. 3.3.0 출시 (2026-10-15)
+
+**방법:** `36ebab7`("Prepare the 3.3.0 release")의 release 빌드로 Windows Sandbox에서 `gui.ps1` 30단계, `accept.ps1` 10단계(3.3.0 설치 → 3.3.1 피드)를 돌렸다. 실패한 단계는 같은 빌드로 따로 다시 돌렸다.
+
+**결과:**
+
+| 실행 | 결과 |
+|---|---|
+| GUI 전체 | 30/30. "A dragged shape keeps up with the pointer"는 34, 28, 34ms. 새 단계 "Canvas size by dragging the frame"(1024 → 1271px, 늘어난 곳이 배경색, 적용 뒤 비율 일치)와 "A bucket fill during playback plays on"(채운 뒤에도 프레임이 넘어감) 통과 |
+| 수용 | 9/10. "Update that fails to download"가 UI Automation `FromHandle` 시간 초과로 실패(B3-97과 같은 모습) |
+| 실패한 1단계 다시 | 1/1. 내려받기 실패 안내(체크섬 불일치)가 나왔다 |
+
+**출시:** 태그 `v3.3.0`(annotated, `36ebab7`) → `release-3.yml` 실행 38698999325 성공. `v3.3.0`에는 `Ugurugu-3.3.0-Windows-x64-Setup.exe`만, 본문 끝에 "What's Changed"(#75~#83)와 비교 링크가 붙었다. `updates`에 `Ugurugu3-3.3.0-win-x64-full.nupkg`가 더해지고 `releases.win-x64.json`이 3.3.0을 가리킨다. 다운로드 배지 workflow(38700313775)가 이어서 돌았다.
+
+**남은 것:** 3.2.1에서 3.3.0으로의 실제 업데이트는 사용자 PC에서 보지 않았다.
+
