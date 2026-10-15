@@ -540,6 +540,7 @@ fn keys(dto: Option<&KeysDto>) -> Keys {
                     rotation: key.rotation,
                     scale: key.scale,
                     flip: key.flip,
+                    opacity: key.opacity,
                 },
                 ease: match key.ease {
                     EaseDto::Linear => Ease::Linear,

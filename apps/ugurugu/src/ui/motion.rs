@@ -64,6 +64,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     let mut y = pose.offset[1] as f32;
     let mut rotation = pose.rotation as f32;
     let mut scale = pose.scale as f32 * 100.0;
+    let mut opacity = pose.opacity as f32 * 100.0;
     row(ui, tr("motion-x"), &mut x, -offset..=offset, " px");
     row(ui, tr("motion-y"), &mut y, -offset..=offset, " px");
     let turn = limits::ROTATION as f32;
@@ -76,11 +77,24 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         low * 100.0..=high * 100.0,
         "%",
     );
+    // Named apart from the layer's own opacity, which a screen reader
+    // also finds.
+    widgets::form_row(ui, tr("motion-opacity"), |ui| {
+        fields.push(widgets::number(
+            ui,
+            &mut opacity,
+            0.0..=100.0,
+            "%",
+            1,
+            96.0,
+            tr("motion-opacity-name"),
+        ));
+    });
     let mut flip = pose.flip;
     let flipped = widgets::check_row(ui, tr("motion-flip"), tr("motion-flip"), &mut flip);
     // Only what was edited here is taken back: the fields hold f32, and a
     // pose dragged on the canvas is not one.
-    let [moved_x, moved_y, turned, scaled] = [0, 1, 2, 3].map(|at| fields[at].changed());
+    let [moved_x, moved_y, turned, scaled, faded] = [0, 1, 2, 3, 4].map(|at| fields[at].changed());
     if moved_x {
         pose.offset[0] = f64::from(x);
     }
@@ -93,8 +107,11 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     if scaled {
         pose.scale = f64::from(scale) / 100.0;
     }
+    if faded {
+        pose.opacity = f64::from(opacity) / 100.0;
+    }
     pose.flip = flip;
-    let changed = moved_x || moved_y || turned || scaled || flipped.changed();
+    let changed = moved_x || moved_y || turned || scaled || faded || flipped.changed();
     let dragging = fields.iter().any(egui::Response::dragged);
     let ended = fields
         .iter()
@@ -130,6 +147,47 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     });
 
     ui.add_space(theme::space::S);
+    widgets::panel_heading(ui, tr("pivot"));
+    let pivot = canvas.pivot();
+    ui.add_enabled_ui(pivot.is_some(), |ui| {
+        let [mut x, mut y] = pivot.unwrap_or_default().map(|value| value as f32);
+        let offset = limits::OFFSET as f32;
+        let mut fields = Vec::new();
+        for (label, value) in [(tr("pivot-x"), &mut x), (tr("pivot-y"), &mut y)] {
+            widgets::form_row(ui, label, |ui| {
+                fields.push(widgets::number(
+                    ui,
+                    value,
+                    -offset..=offset,
+                    " px",
+                    1,
+                    96.0,
+                    label,
+                ));
+            });
+        }
+        let ended = fields
+            .iter()
+            .any(|field| field.changed() && !field.dragged() || field.drag_stopped());
+        if ended && let Some(was) = pivot {
+            let moved = [f64::from(x), f64::from(y)];
+            if moved != was.map(|value| f64::from(value as f32)) {
+                canvas.set_pivot(moved);
+            }
+        }
+        let centre = canvas.drawing_centre();
+        let tip = tr("pivot-centre-tip");
+        if ui
+            .add_enabled(centre.is_some(), egui::Button::new(tr("pivot-centre")))
+            .on_hover_text(tip)
+            .clicked()
+            && let Some(centre) = centre
+        {
+            canvas.set_pivot(centre);
+        }
+    });
+
+    ui.add_space(theme::space::S);
     ui.horizontal_wrapped(|ui| {
         let (glyph, text) = if key.is_some() {
             (Glyph::Remove, tr("key-remove"))
@@ -151,6 +209,24 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         if widgets::icon_button_tip(ui, Glyph::KeyNext, 22.0, tr("key-next"), &tip, true).clicked()
         {
             canvas.step_key(1);
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(key.is_some(), egui::Button::new(tr("key-copy")))
+            .clicked()
+        {
+            canvas.copy_key();
+        }
+        if ui
+            .add_enabled(
+                canvas.copied_key().is_some(),
+                egui::Button::new(tr("key-paste")),
+            )
+            .on_hover_text(tr("key-paste-tip"))
+            .clicked()
+        {
+            canvas.paste_key();
         }
     });
     ui.add_space(theme::space::XS);

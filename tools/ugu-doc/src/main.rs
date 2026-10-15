@@ -24,6 +24,9 @@
 //! - `ugu-doc animate <in.ugurugu> <out.ugurugu> <keyed> <cels>`: gives the
 //!   first `keyed` paint layers keys and makes the first one an animation
 //!   folder of `cels` copies, to measure what keys and cels cost to draw.
+//! - `ugu-doc onion <file.ugurugu> <threads>`: times the onion skin of the
+//!   first animation folder on every frame, the frame before and after each
+//!   drawn alone as the app draws them.
 //! - `ugu-doc play <file.ugurugu> <threads>`: draws every frame three times
 //!   over as playback does, reusing layers whose pixels are as before, and
 //!   prints the time per frame of the first loop and of the later ones and
@@ -68,7 +71,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -93,6 +96,10 @@ fn main() -> ExitCode {
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
         ["render", file] => render(Path::new(file), 8, None),
+        ["onion", file, threads] => threads
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|threads| onion(Path::new(file), threads)),
         ["play", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -352,6 +359,42 @@ fn to_pens(document: &mut Document) {
 }
 
 /// Puts canvas changes in the middle of every layer; see the module notes.
+fn onion(path: &Path, threads: u16) -> Result<(), String> {
+    use ugu_render::document::DocumentRenderer;
+
+    fn folder(layers: &[Layer]) -> Option<LayerId> {
+        layers.iter().find_map(|layer| match &layer.kind {
+            LayerKind::Group(group) if group.cels.is_some() => Some(layer.id),
+            LayerKind::Group(group) => folder(&group.children),
+            LayerKind::Paint(_) => None,
+        })
+    }
+
+    let document = open(path)?;
+    let folder = folder(&document.layers).ok_or("no animation folder")?;
+    let mut renderer = DocumentRenderer::new(threads);
+    set_budget(&mut renderer);
+    let mut times = Vec::new();
+    for round in 0..2 {
+        for frame in 0..i64::from(document.frames) {
+            let started = Instant::now();
+            for around in [frame - 1, frame + 1] {
+                renderer
+                    .render_alone(&document, folder, around)
+                    .ok_or("stopped")?;
+            }
+            if round > 0 {
+                times.push(started.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+    }
+    println!(
+        "{threads} threads: onion skin (2 frames) {}",
+        percentiles(&mut times)
+    );
+    Ok(())
+}
+
 fn play(path: &Path, threads: u16) -> Result<(), String> {
     use ugu_core::history::History;
     use ugu_render::document::{DocumentRenderer, Purpose};
@@ -439,6 +482,7 @@ fn animate(from: &Path, to: &Path, keyed: usize, cels: u32) -> Result<(), String
                     rotation: 12.0,
                     scale: 0.9,
                     flip: false,
+                    opacity: 1.0,
                 },
                 ease: Ease::Smooth,
             });

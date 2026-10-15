@@ -555,6 +555,8 @@ motion-x | X | X | X
 motion-y | Y | Y | Y
 motion-rotation | Rotation | 회전 | 回転
 motion-scale | Scale | 크기 | 拡大率
+motion-opacity | Opacity | 불투명도 | 不透明度
+motion-opacity-name | Key opacity | 키 불투명도 | キーの不透明度
 motion-flip | Flip horizontally | 좌우 반전 | 左右反転
 ease | Easing to the next key | 다음 키까지 | 次のキーまで
 ease-linear | Linear | 일정하게 | 一定
@@ -565,9 +567,21 @@ key-add | Add key | 키 추가 | キーを追加
 key-remove | Remove key | 키 삭제 | キーを削除
 key-previous | Previous key | 이전 키 | 前のキー
 key-next | Next key | 다음 키 | 次のキー
+key-copy | Copy key | 키 복사 | キーをコピー
+key-paste | Paste key | 키 붙여넣기 | キーを貼り付け
+key-paste-tip | Puts the key copied, with its easing, on this frame of the current layer | 복사한 키를 이징과 함께 지금 레이어의 이 프레임에 둡니다 | コピーしたキーをイージングごと、現在のレイヤーのこのフレームに置きます
 frame-previous | Previous frame | 이전 프레임 | 前のフレーム
 frame-next | Next frame | 다음 프레임 | 次のフレーム
 onion-skin | &Onion skin | 어니언 스킨(&O) | オニオンスキン(&O)
+pivot | Pivot | 중심 | 中心
+pivot-x | Pivot X | 중심 X | 中心 X
+pivot-y | Pivot Y | 중심 Y | 中心 Y
+pivot-centre | Centre on drawing | 그림 가운데로 | 絵の中央へ
+pivot-centre-tip | Puts the point the layer turns and scales about in the middle of what it has drawn on this frame | 레이어가 돌고 커지는 중심을 이 프레임에 그린 것의 가운데로 옮깁니다 | レイヤーが回転・拡大する中心を、このフレームに描いたものの中央に移します
+onion-skin-tip | Onion skin (right-click for frames and opacity) | 어니언 스킨(오른쪽 클릭으로 프레임 수와 불투명도) | オニオンスキン(右クリックでフレーム数と不透明度)
+onion-before | Frames before | 앞 프레임 | 前のフレーム
+onion-after | Frames after | 뒤 프레임 | 後のフレーム
+onion-opacity | Opacity | 불투명도 | 不透明度
 animation-folder-make | Make animation &folder | 애니메이션 폴더 만들기(&F) | アニメーションフォルダーを作成(&F)
 cel-new | New &cel | 새 셀(&C) | 新規セル(&C)
 cel-empty | Nothing (empty frame) | 비우기(빈 프레임) | なし（空のフレーム）

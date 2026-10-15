@@ -55,6 +55,54 @@ impl TiledSurface {
         self.size
     }
 
+    /// The pixels that are not transparent, as left, top, right, bottom;
+    /// `None` when all are. Only reached tiles count: the others' pixels
+    /// in `pixmap` are not shown.
+    pub fn painted(&self) -> Option<[u32; 4]> {
+        let pixmap = self.pixmap.as_ref()?;
+        let [left, top] = [self.span[0] * self.edge, self.span[1] * self.edge];
+        let width = usize::from(pixmap.width());
+        let edge = self.edge as usize;
+        let mut found: Option<[u32; 4]> = None;
+        for (y, row) in pixmap.data().chunks_exact(width).enumerate() {
+            let tile_row = self.span[1] + (y / edge) as u32;
+            for (index, part) in row.chunks(edge).enumerate() {
+                let column = self.span[0] + index as u32;
+                if !self.reached[(tile_row * self.grid[0] + column) as usize] {
+                    continue;
+                }
+                let Some(first) = part.iter().position(|pixel| pixel.a != 0) else {
+                    continue;
+                };
+                let last = part.iter().rposition(|pixel| pixel.a != 0).unwrap_or(first);
+                let x = left + (index * edge) as u32;
+                let span = [
+                    x + first as u32,
+                    top + y as u32,
+                    x + last as u32 + 1,
+                    top + y as u32 + 1,
+                ];
+                found = Some(match found {
+                    Some([l, t, r, b]) => [
+                        l.min(span[0]),
+                        t.min(span[1]),
+                        r.max(span[2]),
+                        b.max(span[3]),
+                    ],
+                    None => span,
+                });
+            }
+        }
+        found.map(|[l, t, r, b]| {
+            [
+                l.min(self.size[0]),
+                t.min(self.size[1]),
+                r.min(self.size[0]),
+                b.min(self.size[1]),
+            ]
+        })
+    }
+
     pub fn edge(&self) -> u32 {
         self.edge
     }
@@ -289,6 +337,9 @@ mod tests {
         reached[1] = false;
         surface.set(span, piece, reached);
         assert_eq!(surface.tile_count(), 4);
+        // The unreached tile's pixels are not painted ones.
+        assert_eq!(surface.painted(), Some([4, 0, 10, 6]));
+        assert_eq!(TiledSurface::new([10, 6], 4).painted(), None);
         let parts: Vec<_> = surface
             .row(1, 2, 9)
             .map(|(x, part)| (x, part.len()))

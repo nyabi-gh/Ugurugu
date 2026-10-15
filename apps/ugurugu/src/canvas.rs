@@ -51,7 +51,7 @@ mod view;
 
 pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
-pub use onion::{OnionKey, tint as tint_onion};
+pub use onion::{OnionKey, OnionSettings, tint as tint_onion};
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
@@ -306,6 +306,9 @@ pub struct Canvas {
     generations: u64,
     /// Whether the frames around are shown faintly.
     onion_skin: bool,
+    onion_settings: OnionSettings,
+    /// A key copied to paste on another frame or layer.
+    copied_key: Option<ugu_core::keys::Key>,
 }
 
 /// A cache worker handing its renders to `done`.
@@ -364,6 +367,8 @@ impl Canvas {
             animation_allowed: true,
             generations: 0,
             onion_skin: false,
+            onion_settings: OnionSettings::DEFAULT,
+            copied_key: None,
         }
     }
 
@@ -3227,6 +3232,30 @@ mod tests {
         assert!(canvas.display().data_as_u8_slice() == after.data_as_u8_slice());
     }
 
+    #[test]
+    fn layers_faded_in_one_place_by_keys_merge_as_they_look() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[10.0, 20.0], [40.0, 40.0], [20.0, 60.0]]);
+        canvas.set_pose(ugu_core::keys::Pose {
+            opacity: 0.5,
+            ..ugu_core::keys::Pose::REST
+        });
+        canvas
+            .edit(|session| session.duplicate_layer(|name| format!("{name} copy")))
+            .unwrap();
+        canvas.set_pose(ugu_core::keys::Pose {
+            offset: [30.0, 0.0],
+            opacity: 0.7,
+            ..ugu_core::keys::Pose::REST
+        });
+        settle(&mut canvas, &renders);
+        let before = full_render(&canvas);
+        canvas.edit(Session::merge_down).unwrap();
+        settle(&mut canvas, &renders);
+        assert_eq!(canvas.session().document().layers.len(), 1);
+        assert!(before.data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
+    }
+
     fn full_render(canvas: &super::Canvas) -> Pixmap {
         let document = canvas.session().document();
         let [width, height] = document.canvas.map(|edge| edge as u16);
@@ -3263,6 +3292,7 @@ mod tests {
             rotation: 20.0,
             scale: 0.8,
             flip: false,
+            opacity: 1.0,
         });
         settle(&mut canvas, &renders);
         assert!(canvas.tab.split.as_ref().unwrap().1.moved.is_some());
@@ -3335,6 +3365,24 @@ mod tests {
         canvas.escape();
         assert!(canvas.session().posing().is_none());
         assert!(near(canvas.session().key_here(layer).unwrap().pose.offset));
+    }
+
+    #[test]
+    fn the_first_key_turns_about_the_middle_of_the_drawing_and_the_pivot_moves() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[20.0, 20.0], [40.0, 30.0]]);
+        settle(&mut canvas, &renders);
+        let centre = canvas.drawing_centre().expect("drawn");
+        assert!(
+            (centre[0] - 30.0).abs() < 8.0 && (centre[1] - 25.0).abs() < 8.0,
+            "{centre:?}"
+        );
+        assert_eq!(canvas.pivot(), None);
+        canvas.toggle_key();
+        assert_eq!(canvas.pivot(), Some(centre));
+        canvas.set_pivot([100.0, 10.0]);
+        assert_eq!(canvas.pivot(), Some([100.0, 10.0]));
+        assert_eq!(canvas.session().undo_label(), Some("Move pivot"));
     }
 
     #[test]

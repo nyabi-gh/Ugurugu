@@ -105,7 +105,7 @@ enum Job {
     },
     Thumbnails(u64, Vec<(LayerId, u64)>, Arc<Document>),
     /// The frames, with whether each is before the one shown.
-    Onion(OnionKey, Vec<(i64, bool)>, Arc<Document>),
+    Onion(OnionKey, Vec<(i64, bool)>, Snapshot),
 }
 
 /// What the worker is doing now.
@@ -200,12 +200,13 @@ impl CacheWorker {
                     renderer
                 };
                 let mut renderer = renderer_for(&worker);
+                let mut onion = Vec::new();
                 while let Some(job) = next(&worker) {
                     renderer.set_surface_budget(worker.surface_budget.load(Ordering::Relaxed));
                     // A job that panics is dropped, so an export waiting for
                     // it gets no picture; the panic hook has recorded it.
                     let again = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        run(&mut renderer, job, &done)
+                        run(&mut renderer, &mut onion, job, &done)
                     }))
                     .unwrap_or_else(|_| {
                         renderer = renderer_for(&worker);
@@ -276,12 +277,12 @@ impl CacheWorker {
             .request_frames(version, frames, snapshot, preview);
     }
 
-    /// Replaces the onion skin waiting to be drawn: `folder` of `document`
-    /// alone on `frames`, each with whether it is before the frame shown.
-    pub fn request_onion(&self, key: OnionKey, frames: Vec<(i64, bool)>, document: Arc<Document>) {
+    /// Replaces the onion skin waiting to be drawn: the key's folder alone
+    /// on `frames`, each with whether it is before the frame shown.
+    pub fn request_onion(&self, key: OnionKey, frames: Vec<(i64, bool)>, snapshot: Snapshot) {
         let shared = &self.shared;
         let mut queue = shared.queue.lock().expect("queue lock");
-        queue.onion = Some(Job::Onion(key, frames, document));
+        queue.onion = Some(Job::Onion(key, frames, snapshot));
         shared.wake.notify_one();
     }
 
@@ -403,8 +404,24 @@ fn next(shared: &Shared) -> Option<Job> {
     }
 }
 
-/// Runs `job`; returns an export that was stopped, to run again.
-fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> Option<Job> {
+/// What one frame of an onion skin was drawn from: equal ones draw the same
+/// pixels.
+#[derive(PartialEq)]
+struct OnionFrame {
+    plan: RenderPlan,
+    revisions: Vec<u64>,
+    canvas: [u32; 2],
+    frames: u32,
+}
+
+/// Runs `job`, drawing again only the onion skin frames not in `onion`;
+/// returns an export that was stopped, to run again.
+fn run(
+    renderer: &mut DocumentRenderer,
+    onion: &mut Vec<(OnionFrame, Pixmap)>,
+    job: Job,
+    done: &impl Fn(Rendered),
+) -> Option<Job> {
     let started = Instant::now();
     let ms = || started.elapsed().as_secs_f64() * 1000.0;
     renderer.set_detail(match &job {
@@ -493,17 +510,41 @@ fn run(renderer: &mut DocumentRenderer, job: Job, done: &impl Fn(Rendered)) -> O
             tracing::debug!(ms = ms(), "export frame rendered");
             let _ = reply.send(pixels);
         }
-        Job::Onion(key, frames, document) => {
-            let mut drawn = Vec::new();
-            for (frame, before) in frames {
-                let Some(pixels) = renderer.render_alone(&document, key.folder, frame) else {
+        Job::Onion(key, frames, snapshot) => {
+            let document = &snapshot.document;
+            let mut kept = std::mem::take(onion);
+            let mut drawn = 0;
+            for (frame, _) in &frames {
+                let plan = RenderPlan::alone(document, key.folder, *frame);
+                let wanted = OnionFrame {
+                    revisions: plan
+                        .layers
+                        .iter()
+                        .map(|(id, _)| snapshot.layers.of(*id))
+                        .collect(),
+                    plan,
+                    canvas: document.canvas,
+                    frames: document.frames,
+                };
+                if let Some(at) = kept.iter().position(|(was, _)| *was == wanted) {
+                    onion.push(kept.swap_remove(at));
+                    continue;
+                }
+                let Some(pixels) = renderer.render_alone(document, key.folder, *frame) else {
                     tracing::debug!(ms = ms(), "onion skin stopped");
+                    onion.extend(kept);
                     return None;
                 };
-                drawn.push((pixels, before));
+                drawn += 1;
+                onion.push((wanted, pixels));
             }
-            let pixels = crate::canvas::tint_onion(&drawn, document.canvas);
-            tracing::debug!(ms = ms(), "onion skin rendered");
+            let tinted: Vec<_> = onion
+                .iter()
+                .zip(&frames)
+                .map(|((_, pixels), (_, before))| (pixels, *before))
+                .collect();
+            let pixels = crate::canvas::tint_onion(&tinted, document.canvas, key.settings.opacity);
+            tracing::debug!(ms = ms(), drawn, "onion skin rendered");
             done(Rendered::Onion { key, pixels });
         }
         Job::Thumbnails(generation, layers, document) => {
@@ -571,6 +612,55 @@ mod tests {
             document: Arc::new(document),
             layers: Arc::new(LayerRevisions::default()),
         }
+    }
+
+    #[test]
+    fn onion_skin_frames_drawn_before_are_kept_until_what_they_show_changes() {
+        let mut session = ugu_session::Session::new(Document::new([16, 16]), false);
+        session.make_animation_folder().unwrap();
+        session.set_frame(1).unwrap();
+        session.new_cel().unwrap();
+        let folder = session.folder().unwrap();
+        let key = OnionKey {
+            version: Version {
+                document: 0,
+                revision: 0,
+                posed: 0,
+            },
+            folder,
+            frame: 1,
+            settings: crate::canvas::OnionSettings::DEFAULT,
+        };
+        let frames = vec![(2, false), (0, true)];
+        let snapshot = Snapshot {
+            document: Arc::new(session.document().clone()),
+            layers: Arc::new(session.layer_revisions().clone()),
+        };
+        let mut renderer = DocumentRenderer::new(1);
+        let mut onion = Vec::new();
+        let mut corner = |snapshot: Snapshot, onion: &mut Vec<(OnionFrame, Pixmap)>| {
+            let (to_test, rendered) = std::sync::mpsc::channel();
+            let job = Job::Onion(key, frames.clone(), snapshot);
+            run(&mut renderer, onion, job, &move |done| {
+                let _ = to_test.send(done);
+            });
+            let Ok(Rendered::Onion { pixels, .. }) = rendered.try_recv() else {
+                panic!("an onion skin");
+            };
+            pixels.data_as_u8_slice()[3]
+        };
+        assert_eq!(corner(snapshot.clone(), &mut onion), 0);
+        assert_eq!(onion.len(), 2);
+        // Marked where nothing is drawn: a frame drawn again loses it.
+        for (_, pixels) in &mut onion {
+            pixels.data_as_u8_slice_mut()[..4].copy_from_slice(&[255; 4]);
+        }
+        assert_ne!(corner(snapshot.clone(), &mut onion), 0, "kept");
+        let changed = Snapshot {
+            layers: Arc::new(LayerRevisions::default()),
+            ..snapshot
+        };
+        assert_eq!(corner(changed, &mut onion), 0, "drawn again");
     }
 
     fn shared() -> Shared {

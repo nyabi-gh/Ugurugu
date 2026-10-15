@@ -158,7 +158,16 @@ impl RenderPlan {
             .rev()
             .filter_map(|group| group.keys().at(plan.frame, document.frames))
             .reduce(|inner, outer| inner.then(outer));
+        // As without its opacity, so without the keys' too.
         plan.add_one(layer, Composite::PLAIN, document, false, outer);
+        if let Some(Step::Paint(_, composite) | Step::End(_, composite)) = plan
+            .steps
+            .iter_mut()
+            .rev()
+            .find(|step| !matches!(step, Step::Begin(_)))
+        {
+            composite.opacity = 1.0;
+        }
         plan.cels
             .retain(|id| plan.layers.iter().all(|(drawn, _)| drawn != id));
         plan
@@ -270,6 +279,7 @@ impl RenderPlan {
     ) {
         let own = layer.keys().at(self.frame, document.frames);
         self.animated |= !layer.keys().is_empty();
+        composite.opacity *= layer.keys().opacity(self.frame, document.frames) as f32;
         let moved = match (own, outer) {
             (Some(own), Some(outer)) => Some(own.then(outer)),
             (own, outer) => own.or(outer),
@@ -573,6 +583,38 @@ mod tests {
                 Step::Begin(_) => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_key_fades_the_layer_except_when_it_is_read_alone() {
+        let mut faded = paint(2);
+        if let LayerKind::Paint(paint) = &mut faded.kind {
+            paint.opacity = 0.8;
+        }
+        for (frame, opacity) in [(0, 1.0), (4, 0.5)] {
+            faded.keys_mut().set(ugu_core::keys::Key {
+                frame,
+                pose: ugu_core::keys::Pose {
+                    opacity,
+                    ..ugu_core::keys::Pose::REST
+                },
+                ease: ugu_core::keys::Ease::Linear,
+            });
+        }
+        let document = document(vec![paint(1), faded]);
+        let opacity = |plan: &RenderPlan| match plan.steps.last() {
+            Some(Step::Paint(_, composite)) => composite.opacity,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            opacity(&RenderPlan::new(&document, Purpose::Display, 4)),
+            0.4
+        );
+        assert_eq!(
+            opacity(&RenderPlan::new(&document, Purpose::Display, 2)),
+            0.6
+        );
+        assert_eq!(opacity(&RenderPlan::alone(&document, LayerId(2), 4)), 1.0);
     }
 
     #[test]

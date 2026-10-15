@@ -14,7 +14,16 @@ pub const RENDER_REVISION: u32 = 1;
 /// document uses it, so that readers without it refuse the file as newer.
 pub const KEYS_FEATURE: &str = "keys";
 pub const CELS_FEATURE: &str = "cels";
-pub const FEATURES: [&str; 2] = [KEYS_FEATURE, CELS_FEATURE];
+/// More frames than 3.2 and before read.
+pub const FRAMES_FEATURE: &str = "frames";
+/// Keys that fade a layer, which 3.2 would read without the fade.
+pub const KEY_OPACITY_FEATURE: &str = "key-opacity";
+pub const FEATURES: [&str; 4] = [
+    KEYS_FEATURE,
+    CELS_FEATURE,
+    FRAMES_FEATURE,
+    KEY_OPACITY_FEATURE,
+];
 
 pub const MANIFEST: &str = "manifest.json";
 pub const DOCUMENT: &str = "document.json";
@@ -149,7 +158,17 @@ pub struct KeyDto {
     pub scale: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip: bool,
+    #[serde(default = "full", skip_serializing_if = "is_full")]
+    pub opacity: f64,
     pub ease: EaseDto,
+}
+
+fn full() -> f64 {
+    1.0
+}
+
+fn is_full(opacity: &f64) -> bool {
+    *opacity == 1.0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -18,13 +18,62 @@ const SNAP: f64 = 15.0;
 
 impl Canvas {
     /// What the current layer turns and scales about the first time it is
-    /// keyed: the middle of the canvas.
+    /// keyed: the middle of what it has drawn, else of the canvas.
     pub fn default_pivot(&self) -> [f64; 2] {
-        self.tab
-            .session
-            .document()
-            .canvas
-            .map(|edge| f64::from(edge) / 2.0)
+        self.drawing_centre().unwrap_or_else(|| {
+            self.tab
+                .session
+                .document()
+                .canvas
+                .map(|edge| f64::from(edge) / 2.0)
+        })
+    }
+
+    /// The middle of what the current paint layer has drawn on this frame,
+    /// in its own pixels, from the pixels the canvas holds for it.
+    pub fn drawing_centre(&self) -> Option<[f64; 2]> {
+        let (key, split) = self.tab.split.as_ref()?;
+        if key.layer != self.tab.session.current_layer() {
+            return None;
+        }
+        let ugu_render::stream::Held::Tiles(surface) = split.sources.get(split.edited?)? else {
+            return None;
+        };
+        let [left, top, right, bottom] = surface.painted()?.map(f64::from);
+        Some([(left + right) / 2.0, (top + bottom) / 2.0])
+    }
+
+    /// The current layer's pivot, when it has keys.
+    pub fn pivot(&self) -> Option<[f64; 2]> {
+        let session = &self.tab.session;
+        let keys = session.document().layer(session.current_layer())?.keys();
+        (!keys.is_empty()).then_some(keys.pivot)
+    }
+
+    /// Where the current layer's pivot shows on this frame, for the move
+    /// tool.
+    pub fn pivot_shown(&self) -> Option<[f64; 2]> {
+        if self.tools.tool != ugu_session::Tool::Move {
+            return None;
+        }
+        let pivot = self.pivot()?;
+        let session = &self.tab.session;
+        let transform = session
+            .shown_document()
+            .transform(session.current_layer(), session.cycle())
+            .unwrap_or(Affine::IDENTITY);
+        Some(transform.apply(pivot))
+    }
+
+    /// Moves the current layer's pivot, keeping where it shows.
+    pub fn set_pivot(&mut self, pivot: [f64; 2]) {
+        let layer = self.tab.session.current_layer();
+        if let Err(error) = self.edit(|session| session.set_pivot(layer, pivot)) {
+            self.notice = Some(super::failed_because(
+                crate::i18n::tr("pose-failed"),
+                &error,
+            ));
+        }
     }
 
     /// Where the current layer's canvas is shown on this frame, with the
@@ -173,6 +222,33 @@ impl Canvas {
         let layer = self.tab.session.current_layer();
         let pivot = self.default_pivot();
         if let Err(error) = self.edit(|session| session.set_pose(layer, pose, pivot)) {
+            self.notice = Some(super::failed_because(
+                crate::i18n::tr("pose-failed"),
+                &error,
+            ));
+        }
+    }
+
+    /// Keeps the current layer's key on this frame to paste.
+    pub fn copy_key(&mut self) {
+        let session = &self.tab.session;
+        if let Some(key) = session.key_here(session.current_layer()) {
+            self.copied_key = Some(key);
+        }
+    }
+
+    pub fn copied_key(&self) -> Option<ugu_core::keys::Key> {
+        self.copied_key
+    }
+
+    /// Puts the key copied on this frame of the current layer.
+    pub fn paste_key(&mut self) {
+        let Some(key) = self.copied_key else {
+            return;
+        };
+        let layer = self.tab.session.current_layer();
+        let pivot = self.default_pivot();
+        if let Err(error) = self.edit(|session| session.paste_key(layer, key, pivot)) {
             self.notice = Some(super::failed_because(
                 crate::i18n::tr("pose-failed"),
                 &error,

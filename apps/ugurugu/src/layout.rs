@@ -139,6 +139,7 @@ pub struct Layout {
     /// Keys, animation folders, the onion skin and the move layer tool are
     /// shown; a drawing that has keys or folders turns them on.
     pub animation_tools: bool,
+    pub onion: crate::canvas::OnionSettings,
     pub color_field: ColorField,
 }
 
@@ -161,6 +162,7 @@ impl Default for Layout {
             closed: Vec::new(),
             animation_bar: true,
             animation_tools: false,
+            onion: crate::canvas::OnionSettings::DEFAULT,
             color_field: ColorField::default(),
         }
     }
@@ -368,6 +370,11 @@ impl Layout {
             "closed": self.closed.iter().map(|panel| panel.key()).collect::<Vec<_>>(),
             "animationBar": self.animation_bar,
             "animationTools": self.animation_tools,
+            "onionSkin": {
+                "before": self.onion.before,
+                "after": self.onion.after,
+                "opacity": self.onion.opacity,
+            },
             "colorField": self.color_field.key(),
         })
     }
@@ -468,6 +475,8 @@ fn read(value: &Value) -> Option<Layout> {
             .get("animationTools")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // Not in settings written before 3.3.0.
+        onion: onion_settings(object.get("onionSkin")),
         // Not in settings written before the triangle came back.
         color_field: object
             .get("colorField")
@@ -483,6 +492,27 @@ fn finite(value: &Value) -> Option<f32> {
 
 fn number(object: &Map<String, Value>, key: &str) -> Option<f32> {
     finite(object.get(key)?)
+}
+
+/// The onion skin's settings, the defaults for what is missing or odd.
+fn onion_settings(value: Option<&Value>) -> crate::canvas::OnionSettings {
+    let defaults = crate::canvas::OnionSettings::DEFAULT;
+    let Some(object) = value.and_then(Value::as_object) else {
+        return defaults;
+    };
+    let number = |key: &str, default: u32| {
+        object
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(default)
+    };
+    crate::canvas::OnionSettings {
+        before: number("before", defaults.before),
+        after: number("after", defaults.after),
+        opacity: number("opacity", defaults.opacity),
+    }
+    .clamped()
 }
 
 #[cfg(test)]
@@ -508,6 +538,11 @@ mod tests {
         layout.set_open(Panel::Color, false);
         layout.left.width = 222.0;
         layout.right.collapsed = true;
+        layout.onion = crate::canvas::OnionSettings {
+            before: 3,
+            after: 0,
+            opacity: 55,
+        };
         layout.animation_bar = false;
         layout.animation_tools = true;
         layout.color_field = ColorField::Triangle;

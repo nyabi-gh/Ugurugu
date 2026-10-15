@@ -2519,6 +2519,33 @@ fn a_dragged_pose_shows_until_it_is_keyed_or_dropped() {
 }
 
 #[test]
+fn a_pasted_key_takes_the_pose_and_easing_on_this_frame_in_one_step() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let key = ugu_core::keys::Key {
+        frame: 0,
+        pose: ugu_core::keys::Pose {
+            offset: [5.0, 6.0],
+            opacity: 0.5,
+            ..ugu_core::keys::Pose::REST
+        },
+        ease: ugu_core::keys::Ease::Hold,
+    };
+    session.set_frame(3).unwrap();
+    session.paste_key(layer, key, [1.0, 2.0]).unwrap();
+    let pasted = session.key_here(layer).unwrap();
+    assert_eq!(
+        (pasted.frame, pasted.pose, pasted.ease),
+        (3, key.pose, key.ease)
+    );
+    assert_eq!(
+        session.document().layer(layer).unwrap().keys().pivot,
+        [1.0, 2.0]
+    );
+    assert_eq!(session.undo_label(), Some("Paste key"));
+}
+
+#[test]
 fn a_new_pivot_keeps_every_key_where_it_puts_the_layer() {
     let mut session = session();
     let layer = session.current_layer();
@@ -2527,6 +2554,7 @@ fn a_new_pivot_keeps_every_key_where_it_puts_the_layer() {
         rotation: 30.0,
         scale: 1.5,
         flip: true,
+        opacity: 1.0,
     };
     session.set_pose(layer, pose, [10.0, 10.0]).unwrap();
     let before = session.document().transform(layer, 0).unwrap();

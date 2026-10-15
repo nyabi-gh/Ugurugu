@@ -15,11 +15,13 @@ use crate::store::{Store, StoreError};
 /// of isolated sections that merging creates.
 pub mod limits {
     pub const CANVAS_EDGE: std::ops::RangeInclusive<u32> = 1..=4096;
-    pub const FRAMES: std::ops::RangeInclusive<u32> = 2..=60;
+    /// 3.2 and before read at most 60, which 2.2.13 also allowed.
+    pub const FRAMES: std::ops::RangeInclusive<u32> = 2..=240;
+    pub const FRAMES_BEFORE_3_3: u32 = 60;
     pub const FRAMES_PER_SECOND: std::ops::RangeInclusive<f32> = 1.0..=50.0;
     pub const WOBBLE_AMOUNT: std::ops::RangeInclusive<f32> = 0.0..=12.0;
     /// Poses in a motion loop; a loop uses at most one per frame.
-    pub const MOTION_POSES: std::ops::RangeInclusive<u32> = 1..=*FRAMES.end();
+    pub const MOTION_POSES: std::ops::RangeInclusive<u32> = 1..=FRAMES_BEFORE_3_3;
     pub const MOTION_DETAIL: std::ops::RangeInclusive<u32> = 1..=24;
     pub const BREAK_RANGE: std::ops::RangeInclusive<f32> = 2.0..=256.0;
     pub const LAYERS: usize = 256;
@@ -418,10 +420,15 @@ mod tests {
         wide.canvas = [0, 64];
         assert_eq!(wide.validate(), Err(DocumentError::Canvas([0, 64])));
         let frames = Document {
-            frames: 61,
+            frames: 241,
             ..base.clone()
         };
-        assert_eq!(frames.validate(), Err(DocumentError::Frames(61)));
+        assert_eq!(frames.validate(), Err(DocumentError::Frames(241)));
+        let long = Document {
+            frames: 240,
+            ..base.clone()
+        };
+        assert_eq!(long.validate(), Ok(()));
         let fps = Document {
             frames_per_second: f32::NAN,
             ..base.clone()

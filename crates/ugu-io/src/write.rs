@@ -53,11 +53,17 @@ impl From<zip::result::ZipError> for WriteError {
 /// The features `document` uses that older readers lack.
 fn required(document: &Document) -> Vec<String> {
     let (keyed, folders) = document.is_animated();
-    [(keyed, KEYS_FEATURE), (folders, CELS_FEATURE)]
-        .into_iter()
-        .filter(|(used, _)| *used)
-        .map(|(_, name)| name.to_owned())
-        .collect()
+    let long = document.frames > ugu_core::document::limits::FRAMES_BEFORE_3_3;
+    [
+        (keyed, KEYS_FEATURE),
+        (folders, CELS_FEATURE),
+        (long, FRAMES_FEATURE),
+        (document.fades(), KEY_OPACITY_FEATURE),
+    ]
+    .into_iter()
+    .filter(|(used, _)| *used)
+    .map(|(_, name)| name.to_owned())
+    .collect()
 }
 
 fn keys(keys: &Keys) -> Option<KeysDto> {
@@ -72,6 +78,7 @@ fn keys(keys: &Keys) -> Option<KeysDto> {
                 rotation: key.pose.rotation,
                 scale: key.pose.scale,
                 flip: key.pose.flip,
+                opacity: key.pose.opacity,
                 ease: match key.ease {
                     Ease::Linear => EaseDto::Linear,
                     Ease::Smooth => EaseDto::Smooth,

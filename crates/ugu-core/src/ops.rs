@@ -332,6 +332,15 @@ pub fn merge_down(
     pixel: bool,
 ) -> Result<PaintLayer, MergeRefusal> {
     let moves = [fixed_move(&below.keys)?, fixed_move(&above.keys)?];
+    // A key that fades the layer in one place fades its section alike.
+    let shown = |layer: &PaintLayer| {
+        layer.opacity
+            * layer
+                .keys
+                .keys
+                .first()
+                .map_or(1.0, |key| key.pose.opacity as f32)
+    };
     if below.blend != Blend::Normal || above.blend != Blend::Normal {
         return Err(MergeRefusal::Blend);
     }
@@ -341,7 +350,7 @@ pub fn merge_down(
     if below.final_size() != above.initial_size {
         return Err(MergeRefusal::CanvasEpoch);
     }
-    if changes_canvas(&above.ops) || (below.opacity != 1.0 && changes_canvas(&below.ops)) {
+    if changes_canvas(&above.ops) || (shown(below) != 1.0 && changes_canvas(&below.ops)) {
         return Err(MergeRefusal::CanvasChange);
     }
     let baked = |layer: &PaintLayer, moved: Option<Affine>| {
@@ -361,13 +370,13 @@ pub fn merge_down(
     let section = |layer: &PaintLayer, moved: Option<Affine>| {
         Op::Isolated(Box::new(Section {
             ops: baked(layer, moved),
-            opacity: layer.opacity,
+            opacity: shown(layer),
             wobble: layer.wobble,
         }))
     };
     // An opaque lower layer needs no section; its operations stay as they are,
     // canvas changes included.
-    let mut ops = if below.opacity == 1.0 {
+    let mut ops = if shown(below) == 1.0 {
         baked(below, moves[0])
     } else {
         vec![section(below, moves[0])]

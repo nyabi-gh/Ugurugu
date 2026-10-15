@@ -1414,6 +1414,7 @@ mod tests {
                 rotation,
                 scale,
                 flip,
+                opacity: 1.0,
             },
             ease: Ease::Linear,
         }

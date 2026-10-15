@@ -624,6 +624,7 @@ fn animated() -> Document {
                 rotation: 33.3,
                 scale: 0.75,
                 flip: true,
+                opacity: 1.0,
             },
             ease: Ease::Smooth,
         });
@@ -697,6 +698,37 @@ fn keys_alone_require_only_keys_and_unknown_features_stay_refused() {
         r#""required":["keys","rigs"]"#,
     );
     assert!(matches!(read_bytes(unknown), Err(ReadError::Newer(_))));
+}
+
+#[test]
+fn a_key_that_fades_reads_back_and_is_named_as_required() {
+    let mut document = sample();
+    document.layers[0].keys_mut().set(ugu_core::keys::Key {
+        frame: 1,
+        pose: ugu_core::keys::Pose {
+            opacity: 0.25,
+            ..ugu_core::keys::Pose::REST
+        },
+        ease: ugu_core::keys::Ease::Linear,
+    });
+    let bytes = written(&document);
+    assert!(
+        manifest_of(&bytes).ends_with(r#""required":["keys","key-opacity"]}"#),
+        "{}",
+        manifest_of(&bytes)
+    );
+    assert!(read_bytes(bytes).unwrap().0.layers == document.layers);
+}
+
+#[test]
+fn more_frames_than_3_2_reads_are_named_as_required() {
+    let mut document = sample();
+    document.frames = 61;
+    let bytes = written(&document);
+    assert!(manifest_of(&bytes).ends_with(r#""required":["frames"]}"#));
+    assert_eq!(read_bytes(bytes).unwrap().0.frames, 61);
+    document.frames = 60;
+    assert!(manifest_of(&written(&document)).ends_with(r#""required":[]}"#));
 }
 
 #[test]

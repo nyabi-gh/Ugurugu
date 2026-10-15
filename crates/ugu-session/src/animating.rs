@@ -122,6 +122,28 @@ impl Session {
         })
     }
 
+    /// Puts a copy of `key`, its pose and easing, on this frame of `id` as
+    /// one step. The first key also puts the pivot at `pivot`.
+    pub fn paste_key(
+        &mut self,
+        id: LayerId,
+        key: Key,
+        pivot: [f64; 2],
+    ) -> Result<Outcome, EditError> {
+        self.posing = None;
+        let cycle = self.cycle();
+        self.update_layer(id, "Paste key", |layer| {
+            let keys = layer.keys_mut();
+            if keys.is_empty() {
+                keys.pivot = pivot;
+            }
+            keys.set(Key {
+                frame: cycle,
+                ..key
+            });
+        })
+    }
+
     /// Adds a key on this frame holding the pose `id` has now, or takes
     /// away the one there.
     pub fn toggle_key(&mut self, id: LayerId, pivot: [f64; 2]) -> Result<Outcome, EditError> {

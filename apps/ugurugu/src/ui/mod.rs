@@ -25,6 +25,7 @@ mod text;
 mod timeline;
 mod window;
 
+use crate::canvas::OnionSettings;
 use crate::i18n::args;
 use std::sync::Arc;
 use ugu_core::document::{LayerKind, limits};
@@ -972,6 +973,24 @@ pub fn pose_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
     if let Some(corners) = canvas.pose_box() {
         transform_box(ui, canvas, &corners, |at| canvas.pose_grip_at(at));
     }
+    if let Some(pivot) = canvas.pivot_shown() {
+        let at = to_screen(ui, canvas, pivot);
+        let painter = ui.painter();
+        for (stroke, reach) in [
+            (egui::Stroke::new(3.0, egui::Color32::WHITE), 7.0),
+            (egui::Stroke::new(1.0, theme::accent_text()), 6.0),
+        ] {
+            painter.circle_stroke(at, 4.0, stroke);
+            painter.line_segment(
+                [at - egui::vec2(reach, 0.0), at + egui::vec2(reach, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [at - egui::vec2(0.0, reach), at + egui::vec2(0.0, reach)],
+                stroke,
+            );
+        }
+    }
 }
 
 /// The box's sides and handles, and the pointer shape for what a drag from
@@ -1630,9 +1649,38 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
 fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let keys = &panels.keys;
     let onion = canvas.onion_skin();
-    let tip = widgets::with_key(tr("onion-skin"), &keys.text(Action::OnionSkin));
+    canvas.set_onion_settings(panels.layout.onion);
+    let tip = widgets::with_key(tr("onion-skin-tip"), &keys.text(Action::OnionSkin));
     let response =
         widgets::icon_button_tip(ui, Glyph::OnionSkin, 20.0, tr("onion-skin"), &tip, true);
+    egui::Popup::context_menu(&response).show(|ui| {
+        ui.set_min_width(240.0);
+        ui.set_max_width(280.0);
+        let settings = &mut panels.layout.onion;
+        let frames = OnionSettings::FRAMES;
+        let frames = *frames.start() as f32..=*frames.end() as f32;
+        for (count, key) in [
+            (&mut settings.before, "onion-before"),
+            (&mut settings.after, "onion-after"),
+        ] {
+            let mut value = *count as f32;
+            slider_row(ui, tr(key), tr(key), &mut value, frames.clone(), "", 0);
+            *count = value.round() as u32;
+        }
+        let opacity = OnionSettings::OPACITY;
+        let mut value = settings.opacity as f32;
+        slider_row(
+            ui,
+            tr("onion-opacity"),
+            tr("onion-opacity"),
+            &mut value,
+            *opacity.start() as f32..=*opacity.end() as f32,
+            "%",
+            0,
+        );
+        settings.opacity = value.round() as u32;
+        *settings = settings.clamped();
+    });
     if onion {
         ui.painter().rect_stroke(
             response.rect,

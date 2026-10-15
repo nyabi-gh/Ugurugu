@@ -97,6 +97,11 @@ public static class Native
 
     public static void Down() { mouse_event(0x2, 0, 0, 0, UIntPtr.Zero); }
     public static void Up() { mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); }
+    public static void RightClick()
+    {
+        mouse_event(0x8, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+    }
 
     // A drag through the points, in steps of a few pixels every few ms.
     public static void Drag(int[] xs, int[] ys)
@@ -975,6 +980,37 @@ Step 'Cels and onion skin' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $detail = "cel row on frame 4 $row, back on frame 1 $back; red pixels without onion skin $($plain.Red), with $($onion.Red); $shot"
     if (-not ($row -and $back) -or $onion.Red -le $plain.Red + 20) {
+        throw $detail
+    }
+    $detail
+}
+
+Step 'Key opacity, pivot and onion settings' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    Enable-AnimationTools $process
+    $paper = Draw-Stroke $process
+    $drawn = Get-Ink $process $paper
+    Send-Keys $process 'v'
+    Send-Keys $process 'k'
+    $pivot = Test-Named $process 'Pivot X'
+    Set-Field $process 'Key opacity' '30'
+    $faded = Get-Ink $process $paper
+    $shot = Save-Screen 'key-opacity-pivot'
+    $root = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+    $button = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+        Where-Object { ([string]$_.Current.Name) -like '*Onion skin' } | Select-Object -First 1
+    $rect = $button.Current.BoundingRectangle
+    [Native]::MoveTo([int]($rect.X + $rect.Width / 2), [int]($rect.Y + $rect.Height / 2))
+    Start-Sleep -Milliseconds 300
+    [Native]::RightClick()
+    Start-Sleep -Milliseconds 500
+    $popup = Test-Named $process 'Frames before'
+    $settings = Save-Screen 'onion-settings'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $detail = "dark pixels drawn $($drawn.Count), at 30% $($faded.Count); pivot field $pivot; onion settings $popup; $shot; $settings"
+    if (-not ($pivot -and $popup) -or $drawn.Count -eq 0 -or $faded.Count -gt $drawn.Count / 4) {
         throw $detail
     }
     $detail

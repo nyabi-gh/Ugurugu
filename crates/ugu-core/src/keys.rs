@@ -46,6 +46,8 @@ pub struct Pose {
     pub scale: f64,
     /// Mirrored left to right.
     pub flip: bool,
+    /// Multiplies the layer's own opacity; 1 shows it as it is.
+    pub opacity: f64,
 }
 
 impl Pose {
@@ -54,12 +56,17 @@ impl Pose {
         rotation: 0.0,
         scale: 1.0,
         flip: false,
+        opacity: 1.0,
     };
 
     /// Scales and flips about `pivot`, turns about it, then moves; `None`
     /// when that leaves every pixel where it is.
     pub fn transform(&self, pivot: [f64; 2]) -> Option<Affine> {
-        if *self == Self::REST {
+        let geometry = Self {
+            opacity: 1.0,
+            ..*self
+        };
+        if geometry == Self::REST {
             return None;
         }
         let horizontal = if self.flip { -self.scale } else { self.scale };
@@ -88,6 +95,7 @@ impl Pose {
             && self.rotation.is_finite()
             && self.rotation.abs() <= limits::ROTATION
             && limits::SCALE.contains(&self.scale)
+            && (0.0..=1.0).contains(&self.opacity)
     }
 }
 
@@ -163,7 +171,18 @@ impl Keys {
             rotation: mix(a.rotation, b.rotation),
             scale: mix(a.scale, b.scale),
             flip: a.flip,
+            opacity: mix(a.opacity, b.opacity),
         })
+    }
+
+    /// How much the keys fade the layer on `frame`: 1 without keys.
+    pub fn opacity(&self, frame: u32, frames: u32) -> f64 {
+        self.pose(frame, frames).map_or(1.0, |pose| pose.opacity)
+    }
+
+    /// Whether any key fades the layer.
+    pub fn fades(&self) -> bool {
+        self.keys.iter().any(|key| key.pose.opacity != 1.0)
     }
 
     /// Where the layer's pixels go on `frame`; `None` where they stay.
@@ -338,6 +357,17 @@ impl Document {
         let mut found = (false, false);
         walk(&self.layers, &mut found);
         found
+    }
+
+    /// Whether any key fades its layer.
+    pub fn fades(&self) -> bool {
+        fn walk(layers: &[Layer]) -> bool {
+            layers.iter().any(|layer| {
+                layer.keys().fades()
+                    || matches!(&layer.kind, LayerKind::Group(group) if walk(&group.children))
+            })
+        }
+        walk(&self.layers)
     }
 }
 
