@@ -123,6 +123,71 @@ Step 'Open by association from a Korean path' {
     "title '$title'", $opened
 }
 
+# The taskbar button's Jump List lists a document the app opened. It is
+# handed to the app as an argument, not opened through the shell, which
+# would list it by itself.
+Step 'Recent documents on the taskbar' {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class Mouse {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+    public static void RightClick(int x, int y) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(200);
+        mouse_event(0x8, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+    }
+}
+'@
+    $name = 'ugurugu-recent-probe'
+    $document = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "$name.ugurugu"
+    Copy-Item (Join-Path $in 'drawing.ugurugu') $document
+    Start-Process -FilePath $app -ArgumentList "`"$document`"" | Out-Null
+    $process = Wait-Window
+    Start-Sleep -Seconds 2
+    $desktop = [Windows.Automation.AutomationElement]::RootElement
+    $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $button = Wait-Until {
+        $desktop.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+            Where-Object {
+                $_.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and
+                ([string]$_.Current.Name) -like 'Ugurugu*' -and
+                $_.Current.BoundingRectangle.Y -gt $screen.Height - 120
+            } | Select-Object -First 1
+    } 20 'the taskbar button'
+    $rect = $button.Current.BoundingRectangle
+    [Mouse]::RightClick([int]($rect.X + $rect.Width / 2), [int]($rect.Y + $rect.Height / 2))
+    Start-Sleep -Milliseconds 1500
+    $listed = try {
+        Wait-Until {
+            $desktop.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+                Where-Object { ([string]$_.Current.Name) -eq $name -and $_.Current.ProcessId -ne $process.Id } |
+                Select-Object -First 1
+        } 10 'the document in the Jump List'
+    } catch {
+        $null
+    }
+    # Read before the list closes and the element goes.
+    $entry = if ($listed) { $listed.Current.Name } else { 'none' }
+    $bitmap = New-Object Drawing.Bitmap $screen.Width, $screen.Height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($screen.Location, [Drawing.Point]::Empty, $screen.Size)
+    $bitmap.Save((Join-Path $out 'taskbar-jump-list.png'), [Drawing.Imaging.ImageFormat]::Png)
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Close-App $process
+    $recent = @(Get-ChildItem ([Environment]::GetFolderPath('Recent')) -Filter "$name*.lnk").Count -gt 0
+    $detail = "taskbar button '$($button.Current.Name)'; in Recent: $recent; jump list entry: $entry; taskbar-jump-list.png"
+    if (-not $listed) {
+        throw $detail
+    }
+    $detail
+}
+
 # Its own settings, so the check it finishes does not start the interval
 # that would keep the next step from checking at start.
 Step 'Update that fails to download' {

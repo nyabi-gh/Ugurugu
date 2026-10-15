@@ -152,6 +152,15 @@ pub fn read_with<R: Read + Seek>(
     if file_bytes > limits::FILE_BYTES {
         return Err(ReadError::TooLarge(format!("{file_bytes} bytes")));
     }
+    // The ZIP reader takes in the whole central directory before it can be
+    // counted: 3.5 million entries took 8 s and 1.9 GiB to refuse
+    // (docs/rust/evidence.md section 65).
+    if let Some(entries) = declared_entries(&mut input, file_bytes).map_err(ReadError::Io)?
+        && entries > limits::ENTRIES as u64
+    {
+        return Err(ReadError::TooLarge(format!("{entries} entries")));
+    }
+    input.rewind().map_err(ReadError::Io)?;
     let archive =
         ZipArchive::new(input).map_err(|error| ReadError::NotAnArchive(error.to_string()))?;
     if archive.len() > limits::ENTRIES {
@@ -214,6 +223,52 @@ pub fn read_with<R: Read + Seek>(
         )
     });
     Ok((document, id, active))
+}
+
+/// How many entries the end of the central directory says the archive
+/// has, ZIP64's count when it defers to it; `None` when the end is not
+/// found, for the ZIP reader to refuse.
+fn declared_entries<R: Read + Seek>(
+    input: &mut R,
+    file_bytes: u64,
+) -> std::io::Result<Option<u64>> {
+    use std::io::SeekFrom;
+    const END: u32 = 0x0605_4b50;
+    const LOCATOR: u32 = 0x0706_4b50;
+    const END64: u32 = 0x0606_4b50;
+    // The end record is 22 bytes and a comment of at most 65,535; ZIP64's
+    // locator is the 20 bytes before it.
+    let tail = file_bytes.min(22 + 65_535 + 20);
+    input.seek(SeekFrom::Start(file_bytes - tail))?;
+    let mut bytes = vec![0; tail as usize];
+    input.read_exact(&mut bytes)?;
+    let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("4 bytes"));
+    let Some(end) = (0..bytes.len().saturating_sub(21))
+        .rev()
+        .find(|&at| word(at) == END)
+    else {
+        return Ok(None);
+    };
+    let entries = u16::from_le_bytes([bytes[end + 10], bytes[end + 11]]);
+    if entries != u16::MAX {
+        return Ok(Some(u64::from(entries)));
+    }
+    if end < 20 || word(end - 20) != LOCATOR {
+        return Ok(None);
+    }
+    let at = u64::from_le_bytes(bytes[end - 12..end - 4].try_into().expect("8 bytes"));
+    if at.checked_add(56).is_none_or(|last| last > file_bytes) {
+        return Ok(None);
+    }
+    input.seek(SeekFrom::Start(at))?;
+    let mut record = [0; 56];
+    input.read_exact(&mut record)?;
+    if u32::from_le_bytes(record[..4].try_into().expect("4 bytes")) != END64 {
+        return Ok(None);
+    }
+    Ok(Some(u64::from_le_bytes(
+        record[32..40].try_into().expect("8 bytes"),
+    )))
 }
 
 fn read_up_to(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {

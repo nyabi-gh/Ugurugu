@@ -1295,6 +1295,38 @@ Step 'A file opened from outside becomes a tab of the open window' {
     $detail
 }
 
+# What the app spends while its drawing wobbles on screen, minimized and
+# under another window (docs/rust/evidence.md section 65).
+Step 'CPU while the window is hidden' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $null = Draw-Stroke $process
+    Start-Sleep -Seconds 2
+    $spent = {
+        $process.Refresh()
+        $before = $process.TotalProcessorTime
+        Start-Sleep -Seconds 5
+        $process.Refresh()
+        [int](($process.TotalProcessorTime - $before).TotalMilliseconds)
+    }
+    $shown = & $spent
+    [void][Native]::ShowWindow($process.MainWindowHandle, 6)
+    Start-Sleep -Seconds 1
+    $minimized = & $spent
+    [void][Native]::ShowWindow($process.MainWindowHandle, 9)
+    Start-Sleep -Seconds 1
+    $cover = New-Object Windows.Forms.Form
+    $cover.WindowState = 'Maximized'
+    $cover.TopMost = $true
+    $cover.Show()
+    Start-Sleep -Seconds 1
+    $covered = & $spent
+    $cover.Close()
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    "CPU ms in 5 s while wobbling: shown $shown, minimized $minimized, under a maximized window $covered"
+}
+
 Step 'The window opens where it closed' {
     Stop-Apps
     Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue

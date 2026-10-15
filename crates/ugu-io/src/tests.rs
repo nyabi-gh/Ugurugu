@@ -720,6 +720,142 @@ fn a_key_that_fades_reads_back_and_is_named_as_required() {
     assert!(read_bytes(bytes).unwrap().0.layers == document.layers);
 }
 
+/// A ZIP that is only a central directory of `entries` empty entries, with
+/// ZIP64's end records saying there are `declared`.
+fn central_directory_only(entries: u64, declared: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for index in 0..entries {
+        let name = format!("{index:08}");
+        bytes.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        bytes.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0]);
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(name.as_bytes());
+    }
+    let size = bytes.len() as u64;
+    bytes.extend_from_slice(&0x0606_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&44u64.to_le_bytes());
+    bytes.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    bytes.extend_from_slice(&declared.to_le_bytes());
+    bytes.extend_from_slice(&declared.to_le_bytes());
+    bytes.extend_from_slice(&size.to_le_bytes());
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&0x0706_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&size.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&[0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]);
+    bytes.extend_from_slice(&[0xff; 8]);
+    bytes.extend_from_slice(&[0, 0]);
+    bytes
+}
+
+/// Changes a few bytes of `data`, or cuts it short, as `next` picks.
+fn mutated(data: &[u8], next: &mut impl FnMut() -> u64) -> Vec<u8> {
+    let mut data = data.to_vec();
+    if data.is_empty() {
+        return data;
+    }
+    match next() % 4 {
+        0 => data.truncate((next() % data.len() as u64) as usize),
+        1 => {
+            let at = (next() % data.len() as u64) as usize;
+            let digits = b"0123456789-.e9";
+            data[at] = digits[(next() % digits.len() as u64) as usize];
+        }
+        _ => {
+            for _ in 0..1 + next() % 8 {
+                let at = (next() % data.len() as u64) as usize;
+                data[at] = next() as u8;
+            }
+        }
+    }
+    data
+}
+
+/// Damaged files of every kind are refused, never panic and never take
+/// long: the archive's bytes changed, and each entry's content changed and
+/// packed again so that it reaches the parsers.
+#[test]
+fn damaged_documents_are_refused_without_panicking() {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let rounds = if cfg!(debug_assertions) { 300 } else { 3000 };
+    for document in [sample(), animated()] {
+        let bytes = written(&document);
+        let parts = entries(&bytes);
+        for round in 0..rounds {
+            let damaged = if round % 2 == 0 {
+                mutated(&bytes, &mut next)
+            } else {
+                let mut parts = parts.clone();
+                let index = (next() % parts.len() as u64) as usize;
+                parts[index].1 = mutated(&parts[index].1, &mut next);
+                archive(&parts)
+            };
+            let started = std::time::Instant::now();
+            let read = std::panic::catch_unwind(|| read_bytes(damaged.clone()));
+            assert!(read.is_ok(), "round {round} panicked");
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "round {round} took {:?}",
+                started.elapsed()
+            );
+        }
+    }
+}
+
+/// As above, for the 2.2.13 projects that are imported.
+#[test]
+fn damaged_2_x_projects_are_refused_without_panicking() {
+    let mut state = 0x2545_F491_4F6C_DD1D_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let rounds = if cfg!(debug_assertions) { 100 } else { 1000 };
+    let folder =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ugu13");
+    for name in ["edit.ugu", "fill.ugu", "motion.ugu"] {
+        let bytes = std::fs::read(folder.join(name)).unwrap();
+        assert!(crate::legacy::read(bytes.as_slice()).is_ok(), "{name}");
+        for round in 0..rounds {
+            let damaged = mutated(&bytes, &mut next);
+            let started = std::time::Instant::now();
+            let read = std::panic::catch_unwind(|| crate::legacy::read(damaged.as_slice()).is_ok());
+            assert!(read.is_ok(), "{name} round {round} panicked");
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{name} round {round} took {:?}",
+                started.elapsed()
+            );
+        }
+    }
+}
+
+#[test]
+fn too_many_entries_are_refused_before_the_directory_is_read() {
+    // Said, not there: refused on what the end says, before the
+    // directory is read.
+    let over = crate::read::limits::ENTRIES as u64 + 1;
+    let refused = read_bytes(central_directory_only(1, over));
+    assert!(
+        matches!(&refused, Err(ReadError::TooLarge(why)) if why == &format!("{over} entries")),
+        "{refused:?}"
+    );
+    // A real document still reads.
+    assert!(read_bytes(written(&sample())).is_ok());
+}
+
 #[test]
 fn more_frames_than_3_2_reads_are_named_as_required() {
     let mut document = sample();

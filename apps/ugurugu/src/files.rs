@@ -1390,6 +1390,34 @@ impl Files {
                 .color(theme::accent_ink())
             };
             ui.add(egui::Label::new(estimate.size(theme::SMALL)).wrap());
+            let seconds = f64::from(document.frames) / f64::from(document.frames_per_second);
+            let length = tr_with(
+                "export-length",
+                &crate::i18n::args([
+                    ("seconds", format!("{seconds:.1}")),
+                    ("fps", format!("{}", document.frames_per_second)),
+                ]),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(length)
+                        .size(theme::SMALL)
+                        .color(theme::muted()),
+                )
+                .wrap(),
+            );
+            // GIF has one transparent colour: what is less than half opaque
+            // is left out, and the rest is opaque.
+            if dialog.format == Animation::Gif && transparent && dialog.keep_transparency {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(tr("export-gif-edges"))
+                            .size(theme::SMALL)
+                            .color(theme::muted()),
+                    )
+                    .wrap(),
+                );
+            }
             widgets::dialog_buttons(ui, |ui| {
                 if widgets::button(ui, tr("export-confirm"), widgets::Emphasis::Primary, fits)
                     .clicked()
@@ -1631,13 +1659,13 @@ impl Files {
                     .is_none_or(|export| export.number != number)
                 {
                     if self.last_cancelled == Some(number) && matches!(outcome, Outcome::Done) {
-                        self.say(tr_with("export-done", &args_path(&path)));
+                        self.say(exported(&path, canvas.session().document()));
                     }
                     return;
                 }
                 self.exporting = None;
                 match outcome {
-                    Outcome::Done => self.say(tr_with("export-done", &args_path(&path))),
+                    Outcome::Done => self.say(exported(&path, canvas.session().document())),
                     Outcome::Cancelled => self.say(tr("export-canceled").to_owned()),
                     Outcome::Failed(error) => {
                         self.fail(format!("{}: {error}", tr("export-failed")));
@@ -2151,6 +2179,11 @@ fn run(job: Job) -> Option<FileEvent> {
                 ok = result.is_ok(),
                 "document saved"
             );
+            // Tests save to temporary folders, which are no one's recent
+            // documents.
+            if result.is_ok() && !cfg!(test) {
+                ugu_win::recent::add(&path);
+            }
             FileEvent::Saved {
                 number,
                 document: generation,
@@ -2199,6 +2232,11 @@ fn run(job: Job) -> Option<FileEvent> {
                 ok = result.is_ok(),
                 "document opened"
             );
+            // Only documents open again as they are; a 2.x project is
+            // imported into a new one.
+            if matches!(result, Ok(Opened::Document(..))) && !cfg!(test) {
+                ugu_win::recent::add(&path);
+            }
             FileEvent::Opened(path, result)
         }
         Job::BeginRecovery { root, folder } => FileEvent::RecoveryBegun(
@@ -2923,6 +2961,26 @@ mod tests {
     }
 
     #[test]
+    fn a_transparent_drawing_exported_as_jpeg_is_said_to_be_on_white() {
+        let mut document = ugu_core::document::Document::new([8, 8]);
+        let path = Path::new("frame.JPG");
+        assert_eq!(
+            exported(path, &document),
+            tr_with("export-done", &args_path(path))
+        );
+        document.background.0[3] = 0;
+        assert_eq!(
+            exported(path, &document),
+            tr_with("export-done-white", &args_path(path))
+        );
+        let png = Path::new("frame.png");
+        assert_eq!(
+            exported(png, &document),
+            tr_with("export-done", &args_path(png))
+        );
+    }
+
+    #[test]
     fn exports_run_one_at_a_time_and_a_cancelled_one_is_answered_at_once() {
         let (mut files, mut canvas, events) = setup();
         let folder = folder("export-flow");
@@ -3111,6 +3169,21 @@ fn open(path: &Path) -> Result<Opened, String> {
         }
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// What is said once `path` is exported from `document`: a JPEG, which has
+/// no transparency, puts transparent areas on white.
+fn exported(path: &Path, document: &ugu_core::document::Document) -> String {
+    let jpeg = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "jpg" | "jpeg"));
+    let key = if jpeg && document.background.0[3] < 255 {
+        "export-done-white"
+    } else {
+        "export-done"
+    };
+    tr_with(key, &args_path(path))
 }
 
 /// Why a 2.x project does not open, in the interface language.

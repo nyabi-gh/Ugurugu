@@ -1232,3 +1232,21 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 **Windows Sandbox:** "Key opacity, pivot and onion settings"(새 단계: 키 → 중심 칸, 키 불투명도 30%에 검은 화소 435 → 16, 어니언 버튼 오른쪽 클릭에 설정 팝업), "Keyframes", "Cels and onion skin"(붉은 화소 0 → 507), "Animation icons at 100%" 통과. 화면에서 중심 표시가 그림 가운데에 있다.
 
 **남은 것:** 앞뒤 프레임을 4장씩 늘렸을 때 처음 그리는 비용은 프레임 수에 비례한다(가설, 재지 않음).
+
+## 65. 최근 문서, 가려진 창, 읽기 퍼징과 ZIP 디렉터리 (2026-10-15)
+
+**최근 문서(Jump List):** Windows Sandbox 수용 시험에 "Recent documents on the taskbar"를 더했다. 설치한 앱을 실행 인자로 연 `ugurugu-recent-probe.ugurugu`(셸을 거치지 않음)가 작업 표시줄 단추의 Jump List "최근 항목"에 보이는지 UI Automation과 화면으로 본다. 이 변경의 빌드는 항목이 보였다(앞 단계에서 탐색기로 연 "새 그림"과 함께). 고치기 전 빌드로는 돌리지 않았다. 셸이 실행 인자의 파일을 넣지 않는다는 것은 가설이다.
+
+**가려진 창:** `gui.ps1` "CPU while the window is hidden": 획 하나가 우글거리는 동안 앱 프로세스의 CPU 시간을 5초씩 쟀다. 보일 때 31ms, 최소화 16ms, 최대화한 다른 창 아래 31ms. Sandbox는 vGPU가 꺼져 WARP의 그리기도 앱 CPU에 든다. 실제 GPU의 전력은 재지 않았다.
+
+**ZIP 중앙 디렉터리:** `ugu-doc cd-only <entries>`로 내용 없이 중앙 디렉터리만 있는 ZIP64를 만들고 `ugu-doc readmem`으로 읽었다.
+
+| 파일 | 항목 | 바꾸기 전 | 바꾼 뒤 |
+|---|---|---|---|
+| 3.1 MiB | 60,000 | 131ms, 최대 작업 집합 39 MiB(손상으로 거절) | 같음 |
+| 51.5 MiB | 1,000,000 | 2,239ms, 566 MiB | 0ms, 5 MiB |
+| 180.2 MiB | 3,500,000 | 8,047ms, 1,940 MiB | 0ms, 5 MiB |
+
+zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이제 끝 레코드(ZIP64면 그 레코드)의 항목 수를 먼저 읽어 `ENTRIES`(60,002)를 넘으면 거절한다(`read::declared_entries`). 같은 크기의 보통 문서(fixture ③) 읽기는 10ms·11 MiB.
+
+**퍼징:** `cargo fuzz`는 nightly와 libFuzzer가 필요해, 시드가 정해진 변형 시험을 테스트에 두었다. `.ugurugu` 두 개(키·셀 포함)를 바이트 변경·잘라내기와, 항목 내용을 바꿔 다시 묶기(JSON·마스크·이미지 파서에 닿게)로 release 6,000번씩, 2.2.13 `.ugu` 세 개를 1,000번씩 읽어 panic 없이 2초 안에 끝남을 본다(debug는 1/10). 처음부터 panic은 없었다. 프리셋·이미지 가져오기는 넣지 않았다.

@@ -24,6 +24,11 @@
 //! - `ugu-doc animate <in.ugurugu> <out.ugurugu> <keyed> <cels>`: gives the
 //!   first `keyed` paint layers keys and makes the first one an animation
 //!   folder of `cels` copies, to measure what keys and cels cost to draw.
+//! - `ugu-doc cd-only <entries> <out.ugurugu>`: writes a ZIP that is only a
+//!   central directory of that many empty entries, to measure what reading
+//!   a directory costs before its entries are counted (evidence section 65).
+//! - `ugu-doc readmem <file>`: reads a document as the app does and prints
+//!   how long it took, the outcome and the peak working set.
 //! - `ugu-doc onion <file.ugurugu> <threads>`: times the onion skin of the
 //!   first animation folder on every frame, the frame before and after each
 //!   drawn alone as the app draws them.
@@ -71,7 +76,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -96,6 +101,11 @@ fn main() -> ExitCode {
             .map_err(|_| USAGE.to_owned())
             .and_then(|rounds| bench(Path::new(file), rounds)),
         ["render", file] => render(Path::new(file), 8, None),
+        ["cd-only", entries, out] => entries
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|entries| central_directory_only(entries, Path::new(out))),
+        ["readmem", file] => read_memory(Path::new(file)),
         ["onion", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -359,6 +369,66 @@ fn to_pens(document: &mut Document) {
 }
 
 /// Puts canvas changes in the middle of every layer; see the module notes.
+fn central_directory_only(entries: u64, out: &Path) -> Result<(), String> {
+    use std::io::Write;
+    let mut bytes = Vec::new();
+    for index in 0..entries {
+        let name = format!("{index:08}");
+        bytes.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        bytes.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0]);
+        bytes.extend_from_slice(&[0; 4]); // time, date
+        bytes.extend_from_slice(&[0; 12]); // crc, sizes
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&[0; 4]); // extra, comment
+        bytes.extend_from_slice(&[0; 8]); // disk, attributes
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // local header offset
+        bytes.extend_from_slice(name.as_bytes());
+    }
+    let size = bytes.len() as u64;
+    let zip64 = bytes.len() as u64;
+    bytes.extend_from_slice(&0x0606_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&44u64.to_le_bytes());
+    bytes.extend_from_slice(&[45, 0, 45, 0]);
+    bytes.extend_from_slice(&[0; 8]);
+    bytes.extend_from_slice(&entries.to_le_bytes());
+    bytes.extend_from_slice(&entries.to_le_bytes());
+    bytes.extend_from_slice(&size.to_le_bytes());
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&0x0706_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&zip64.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+    bytes.extend_from_slice(&[0xff; 4]);
+    bytes.extend_from_slice(&[0xff; 8]);
+    bytes.extend_from_slice(&[0; 2]);
+    std::fs::File::create(out)
+        .and_then(|mut file| file.write_all(&bytes))
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{entries} entries, {:.1} MiB",
+        bytes.len() as f64 / 1048576.0
+    );
+    Ok(())
+}
+
+fn read_memory(path: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let started = Instant::now();
+    let result = ugu_io::read::read_with(std::io::BufReader::new(file));
+    println!(
+        "{:.0} ms, {}, peak working set {:.0} MiB",
+        started.elapsed().as_secs_f64() * 1000.0,
+        match &result {
+            Ok(_) => "read".to_owned(),
+            Err(error) => format!("refused: {error}"),
+        },
+        peak_working_set_mib()
+    );
+    Ok(())
+}
+
 fn onion(path: &Path, threads: u16) -> Result<(), String> {
     use ugu_render::document::DocumentRenderer;
 

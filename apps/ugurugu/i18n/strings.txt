@@ -34,9 +34,12 @@ export-keep-transparency | Keep transparent areas | 투명한 부분 유지 | �
 export-opaque-background | The canvas background is opaque, so there is nothing to keep transparent. | 캔버스 배경이 불투명해서 유지할 투명한 부분이 없습니다. | キャンバスの背景が不透明なため、保持する透明部分はありません。
 export-estimate | %1 frames, about %2 MiB while encoding. | %1프레임, 인코딩 중 약 %2 MiB를 사용합니다. | %1フレーム、エンコード中に約 %2 MiB を使用します。 | args=frames,mebibytes
 export-over-budget | This size needs about %1 MiB while encoding, which is more than the export budget. Choose a smaller size. | 이 크기는 인코딩 중 약 %1 MiB가 필요해 내보내기 한도를 넘습니다. 더 작은 크기를 선택하세요. | このサイズはエンコード中に約 %1 MiB が必要で、書き出しの上限を超えます。より小さいサイズを選んでください。 | args=mebibytes
+export-length | Plays for %1 s at %2 frames per second. | 초당 %2프레임으로 %1초 재생됩니다. | 毎秒 %2 フレームで %1 秒再生されます。 | args=seconds,fps
+export-gif-edges | GIF has no partial transparency: pixels less than half opaque are left out and soft edges become hard. WebP keeps them. | GIF는 반투명을 담지 못해, 절반보다 투명한 화소는 빠지고 부드러운 가장자리는 딱딱해집니다. WebP는 그대로 둡니다. | GIF は半透明を保てないため、半分より透明な画素は抜け、柔らかい縁は硬くなります。WebP はそのまま保ちます。
 export-cancel | Cancel | 취소 | キャンセル
 export-canceled | Export canceled | 내보내기를 취소했습니다 | 書き出しをキャンセルしました
 export-done | Exported %1 | %1 내보냄 | %1 を書き出しました | args=path
+export-done-white | Exported %1. JPEG has no transparency, so transparent areas are white. | %1 내보냄. JPEG는 투명을 담지 못해 투명한 부분은 흰색입니다. | %1 を書き出しました。JPEG は透明を保てないため、透明部分は白になります。 | args=path
 export-failed | Export failed | 내보내기 실패 | 書き出しに失敗しました
 export-close-title | Export in progress | 내보내기 진행 중 | 書き出し中
 export-close-text | Closing now stops the export. | 지금 닫으면 내보내기가 취소됩니다. | 今閉じると書き出しがキャンセルされます。

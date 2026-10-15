@@ -91,26 +91,23 @@
 | B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` 67~83행 | 분석 3.2; 검토 9절 |
 | B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` 642·712·778·793행 근처 | 분석 3.4 |
 | B3-47 | 코드에 직접 넣은 사용자 문구 검사 | Fluent 키 일치 시험은 언어 파일끼리만 비교해 코드의 하드코딩 영어를 찾지 못한다. 지금 남은 하드코딩 문구가 있는지는 전수 확인하지 않았다(가설) | `apps/ugurugu/src/i18n.rs` | 분석 3.7; 검토 6절 |
-| B3-49 | Rust reader의 퍼징과 ZIP 디렉터리 메모리 | `.ugurugu`·구형 JSON·qCompress·마스크·프리셋·이미지에 corpus를 두고 시간·메모리 한도를 함께 재는 퍼징이 없다. ZIP 중앙 디렉터리는 항목 수를 보기 전에 zip crate가 파싱하므로 파일 길이(`read::limits::FILE_BYTES`, 약 223MiB)로만 묶여 있다. 그 안에서 항목 머리만 채운 파일이 쓰는 메모리는 재지 않았다(가설: 파일 길이의 몇 배). 취약점으로 입증한 것은 아니다 | `crates/ugu-io/src/read.rs` `read_with`, `legacy.rs`, `apps/ugurugu/src/settings/preset.rs` | 검토 9절; ANALYSIS_REPORT R-08 |
 | B3-50 | 긴 텍스트의 윤곽을 UI 스레드에서 다시 만듦 | 배치한 텍스트가 바뀌면 render/UI 스레드에서 Parley 윤곽을 다시 만든다(같은 글이면 캐시). 긴 문장·대량 붙여넣기는 입력 지연 후보. 재고 길이 제한·지연 합치기·백그라운드 배치를 검토 | `apps/ugurugu/src/canvas/text.rs` 68행 | 검토 8절 |
 | B3-51 | 축소 재생 미리보기의 정확성 fixture | 재생 때 `preview_shrink`는 해상도·표본 간격을 줄인다. 픽셀 모드와 곡선의 축소 미리보기 비교 fixture가 있으면 좋다. 릴리스 노트 문구는 고쳤고 fixture는 더하지 않은 것으로 보인다(가설) | `apps/ugurugu/src/canvas.rs` | 검토 8절, 10절 |
 | B3-52 | 작업 흐름 안내 | 도움말에는 "시작하기"가 있지만 첫 실행에 띄우지 않는다. 문자 안내(`text-hint`)는 확정하면 윤곽이 되어 다시 편집할 수 없다는 말이 없다. 삽입한 이미지를 캔버스에 맞춰 줄여도 "삽입됨"만 알린다(`import::decode`의 `fit`). 메뉴의 "현재 프레임을 이미지로 내보내기"와 동작 이름 "이미지로 내보내기"가 다르다. 움직이는 GIF·WebP를 삽입하면 첫 프레임만 가져오지만(`import.rs`) 그렇다고 알리지 않는다. 확인 창을 늘리기보다 결과가 바뀌는 자리(문자 패널, 실제로 줄였을 때의 알림)에 짧게 둔다. 문구 예: "적용하면 글자가 선으로 바뀝니다", "이미지를 6000×4000에서 1024×683으로 줄여 넣었습니다"(숫자는 실제 값) | `apps/ugurugu/src/ui/`, `files.rs`, `i18n/strings.txt` | 검토 6절 "작업 흐름 개선 제안", 3.1.0 종합 검토 |
 | B3-53 | PNG 연속 프레임·sprite sheet 내보내기 | 게임 엔진·영상 편집으로 재사용, 픽셀 모드와 잘 맞는다 | `apps/ugurugu/src/export.rs` | 분석 3.8 |
 | B3-54 | 인접 포즈를 겹쳐 보는 미리보기(어니언 스킨) | 우글거림 진폭·끊김·연결을 정지 상태에서 비교. 키프레임 편집기 전체가 아니라 포즈 비교로 한정 | `apps/ugurugu/src/cache.rs` | 분석 3.8 |
 | B3-55 | 모션 seed 다시 뽑기·잠금, A/B 비교 | 같은 설정에서 다른 느낌을 찾고 고른 결과를 재현 | `crates/ugu-core/src/store.rs`, `apps/ugurugu/src/ui/mod.rs` | 분석 3.8 |
-| B3-56 | 내보내기 알파 안내 | 애니메이션 창에는 크기·인코딩 메모리 추정·투명 유지 스위치가 있다. GIF가 alpha 128 미만을 버려 부드러운 가장자리가 딱딱해지는 것과, 투명한 문서를 JPEG로 내보내면 흰 바탕이 되는 것은 알리지 않는다. 함께 볼 후보: 변환한 한 프레임 미리보기(최종 인코딩과 같은 옵션), 프레임 수·fps로 계산한 재생 길이 표시, 최근 설정이나 이름 있는 몇 개의 내보내기 프리셋 | `apps/ugurugu/src/files.rs` 애니메이션 창, `export.rs` | 분석 3.8, 3.1.0 종합 검토 |
+| B3-136 | 내보내기 미리보기와 프리셋 | 애니메이션 창은 크기·인코딩 메모리·재생 길이·GIF 가장자리 안내를 보인다(3.3.0). 최종 인코딩과 같은 옵션으로 바꾼 한 프레임 미리보기와, 최근 설정이나 이름 있는 몇 개의 내보내기 프리셋은 없다 | `apps/ugurugu/src/files.rs` 애니메이션 창, `export.rs` | 분석 3.8, 3.1.0 종합 검토 |
 
 ## 7. 2.2.x 분석 보고서 중 3.0에도 해당하는 것
 
-`docs/ANALYSIS_REPORT.md`(C++ 2.2.x 분석)의 항목 가운데 Rust 코드에서 같은 문제를 확인한 것만 옮겼다. 대부분은 해당하지 않는다. 예: B-01(위가 클리핑 레이어면 병합 거절, `command.rs` `merge_down`), B-06(접촉 중 barrel은 획을 이어 감, `input.rs`), B-07(펜이 떠나도 키 상태 유지), U-02(`Ctrl+Shift+Z` 있음), U-03(파일 연결·여러 창), R-01(이미지 형식 모두 디코드), B-14(500단계·256MiB). R-02는 B3-12, R-08은 B3-49에 합쳤다.
+`docs/ANALYSIS_REPORT.md`(C++ 2.2.x 분석)의 항목 가운데 Rust 코드에서 같은 문제를 확인한 것만 옮겼다. 대부분은 해당하지 않는다. 예: B-01(위가 클리핑 레이어면 병합 거절, `command.rs` `merge_down`), B-06(접촉 중 barrel은 획을 이어 감, `input.rs`), B-07(펜이 떠나도 키 상태 유지), U-02(`Ctrl+Shift+Z` 있음), U-03(파일 연결·여러 창), R-01(이미지 형식 모두 디코드), B-14(500단계·256MiB). R-02는 B3-12에 합쳤다. R-08(읽기 퍼징)은 3.3.0에서 닫았다(evidence.md 65절).
 
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
-| B3-61 | 창이 가려져도 재생·표시가 계속됨 | 최소화(크기 0)일 때만 그리기·재생을 멈춘다. winit 0.30.13은 Windows에서 `Occluded`를 보내지 않으므로(문서에 Unsupported) 그것으로는 고칠 수 없다. 하려면 `DWMWA_CLOAKED`(가상 데스크톱), 세션 잠금, 화면 꺼짐을 `ugu-win`에서 받아 최소화처럼 다룬다. 가려진 동안의 전력 사용은 재지 않았다(가설). 먼저 잰다 | `apps/ugurugu/src/render.rs` `minimized` | ANALYSIS_REPORT P-03 |
 | B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
-| B3-66 | 최근 파일 목록 없음 | 번역 키·메뉴 어디에도 없다. 작업 표시줄 Jump List(`SHAddToRecentDocs`, 열기·저장 때)로 하기로 했다(2026-10-13, 메뉴 하위 목록보다 작고 범위를 덜 바꿈). 메뉴 목록은 scope.md 5절대로 넣지 않는다 | `ugu-win`, `apps/ugurugu/src/files.rs` | ANALYSIS_REPORT U-17; 검토 6절 |
 | B3-67 | 릴리스 PDB를 보관하지 않음 | Release는 `debug = "line-tables-only"`로 PDB를 만들지만 패키지는 exe·LICENSE·고지 세 파일만 담고 `release-3.yml`도 PDB를 올리지 않는다. 네이티브 충돌 기록(모듈+오프셋)을 기호로 풀 수 없고, panic backtrace에도 함수 이름이 빠질 것으로 보인다(가설) | `Cargo.toml` `[profile.release]`, `tools/package_windows.ps1`, `.github/workflows/release-3.yml` | ANALYSIS_REPORT R-11 |
 | B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 링크와 Velopack 피드가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml` 176행 | ANALYSIS_REPORT R-12 |
 
@@ -155,7 +152,7 @@
 | B3-132 | render 스레드가 창 스레드를 기다리는 남은 길 | 세션이 끝나는 동안 창 스레드는 복구 쓰기를 4초 기다린다. 그때 render 스레드가 장치 손실 뒤 새 표면을 청하고 있으면(`UiEvent::NeedSurface`, 창 스레드만 만든다) 둘 다 4초를 쓴다. 창을 주인으로 하는 대화상자가 그 순간 열리는 경우도 주인 창을 동기 메시지로 끄는지는 보지 않았다(가설). 제목과 포인터는 2026-10-15에 창 스레드로 옮겼다 | `apps/ugurugu/src/app.rs` `ending`, `render.rs` `surface_source` | 3.1.0 출시 전 검토 |
 ## 11. 3.1.0 종합 검토에서 새로 확인한 것
 
-2026-10-14 3.1.0(`f96d785`) 종합 검토 보고서(저장소에 두지 않음)의 새 발견을 코드로 확인해 옮겼다. 그 보고서의 기존 항목 재평가는 B3-38·B3-39·B3-42·B3-52·B3-56·B3-101 행에 합쳤다.
+2026-10-14 3.1.0(`f96d785`) 종합 검토 보고서(저장소에 두지 않음)의 새 발견을 코드로 확인해 옮겼다. 그 보고서의 기존 항목 재평가는 B3-38·B3-39·B3-42·B3-52·B3-101 행에 합쳤다.
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
