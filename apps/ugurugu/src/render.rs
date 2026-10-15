@@ -94,6 +94,18 @@ unsafe impl Send for EguiState {}
 /// UI Automation provider.
 pub type TreeSink = Box<dyn Fn(egui::accesskit::TreeUpdate) + Send>;
 
+/// A change to the window that only its own thread may make without waiting
+/// for it: winit sets the title with a cross-thread `SetWindowTextW` and
+/// shows or hides the pointer by waiting for the window's thread, which
+/// waits for this thread while the session ends.
+pub enum WindowChange {
+    Title(String),
+    /// `None` hides the pointer.
+    Cursor(Option<winit::window::CursorIcon>),
+}
+
+pub type WindowSink = Box<dyn Fn(WindowChange) + Send>;
+
 /// The graphics instance, for the UI thread to make the first surface with.
 pub struct EarlyInstance(Receiver<wgpu::Instance>);
 
@@ -127,6 +139,7 @@ impl EarlyInstance {
 pub struct Links {
     pub surface_source: SurfaceSource,
     pub tree_sink: TreeSink,
+    pub window_sink: WindowSink,
     /// The render thread's own message queue, for work finished elsewhere.
     pub to_self: Sender<ToRender>,
     /// The window handle, for dialogs to belong to.
@@ -141,6 +154,7 @@ pub struct RenderThread {
     egui_state: egui_winit::State,
     surface_source: SurfaceSource,
     tree_sink: TreeSink,
+    window_sink: WindowSink,
     adapter_choice: AdapterChoice,
     display: Display,
     /// `UGURUGU_DIAGNOSTICS=1` enables test-only keys.
@@ -330,6 +344,7 @@ impl RenderThread {
         let Links {
             surface_source,
             tree_sink,
+            window_sink,
             to_self,
             hwnd,
         } = links;
@@ -345,6 +360,7 @@ impl RenderThread {
             egui_state,
             surface_source,
             tree_sink,
+            window_sink,
             adapter_choice,
             display,
             diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
@@ -816,13 +832,9 @@ impl RenderThread {
         // arrow showing ahead of the stroke, and no other shape showed.
         if self.cursor != Some(platform_output.cursor_icon) {
             self.cursor = Some(platform_output.cursor_icon);
-            match winit_cursor(platform_output.cursor_icon) {
-                Some(icon) => {
-                    self.window.set_cursor(icon);
-                    self.window.set_cursor_visible(true);
-                }
-                None => self.window.set_cursor_visible(false),
-            }
+            (self.window_sink)(WindowChange::Cursor(winit_cursor(
+                platform_output.cursor_icon,
+            )));
         }
         self.egui_state
             .handle_platform_output(&self.window, platform_output);
@@ -840,7 +852,7 @@ impl RenderThread {
 
         let title = self.files.title(&self.canvas);
         if title != self.title {
-            self.window.set_title(&title);
+            (self.window_sink)(WindowChange::Title(title.clone()));
             self.title = title;
         }
         if let Some(next) = self.canvas.tick(Instant::now()) {

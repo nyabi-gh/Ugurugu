@@ -25,10 +25,16 @@ pub const QUIET: Duration = Duration::from_secs(3);
 pub const LONGEST: Duration = Duration::from_secs(30);
 
 const LOCK: &str = "lock";
+/// Written as a window closes normally, whose work was saved or dropped.
+const ENDED: &str = "ended";
 /// Folders whose work could not be read; kept for the user, never offered.
 const FAILED: &str = "failed-";
 /// How long they are kept.
 const FAILED_KEPT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// A window makes its folder and locks it at once, so one this old without
+/// a lock is not being made: its window stopped in between, or a normal end
+/// stopped removing it.
+const STARTING: Duration = Duration::from_secs(60);
 const FORMAT: &str = "ugurugu.recovery";
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
@@ -173,10 +179,17 @@ fn lock(folder: &Path) -> io::Result<File> {
         .open(folder.join(LOCK))
 }
 
-/// As `lock`, for another window's folder. One without a lock is being made
-/// by a window starting now, which makes and holds its lock at once, so it
-/// is not taken: `NotFound`.
-fn lock_left(folder: &Path) -> io::Result<File> {
+/// As `lock`, for another window's folder. One without a lock made less
+/// than `starting` ago is being made by a window starting now, so it is not
+/// taken: `NotFound`.
+fn lock_left(folder: &Path, starting: Duration) -> io::Result<File> {
+    let made = std::fs::metadata(folder)?.created()?;
+    if SystemTime::now()
+        .duration_since(made)
+        .is_ok_and(|age| age >= starting)
+    {
+        return lock(folder);
+    }
     OpenOptions::new()
         .read(true)
         .write(true)
@@ -246,6 +259,10 @@ fn undescribed(path: &Path) -> Option<Meta> {
 /// folders with no document are removed, and documents that do not read are
 /// set aside.
 pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
+    begin_with(root, session, STARTING)
+}
+
+fn begin_with(root: &Path, session: &Path, starting: Duration) -> io::Result<(File, Vec<Found>)> {
     std::fs::create_dir_all(session)?;
     let own = lock(session)?;
     let mut found = Vec::new();
@@ -263,7 +280,7 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
             }
             continue;
         }
-        let lock = match lock_left(&folder) {
+        let lock = match lock_left(&folder, starting) {
             Ok(lock) => lock,
             Err(error)
                 if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
@@ -276,6 +293,13 @@ pub fn begin(root: &Path, session: &Path) -> io::Result<(File, Vec<Found>)> {
                 continue;
             }
         };
+        if folder.join(ENDED).exists() {
+            drop(lock);
+            if let Err(error) = std::fs::remove_dir_all(&folder) {
+                tracing::warn!(%error, folder = %folder.display(), "cannot remove a recovery folder a window closed with");
+            }
+            continue;
+        }
         let window = Arc::new(Left {
             folder: folder.clone(),
             lock: Some(lock),
@@ -457,8 +481,22 @@ pub fn set_aside(found: Found) -> io::Result<PathBuf> {
     Ok(aside)
 }
 
-/// Removes this window's own folder as it closes normally.
+/// Removes this window's own folder as it closes normally, the lock last,
+/// so a removal that stops part way leaves a locked folder marked as ended,
+/// which a later start removes without offering what is left in it.
 pub fn end(folder: &Path, lock: File) -> io::Result<()> {
+    File::create(folder.join(ENDED))?;
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        if entry.file_name() == LOCK || entry.file_name() == ENDED {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
     drop(lock);
     std::fs::remove_dir_all(folder)
 }
@@ -651,6 +689,38 @@ pub(crate) mod tests {
         assert!(found.is_empty());
         assert!(starting.exists());
         assert!(begin(&root.0, &starting).is_ok());
+    }
+
+    #[test]
+    fn a_folder_left_without_a_lock_is_taken_once_no_window_can_be_making_it() {
+        let root = Root::new("lockless");
+        let crashed = root.0.join("crashed");
+        write(&tab_folder(&crashed, 1), &document(11), [1; 16], &meta(1)).unwrap();
+        std::fs::create_dir_all(root.0.join("emptied")).unwrap();
+        let (_own, mut found) = begin_with(&root.0, &root.0.join("next"), Duration::ZERO).unwrap();
+        assert_eq!(found.len(), 1);
+        discard(found.pop().unwrap()).unwrap();
+        assert_eq!(root.names(), ["next"]);
+    }
+
+    #[test]
+    fn a_normal_end_removes_the_lock_last() {
+        let root = Root::new("end");
+        let session = root.0.join("session");
+        let (own, _) = begin(&root.0, &session).unwrap();
+        write(&tab_folder(&session, 1), &document(11), [1; 16], &meta(1)).unwrap();
+        // Held open, as by a virus scanner, so the removal stops.
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(document_path(&tab_folder(&session, 1), 1))
+            .unwrap();
+        assert!(end(&session, own).is_err());
+        assert!(session.join(LOCK).exists());
+        drop(held);
+        let (_own, found) = begin(&root.0, &root.0.join("next")).unwrap();
+        assert!(found.is_empty());
+        assert_eq!(root.names(), ["next"]);
     }
 
     #[test]

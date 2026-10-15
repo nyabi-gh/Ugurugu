@@ -496,14 +496,14 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
 #[derive(Debug, PartialEq)]
 enum Pressed {
     Key(Chord),
-    /// Tab, which goes on to move the focus.
+    /// Tab without Ctrl, which goes on to move the focus.
     Cancel,
     Escape,
 }
 
 /// Takes the first key pressed in this frame, before the dialog's buttons
-/// and its Escape handling see it. Tab still moves the focus and ends the
-/// wait; Space, which pans the canvas, is not taken.
+/// and its Escape handling see it. Tab without Ctrl still moves the focus
+/// and ends the wait; Space, which pans the canvas, is not taken.
 fn pressed(ctx: &egui::Context, typed: &[Chord]) -> Option<Pressed> {
     let mut found = typed.first().copied().map(Pressed::Key);
     ctx.input_mut(|input| {
@@ -522,7 +522,7 @@ fn pressed(ctx: &egui::Context, typed: &[Chord]) -> Option<Pressed> {
             }
             let chord = Chord::new(modifiers, key);
             match key {
-                egui::Key::Tab => {
+                egui::Key::Tab if !chord.assignable() => {
                     found = Some(Pressed::Cancel);
                     true
                 }
@@ -898,6 +898,12 @@ mod tests {
         assert_eq!(
             waiting(&[(none, egui::Key::Tab)], &[]),
             (Some(Pressed::Cancel), vec![egui::Key::Tab])
+        );
+        // Ctrl+Tab is taken, so the next tab default can be given back.
+        let next = Chord::new(command, egui::Key::Tab);
+        assert_eq!(
+            waiting(&[(command, egui::Key::Tab)], &[]),
+            (Some(Pressed::Key(next)), vec![])
         );
         // Space is the canvas's.
         assert_eq!(waiting(&[(none, egui::Key::Space)], &[]), (None, vec![]));

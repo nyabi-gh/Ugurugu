@@ -23,6 +23,7 @@ use winit::window::{Window, WindowId};
 
 use crate::render::{
     EarlyGpu, EarlyInstance, EguiState, Links, RenderThread, SurfaceSource, ToRender, TreeSink,
+    WindowChange, WindowSink,
 };
 use crate::settings::Store;
 
@@ -59,6 +60,7 @@ pub enum UiEvent {
     Accessibility(accesskit_winit::Event),
     /// egui's accessibility tree changed.
     AccessibilityTree(egui::accesskit::TreeUpdate),
+    Window(WindowChange),
 }
 
 impl From<accesskit_winit::Event> for UiEvent {
@@ -227,6 +229,10 @@ impl Session {
         let tree_sink: TreeSink = Box::new(move |update| {
             let _ = tree_proxy.send_event(UiEvent::AccessibilityTree(update));
         });
+        let window_proxy = proxy.clone();
+        let window_sink: WindowSink = Box::new(move |change| {
+            let _ = window_proxy.send_event(UiEvent::Window(change));
+        });
         let (to_render, messages) = mpsc::channel();
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
@@ -275,6 +281,7 @@ impl Session {
                         Links {
                             surface_source,
                             tree_sink,
+                            window_sink,
                             to_self,
                             hwnd,
                         },
@@ -384,6 +391,19 @@ impl ApplicationHandler<UiEvent> for App {
             UiEvent::AccessibilityTree(update) => {
                 if let Some(session) = self.session.as_mut() {
                     session.accessibility.update_if_active(|| update);
+                }
+                return;
+            }
+            UiEvent::Window(change) => {
+                if let Some(session) = self.session.as_ref() {
+                    match change {
+                        WindowChange::Title(title) => session.window.set_title(&title),
+                        WindowChange::Cursor(Some(icon)) => {
+                            session.window.set_cursor(icon);
+                            session.window.set_cursor_visible(true);
+                        }
+                        WindowChange::Cursor(None) => session.window.set_cursor_visible(false),
+                    }
                 }
                 return;
             }

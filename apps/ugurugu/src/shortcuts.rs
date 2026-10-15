@@ -83,13 +83,16 @@ impl Chord {
         }
     }
 
-    /// Space pans the canvas and Tab moves the focus, with any modifiers.
-    /// A modifier alone, which egui also sends as a key, is no shortcut.
+    /// Space pans the canvas with any modifiers, and Tab moves the focus
+    /// unless Ctrl is held, as by the next and previous tab defaults. A
+    /// modifier alone, which egui also sends as a key, is no shortcut.
     pub fn assignable(self) -> bool {
+        if self.key == Key::Tab {
+            return self.ctrl;
+        }
         !matches!(
             self.key,
             Key::Space
-                | Key::Tab
                 | Key::ShiftLeft
                 | Key::ShiftRight
                 | Key::ControlLeft
@@ -756,10 +759,12 @@ mod tests {
     }
 
     #[test]
-    fn space_and_tab_cannot_be_given() {
+    fn space_and_tab_without_ctrl_cannot_be_given() {
         assert!(!plain(Key::Space).assignable());
         assert!(!ctrl(Key::Space).assignable());
         assert!(!shift(Key::Tab).assignable());
+        assert!(ctrl(Key::Tab).assignable());
+        assert!(ctrl_shift(Key::Tab).assignable());
         assert!(!ctrl(Key::ControlLeft).assignable());
         assert!(!shift(Key::ShiftRight).assignable());
         assert!(plain(Key::F2).assignable());

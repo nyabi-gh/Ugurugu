@@ -251,7 +251,7 @@ fn area(
         });
     // Only a width the user dragged to: a window too narrow for the area
     // squeezes it without changing what it goes back to.
-    if ui.input(|input| input.pointer.primary_down()) {
+    if ui.ctx().is_being_dragged(handle) {
         panels.layout.area_mut(side).width = shown.response.rect.width();
     }
     if let Some(response) = ui.ctx().read_response(handle) {
@@ -715,6 +715,7 @@ mod tests {
         ctx: egui::Context,
         canvas: Canvas,
         panels: Panels,
+        size: Vec2,
     }
 
     impl Window {
@@ -723,6 +724,7 @@ mod tests {
                 ctx: egui::Context::default(),
                 canvas: Canvas::new(Document::new([320, 200]), |_| {}),
                 panels: Panels::default(),
+                size: vec2(1600.0, 900.0),
             };
             window.frame(Vec::new());
             window
@@ -730,7 +732,7 @@ mod tests {
 
         fn frame(&mut self, events: Vec<Event>) {
             let input = RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0))),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
                 events,
                 ..RawInput::default()
             };
@@ -738,6 +740,7 @@ mod tests {
                 ctx,
                 canvas,
                 panels,
+                ..
             } = self;
             let mut output = ctx.run_ui(input, |ui| {
                 areas(ui, canvas, panels, None);
@@ -827,6 +830,33 @@ mod tests {
         let layout = &window.panels.layout;
         assert!(layout.floating.is_empty());
         assert_eq!(layout.side_of(Panel::Wobble), Some(Side::Right));
+    }
+
+    #[test]
+    fn pressing_in_a_panel_squeezed_by_a_narrow_window_keeps_its_width() {
+        let mut window = Window::new();
+        let widths = |window: &Window| {
+            let layout = &window.panels.layout;
+            [layout.left.width, layout.right.width]
+        };
+        let before = widths(&window);
+        window.size = vec2(500.0, 900.0);
+        window.frame(Vec::new());
+        let inside = window.target(Place::With(Panel::Wobble)).center();
+        window.drag(inside, inside + vec2(0.0, 1.0));
+        assert_eq!(widths(&window), before);
+
+        // Dragging the edge still sets it.
+        window.size = vec2(1600.0, 900.0);
+        window.frame(Vec::new());
+        let edge = window.target(Place::With(Panel::Wobble)).left() - theme::space::M;
+        window.drag(pos2(edge, 450.0), pos2(edge - 40.0, 450.0));
+        let squeezed = 1600.0 - edge;
+        assert!(
+            widths(&window)[1] > squeezed + 20.0,
+            "{:?}",
+            widths(&window)
+        );
     }
 
     #[test]

@@ -687,6 +687,7 @@ impl Canvas {
     /// playback stops. When the document cannot take what is pending, says
     /// so and returns `false`, and the tab stays shown as it was.
     fn leave_tab(&mut self) -> bool {
+        self.cancel_gesture();
         if self.edit(Session::settle).is_err() {
             self.notice = Some(tr("restyle-pending").to_owned());
             return false;
@@ -3069,6 +3070,23 @@ mod tests {
         canvas.apply(draw(press(151.0, 101.0)));
         canvas.apply(CanvasInput::End(press(151.0, 101.0)));
         assert_eq!(pen(&canvas), ugu_core::ops::Rgba8([0, 0, 255, 255]));
+    }
+
+    #[test]
+    fn a_selection_being_dragged_is_dropped_when_its_tab_is_left() {
+        let (mut canvas, _renders) = animated_canvas();
+        canvas.set_tool(Tool::Select).unwrap();
+        canvas.apply(CanvasInput::Begin(
+            Gesture::Draw,
+            PointerKind::Mouse,
+            press(10.0, 10.0),
+        ));
+        canvas.apply(CanvasInput::Extend(press(60.0, 40.0)));
+        assert!(canvas.session().lasso().is_some());
+        assert!(canvas.open_tab(Document::new([32, 16]), true).unwrap());
+        assert!(canvas.show_tab(0));
+        assert!(canvas.session().lasso().is_none());
+        assert!(matches!(canvas.interaction, Interaction::Idle));
     }
 
     fn animated_canvas() -> (super::Canvas, std::sync::mpsc::Receiver<Rendered>) {
