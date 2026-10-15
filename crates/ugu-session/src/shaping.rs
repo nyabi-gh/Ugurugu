@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The shape tool: a line, rectangle, ellipse, regular polygon or star
-//! dragged out and drawn as one ordinary stroke along its outline, with the
-//! brush, width and colour of the pen, so it wobbles and undoes as a stroke.
+//! The shape tool: a line or a closed shape dragged out and drawn as one
+//! ordinary stroke along its outline, with the brush, width and colour of
+//! the pen, so it wobbles and undoes as a stroke. A closed shape can also
+//! be filled, as the bucket fills: in the pen's colour, without wobbling,
+//! under the outline when it has one.
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, TAU};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
+use ugu_core::command;
 use ugu_core::edit::{EditError, Outcome};
+use ugu_core::ops::Rgba8;
+use ugu_core::selection::{self, Selection};
 use ugu_core::store;
 
-use crate::{InputPoint, Session, StrokeRefused, Tools, point};
+use crate::{InputPoint, LiveStroke, Session, StrokeRefused, Tools, point, selecting};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Shape {
@@ -20,6 +25,26 @@ pub enum Shape {
     Ellipse,
     Polygon,
     Star,
+    Parallelogram,
+    Trapezoid,
+    Semicircle,
+    Moon,
+}
+
+impl Shape {
+    /// Whether the outline ends where it starts, so the shape can be filled.
+    pub fn closed(self) -> bool {
+        self != Self::Line
+    }
+}
+
+/// What a closed shape draws: its outline, the area inside, or both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShapePaint {
+    #[default]
+    Outline,
+    Fill,
+    Both,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +54,10 @@ pub struct ShapeSettings {
     pub sides: u32,
     /// A star's points.
     pub points: u32,
+    /// How far out a star's inner corners are, in percent of the outer
+    /// ones' distance from the centre.
+    pub inner: u32,
+    pub paint: ShapePaint,
 }
 
 impl ShapeSettings {
@@ -36,8 +65,21 @@ impl ShapeSettings {
         shape: Shape::Rectangle,
         sides: 3,
         points: 5,
+        inner: 50,
+        paint: ShapePaint::Outline,
     };
     pub const CORNERS: std::ops::RangeInclusive<u32> = 3..=12;
+    pub const INNER: std::ops::RangeInclusive<u32> = 10..=90;
+
+    /// Whether the shape is drawn with a stroke along its outline.
+    pub fn outlined(self) -> bool {
+        !self.shape.closed() || self.paint != ShapePaint::Fill
+    }
+
+    /// Whether the area inside the shape is filled.
+    pub fn filled(self) -> bool {
+        self.shape.closed() && self.paint != ShapePaint::Outline
+    }
 }
 
 /// How a drag is read: Shift keeps a square box or a line at a multiple of
@@ -51,9 +93,12 @@ pub struct Drag {
 /// Outline points are at most this far apart, as a quick hand drawing them,
 /// so that the wobble bends edges as it bends strokes.
 const STEP: f64 = 2.0;
-/// A star's inner corners, as a share of the outer ones' distance from the
-/// centre.
-const STAR_INNER: f64 = 0.5;
+/// A parallelogram's slant and how much narrower a trapezoid's top is than
+/// its base, each as a share of the box's width.
+const SLANT: f64 = 0.25;
+/// The moon is a circle with one of this radius cut from it, this far to
+/// the right of its centre, both in the first circle's radius.
+const MOON_BITE: (f64, f64) = (0.85, 0.5);
 
 /// A drag in progress, kept with the stroke it draws.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,9 +189,75 @@ pub fn outline(
             );
         }
         Shape::Polygon => fitted(&regular(settings.sides, 1.0), low, high),
-        Shape::Star => fitted(&regular(settings.points, STAR_INNER), low, high),
+        Shape::Star => {
+            let inner = settings
+                .inner
+                .clamp(*ShapeSettings::INNER.start(), *ShapeSettings::INNER.end());
+            fitted(
+                &regular(settings.points, f64::from(inner) / 100.0),
+                low,
+                high,
+            )
+        }
+        Shape::Parallelogram => {
+            let slant = (high[0] - low[0]) * SLANT;
+            vec![
+                [low[0] + slant, low[1]],
+                [high[0], low[1]],
+                [high[0] - slant, high[1]],
+                [low[0], high[1]],
+            ]
+        }
+        Shape::Trapezoid => {
+            let inset = (high[0] - low[0]) * SLANT / 2.0;
+            vec![
+                [low[0] + inset, low[1]],
+                [high[0] - inset, low[1]],
+                high,
+                [low[0], high[1]],
+            ]
+        }
+        Shape::Semicircle => {
+            // The upper half of a circle on the box's bottom edge.
+            let around = PI * (high[0] - low[0]).max(2.0 * (high[1] - low[1])) / 2.0;
+            // Closing it draws the base.
+            let arc = arc([0.0, 0.0], 1.0, PI, TAU, pieces(around));
+            return dense(&close(fitted(&arc, low, high)));
+        }
+        Shape::Moon => {
+            let (radius, offset) = MOON_BITE;
+            // Where the two circles cross.
+            let x = (offset * offset + 1.0 - radius * radius) / (2.0 * offset);
+            let y = (1.0 - x * x).sqrt();
+            let outer = y.atan2(x);
+            let inner = y.atan2(x - offset);
+            let around = PI * (high[0] - low[0]).max(high[1] - low[1]);
+            let count = pieces(around);
+            let mut points = arc([0.0, 0.0], 1.0, outer, TAU - outer, count);
+            points.extend(arc([offset, 0.0], radius, TAU - inner, inner, count));
+            return dense(&close(fitted(&points, low, high)));
+        }
     };
     dense(&close(corners))
+}
+
+/// Enough pieces of at most `STEP` for an outline `around` long.
+fn pieces(around: f64) -> usize {
+    ((around / STEP).ceil() as usize).max(8)
+}
+
+/// `count` pieces of the circle round `centre` from angle `from` to `to`,
+/// clockwise on screen when `to` is the larger.
+fn arc(centre: [f64; 2], radius: f64, from: f64, to: f64, count: usize) -> Vec<[f64; 2]> {
+    (0..=count)
+        .map(|index| {
+            let angle = from + (to - from) * index as f64 / count as f64;
+            [
+                centre[0] + radius * angle.cos(),
+                centre[1] + radius * angle.sin(),
+            ]
+        })
+        .collect()
 }
 
 /// The corners of a regular shape of `corners` points, the first straight
@@ -244,6 +355,8 @@ impl Session {
             start,
             pixel,
         });
+        // The eraser's end erases along the outline only.
+        live.outlined = tools.shape.outlined() || live.erase;
         Ok(())
     }
 
@@ -270,6 +383,12 @@ impl Session {
         if points == live.points {
             return false;
         }
+        live.fill = (shaping.settings.filled() && !live.erase && points.len() > 2).then(|| {
+            points
+                .iter()
+                .map(|point| [f64::from(point.x), f64::from(point.y)])
+                .collect()
+        });
         live.points = points;
         live.replaced_last = true;
         true
@@ -286,7 +405,55 @@ impl Session {
             self.drop_cel();
             return Ok(Outcome::NoChange);
         }
-        self.commit(live)
+        let area = live.fill.as_ref().and_then(|outline| {
+            Selection::of_shape(
+                &selection::Shape::Freehand(outline.clone()),
+                self.document().canvas,
+            )
+        });
+        match area {
+            Some(area) => self.commit_filled(live, &area),
+            None if live.outlined => self.commit(live),
+            None => {
+                self.drop_cel();
+                Ok(Outcome::NoChange)
+            }
+        }
+    }
+
+    /// Fills `area` in the stroke's colour and opacity and draws the stroke
+    /// over it when the shape is outlined, as one step.
+    fn commit_filled(&mut self, live: LiveStroke, area: &Selection) -> Result<Outcome, EditError> {
+        let brush = &live.template.brush;
+        let antialias = brush.antialias && !self.pixel_mode();
+        let [red, green, blue, alpha] = live.template.color.0;
+        let alpha = (f32::from(alpha) * brush.opacity.clamp(0.0, 1.0)).round() as u8;
+        let color = Rgba8([red, green, blue, alpha]);
+        let stroke = live.outlined.then(|| store::Stroke {
+            points: std::sync::Arc::from(live.points.as_slice()),
+            ..live.template.clone()
+        });
+        let outcome = self.with_cel(|session| {
+            session.history_mut()?.group("Draw", |group| {
+                let clip = match &live.clip {
+                    Some(selection) => Some(selecting::stored_mask(group, selection)?),
+                    None => None,
+                };
+                let coverage = selecting::stored_mask(group, area)?;
+                group.apply(|document| {
+                    command::fill(document, live.layer, coverage, color, antialias, clip)
+                })?;
+                match stroke {
+                    Some(stroke) => group
+                        .apply(|document| command::draw(document, live.layer, stroke, false, clip)),
+                    None => Ok(()),
+                }
+            })
+        })?;
+        if matches!(outcome, Outcome::Committed(_)) {
+            self.used.push(live.template.color);
+        }
+        Ok(outcome)
     }
 }
 
@@ -315,15 +482,21 @@ mod tests {
         }
     }
 
+    const CLOSED: [Shape; 8] = [
+        Shape::Rectangle,
+        Shape::Ellipse,
+        Shape::Polygon,
+        Shape::Star,
+        Shape::Parallelogram,
+        Shape::Trapezoid,
+        Shape::Semicircle,
+        Shape::Moon,
+    ];
+
     #[test]
     fn every_shape_fills_the_dragged_box_and_closed_ones_close() {
         let plain = Drag::default();
-        for shape in [
-            Shape::Rectangle,
-            Shape::Ellipse,
-            Shape::Polygon,
-            Shape::Star,
-        ] {
+        for shape in CLOSED {
             let points = outline(settings(shape), [40.0, 30.0], [10.0, 90.0], plain);
             let [left, top, right, bottom] = bounds(&points);
             assert!(
@@ -419,17 +592,56 @@ mod tests {
             turns(&outline(star, [0.0, 0.0], [100.0, 100.0], Drag::default())),
             10
         );
+        // The inner corners as far out as asked, from the box's centre.
+        let reach = |inner: u32| {
+            let star = ShapeSettings { inner, ..star };
+            outline(star, [0.0, 0.0], [100.0, 100.0], Drag::default())
+                .iter()
+                .map(|point| (point[0] - 50.0).hypot(point[1] - 50.0))
+                .fold(f64::INFINITY, f64::min)
+        };
+        assert!(reach(20) < reach(50) && reach(50) < reach(80));
+        for shape in [Shape::Parallelogram, Shape::Trapezoid] {
+            assert_eq!(
+                turns(&outline(
+                    settings(shape),
+                    [0.0, 0.0],
+                    [100.0, 60.0],
+                    Drag::default()
+                )),
+                4,
+                "{shape:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_moon_and_the_semicircle_are_cut_where_expected() {
+        let inside = |points: &[[f64; 2]], at: [f64; 2]| {
+            let mut crossings = 0;
+            for pair in points.windows(2) {
+                let [a, b] = [pair[0], pair[1]];
+                if (a[1] > at[1]) != (b[1] > at[1])
+                    && at[0] < a[0] + (at[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0])
+                {
+                    crossings += 1;
+                }
+            }
+            crossings % 2 == 1
+        };
+        let box_ = ([0.0, 0.0], [100.0, 100.0]);
+        let moon = outline(settings(Shape::Moon), box_.0, box_.1, Drag::default());
+        // The thick part is on the left and the bite on the right.
+        assert!(inside(&moon, [8.0, 50.0]));
+        assert!(!inside(&moon, [60.0, 50.0]));
+        let half = outline(settings(Shape::Semicircle), box_.0, box_.1, Drag::default());
+        assert!(inside(&half, [50.0, 90.0]));
+        assert!(!inside(&half, [3.0, 3.0]));
     }
 
     #[test]
     fn a_drag_too_small_draws_nothing() {
-        for shape in [
-            Shape::Line,
-            Shape::Rectangle,
-            Shape::Ellipse,
-            Shape::Polygon,
-            Shape::Star,
-        ] {
+        for shape in std::iter::once(Shape::Line).chain(CLOSED) {
             assert!(outline(settings(shape), [5.0, 5.0], [5.4, 5.6], Drag::default()).is_empty());
         }
         // A flat box is a line's worth.

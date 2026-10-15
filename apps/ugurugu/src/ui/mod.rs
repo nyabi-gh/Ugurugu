@@ -459,7 +459,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
 
 /// Which shape the shape tool drags out, and its corners.
 fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
-    use ugu_session::{Shape, ShapeSettings};
+    use ugu_session::{Shape, ShapePaint, ShapeSettings};
     let mut settings = canvas.tools().shape;
     widgets::panel_heading(ui, tr("shape-kind"));
     widgets::segmented(
@@ -471,16 +471,18 @@ fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             (Shape::Ellipse, tr("shape-ellipse")),
             (Shape::Polygon, tr("shape-polygon")),
             (Shape::Star, tr("shape-star")),
+            (Shape::Parallelogram, tr("shape-parallelogram")),
+            (Shape::Trapezoid, tr("shape-trapezoid")),
+            (Shape::Semicircle, tr("shape-semicircle")),
+            (Shape::Moon, tr("shape-moon")),
         ],
         3,
     );
-    let corners = match settings.shape {
-        Shape::Polygon => Some((&mut settings.sides, tr("shape-sides"))),
-        Shape::Star => Some((&mut settings.points, tr("shape-points"))),
-        Shape::Line | Shape::Rectangle | Shape::Ellipse => None,
-    };
-    if let Some((count, name)) = corners {
-        let range = ShapeSettings::CORNERS;
+    let whole = |ui: &mut egui::Ui,
+                 count: &mut u32,
+                 name: &str,
+                 range: std::ops::RangeInclusive<u32>,
+                 unit: &str| {
         let mut value = *count as f32;
         slider_row(
             ui,
@@ -488,10 +490,49 @@ fn shape_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
             name,
             &mut value,
             *range.start() as f32..=*range.end() as f32,
-            "",
+            unit,
             0,
         );
         *count = (value.round() as u32).clamp(*range.start(), *range.end());
+    };
+    match settings.shape {
+        Shape::Polygon => whole(
+            ui,
+            &mut settings.sides,
+            tr("shape-sides"),
+            ShapeSettings::CORNERS,
+            "",
+        ),
+        Shape::Star => {
+            whole(
+                ui,
+                &mut settings.points,
+                tr("shape-points"),
+                ShapeSettings::CORNERS,
+                "",
+            );
+            whole(
+                ui,
+                &mut settings.inner,
+                tr("shape-inner"),
+                ShapeSettings::INNER,
+                "%",
+            );
+        }
+        _ => {}
+    }
+    if settings.shape.closed() {
+        widgets::panel_heading(ui, tr("shape-paint"));
+        widgets::segmented(
+            ui,
+            &mut settings.paint,
+            &[
+                (ShapePaint::Outline, tr("shape-paint-outline")),
+                (ShapePaint::Fill, tr("shape-paint-fill")),
+                (ShapePaint::Both, tr("shape-paint-both")),
+            ],
+            3,
+        );
     }
     ui.label(
         egui::RichText::new(tr("shape-hint"))

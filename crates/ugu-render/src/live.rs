@@ -53,6 +53,8 @@ pub struct LiveStroke {
     written: Option<PixelRect>,
     /// The tail over the settled coverage, and where it lies.
     tail: Option<(PixelRect, Pixmap)>,
+    /// The tail before, for the next one to be drawn into.
+    spare_tail: Option<Pixmap>,
     stamp: Stamp,
     painter: dab::Painter,
     placed: Vec<Dab>,
@@ -74,18 +76,24 @@ pub struct LiveStroke {
 
 impl LiveStroke {
     /// `color` is the stroke's own, straight.
-    /// `spare` is a previous stroke's coverage from `into_spare`, used again
-    /// when it has the document's size: allocating and freeing a document's
-    /// worth of pixels for every stroke costs milliseconds on large canvases.
+    /// `spare` is what a previous stroke drew into, from `into_spare`, used
+    /// again: allocating and freeing a document's worth of pixels for every
+    /// stroke, or a large shape's for every frame it is dragged, costs
+    /// milliseconds.
     pub fn new(
         size: [u16; 2],
         pen: Pen,
         frame: u32,
         color: [u8; 4],
         erase: bool,
-        spare: Option<Pixmap>,
+        spare: Option<Spare>,
     ) -> Self {
-        let coverage = spare
+        let Spare {
+            coverage,
+            stamp,
+            tail,
+        } = spare.unwrap_or_default();
+        let coverage = Some(coverage)
             .filter(|spare| [spare.width(), spare.height()] == size)
             .unwrap_or_else(|| Pixmap::new(size[0], size[1]));
         let dabs = matches!(pen.brush.engine, BrushEngine::Airbrush | BrushEngine::Spray)
@@ -108,7 +116,8 @@ impl LiveStroke {
             coverage,
             written: None,
             tail: None,
-            stamp: Stamp::default(),
+            spare_tail: tail,
+            stamp,
             painter: dab::Painter::default(),
             placed: Vec::new(),
             clip: None,
@@ -158,8 +167,9 @@ impl LiveStroke {
         (!self.shown.is_empty()).then_some(&self.shown[..])
     }
 
-    /// The coverage cleared again, for the next stroke's `new`.
-    pub fn into_spare(mut self) -> Pixmap {
+    /// What this stroke drew into, the coverage cleared again, for the next
+    /// stroke's `new`.
+    pub fn into_spare(mut self) -> Spare {
         if let Some([left, top, right, bottom]) = self.written {
             let row = usize::from(self.coverage.width()) * 4;
             let pixels = self.coverage.data_as_u8_slice_mut();
@@ -167,7 +177,11 @@ impl LiveStroke {
                 pixels[y * row + left as usize * 4..y * row + right as usize * 4].fill(0);
             }
         }
-        self.coverage
+        Spare {
+            coverage: self.coverage,
+            stamp: self.stamp,
+            tail: self.tail.map(|(_, tail)| tail).or(self.spare_tail),
+        }
     }
 
     /// Takes the points after those seen before and returns the pixels whose
@@ -176,9 +190,7 @@ impl LiveStroke {
         if self.points == 0
             && let Some(first) = points.first()
         {
-            let [r, g, b, a] = self.color;
-            let alpha = stroke::line_alpha_at(a, &self.pen.brush, f64::from(first.pressure));
-            self.line = premultiplied([r, g, b, alpha]);
+            self.begin_line(first.pressure);
         }
         if self.pixels.is_some() {
             self.points = points.len();
@@ -211,15 +223,15 @@ impl LiveStroke {
                 self.shown(),
             );
             if let Some(rect) = clamp(pieces.bounds, self.size()) {
-                let piece = self.draw(rect, &pieces.path);
-                add_coverage(&mut self.coverage, &piece, rect);
+                let piece = draw(&mut self.stamp, rect, &pieces.path);
+                add_coverage(&mut self.coverage, piece, rect);
                 self.written = union(self.written, Some(rect));
                 dirty = Some(rect);
             }
             self.settled = fixed;
         }
 
-        let old_tail = self.tail.take().map(|(rect, _)| rect);
+        let old_tail = self.take_tail();
         let pieces = stroke::pieces(
             &samples,
             &self.pen,
@@ -229,17 +241,74 @@ impl LiveStroke {
             self.shown(),
         );
         if let Some(rect) = clamp(pieces.bounds, self.size()) {
-            let piece = self.draw(rect, &pieces.path);
-            let mut tail = copy(&self.coverage, rect);
+            let piece = draw(&mut self.stamp, rect, &pieces.path);
+            let mut tail = self.spare_tail.take().unwrap_or_else(|| Pixmap::new(0, 0));
+            copy(&self.coverage, rect, &mut tail);
             add_coverage(
                 &mut tail,
-                &piece,
+                piece,
                 [0, 0, rect[2] - rect[0], rect[3] - rect[1]],
             );
             self.tail = Some((rect, tail));
             dirty = union(dirty, Some(rect));
         }
         union(dirty, old_tail)
+    }
+
+    /// The colour drawn at full coverage, from the first point's pressure.
+    fn begin_line(&mut self, pressure: f32) {
+        let [r, g, b, a] = self.color;
+        let alpha = stroke::line_alpha_at(a, &self.pen.brush, f64::from(pressure));
+        self.line = premultiplied([r, g, b, alpha]);
+    }
+
+    /// Fills the closed `outline` under what `update` draws, as a shape that
+    /// is filled shows while it is dragged; before any `update`. Returns the
+    /// pixels changed.
+    pub fn fill(&mut self, outline: &[[f64; 2]], antialias: bool) -> Option<PixelRect> {
+        let (first, rest) = outline.split_first()?;
+        if self.points == 0 {
+            self.begin_line(1.0);
+        }
+        let mut path = vello_cpu::kurbo::BezPath::new();
+        path.move_to((first[0], first[1]));
+        let mut bounds = [first[0], first[1], first[0], first[1]];
+        for point in rest {
+            path.line_to((point[0], point[1]));
+            bounds = [
+                bounds[0].min(point[0]),
+                bounds[1].min(point[1]),
+                bounds[2].max(point[0]),
+                bounds[3].max(point[1]),
+            ];
+        }
+        path.close_path();
+        let rect = clamp(bounds, self.size())?;
+        let piece = self.stamp.draw(rect, |context| {
+            context.set_aliasing_threshold((!antialias).then_some(ALIASING_THRESHOLD));
+            context.set_paint(AlphaColor::<Srgb>::WHITE);
+            context.fill_path(&path);
+        });
+        if self.dabs.is_some() {
+            // Dabs keep the colour they paint, so the fill does too.
+            let width = usize::from(self.coverage.width());
+            let piece_width = usize::from(piece.width());
+            let source = piece.data_as_u8_slice();
+            let target = self.coverage.data_as_u8_slice_mut();
+            for y in rect[1] as usize..rect[3] as usize {
+                for x in rect[0] as usize..rect[2] as usize {
+                    let at = ((y - rect[1] as usize) * piece_width + x - rect[0] as usize) * 4;
+                    let cover = source[at + 3];
+                    if cover != 0 {
+                        paint(&mut target[(y * width + x) * 4..][..4], self.line, cover);
+                    }
+                }
+            }
+        } else {
+            add_coverage(&mut self.coverage, piece, rect);
+        }
+        self.written = union(self.written, Some(rect));
+        Some(rect)
     }
 
     /// `update` for a pixel brush. Its pixels are found again from all the
@@ -309,7 +378,7 @@ impl LiveStroke {
             self.settled = fixed;
         }
 
-        let old_tail = self.tail.take().map(|(rect, _)| rect);
+        let old_tail = self.take_tail();
         self.placed.clear();
         let range = self.settled..samples.len();
         let shown = (!self.shown.is_empty()).then_some(&self.shown[..]);
@@ -323,7 +392,8 @@ impl LiveStroke {
             &mut self.placed,
         );
         if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
-            let mut tail = copy(&self.coverage, rect);
+            let mut tail = self.spare_tail.take().unwrap_or_else(|| Pixmap::new(0, 0));
+            copy(&self.coverage, rect, &mut tail);
             for dab in &mut self.placed {
                 dab.center = [
                     dab.center[0] - f64::from(rect[0]),
@@ -344,13 +414,12 @@ impl LiveStroke {
         union(dirty, old_tail)
     }
 
-    /// Antialiased coverage even for an aliased pen: thresholding each
-    /// batch alone would drop pixels that two batches share.
-    fn draw(&mut self, rect: PixelRect, path: &vello_cpu::kurbo::BezPath) -> Pixmap {
-        self.stamp.draw(rect, |context| {
-            context.set_paint(AlphaColor::<Srgb>::WHITE);
-            context.fill_path(path);
-        })
+    /// Takes the tail away, keeping its pixmap for the next; returns where
+    /// it lay.
+    fn take_tail(&mut self) -> Option<PixelRect> {
+        let (rect, tail) = self.tail.take()?;
+        self.spare_tail = Some(tail);
+        Some(rect)
     }
 
     /// The pixel at `x`, `y`: the tail's where it lies, else the settled one.
@@ -456,9 +525,36 @@ fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
     }
 }
 
-fn copy(pixmap: &Pixmap, [left, top, right, bottom]: PixelRect) -> Pixmap {
+/// What a stroke draws into, kept from one for the next.
+pub struct Spare {
+    coverage: Pixmap,
+    stamp: Stamp,
+    tail: Option<Pixmap>,
+}
+
+impl Default for Spare {
+    fn default() -> Self {
+        Self {
+            coverage: Pixmap::new(0, 0),
+            stamp: Stamp::default(),
+            tail: None,
+        }
+    }
+}
+
+/// Antialiased coverage even for an aliased pen: thresholding each batch
+/// alone would drop pixels that two batches share.
+fn draw<'a>(stamp: &'a mut Stamp, rect: PixelRect, path: &vello_cpu::kurbo::BezPath) -> &'a Pixmap {
+    stamp.draw(rect, |context| {
+        context.set_paint(AlphaColor::<Srgb>::WHITE);
+        context.fill_path(path);
+    })
+}
+
+/// `rect` of `pixmap` into `out`, which takes its size.
+fn copy(pixmap: &Pixmap, [left, top, right, bottom]: PixelRect, out: &mut Pixmap) {
     let (width, height) = ((right - left) as u16, (bottom - top) as u16);
-    let mut out = Pixmap::new(width, height);
+    out.resize(width, height);
     let row = usize::from(width) * 4;
     let source_row = usize::from(pixmap.width()) * 4;
     let source = pixmap.data_as_u8_slice();
@@ -466,7 +562,6 @@ fn copy(pixmap: &Pixmap, [left, top, right, bottom]: PixelRect) -> Pixmap {
         let start = (top as usize + y) * source_row + left as usize * 4;
         target.copy_from_slice(&source[start..start + row]);
     }
-    out
 }
 
 /// Adds the coverage in `piece`'s alpha to `target`'s within `rect`. Vello
@@ -546,7 +641,8 @@ mod tests {
     fn whole(pen: &Pen, points: &[Point]) -> Vec<u8> {
         let samples = Resampler::whole(points, stroke::spacing(pen.width));
         let path = stroke::outline(&samples, pen, 2).unwrap();
-        let piece = Stamp::default().draw([0, 0, 200, 120], |context| {
+        let mut stamp = Stamp::default();
+        let piece = stamp.draw([0, 0, 200, 120], |context| {
             context.set_paint(AlphaColor::<Srgb>::WHITE);
             context.fill_path(&path);
         });
@@ -729,7 +825,13 @@ mod tests {
             first.update(&points[..count]);
         }
         let spare = first.into_spare();
-        assert!(spare.data_as_u8_slice().iter().all(|&value| value == 0));
+        assert!(
+            spare
+                .coverage
+                .data_as_u8_slice()
+                .iter()
+                .all(|&value| value == 0)
+        );
         let other: Vec<Point> = points
             .iter()
             .map(|point| Point {

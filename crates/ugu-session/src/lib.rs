@@ -36,7 +36,7 @@ pub use crate::animating::Posing;
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
-pub use crate::shaping::{Drag, Shape, ShapeSettings, outline};
+pub use crate::shaping::{Drag, Shape, ShapePaint, ShapeSettings, outline};
 use crate::stabilizer::Stabilizer;
 pub use crate::tools::{Brushes, ColorHistory, Kept, Tools, is_pixel};
 pub use crate::transforming::{Ended, Pending};
@@ -136,6 +136,11 @@ pub struct LiveStroke {
     uses_pressure: bool,
     /// The shape dragged out, for a stroke the shape tool draws.
     shaping: Option<shaping::Shaping>,
+    /// Whether the stroke itself is drawn; a shape that is only filled
+    /// draws none.
+    pub outlined: bool,
+    /// The area a shape fills, in the layer's own pixels.
+    pub fill: Option<Vec<[f64; 2]>>,
 }
 
 impl LiveStroke {
@@ -394,6 +399,8 @@ impl Session {
             stabilizer: Stabilizer::new(settings.stabilizer, position, input.time),
             uses_pressure: tools.uses_pressure,
             shaping: None,
+            outlined: true,
+            fill: None,
         });
         Ok(())
     }

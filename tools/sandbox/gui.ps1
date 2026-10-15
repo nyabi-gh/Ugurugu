@@ -815,6 +815,49 @@ Step 'Shapes and the round pixel pencil' {
     $detail
 }
 
+Step 'Filled shapes' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $process 'u'
+    Invoke-Named $process 'Moon'
+    Invoke-Named $process 'Both'
+    $moon = @(($paper.Left + [int]($w * 0.05)), ($paper.Top + [int]($h * 0.1)), ($paper.Left + [int]($w * 0.45)), ($paper.Top + [int]($h * 0.9)))
+    [Native]::Drag(@($moon[0], $moon[2]), @($moon[1], $moon[3]))
+    Invoke-Named $process 'Trapezoid'
+    Invoke-Named $process 'Fill'
+    $trapezoid = @(($paper.Left + [int]($w * 0.55)), ($paper.Top + [int]($h * 0.2)), ($paper.Left + [int]($w * 0.95)), ($paper.Top + [int]($h * 0.8)))
+    [Native]::Drag(@($trapezoid[0], $trapezoid[2]), @($trapezoid[1], $trapezoid[3]))
+    Invoke-Named $process 'Star'
+    $inner = Test-Named $process 'Inner corners'
+    [Native]::MoveTo($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $shot = Save-Screen 'filled-shapes'
+    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+    $dark = {
+        param($x, $y)
+        $c = $bitmap.GetPixel([int]$x, [int]$y)
+        $c.R + $c.G + $c.B -lt 200
+    }
+    # Inside the thick left part of the moon, its bite and the trapezoid's middle.
+    $moonInside = & $dark ($moon[0] + ($moon[2] - $moon[0]) * 0.15) (($moon[1] + $moon[3]) / 2)
+    $bite = & $dark ($moon[0] + ($moon[2] - $moon[0]) * 0.8) (($moon[1] + $moon[3]) / 2)
+    $trapezoidInside = & $dark (($trapezoid[0] + $trapezoid[2]) / 2) (($trapezoid[1] + $trapezoid[3]) / 2)
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "moon filled $moonInside, bite empty $(-not $bite), trapezoid filled $trapezoidInside, star inner control $inner; $shot"
+    if (-not ($moonInside -and -not $bite -and $trapezoidInside -and $inner)) {
+        throw $detail
+    }
+    $detail
+}
+
 # Presses the control whose name starts with the words for $Key, without a
 # trailing ellipsis: menu items carry their shortcut after the label.
 function Invoke-Word($Process, $Words, [string] $Key) {

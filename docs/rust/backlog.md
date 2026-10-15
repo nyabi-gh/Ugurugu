@@ -38,7 +38,6 @@
 | B3-82 | 일본어 줄바꿈 금칙 | egui는 글자 단위로 줄을 바꾸므로 작은 가나·장음·구두점이 줄 머리에 올 수 있다(설명 글 몇 곳). 넘치지는 않는다 | egui 줄바꿈 | evidence.md 43절 |
 | B3-83 | 날짜 표기의 언어 | 복구 안내 등의 날짜는 시스템 로캘로 쓴다. UI 언어가 다르면 섞인다(한국어 Windows + 일본어 UI에서 "오전") | `ugu-win` `locale` | evidence.md 43절 |
 | B3-79 | egui 기본 모양이 남은 곳 | 드롭다운의 닫힌 버튼(`egui::ComboBox`)은 egui 것을 팔레트로 칠해 쓴다(높이 28·모서리·색은 테마 값, 화살표는 egui 삼각형). 다른 위젯과 어긋나는지는 사용자가 Screen set 화면으로 본다. 선 속성의 색 버튼은 `6b2f565`에서 앱의 색 견본(`widgets::color_swatch`)으로 바꿈 | `ComboBox` 쓰는 곳 | 2026-10-12 위젯 통일, evidence.md 42절 |
-| B3-110 | 도형 도구 다음 단계 (이슈 #51) | 3.1.0에는 직선·사각형·타원·정다각형·별의 외곽선만 들어간다. 요청 표에서 남은 평행사변형·사다리꼴·반원·달, 그리고 채우기(외곽선·채움·둘 다)가 남았다. 채움은 기존 `Op::Fill`과 마스크로 형식 변경 없이 만들 수 있지만 우글거리지 않아 외곽선과 어긋난다(가설, 그려 보지 않음). 별 안쪽 비율 선택도 후보 | `crates/ugu-session/src/shaping.rs`, `apps/ugurugu/src/ui/mod.rs` `shape_settings` | 이슈 #51, 2026-10-14 사용자 결정 |
 
 ## 4. 알려진 한계
 
@@ -73,7 +72,6 @@
 | B3-33 | egui-wgpu 장치 손실 panic 우회 제거 | egui-wgpu가 손실된 장치에서 오류 대신 panic하므로 장치 손실 때만 `catch_unwind`로 흡수한다. 상류가 오류를 돌려주게 고쳐지면 지운다 | `apps/ugurugu/src/render.rs` 852행 근처 | m0-close 58행 |
 | B3-34 | egui TextEdit의 UIA `SetValue` | egui가 지원하지 않아 일부 보조 기술이 제한된다. 수용했고 egui를 올릴 때 다시 본다 | egui | m0-close 64행 |
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
-| B3-128 | 도형 미리보기는 프레임마다 획 전체를 다시 만든다 | #72 뒤에도 끌린 도형은 프레임마다 외곽선 재표본·우글거림·경계 상자 래스터화를 한 스레드로 한다. 1920×1080을 거의 채운 40px 타원에서 프레임 최대 5.3ms(evidence 58). 느린 PC에서 프레임을 놓칠 수 있다(가설, 재지 않음). 후보: 커버리지 래스터화를 줄 단위로 나누기, 크기만 바뀐 도형의 재사용 | `apps/ugurugu/src/canvas.rs` `show_shape`, `crates/ugu-render/src/live.rs` | 이슈 #51, evidence 58 |
 | B3-129 | 픽셀 모드의 확대율 안내 | 100% 아래에서는 화소가 섞여 픽셀 칸이 보이지 않는다. 이슈 #24 사용자는 이것을 브러시 모양 차이로 보았다(evidence 59). 후보: 픽셀 모드 문서를 정수 배율로 맞춰 열기, 100% 아래에서 상태 표시줄에 안내. 사용자 결정 전 | `crates/ugu-render/src/view.rs`, `apps/ugurugu/src/canvas/view.rs` | 이슈 #24, evidence 59 |
 | B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60 |
 

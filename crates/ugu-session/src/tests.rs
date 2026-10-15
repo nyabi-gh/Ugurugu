@@ -2334,6 +2334,56 @@ fn a_shape_is_one_pen_stroke_along_its_outline() {
 }
 
 #[test]
+fn a_filled_shape_fills_under_its_outline_in_one_step_or_fills_alone() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let mut tools = Tools {
+        tool: Tool::Shape,
+        color: Rgba8([10, 120, 200, 200]),
+        shape: ShapeSettings {
+            shape: Shape::Rectangle,
+            paint: ShapePaint::Both,
+            ..ShapeSettings::DEFAULT
+        },
+        ..Tools::default()
+    };
+    tools.plain.pen.opacity = 0.5;
+    session.begin_shape(&tools, [10.0, 20.0]).unwrap();
+    session.end_shape([60.0, 70.0], Drag::default()).unwrap();
+    let [
+        Op::Fill {
+            coverage, color, ..
+        },
+        Op::Paint { .. },
+    ] = ops(&session, layer)[..]
+    else {
+        panic!("a fill under a stroke: {:?}", ops(&session, layer));
+    };
+    assert_eq!(color, Rgba8([10, 120, 200, 100]));
+    let mask = &session.document().store.masks[&coverage];
+    assert!(mask.contains(35, 45));
+    assert!(!mask.contains(5, 45) && !mask.contains(65, 45));
+    assert_eq!(session.undo_label(), Some("Draw"));
+    session.undo().unwrap();
+    assert!(ops(&session, layer).is_empty());
+
+    tools.shape.paint = ShapePaint::Fill;
+    session.begin_shape(&tools, [10.0, 20.0]).unwrap();
+    assert!(!session.live().unwrap().outlined);
+    session.end_shape([60.0, 70.0], Drag::default()).unwrap();
+    assert!(matches!(ops(&session, layer)[..], [Op::Fill { .. }]));
+
+    // A line has nothing inside, so it is drawn whatever the choice.
+    tools.shape.shape = Shape::Line;
+    session.begin_shape(&tools, [10.0, 20.0]).unwrap();
+    session.end_shape([60.0, 70.0], Drag::default()).unwrap();
+    assert!(matches!(
+        ops(&session, layer)[..],
+        [Op::Fill { .. }, Op::Paint { .. }]
+    ));
+}
+
+#[test]
 fn a_shape_in_pixel_mode_runs_through_pixel_centres() {
     let mut document = Document::new([64, 64]);
     document.pixel = true;

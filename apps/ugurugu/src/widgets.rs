@@ -578,9 +578,28 @@ pub fn segmented<T: PartialEq + Copy>(
 ) -> Response {
     const INSET: f32 = 2.0;
     const SEGMENT: f32 = theme::CONTROL_HEIGHT - 2.0 * INSET;
-    let columns = columns.clamp(1, options.len().max(1));
-    let rows = options.len().div_ceil(columns);
     let width = ui.available_width();
+    // Fewer columns when the longest label would not fit in a cell, as in a
+    // narrow panel or a longer language.
+    let widest = options
+        .iter()
+        .map(|(_, text)| {
+            ui.painter()
+                .layout_no_wrap(
+                    (*text).to_owned(),
+                    FontId::proportional(theme::BODY),
+                    Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    let cell_for = |columns: usize| (width - INSET - columns as f32 * INSET) / columns as f32;
+    let mut columns = columns.clamp(1, options.len().max(1));
+    while columns > 1 && cell_for(columns) < widest + 2.0 * theme::space::S {
+        columns -= 1;
+    }
+    let rows = options.len().div_ceil(columns);
     let height = rows as f32 * (SEGMENT + INSET) + INSET;
     let (rect, mut response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     let painter = ui.painter().clone();
@@ -591,7 +610,7 @@ pub fn segmented<T: PartialEq + Copy>(
         Stroke::new(1.0, theme::border()),
         StrokeKind::Inside,
     );
-    let cell = (width - INSET - columns as f32 * INSET) / columns as f32;
+    let cell = cell_for(columns);
     let enabled = ui.is_enabled();
     for (index, &(value, text)) in options.iter().enumerate() {
         let (row, column) = (index / columns, index % columns);
@@ -1057,6 +1076,24 @@ mod tests {
             hex_code(Color32::from_rgba_unmultiplied(16, 32, 48, 128)),
             "#10203080"
         );
+    }
+
+    #[test]
+    fn segments_too_narrow_for_their_labels_take_fewer_columns() {
+        let ctx = egui::Context::default();
+        let height = |width: f32, labels: &[&str]| {
+            let options: Vec<_> = labels.iter().copied().enumerate().collect();
+            frame(&ctx, Vec::new(), |ui| {
+                ui.allocate_ui(egui::vec2(width, 400.0), |ui| {
+                    segmented(ui, &mut 0, &options, 3).rect.height()
+                })
+                .inner
+            })
+        };
+        let short = ["Line", "Star", "Moon", "Fill", "Both", "Pen"];
+        let long = ["Line", "Parallelogram", "Moon", "Fill", "Both", "Pen"];
+        assert!(height(200.0, &long) > height(200.0, &short));
+        assert_eq!(height(600.0, &long), height(600.0, &short));
     }
 
     /// Runs one frame of `add` with `events`, returning what it returned.

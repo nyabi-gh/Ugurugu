@@ -23,7 +23,7 @@ use ugu_core::selection::Combine;
 use ugu_core::store::StoreError;
 use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
-use ugu_render::live::LiveStroke;
+use ugu_render::live::{LiveStroke, Spare};
 use ugu_render::plan::{Reference, RenderPlan};
 use ugu_render::raster::PixelRect;
 use ugu_render::stroke::Pen;
@@ -289,8 +289,8 @@ pub struct Canvas {
     interaction: Interaction,
     /// Shift and Alt.
     modifiers: (bool, bool),
-    /// The last stroke's coverage, cleared, for the next stroke.
-    spare_coverage: Option<Pixmap>,
+    /// What the last stroke drew into, for the next stroke.
+    spare_coverage: Option<Spare>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
     area: Option<[i32; 4]>,
     pixels_per_point: f32,
@@ -1283,6 +1283,7 @@ impl Canvas {
                         live, rect, shape, ..
                     } => {
                         let before = self.key();
+                        let had = layer_ops(self.tab.session.document(), before.layer).len();
                         let point = self.input_point(&sample);
                         let outcome = if shape {
                             let drag = self.shape_drag();
@@ -1290,7 +1291,7 @@ impl Canvas {
                         } else {
                             self.tab.session.end_stroke(point)
                         };
-                        self.end_drawing(before, outcome, live, rect);
+                        self.end_drawing(before, had, outcome, live, rect);
                     }
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
@@ -1620,7 +1621,7 @@ impl Canvas {
     }
 
     /// The display of the session's stroke, with none of its points drawn.
-    fn live_stroke(&self, spare: Option<Pixmap>) -> LiveStroke {
+    fn live_stroke(&self, spare: Option<Spare>) -> LiveStroke {
         let live = self.tab.session.live().expect("a stroke has begun");
         let document = self.tab.session.document();
         let pen = Pen::new(
@@ -1670,7 +1671,18 @@ impl Canvas {
             unreachable!("dragging a shape");
         };
         let mut stroke = self.live_stroke(Some(old.into_spare()));
-        let rect = stroke.update(&self.tab.session.live().expect("dragging").points);
+        let live = self.tab.session.live().expect("dragging");
+        let antialias = live.template.brush.antialias && !self.tab.session.pixel_mode();
+        let filled = live
+            .fill
+            .as_ref()
+            .and_then(|outline| stroke.fill(outline, antialias));
+        let outlined = if live.outlined {
+            stroke.update(&live.points)
+        } else {
+            None
+        };
+        let rect = union(filled, outlined);
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
             rect,
@@ -1696,9 +1708,12 @@ impl Canvas {
 
     /// Shows how the stroke the session has ended, from state `before`,
     /// came out.
+    /// Shows what a stroke or a shape committed: the operations after the
+    /// layer's first `had`, a filled shape's fill under its stroke.
     fn end_drawing(
         &mut self,
         before: Key,
+        had: usize,
         outcome: Result<Outcome, ugu_core::edit::EditError>,
         live: Box<LiveStroke>,
         rect: Option<PixelRect>,
@@ -1723,13 +1738,30 @@ impl Canvas {
         let document = self.tab.session.document();
         let added = match self.tab.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
-                last_stroke(document, after.layer).and_then(|(stroke, erase, clip)| {
-                    let wobble = wobble_of(document, after.layer);
-                    let frames = document.frames;
-                    let changed = split.stamp(&mut self.stamp, stroke, erase, wobble, frames, clip);
-                    *key = after;
-                    changed
-                })
+                let wobble = wobble_of(document, after.layer);
+                let mut changed = None;
+                for op in layer_ops(document, after.layer)
+                    .get(had..)
+                    .unwrap_or_default()
+                {
+                    let stamped = if let Some((stroke, erase, clip)) = op_stroke(document, op) {
+                        split.stamp(
+                            &mut self.stamp,
+                            stroke,
+                            erase,
+                            wobble,
+                            document.frames,
+                            clip,
+                        )
+                    } else if let Some((coverage, clip, antialias, color)) = op_fill(document, op) {
+                        split.stamp_fill(coverage, clip, antialias, color)
+                    } else {
+                        None
+                    };
+                    changed = union(changed, stamped);
+                }
+                *key = after;
+                changed
             }
             _ => None,
         };
@@ -1924,18 +1956,24 @@ fn wobble_of(document: &Document, layer: ugu_core::document::LayerId) -> ugu_cor
 }
 
 /// The stroke the last operation of `layer` draws, and whether it erases.
-fn last_stroke(
-    document: &Document,
-    layer: ugu_core::document::LayerId,
+/// A paint layer's operations; none for any other layer.
+fn layer_ops(document: &Document, layer: ugu_core::document::LayerId) -> &[Op] {
+    match document.layer(layer).map(|layer| &layer.kind) {
+        Some(LayerKind::Paint(paint)) => &paint.ops,
+        _ => &[],
+    }
+}
+
+/// The stroke `op` draws or erases with, and its clip.
+fn op_stroke<'a>(
+    document: &'a Document,
+    op: &Op,
 ) -> Option<(
-    &ugu_core::store::Stroke,
+    &'a ugu_core::store::Stroke,
     bool,
-    Option<&ugu_core::store::Mask>,
+    Option<&'a ugu_core::store::Mask>,
 )> {
-    let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
-        return None;
-    };
-    let (id, erase, clip) = match paint.ops.last()? {
+    let (id, erase, clip) = match op {
         Op::Paint { stroke, clip } => (stroke, false, clip),
         Op::Erase { stroke, clip } => (stroke, true, clip),
         _ => return None,
@@ -1966,15 +2004,26 @@ fn last_fill(
     bool,
     [u8; 4],
 )> {
-    let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
-        return None;
-    };
+    op_fill(document, layer_ops(document, layer).last()?)
+}
+
+/// What a fill `op` fills, its clip, whether it is antialiased and its
+/// colour.
+fn op_fill<'a>(
+    document: &'a Document,
+    op: &Op,
+) -> Option<(
+    &'a ugu_core::store::Mask,
+    Option<&'a ugu_core::store::Mask>,
+    bool,
+    [u8; 4],
+)> {
     let Op::Fill {
         coverage,
         color,
         antialias,
         clip,
-    } = paint.ops.last()?
+    } = op
     else {
         return None;
     };
@@ -2922,6 +2971,60 @@ mod tests {
             &mut full,
         );
         assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
+    }
+
+    #[test]
+    fn a_filled_shape_shows_its_fill_as_it_goes_and_ends_as_the_export_draws_it() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        settle(&mut canvas, &renders);
+        let blank = canvas.display().clone();
+        canvas.set_tool(Tool::Shape).unwrap();
+        for paint in [ugu_session::ShapePaint::Fill, ugu_session::ShapePaint::Both] {
+            let shape = &mut canvas.tools_mut().shape;
+            shape.shape = ugu_session::Shape::Moon;
+            shape.paint = paint;
+            let at = |canvas: &super::Canvas, x: f64, y: f64| {
+                let [x, y] = canvas.to_client([x, y]);
+                press(x, y)
+            };
+            let begin = at(&canvas, 10.0, 10.0);
+            canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+            let end = at(&canvas, 90.0, 80.0);
+            canvas.apply(CanvasInput::Extend(end));
+            canvas.take_upload();
+            let pixel = |canvas: &super::Canvas, x: usize, y: usize| {
+                canvas.display().data_as_u8_slice()[(y * 120 + x) * 4..][..4].to_vec()
+            };
+            // Inside the thick part of the moon, away from its outline.
+            let inside = (24, 45);
+            assert_ne!(
+                pixel(&canvas, inside.0, inside.1),
+                pixel_of(&blank, inside),
+                "{paint:?}"
+            );
+            canvas.apply(CanvasInput::End(end));
+            let mut full = Pixmap::new(120, 90);
+            ugu_render::document::DocumentRenderer::new(0).render(
+                canvas.session().document(),
+                canvas.session().frame(),
+                ugu_render::document::Purpose::Display,
+                &mut full,
+            );
+            assert!(
+                canvas.display().data_as_u8_slice() == full.data_as_u8_slice(),
+                "{paint:?}"
+            );
+            canvas.edit(Session::undo).unwrap();
+            settle(&mut canvas, &renders);
+        }
+    }
+
+    fn pixel_of(pixmap: &Pixmap, (x, y): (usize, usize)) -> Vec<u8> {
+        pixmap.data_as_u8_slice()[(y * usize::from(pixmap.width()) + x) * 4..][..4].to_vec()
     }
 
     /// Issue #51: the time a frame of a large wobbly shape drag takes to

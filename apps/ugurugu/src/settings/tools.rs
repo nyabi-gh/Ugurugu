@@ -10,8 +10,8 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::STROKE_WIDTH;
 use ugu_session::{
-    Brushes, ColorHistory, Kept, Reads, Shape, ShapeKind, ShapeSettings, TextSettings, Tool,
-    ToolSettings, Tools, is_pixel,
+    Brushes, ColorHistory, Kept, Reads, Shape, ShapeKind, ShapePaint, ShapeSettings, TextSettings,
+    Tool, ToolSettings, Tools, is_pixel,
 };
 
 const TOOLS: [(Tool, &str); 9] = [
@@ -30,12 +30,21 @@ const SHAPES: [(ShapeKind, &str); 3] = [
     (ShapeKind::Rectangle, "rectangle"),
     (ShapeKind::Ellipse, "ellipse"),
 ];
-const FIGURES: [(Shape, &str); 5] = [
+const FIGURES: [(Shape, &str); 9] = [
     (Shape::Line, "line"),
     (Shape::Rectangle, "rectangle"),
     (Shape::Ellipse, "ellipse"),
     (Shape::Polygon, "polygon"),
     (Shape::Star, "star"),
+    (Shape::Parallelogram, "parallelogram"),
+    (Shape::Trapezoid, "trapezoid"),
+    (Shape::Semicircle, "semicircle"),
+    (Shape::Moon, "moon"),
+];
+const SHAPE_PAINTS: [(ShapePaint, &str); 3] = [
+    (ShapePaint::Outline, "outline"),
+    (ShapePaint::Fill, "fill"),
+    (ShapePaint::Both, "both"),
 ];
 const SAMPLINGS: [(Sampling, &str); 2] =
     [(Sampling::Smooth, "smooth"), (Sampling::Nearest, "nearest")];
@@ -284,6 +293,11 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
         if let Some(points) = number(shape, "points", range) {
             tools.shape.points = points.round() as u32;
         }
+        let inner = ShapeSettings::INNER;
+        if let Some(inner) = number(shape, "inner", *inner.start() as f32..=*inner.end() as f32) {
+            tools.shape.inner = inner.round() as u32;
+        }
+        named(shape, "paint", &SHAPE_PAINTS, &mut tools.shape.paint);
     }
     if let Some(tablet) = object(value, "tablet") {
         boolean(tablet, "pressure", &mut tools.uses_pressure);
@@ -375,6 +389,8 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "shape": name(&FIGURES, tools.shape.shape),
             "sides": tools.shape.sides,
             "points": tools.shape.points,
+            "inner": tools.shape.inner,
+            "paint": name(&SHAPE_PAINTS, tools.shape.paint),
         },
         "tablet": { "pressure": tools.uses_pressure },
         "fill": {
@@ -425,9 +441,11 @@ mod tests {
             selection_shape: ShapeKind::Ellipse,
             lasso_paints: true,
             shape: ShapeSettings {
-                shape: Shape::Star,
+                shape: Shape::Moon,
                 sides: 7,
                 points: 9,
+                inner: 30,
+                paint: ShapePaint::Both,
             },
             uses_pressure: false,
             transform_sampling: Sampling::Nearest,

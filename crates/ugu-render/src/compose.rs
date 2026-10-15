@@ -372,6 +372,9 @@ pub struct Stamp {
     dabs: Vec<Dab>,
     /// A dab stroke's pixels, premultiplied.
     buffer: Vec<u8>,
+    /// What `draw` drew last. Kept for the next: a new pixmap the size of a
+    /// large shape takes longer to allocate than to draw into.
+    piece: Pixmap,
 }
 
 impl Default for Stamp {
@@ -389,6 +392,7 @@ impl Default for Stamp {
             painter: dab::Painter::default(),
             dabs: Vec::new(),
             buffer: Vec::new(),
+            piece: Pixmap::new(0, 0),
         }
     }
 }
@@ -495,7 +499,7 @@ impl Stamp {
     }
 
     /// Fills `draw` in a fresh transparent pixmap covering `rect`.
-    pub fn draw(&mut self, rect: PixelRect, draw: impl FnOnce(&mut RenderContext)) -> Pixmap {
+    pub fn draw(&mut self, rect: PixelRect, draw: impl FnOnce(&mut RenderContext)) -> &Pixmap {
         let [left, top, right, bottom] = rect.map(|value| value as u16);
         let (width, height) = (right - left, bottom - top);
         self.context.reset_and_resize(width, height);
@@ -503,13 +507,15 @@ impl Stamp {
             .set_transform(Affine::translate((-f64::from(left), -f64::from(top))));
         draw(&mut self.context);
         self.context.flush();
-        let mut piece = Pixmap::new(width, height);
+        // Drawing the whole of a pixmap its size writes every pixel, so what
+        // the last drawing left is not cleared first.
+        self.piece.resize(width, height);
         self.context.render_with(
-            &mut piece,
+            &mut self.piece,
             &mut self.resources,
             RasterizerSettings::default(),
         );
-        piece
+        &self.piece
     }
 }
 

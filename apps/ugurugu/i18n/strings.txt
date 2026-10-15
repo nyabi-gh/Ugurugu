@@ -405,6 +405,15 @@ shape-kind | Shape | 모양 | 形
 shape-line | Line | 직선 | 直線
 shape-polygon | Polygon | 다각형 | 多角形
 shape-star | Star | 별 | 星
+shape-parallelogram | Parallelogram | 평행사변형 | 平行四辺形
+shape-trapezoid | Trapezoid | 사다리꼴 | 台形
+shape-semicircle | Semicircle | 반원 | 半円
+shape-moon | Moon | 초승달 | 三日月
+shape-inner | Inner corners | 안쪽 꼭짓점 | 内側の頂点
+shape-paint | Draw | 그리기 | 描画
+shape-paint-outline | Outline | 외곽선 | 輪郭
+shape-paint-fill | Fill | 채우기 | 塗り
+shape-paint-both | Both | 둘 다 | 両方
 shape-sides | Sides | 변 수 | 辺の数
 shape-points | Points | 꼭짓점 수 | 頂点の数
 shape-hint | Drag to draw with the brush. Shift keeps a square, a circle or a 45° line; Alt draws from the centre. | 드래그해서 브러시로 그립니다. Shift는 정사각형·원·45° 직선으로, Alt는 가운데부터 그립니다. | ドラッグしてブラシで描きます。Shiftで正方形・円・45°の直線に、Altで中心から描きます。
