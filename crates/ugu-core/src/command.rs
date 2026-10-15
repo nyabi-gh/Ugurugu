@@ -480,13 +480,30 @@ pub fn merge_down(document: &Document, above: LayerId) -> Result<Vec<Change>, Ed
     if siblings.get(index + 1).is_some_and(Layer::clip_to_below) {
         return Err(EditError::Merge(ops::MergeRefusal::Clipping));
     }
-    let merged = ops::merge_down(lower_paint, upper_paint).map_err(EditError::Merge)?;
+    let moved = [lower_paint, upper_paint]
+        .iter()
+        .map(|paint| ops::fixed_move(&paint.keys).map(|moved| moved.is_some()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(EditError::Merge)?
+        .contains(&true);
+    let all = MaskId(free_mask_ids(&document.store).take());
+    let merged =
+        ops::merge_down(lower_paint, upper_paint, all, document.pixel).map_err(EditError::Merge)?;
     let mut merged_layer = lower.clone();
     merged_layer.kind = LayerKind::Paint(merged);
-    Ok(vec![
+    let mut changes = Vec::new();
+    if moved {
+        let whole = crate::selection::Selection::all(document.canvas)
+            .ok_or(EditError::CannotMerge)?
+            .mask()
+            .clone();
+        changes.push(Change::InsertMask(all, whole));
+    }
+    changes.extend([
         Change::ReplaceLayer(merged_layer),
         Change::RemoveLayer(above),
-    ])
+    ]);
+    Ok(changes)
 }
 
 /// Changes the canvas size; content keeps its pixels and moves by `offset`.
@@ -1013,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn keyed_layers_and_cels_are_not_merged_down() {
+    fn layers_moving_between_frames_and_cels_are_not_merged_down() {
         let (document, _) = with_folder();
         assert_eq!(
             merge_down(&document, LayerId(3)),
@@ -1022,7 +1039,33 @@ mod tests {
         let mut keyed = three_layers();
         run(&mut keyed, |document| {
             update_layer(document, LayerId(2), |layer| {
-                layer.keys_mut().set(key(0, 3.0))
+                layer.keys_mut().set(key(0, 3.0));
+                layer.keys_mut().set(key(4, 3.0));
+            })
+            .unwrap()
+        })
+        .unwrap();
+        // Put in one place on every frame, the move is kept in the merge.
+        let mut placed = keyed.clone();
+        run(&mut placed, |document| {
+            merge_down(document, LayerId(2)).unwrap()
+        })
+        .unwrap();
+        let LayerKind::Paint(merged) = &placed.layer(LayerId(1)).unwrap().kind else {
+            panic!("a paint layer");
+        };
+        assert!(merged.keys.is_empty());
+        let Some(Op::Isolated(section)) = merged.ops.last() else {
+            panic!("a section");
+        };
+        assert!(matches!(
+            section.ops.last(),
+            Some(Op::TransformSelection { transform, .. }) if *transform == ops::Affine::translation(3.0, 0.0)
+        ));
+        assert_eq!(placed.validate(), Ok(()));
+        run(&mut keyed, |document| {
+            update_layer(document, LayerId(2), |layer| {
+                layer.keys_mut().set(key(4, 9.0))
             })
             .unwrap()
         })

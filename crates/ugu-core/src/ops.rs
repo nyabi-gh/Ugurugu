@@ -299,19 +299,39 @@ pub enum MergeRefusal {
     CanvasEpoch,
     /// A crop or resample in the upper layer would also move the lower layer.
     CanvasChange,
-    /// Either layer has keys, or both are cels of an animation folder.
+    /// Either layer moves from frame to frame, or both are cels of an
+    /// animation folder.
     Animated,
+}
+
+/// Where `keys` put the layer on every frame, when that is one place:
+/// `None` where it stays, and `Animated` when it moves between frames.
+pub fn fixed_move(keys: &crate::keys::Keys) -> Result<Option<Affine>, MergeRefusal> {
+    let Some(first) = keys.keys.first() else {
+        return Ok(None);
+    };
+    if keys.keys.iter().any(|key| key.pose != first.pose) {
+        return Err(MergeRefusal::Animated);
+    }
+    Ok(first.pose.transform(keys.pivot))
 }
 
 /// Merges `above` into `below`, keeping the appearance of every frame.
 ///
 /// Each layer becomes an isolated section that keeps its opacity and wobble,
 /// and the merged layer is opaque Normal. Operations added after the merge
-/// act on both sections' result.
-pub fn merge_down(below: &PaintLayer, above: &PaintLayer) -> Result<PaintLayer, MergeRefusal> {
-    if !below.keys.is_empty() || !above.keys.is_empty() {
-        return Err(MergeRefusal::Animated);
-    }
+/// act on both sections' result. A layer that keys put in one place has
+/// that move as its section's last operation, moving everything selected
+/// by `all`, the whole canvas; `pixel` moves whole pixels as keys do there.
+/// Off whole pixels and quarter turns, an edge pixel can come out a level
+/// apart (docs/rust/evidence.md section 63).
+pub fn merge_down(
+    below: &PaintLayer,
+    above: &PaintLayer,
+    all: MaskId,
+    pixel: bool,
+) -> Result<PaintLayer, MergeRefusal> {
+    let moves = [fixed_move(&below.keys)?, fixed_move(&above.keys)?];
     if below.blend != Blend::Normal || above.blend != Blend::Normal {
         return Err(MergeRefusal::Blend);
     }
@@ -324,9 +344,23 @@ pub fn merge_down(below: &PaintLayer, above: &PaintLayer) -> Result<PaintLayer, 
     if changes_canvas(&above.ops) || (below.opacity != 1.0 && changes_canvas(&below.ops)) {
         return Err(MergeRefusal::CanvasChange);
     }
-    let section = |layer: &PaintLayer| {
+    let baked = |layer: &PaintLayer, moved: Option<Affine>| {
+        let mut ops = layer.ops.clone();
+        ops.extend(moved.map(|transform| Op::TransformSelection {
+            mask: all,
+            transform,
+            sampling: if pixel {
+                Sampling::Nearest
+            } else {
+                Sampling::Smooth
+            },
+            keep_source: false,
+        }));
+        ops
+    };
+    let section = |layer: &PaintLayer, moved: Option<Affine>| {
         Op::Isolated(Box::new(Section {
-            ops: layer.ops.clone(),
+            ops: baked(layer, moved),
             opacity: layer.opacity,
             wobble: layer.wobble,
         }))
@@ -334,11 +368,11 @@ pub fn merge_down(below: &PaintLayer, above: &PaintLayer) -> Result<PaintLayer, 
     // An opaque lower layer needs no section; its operations stay as they are,
     // canvas changes included.
     let mut ops = if below.opacity == 1.0 {
-        below.ops.clone()
+        baked(below, moves[0])
     } else {
-        vec![section(below)]
+        vec![section(below, moves[0])]
     };
-    ops.push(section(above));
+    ops.push(section(above, moves[1]));
     Ok(PaintLayer {
         ops,
         opacity: 1.0,

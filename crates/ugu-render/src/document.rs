@@ -2243,7 +2243,7 @@ mod tests {
     #[test]
     fn merging_keeps_every_frame_and_each_eraser_in_its_own_layer() {
         let (document, below, above) = two_layers();
-        let merged = merge_down(&below, &above).unwrap();
+        let merged = merge_down(&below, &above, ugu_core::ops::MaskId(999), false).unwrap();
         let separate = with_layers(&document, &[below, above]);
         let joined = with_layers(&document, &[merged]);
         for frame in 0..4 {
@@ -2266,7 +2266,7 @@ mod tests {
         // Covers y 20..28: the lower line's lower half and the upper line's
         // upper half.
         let eraser = line(&mut document, 36.0, 44.0, 24.0, [0, 0, 0, 255], true);
-        let mut merged = merge_down(&below, &above).unwrap();
+        let mut merged = merge_down(&below, &above, ugu_core::ops::MaskId(999), false).unwrap();
         merged.ops.push(Op::Erase {
             stroke: eraser,
             clip: None,
@@ -3706,7 +3706,7 @@ mod tests {
     #[test]
     fn tiles_keep_the_pixels_within_a_level() {
         let (base, below, above) = two_layers();
-        let merged = merge_down(&below, &above).unwrap();
+        let merged = merge_down(&below, &above, ugu_core::ops::MaskId(999), false).unwrap();
         let merged = with_layers(&base, &[below, above, merged]);
         for document in [merged, many_layers()] {
             for frame in [0, 3] {

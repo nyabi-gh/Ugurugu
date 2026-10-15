@@ -3202,6 +3202,31 @@ mod tests {
         (canvas, renders)
     }
 
+    #[test]
+    fn copies_of_a_layer_moved_to_other_places_merge_as_they_look() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[10.0, 20.0], [40.0, 40.0], [20.0, 60.0]]);
+        for x in [30.0, 60.0] {
+            canvas
+                .edit(|session| session.duplicate_layer(|name| format!("{name} copy")))
+                .unwrap();
+            canvas.set_pose(ugu_core::keys::Pose {
+                offset: [x, 5.0],
+                ..ugu_core::keys::Pose::REST
+            });
+        }
+        settle(&mut canvas, &renders);
+        let before = full_render(&canvas);
+        for _ in 0..2 {
+            canvas.edit(Session::merge_down).unwrap();
+        }
+        assert_eq!(canvas.session().document().layers.len(), 1);
+        settle(&mut canvas, &renders);
+        let after = full_render(&canvas);
+        assert!(before.data_as_u8_slice() == after.data_as_u8_slice());
+        assert!(canvas.display().data_as_u8_slice() == after.data_as_u8_slice());
+    }
+
     fn full_render(canvas: &super::Canvas) -> Pixmap {
         let document = canvas.session().document();
         let [width, height] = document.canvas.map(|edge| edge as u16);

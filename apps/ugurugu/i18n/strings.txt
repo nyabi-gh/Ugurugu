@@ -289,7 +289,7 @@ merge-no-paint-below | No paint layer is directly below | 바로 아래에 페�
 merge-properties | Both layers must use matching safe properties, and no clipping layer may rest on this one | 두 레이어가 동일한 안전 속성을 사용해야 하며, 이 레이어 위에 클리핑 레이어가 없어야 합니다 | 両方のレイヤーで一致する安全なプロパティが必要で、このレイヤーの上にクリッピングレイヤーがあってはいけません
 merge-canvas-change | This layer resizes the canvas or erased merged artwork, so merging would change the picture | 이 레이어는 캔버스 크기를 바꾸거나 합쳐진 그림을 지운 적이 있어 병합하면 그림이 달라집니다 | このレイヤーはキャンバスサイズを変更するか、結合済みの絵を消したことがあるため、結合すると絵が変わります
 merge-epoch | The layers use incompatible canvas histories | 레이어의 캔버스 기록이 서로 호환되지 않습니다 | レイヤーのキャンバス履歴に互換性がありません
-merge-animated | Layers moved by keys, and cels of an animation folder, are not merged | 키로 움직이는 레이어와 애니메이션 폴더의 셀은 병합하지 않습니다 | キーで動くレイヤーとアニメーションフォルダーのセルは結合しません
+merge-animated | Layers that move from frame to frame, and cels of an animation folder, are not merged | 프레임마다 움직이는 레이어와 애니메이션 폴더의 셀은 병합하지 않습니다 | フレームごとに動くレイヤーとアニメーションフォルダーのセルは結合しません
 merge-limit | The merged layer would exceed the stroke limit | 병합한 레이어가 선 개수 한도를 초과합니다 | 結合後のレイヤーがストローク数の上限を超えます
 blend-mode | BLEND MODE | 합성 모드 | ブレンドモード
 blend-mode-name | Layer blend mode | 레이어 합성 모드 | レイヤーのブレンドモード

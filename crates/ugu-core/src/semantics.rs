@@ -426,7 +426,7 @@ fn merging_keeps_every_frame_and_each_eraser_in_its_own_layer() {
     above.opacity = 0.75;
     above.wobble = Some(Wobble::classic(2.0));
 
-    let merged = merge_down(&below, &above).unwrap();
+    let merged = merge_down(&below, &above, MaskId(999), false).unwrap();
     for frame in 0..4 {
         world
             .document(&[&merged], frame)
@@ -443,7 +443,7 @@ fn an_eraser_added_after_a_merge_reaches_both_layers() {
     let eraser = world.stroke([0, 0, 2, 2], CLEAR);
     let below = layer(vec![paint(lower_line)], [4, 2]);
     let above = layer(vec![paint(upper_line)], [4, 2]);
-    let mut merged = merge_down(&below, &above).unwrap();
+    let mut merged = merge_down(&below, &above, MaskId(999), false).unwrap();
     merged.ops.push(erase(eraser));
     let result = world.layer(&merged, 0);
     assert_eq!([result.at(0, 0), result.at(0, 1)], [CLEAR, CLEAR]);
@@ -455,13 +455,19 @@ fn merging_refuses_what_it_cannot_keep() {
     let below = layer(vec![], [4, 4]);
     let mut multiply = below.clone();
     multiply.blend = Blend::Multiply;
-    assert_eq!(merge_down(&below, &multiply), Err(MergeRefusal::Blend));
+    assert_eq!(
+        merge_down(&below, &multiply, MaskId(999), false),
+        Err(MergeRefusal::Blend)
+    );
     let mut clipped = below.clone();
     clipped.clip_to_below = true;
-    assert_eq!(merge_down(&below, &clipped), Err(MergeRefusal::Clipping));
+    assert_eq!(
+        merge_down(&below, &clipped, MaskId(999), false),
+        Err(MergeRefusal::Clipping)
+    );
     let other_canvas = layer(vec![], [8, 8]);
     assert_eq!(
-        merge_down(&below, &other_canvas),
+        merge_down(&below, &other_canvas, MaskId(999), false),
         Err(MergeRefusal::CanvasEpoch)
     );
     let cropping = layer(
@@ -472,16 +478,16 @@ fn merging_refuses_what_it_cannot_keep() {
         [4, 4],
     );
     assert_eq!(
-        merge_down(&below, &cropping),
+        merge_down(&below, &cropping, MaskId(999), false),
         Err(MergeRefusal::CanvasChange)
     );
     let mut translucent_cropping = cropping.clone();
     translucent_cropping.opacity = 0.5;
     assert_eq!(
-        merge_down(&translucent_cropping, &below),
+        merge_down(&translucent_cropping, &below, MaskId(999), false),
         Err(MergeRefusal::CanvasChange)
     );
-    assert!(merge_down(&cropping, &below).is_ok());
+    assert!(merge_down(&cropping, &below, MaskId(999), false).is_ok());
 }
 
 #[test]
