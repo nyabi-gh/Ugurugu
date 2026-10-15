@@ -3,7 +3,7 @@ resolver = "3"
 members = ["apps/*", "crates/*", "tools/latency-probe", "tools/render-bench", "tools/ugu-doc"]
 
 [workspace.package]
-version = "3.2.1"
+version = "3.3.0"
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
