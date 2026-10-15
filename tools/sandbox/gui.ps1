@@ -966,6 +966,60 @@ function Get-Ink($Process, $Paper) {
     [pscustomobject]@{ Centre = $centre; Count = $count; Red = $red }
 }
 
+Step 'Symmetry ruler' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    $middle = $paper.Left + [int]($w / 2)
+    # Dark pixels right of the ruler's line, which is left out.
+    $right = {
+        [Native]::MoveTo($paper.Right + 40, $paper.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+        $count = 0
+        for ($y = $paper.Top + 2; $y -lt $paper.Bottom - 2; $y += 2) {
+            for ($x = $middle + 15; $x -lt $paper.Right - 2; $x += 2) {
+                $c = $bitmap.GetPixel($x, $y)
+                if ($c.R + $c.G + $c.B -lt 200) { $count++ }
+            }
+        }
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $count
+    }
+    $words = Read-Words 'en'
+    Invoke-Word $process $words 'menu-view'
+    # The tool settings' heading has the same name and can be invoked too.
+    $item = Find-Pattern $process $words['view-symmetry'] @([Windows.Automation.SelectionItemPattern]::Pattern,
+        [Windows.Automation.TogglePattern]::Pattern)
+    if ($item -is [Windows.Automation.SelectionItemPattern]) { $item.Select() } else { $item.Toggle() }
+    Start-Sleep -Milliseconds 500
+    $switch = Find-Pattern $process 'Use the symmetry ruler' @([Windows.Automation.TogglePattern]::Pattern)
+    $on = $switch.Current.ToggleState -eq [Windows.Automation.ToggleState]::On
+    $before = & $right
+    Send-Keys $process 'b'
+    # On the left half only.
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.1)), ($paper.Left + [int]($w * 0.25)), ($paper.Left + [int]($w * 0.4))),
+        @(($paper.Top + [int]($h * 0.2)), ($paper.Top + [int]($h * 0.35)), ($paper.Top + [int]($h * 0.25))))
+    $after = & $right
+    $mirrored = Save-Screen 'symmetry-mirror'
+    Set-Field $process 'Number of symmetry lines' '6'
+    [Native]::Drag(@(($paper.Left + [int]($w * 0.45)), ($paper.Left + [int]($w * 0.48))),
+        @(($paper.Top + [int]($h * 0.6)), ($paper.Top + [int]($h * 0.85))))
+    $six = Save-Screen 'symmetry-six-lines'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "switch on $on, dark pixels right of the line $before -> $after; $mirrored; $six"
+    if (-not $on -or $before -gt 20 -or $after -lt 50) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'Keyframes' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App

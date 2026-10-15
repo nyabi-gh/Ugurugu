@@ -382,17 +382,19 @@ fn snapped(position: [f64; 2], pixel: bool) -> [f64; 2] {
 
 impl Session {
     /// Starts dragging out the shape `tools` choose at `position`, drawn
-    /// with the pen as `begin_stroke` draws.
+    /// with the pen as `begin_stroke` draws. The symmetry ruler does not
+    /// repeat it.
     pub fn begin_shape(&mut self, tools: &Tools, position: [f64; 2]) -> Result<(), StrokeRefused> {
         let pixel = self.pixel_mode();
         let start = snapped(position, pixel);
-        self.begin_stroke(
+        self.start_stroke(
             tools,
             InputPoint {
                 position: start,
                 pressure: None,
                 time: 0.0,
             },
+            false,
         )?;
         let live = self.live.as_mut().expect("just begun");
         live.shaping = Some(Shaping {

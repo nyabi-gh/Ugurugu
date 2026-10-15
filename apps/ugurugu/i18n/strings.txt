@@ -92,6 +92,8 @@ view-turn-reset | Rese&t canvas rotation | 캔버스 회전 초기화(&T) | キ�
 view-turn-reset-tip | Reset the canvas view to 0° without changing zoom or mirroring | 확대/축소나 좌우 반전을 바꾸지 않고 캔버스 보기를 0°로 초기화 | ズームや左右反転を変えずにキャンバス表示を0°にリセット
 view-mirror | Flip canvas horizontally | 캔버스 좌우반전 | キャンバスを左右反転
 view-mirror-tip | Temporarily flip the canvas horizontally | 캔버스를 임시로 좌우 반전 | キャンバスを一時的に左右反転
+view-symmetry | Symmetry ruler | 대칭자 | 対称定規
+view-symmetry-tip | Draw each brush and eraser stroke again, mirrored and turned around a centre | 브러시와 지우개 획을 중심을 두고 뒤집고 돌려 함께 그립니다 | ブラシと消しゴムのストロークを、中心のまわりで反転・回転してもう一度描きます
 canvas-rotation | Canvas rotation angle | 캔버스 회전 각도 | キャンバスの回転角度
 view-animate | &Animate preview | 미리보기 재생(&A) | プレビューを再生(&A)
 view-animation-tools | Animation tool&s | 애니메이션 도구(&S) | アニメーションツール(&S)
@@ -241,6 +243,20 @@ stabilization-name | Stroke stabilization | 손떨림 보정 | 手ぶれ補正
 antialiasing | ANTI-ALIASING | 안티앨리어싱 | アンチエイリアス
 antialiasing-name | Anti-aliasing | 안티앨리어싱 | アンチエイリアス
 antialiasing-tip | Smooth stroke edges | 선 가장자리를 부드럽게 | 線の縁を滑らかにします
+symmetry | Symmetry ruler | 대칭자 | 対称定規
+symmetry-on | On | 사용 | 使用
+symmetry-on-name | Use the symmetry ruler | 대칭자 사용 | 対称定規を使用
+symmetry-lines | Lines | 선 수 | 線の数
+symmetry-lines-name | Number of symmetry lines | 대칭선 수 | 対称線の数
+symmetry-mirror | Mirror | 선대칭 | 線対称
+symmetry-mirror-name | Mirror across the lines | 선을 기준으로 뒤집기 | 線を軸に反転
+symmetry-mirror-tip | Mirror each stroke across the lines. Off, strokes only repeat around the centre | 선을 기준으로 뒤집어 그립니다. 끄면 중심을 두고 돌려서만 그립니다 | 線を軸に反転して描きます。オフにすると中心のまわりに回して描くだけです
+symmetry-angle | Angle | 각도 | 角度
+symmetry-angle-name | Symmetry line angle | 대칭선 각도 | 対称線の角度
+symmetry-x | Centre X | 중심 X | 中心 X
+symmetry-y | Centre Y | 중심 Y | 中心 Y
+symmetry-centre | Centre on canvas | 캔버스 가운데로 | キャンバスの中央へ
+symmetry-centre-tip | Puts the ruler's centre in the middle of the canvas | 대칭자의 중심을 캔버스 가운데로 옮깁니다 | 対称定規の中心をキャンバスの中央に移します
 
 # Wobble
 wobble-dock | Wobble | 우글거림 | ゆらぎ

@@ -46,6 +46,7 @@ mod onion;
 mod picking;
 mod posing;
 mod sizing;
+mod symmetry;
 mod text;
 mod transform;
 mod view;
@@ -94,6 +95,8 @@ enum Interaction {
     Idle,
     Drawing {
         live: Box<LiveStroke>,
+        /// The symmetry ruler's copies of `live`, drawn after it.
+        copies: Vec<LiveStroke>,
         rect: Option<PixelRect>,
         /// Dragged out with the shape tool, its points all replaced as it
         /// changes.
@@ -295,11 +298,13 @@ pub struct Canvas {
     /// The size, shrink and origin of the pixels shown when last uploaded.
     uploaded: Option<([u16; 2], u32, [u32; 2])>,
     stamp: Stamp,
+    /// What the symmetry ruler's strokes are drawn with side by side.
+    helpers: Vec<Stamp>,
     interaction: Interaction,
     /// Shift and Alt.
     modifiers: (bool, bool),
     /// What the last stroke drew into, for the next stroke.
-    spare_coverage: Option<Spare>,
+    spare_coverage: Vec<Spare>,
     /// Canvas area in client physical pixels: left, top, right, bottom.
     area: Option<[i32; 4]>,
     pixels_per_point: f32,
@@ -366,9 +371,10 @@ impl Canvas {
             upload: Some([0, 0, u32::from(width), u32::from(height)]),
             uploaded: None,
             stamp: Stamp::default(),
+            helpers: Vec::new(),
             interaction: Interaction::Idle,
             modifiers: (false, false),
-            spare_coverage: None,
+            spare_coverage: Vec::new(),
             area: None,
             pixels_per_point: 1.0,
             hover_eraser: false,
@@ -455,7 +461,7 @@ impl Canvas {
         self.tab.reset(document, saved, self.generations);
         self.interaction = Interaction::Idle;
         self.sizing = None;
-        self.spare_coverage = None;
+        self.spare_coverage.clear();
         self.upload_all();
         if let Some(area) = self.area {
             self.place(area);
@@ -719,7 +725,7 @@ impl Canvas {
     /// what was asked of the worker while it was hidden is asked again.
     fn enter_tab(&mut self) {
         self.interaction = Interaction::Idle;
-        self.spare_coverage = None;
+        self.spare_coverage.clear();
         self.tab.requested = None;
         self.tab.thumbnails_asked = false;
         self.upload_all();
@@ -772,7 +778,7 @@ impl Canvas {
             // The split is of the canvas before; what it shows stays until
             // the split of the new one arrives.
             self.tab.split = None;
-            self.spare_coverage = None;
+            self.spare_coverage.clear();
             self.fit();
         }
         self.follow_transform(key);
@@ -1082,7 +1088,7 @@ impl Canvas {
         // them for playback.
         self.tab.split = None;
         self.tab.requested = None;
-        self.spare_coverage = None;
+        self.spare_coverage.clear();
         let shown = self.tab.held.take().unwrap_or_else(|| {
             let display = std::mem::replace(&mut self.tab.display, Pixmap::new(1, 1));
             (Arc::new(display), 1)
@@ -1206,11 +1212,8 @@ impl Canvas {
         let Some(rect) = split.shown(rect, canvas) else {
             return;
         };
-        let live = match &self.interaction {
-            Interaction::Drawing { live, .. } => Some(live.as_ref()),
-            _ => None,
-        };
-        composite(split, live, rect, &mut self.tab.display);
+        let drawn = drawn(&self.interaction);
+        composite(split, &drawn, rect, &mut self.tab.display);
         self.tab.onion.cover(&mut self.tab.display, rect);
         self.upload = union(self.upload, Some(rect));
     }
@@ -1310,7 +1313,11 @@ impl Canvas {
                 self.sample_count += 1;
                 match std::mem::replace(&mut self.interaction, Interaction::Idle) {
                     Interaction::Drawing {
-                        live, rect, shape, ..
+                        live,
+                        copies,
+                        rect,
+                        shape,
+                        ..
                     } => {
                         let before = self.key();
                         let had = layer_ops(self.tab.session.document(), before.layer).len();
@@ -1321,7 +1328,7 @@ impl Canvas {
                         } else {
                             self.tab.session.end_stroke(point)
                         };
-                        self.end_drawing(before, had, outcome, live, rect);
+                        self.end_drawing(before, had, outcome, live, copies, rect);
                     }
                     Interaction::Selecting => {
                         let point = self.to_document(sample.position);
@@ -1652,11 +1659,20 @@ impl Canvas {
                 return;
             }
         }
-        let spare = self.spare_coverage.take();
+        let spare = self.spare_coverage.pop();
         let mut stroke = self.live_stroke(spare);
-        let rect = stroke.update(&self.tab.session.live().expect("a stroke has begun").points);
+        let live = self.tab.session.live().expect("a stroke has begun");
+        let mut rect = stroke.update(&live.points);
+        let mut copies = Vec::with_capacity(live.copies.len());
+        for (index, copy) in live.copies.iter().enumerate() {
+            let spare = self.spare_coverage.pop();
+            let mut shown = self.copy_stroke(index, spare);
+            rect = union(rect, shown.update(&copy.points));
+            copies.push(shown);
+        }
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
+            copies,
             rect,
             shape,
             moved: false,
@@ -1667,18 +1683,28 @@ impl Canvas {
     /// The display of the session's stroke, with none of its points drawn.
     fn live_stroke(&self, spare: Option<Spare>) -> LiveStroke {
         let live = self.tab.session.live().expect("a stroke has begun");
+        self.shown_stroke(&live.template, spare)
+    }
+
+    /// The display of the session stroke's copy `index`, with none of its
+    /// points drawn.
+    fn copy_stroke(&self, index: usize, spare: Option<Spare>) -> LiveStroke {
+        let live = self.tab.session.live().expect("a stroke has begun");
+        self.shown_stroke(&live.copies[index].template, spare)
+    }
+
+    /// The display of a stroke like `template` on the session stroke's
+    /// layer, cut to its selection.
+    fn shown_stroke(&self, template: &ugu_core::store::Stroke, spare: Option<Spare>) -> LiveStroke {
+        let live = self.tab.session.live().expect("a stroke has begun");
         let document = self.tab.session.document();
-        let pen = Pen::new(
-            &live.template,
-            wobble_of(document, live.layer),
-            document.frames,
-        );
+        let pen = Pen::new(template, wobble_of(document, live.layer), document.frames);
         let size = document.canvas.map(|edge| edge as u16);
         LiveStroke::new(
             size,
             pen,
             self.key().frame,
-            live.template.color.0,
+            template.color.0,
             live.erase,
             spare,
         )
@@ -1729,6 +1755,7 @@ impl Canvas {
         let rect = union(filled, outlined);
         self.interaction = Interaction::Drawing {
             live: Box::new(stroke),
+            copies: Vec::new(),
             rect,
             shape: true,
             moved: false,
@@ -1741,13 +1768,30 @@ impl Canvas {
         if !self.tab.session.extend_stroke(point) {
             return;
         }
-        let points = &self.tab.session.live().expect("drawing").points;
-        let Interaction::Drawing { live, rect, .. } = &mut self.interaction else {
+        let session = self.tab.session.live().expect("drawing");
+        let Interaction::Drawing {
+            live, copies, rect, ..
+        } = &mut self.interaction
+        else {
             return;
         };
-        let changed = live.update(points);
-        *rect = union(*rect, changed);
-        self.recomposite(changed);
+        // The ruler's strokes change pixels far apart: each is put together
+        // on its own, not the box around them all.
+        let changed: Vec<_> = std::iter::once(live.update(&session.points))
+            .chain(
+                copies
+                    .iter_mut()
+                    .zip(&session.copies)
+                    .map(|(shown, copy)| shown.update(&copy.points)),
+            )
+            .flatten()
+            .collect();
+        for &changed in &changed {
+            *rect = union(*rect, Some(changed));
+        }
+        for changed in changed {
+            self.recomposite(Some(changed));
+        }
     }
 
     /// Shows how the stroke the session has ended, from state `before`,
@@ -1760,11 +1804,14 @@ impl Canvas {
         had: usize,
         outcome: Result<Outcome, ugu_core::edit::EditError>,
         live: Box<LiveStroke>,
+        copies: Vec<LiveStroke>,
         rect: Option<PixelRect>,
     ) {
         let started = Instant::now();
         self.record_colors();
-        self.spare_coverage = Some(live.into_spare());
+        self.spare_coverage.push(live.into_spare());
+        self.spare_coverage
+            .extend(copies.into_iter().map(LiveStroke::into_spare));
         match outcome {
             Ok(Outcome::Committed(_)) => {}
             Ok(Outcome::NoChange) => return self.recomposite(rect),
@@ -1783,28 +1830,42 @@ impl Canvas {
         let added = match self.tab.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
                 let wobble = wobble_of(document, after.layer);
+                // The symmetry ruler's strokes are drawn side by side.
+                let threads =
+                    std::thread::available_parallelism().map_or(1, |count| count.get().min(8));
                 let mut changed = None;
-                for op in layer_ops(document, after.layer)
+                let mut strokes = Vec::new();
+                let ops = layer_ops(document, after.layer)
                     .get(had..)
-                    .unwrap_or_default()
-                {
-                    let stamped = if let Some((stroke, erase, clip)) = op_stroke(document, op) {
-                        split.stamp(
-                            &mut self.stamp,
-                            stroke,
-                            erase,
-                            wobble,
-                            document.frames,
-                            clip,
-                        )
+                    .unwrap_or_default();
+                for (index, op) in ops.iter().enumerate() {
+                    if let Some(stroke) = op_stroke(document, op) {
+                        strokes.push(stroke);
                     } else if let Some((coverage, clip, antialias, color, behind)) =
                         op_fill(document, op)
                     {
-                        split.stamp_fill(coverage, clip, antialias, color, behind)
-                    } else {
-                        None
-                    };
-                    changed = union(changed, stamped);
+                        changed = union(
+                            changed,
+                            split.stamp_fill(coverage, clip, antialias, color, behind),
+                        );
+                    }
+                    let next_is_stroke = ops
+                        .get(index + 1)
+                        .is_some_and(|next| op_stroke(document, next).is_some());
+                    if !strokes.is_empty() && !next_is_stroke {
+                        changed = union(
+                            changed,
+                            split.stamp_strokes(
+                                &mut self.stamp,
+                                &mut self.helpers,
+                                &strokes,
+                                wobble,
+                                document.frames,
+                                threads,
+                            ),
+                        );
+                        strokes.clear();
+                    }
                 }
                 *key = after;
                 changed
@@ -2154,6 +2215,16 @@ pub(crate) fn is_point_limit(error: &EditError) -> bool {
         EditError::Store(StoreError::TooManyPoints(_))
             | EditError::Document(DocumentError::Store(StoreError::TooManyPoints(_)))
     )
+}
+
+/// The strokes being drawn, the hand-drawn one first, as they are committed.
+fn drawn(interaction: &Interaction) -> Vec<&LiveStroke> {
+    match interaction {
+        Interaction::Drawing { live, copies, .. } => {
+            std::iter::once(live.as_ref()).chain(copies).collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -3219,6 +3290,129 @@ mod tests {
                 println!(
                     "{tool:?} {per_frame}/frame: {frames} frames, total {total:.0} ms, \
                      median {:.2} ms, max {:.2} ms",
+                    times[times.len() / 2],
+                    times[times.len() - 1]
+                );
+                canvas.edit(|session| session.undo()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn the_symmetry_rulers_strokes_show_as_they_go_and_end_as_the_export_draws_them() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        settle(&mut canvas, &renders);
+        let blank = canvas.display().clone();
+        let symmetry = canvas.symmetry();
+        canvas.set_symmetry(ugu_session::Symmetry {
+            on: true,
+            lines: 2,
+            ..symmetry
+        });
+        canvas.brushes_mut().pen.width = 6.0;
+        canvas.brushes_mut().pen.opacity = 0.5;
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let begin = at(&canvas, 20.0, 20.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        for x in [30.0, 40.0, 50.0] {
+            let sample = at(&canvas, x, 25.0);
+            canvas.apply(CanvasInput::Extend(sample));
+        }
+        let pixel = |shown: &Pixmap, x: usize, y: usize| {
+            shown.data_as_u8_slice()[(y * 120 + x) * 4..][..4].to_vec()
+        };
+        // Two lines mirror and turn the stroke into all four corners.
+        for [x, y] in [[35, 24], [84, 24], [35, 65], [84, 65]] {
+            assert_ne!(
+                pixel(canvas.display(), x, y),
+                pixel(&blank, x, y),
+                "{x}, {y}"
+            );
+        }
+        let end = at(&canvas, 50.0, 25.0);
+        canvas.apply(CanvasInput::End(end));
+        let layer = canvas.session().current_layer();
+        let LayerKind::Paint(paint) = &canvas.session().document().layer(layer).unwrap().kind
+        else {
+            panic!("a paint layer");
+        };
+        assert_eq!(paint.ops.len(), 4);
+        let mut full = Pixmap::new(120, 90);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            canvas.session().document(),
+            canvas.session().frame(),
+            ugu_render::document::Purpose::Display,
+            &mut full,
+        );
+        assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
+        canvas.edit(|session| session.undo()).unwrap();
+        settle(&mut canvas, &renders);
+        assert!(canvas.display().data_as_u8_slice() == blank.data_as_u8_slice());
+    }
+
+    /// What a stroke costs a frame with the symmetry ruler off and with
+    /// 2, 12 and 24 strokes, at one sample a frame and at sixteen (a
+    /// 1000 Hz mouse at 60 Hz), and the pen-up after it.
+    #[test]
+    #[ignore = "measurement; run with --release --ignored --nocapture"]
+    fn symmetry_stroke_frame_cost() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([2048, 2048]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 2048, 2048]);
+        settle(&mut canvas, &renders);
+        canvas.brushes_mut().pen.width = 12.0;
+        let at = |canvas: &super::Canvas, t: f64| {
+            // A loop around the middle, as a mandala is drawn.
+            let angle = t * std::f64::consts::TAU;
+            let radius = 300.0 + 500.0 * t;
+            let [x, y] =
+                canvas.to_client([1024.0 + radius * angle.cos(), 1024.0 + radius * angle.sin()]);
+            press(x, y)
+        };
+        for (lines, mirror) in [(1, false), (1, true), (6, true), (12, true)] {
+            let symmetry = canvas.symmetry();
+            canvas.set_symmetry(ugu_session::Symmetry {
+                on: true,
+                lines,
+                mirror,
+                ..symmetry
+            });
+            let strokes = canvas.symmetry().copies().len() + 1;
+            for per_frame in [1u32, 16] {
+                settle(&mut canvas, &renders);
+                let begin = at(&canvas, 0.0);
+                canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+                let frames = 120;
+                let mut times = Vec::new();
+                for frame in 0..frames {
+                    let started = std::time::Instant::now();
+                    for sample in 1..=per_frame {
+                        let t =
+                            f64::from(frame * per_frame + sample) / f64::from(frames * per_frame);
+                        let sample = at(&canvas, t);
+                        canvas.apply(CanvasInput::Extend(sample));
+                    }
+                    canvas.take_upload();
+                    times.push(started.elapsed().as_secs_f64() * 1000.0);
+                }
+                let started = std::time::Instant::now();
+                canvas.apply(CanvasInput::End(at(&canvas, 1.0)));
+                canvas.take_upload();
+                let up = started.elapsed().as_secs_f64() * 1000.0;
+                let total: f64 = times.iter().sum();
+                times.sort_by(f64::total_cmp);
+                println!(
+                    "{strokes} strokes, {per_frame}/frame: total {total:.0} ms, \
+                     median {:.2} ms, max {:.2} ms, pen-up {up:.2} ms",
                     times[times.len() / 2],
                     times[times.len() - 1]
                 );

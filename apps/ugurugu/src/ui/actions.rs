@@ -77,6 +77,7 @@ pub const VIEW: &[Entry] = &[
     Do(A::TurnRight),
     Do(A::ResetTurn),
     Do(A::Mirror),
+    Do(A::Symmetry),
     Gap,
     Do(A::Animate),
     Do(A::PreviousFrame),
@@ -266,6 +267,7 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
         A::OnionSkin => Some(canvas.onion_skin()),
         A::AnimationTools => Some(layout.animation_tools),
         A::Mirror => Some(canvas.is_mirrored()),
+        A::Symmetry => Some(canvas.symmetry().on),
         A::PixelMode => Some(canvas.session().pixel_mode()),
         _ => None,
     }
@@ -289,6 +291,7 @@ fn tip(action: Action) -> Option<&'static str> {
         A::TurnRight => "view-turn-right-tip",
         A::ResetTurn => "view-turn-reset-tip",
         A::Mirror => "view-mirror-tip",
+        A::Symmetry => "view-symmetry-tip",
         A::PixelMode => "pixel-mode-tip",
         A::AnimationTools => "view-animation-tools-tip",
         _ => return None,
@@ -452,6 +455,13 @@ pub fn run(
         A::TurnRight => canvas.turn_by(TURN_STEP),
         A::ResetTurn => canvas.turn_to(0.0),
         A::Mirror => canvas.set_mirrored(!canvas.is_mirrored()),
+        A::Symmetry => {
+            let symmetry = canvas.symmetry();
+            canvas.set_symmetry(ugu_session::Symmetry {
+                on: !symmetry.on,
+                ..symmetry
+            });
+        }
         A::Animate => canvas.toggle_playback(),
         A::PreviousFrame => canvas.step_frame(-1),
         A::NextFrame => canvas.step_frame(1),

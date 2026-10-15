@@ -138,6 +138,124 @@ impl Split {
         stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip)
     }
 
+    /// `stamp` for `strokes` in order, each with whether it erases and its
+    /// clip. Line strokes are drawn on up to `threads` threads at once, one
+    /// of `helpers` each (added to as needed and kept for next time, as a
+    /// new one is slow to draw its first large stroke), and laid in order,
+    /// as the symmetry ruler commits several together.
+    pub fn stamp_strokes(
+        &mut self,
+        stamp: &mut Stamp,
+        helpers: &mut Vec<Stamp>,
+        strokes: &[(&Stroke, bool, Option<&Mask>)],
+        wobble: Wobble,
+        frames: u32,
+        threads: usize,
+    ) -> Option<PixelRect> {
+        let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        let surface = Arc::make_mut(surface);
+        let size = surface.size();
+        let frame = self.frame;
+        let pens: Vec<Pen> = strokes
+            .iter()
+            .map(|(stroke, ..)| Pen::new(stroke, wobble, frames))
+            .collect();
+        let lines: Vec<usize> = (0..strokes.len())
+            .filter(|&index| strokes[index].0.brush.engine == BrushEngine::Line)
+            .collect();
+        let threads = threads.clamp(1, lines.len().max(1));
+        let mut drawn: Vec<Option<(PixelRect, Pixmap)>> = vec![None; strokes.len()];
+        if threads > 1 {
+            if helpers.len() < threads {
+                helpers.resize_with(threads, Stamp::default);
+            }
+            let parts: Vec<Vec<(usize, PixelRect, Pixmap)>> = std::thread::scope(|scope| {
+                let workers: Vec<_> = helpers[..threads]
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(worker, stamp)| {
+                        let (lines, pens) = (&lines, &pens);
+                        scope.spawn(move || {
+                            lines
+                                .iter()
+                                .skip(worker)
+                                .step_by(threads)
+                                .filter_map(|&index| {
+                                    let rect = stamp.line_coverage(
+                                        strokes[index].0,
+                                        &pens[index],
+                                        frame,
+                                        size,
+                                    )?;
+                                    let coverage =
+                                        std::mem::replace(&mut stamp.piece, Pixmap::new(0, 0));
+                                    Some((index, rect, coverage))
+                                })
+                                .collect()
+                        })
+                    })
+                    .collect();
+                workers
+                    .into_iter()
+                    .map(|worker| worker.join().expect("drawing a stroke does not panic"))
+                    .collect()
+            });
+            for (index, rect, coverage) in parts.into_iter().flatten() {
+                drawn[index] = Some((rect, coverage));
+            }
+        }
+        let mut changed: Option<PixelRect> = None;
+        // Line strokes drawn ahead are laid a run at a time, the run's rows
+        // shared out among the threads; other strokes go between runs.
+        let mut run = Vec::new();
+        for (index, &(stroke, erase, clip)) in strokes.iter().enumerate() {
+            let rect = if threads > 1 && stroke.brush.engine == BrushEngine::Line {
+                drawn[index].as_ref().map(|(rect, coverage)| {
+                    run.push(Laid {
+                        rect: *rect,
+                        coverage,
+                        color: premultiplied(stroke_color(stroke, erase)),
+                        erase,
+                        clip,
+                    });
+                    *rect
+                })
+            } else {
+                lay_lines(surface, &run, threads);
+                run.clear();
+                stamp.apply_stroke(surface, stroke, erase, &pens[index], frame, clip)
+            };
+            changed = match (changed, rect) {
+                (Some(a), Some(b)) => Some([
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[2].max(b[2]),
+                    a[3].max(b[3]),
+                ]),
+                (a, b) => a.or(b),
+            };
+        }
+        lay_lines(surface, &run, threads);
+        drop(run);
+        let mut laid: Vec<Pixmap> = drawn
+            .into_iter()
+            .flatten()
+            .map(|(_, coverage)| coverage)
+            .collect();
+        // The helpers keep the largest pixmaps to draw into next time.
+        laid.sort_by_key(|coverage| usize::from(coverage.width()) * usize::from(coverage.height()));
+        for helper in helpers.iter_mut() {
+            if helper.piece.width() == 0
+                && let Some(coverage) = laid.pop()
+            {
+                helper.piece = coverage;
+            }
+        }
+        changed
+    }
+
     /// Puts `plan`'s layers (`RenderPlan::reference`) together into `out`,
     /// which must have the canvas size, from the surfaces held: what a full
     /// render of the plan gives. `false` when the plan has no layers or this
@@ -328,9 +446,10 @@ impl DocumentRenderer {
     }
 }
 
-/// Puts the shown image together within `rect`, drawing `live` (a stroke
-/// being drawn, `None` for none) on the edited layer first.
-pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out: &mut Pixmap) {
+/// Puts the shown image together within `rect`, drawing `live` (the
+/// strokes being drawn, in the order they are committed) on the edited layer
+/// first.
+pub fn composite(split: &Split, live: &[&LiveStroke], rect: PixelRect, out: &mut Pixmap) {
     let sources = split.sources();
     let [left, top, right, bottom] = rect;
     // Thread start-up outweighs the work below about this many pixels.
@@ -339,10 +458,20 @@ pub fn composite(split: &Split, live: Option<&LiveStroke>, rect: PixelRect, out:
     } else {
         1
     };
-    match (live, split.edited) {
-        (Some(live), Some(source)) => {
-            let painting = live.painting();
-            let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| painting.apply(x, y, pixel);
+    // Only the strokes that reach `rect` are asked for its pixels: the
+    // symmetry ruler's are mostly far apart.
+    let paintings: Vec<_> = live
+        .iter()
+        .map(|live| live.painting())
+        .filter(|painting| painting.reaches(rect))
+        .collect();
+    match split.edited {
+        Some(source) if !paintings.is_empty() => {
+            let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| {
+                for painting in &paintings {
+                    painting.apply(x, y, pixel);
+                }
+            };
             let overlay = Overlay {
                 source,
                 apply: &apply,
@@ -424,32 +553,28 @@ impl Stamp {
                 return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
             }
         }
-        let rect = clamp(stroke::bounds(&stroke.points, pen), surface.size())?;
+        let rect = self.line_coverage(stroke, pen, frame, surface.size())?;
+        lay_line(surface, rect, &self.piece, stroke, erase, clip);
+        Some(rect)
+    }
+
+    /// A line stroke's coverage, drawn into `self.piece`; returns where it
+    /// lies.
+    fn line_coverage(
+        &mut self,
+        stroke: &Stroke,
+        pen: &Pen,
+        frame: u32,
+        size: [u32; 2],
+    ) -> Option<PixelRect> {
+        let rect = clamp(stroke::bounds(&stroke.points, pen), size)?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
         let path = stroke::outline(&samples, pen, frame)?;
-        let coverage = self.draw(rect, |context| {
+        self.draw(rect, |context| {
             context.set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
             context.set_paint(AlphaColor::<vello_cpu::color::Srgb>::WHITE);
             context.fill_path(&path);
         });
-        let color = premultiplied(stroke_color(stroke, erase));
-        surface.ensure(rect);
-        let coverage_width = usize::from(coverage.width());
-        let source = coverage.data_as_u8_slice();
-        for (y, line) in surface.rows_mut(rect) {
-            let from = (y - rect[1]) as usize * coverage_width;
-            for (x, target) in line.iter_mut().enumerate() {
-                let cover = source[(from + x) * 4 + 3];
-                if cover == 0 || !inside(clip, rect[0] as usize + x, y as usize) {
-                    continue;
-                }
-                if erase {
-                    self::erase(target, color, cover);
-                } else {
-                    paint(target, color, cover);
-                }
-            }
-        }
         Some(rect)
     }
 
@@ -524,6 +649,104 @@ impl Stamp {
         );
         &self.piece
     }
+}
+
+/// Paints, or erases, a line stroke's `coverage` lying at `rect`.
+fn lay_line(
+    surface: &mut TiledSurface,
+    rect: PixelRect,
+    coverage: &Pixmap,
+    stroke: &Stroke,
+    erase: bool,
+    clip: Option<&Mask>,
+) {
+    let line = Laid {
+        rect,
+        coverage,
+        color: premultiplied(stroke_color(stroke, erase)),
+        erase,
+        clip,
+    };
+    lay_lines(surface, std::slice::from_ref(&line), 1);
+}
+
+/// A line stroke's coverage drawn ahead, and how it is laid.
+struct Laid<'a> {
+    rect: PixelRect,
+    coverage: &'a Pixmap,
+    /// Premultiplied.
+    color: [u8; 4],
+    erase: bool,
+    clip: Option<&'a Mask>,
+}
+
+impl Laid<'_> {
+    /// Lays the stroke on pixel row `y`, of which `line` starts at `left`.
+    fn lay_row(&self, y: u32, left: u32, line: &mut [[u8; 4]]) {
+        let [from_x, top, to_x, bottom] = self.rect;
+        if !(top..bottom).contains(&y) {
+            return;
+        }
+        let right = left + line.len() as u32;
+        let (start, end) = (from_x.max(left), to_x.min(right));
+        if start >= end {
+            return;
+        }
+        let width = usize::from(self.coverage.width());
+        let source = self.coverage.data_as_u8_slice();
+        let row = (y - top) as usize * width;
+        for x in start..end {
+            let cover = source[(row + (x - from_x) as usize) * 4 + 3];
+            if cover == 0 || !inside(self.clip, x as usize, y as usize) {
+                continue;
+            }
+            let target = &mut line[(x - left) as usize];
+            if self.erase {
+                erase(target, self.color, cover);
+            } else {
+                paint(target, self.color, cover);
+            }
+        }
+    }
+}
+
+/// Lays `lines` in order, the rows they reach shared out among `threads`.
+fn lay_lines(surface: &mut TiledSurface, lines: &[Laid], threads: usize) {
+    let Some(rect) = lines.iter().map(|line| line.rect).reduce(|a, b| {
+        [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]
+    }) else {
+        return;
+    };
+    for line in lines {
+        surface.ensure(line.rect);
+    }
+    let mut rows: Vec<(u32, &mut [[u8; 4]])> = surface.rows_mut(rect).collect();
+    let lay = |rows: &mut [(u32, &mut [[u8; 4]])]| {
+        for (y, row) in rows {
+            for line in lines {
+                line.lay_row(*y, rect[0], row);
+            }
+        }
+    };
+    // Thread start-up outweighs laying about this many pixels.
+    let reach: u64 = lines
+        .iter()
+        .map(|line| u64::from(line.rect[2] - line.rect[0]) * u64::from(line.rect[3] - line.rect[1]))
+        .sum();
+    if threads <= 1 || reach <= 65_536 {
+        return lay(&mut rows);
+    }
+    let per_thread = rows.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        for part in rows.chunks_mut(per_thread) {
+            scope.spawn(|| lay(part));
+        }
+    });
 }
 
 /// `Stamp::apply_stroke` for a pixel brush: its pixels at full coverage.
@@ -1000,7 +1223,7 @@ mod tests {
                 let (split, display) = split(&history, layer, 3);
                 assert!(display.data_as_u8_slice() == full.data_as_u8_slice());
                 let mut shown = canvas(history.document());
-                composite(&split, None, whole(history.document()), &mut shown);
+                composite(&split, &[], whole(history.document()), &mut shown);
                 assert!(
                     shown.data_as_u8_slice() == full.data_as_u8_slice(),
                     "layer {layer:?}"
@@ -1052,7 +1275,7 @@ mod tests {
                         )
                         .unwrap();
                     let mut shown = canvas(history.document());
-                    composite(&split, None, whole(history.document()), &mut shown);
+                    composite(&split, &[], whole(history.document()), &mut shown);
                     history
                         .edit("Draw", |document| {
                             command::draw(document, layer, new, erase, clip)
@@ -1121,7 +1344,7 @@ mod tests {
                         .unwrap();
                     assert!(rect[2] > rect[0]);
                     let mut shown = canvas(document);
-                    composite(&split, None, whole(document), &mut shown);
+                    composite(&split, &[], whole(document), &mut shown);
                     history
                         .group("Fill", |group| {
                             if !group.document().store.masks.contains_key(&coverage) {
@@ -1204,7 +1427,7 @@ mod tests {
                 )
                 .unwrap();
             let mut shown = canvas(history.document());
-            composite(&split, None, whole(history.document()), &mut shown);
+            composite(&split, &[], whole(history.document()), &mut shown);
             history
                 .edit("Draw", |document| {
                     command::draw(document, layer, new, false, None)
@@ -1274,7 +1497,7 @@ mod tests {
                             "{layer:?} {transform:?} keep {keep_source}: differs by {most}"
                         );
                         let mut shown = canvas(document);
-                        composite(&split, None, whole(document), &mut shown);
+                        composite(&split, &[], whole(document), &mut shown);
                         let most = max_difference(&shown, &full);
                         assert!(
                             most <= 2,
@@ -1288,11 +1511,11 @@ mod tests {
                         keep_source,
                     );
                     let mut shown = canvas(document);
-                    composite(&split, None, whole(document), &mut shown);
+                    composite(&split, &[], whole(document), &mut shown);
                     assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
                     split.show_move(&mut moving, transforms[2].0, Sampling::Smooth, keep_source);
                     split.end_move(moving, false);
-                    composite(&split, None, whole(document), &mut shown);
+                    composite(&split, &[], whole(document), &mut shown);
                     assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
                 }
             }
@@ -1334,7 +1557,7 @@ mod tests {
                         }
                         split.show_move(&mut moving, transform, Sampling::Smooth, keep_source);
                         let mut shown = canvas(document);
-                        composite(&split, None, whole(document), &mut shown);
+                        composite(&split, &[], whole(document), &mut shown);
                         let most = max_difference(same.pixels(), &shown);
                         assert!(most <= 2, "{layer:?} {transform:?}: differs by {most}");
                         let crop = cropped(&shown, [37, 21, 120, 80]);
@@ -1578,7 +1801,7 @@ mod tests {
                     let mut pieces = canvas(document);
                     let [w, h] = document.canvas;
                     for rect in [[0, 0, w, h / 3], [0, h / 3, w / 2, h], [w / 2, h / 3, w, h]] {
-                        composite(&split, None, rect, &mut pieces);
+                        composite(&split, &[], rect, &mut pieces);
                     }
                     assert!(
                         pieces.data_as_u8_slice() == full.data_as_u8_slice(),
@@ -1610,7 +1833,7 @@ mod tests {
                 )
                 .unwrap();
             let reach = split.shown(changed, document.canvas).unwrap();
-            composite(&split, None, reach, &mut shown);
+            composite(&split, &[], reach, &mut shown);
             history
                 .edit("Draw", |document| {
                     command::draw(document, first, new, false, None)
@@ -1633,14 +1856,129 @@ mod tests {
         let mut live = LiveStroke::new([120, 80], pen, split.frame, [0, 0, 0, 255], false, None);
         live.update(&line.points).unwrap();
         let mut whole_shown = canvas(document);
-        composite(&split, Some(&live), whole(document), &mut whole_shown);
+        composite(&split, &[&live], whole(document), &mut whole_shown);
         let mut pieces = canvas(document);
         for rect in [[0, 0, 61, 80], [61, 0, 120, 80]] {
-            composite(&split, Some(&live), rect, &mut pieces);
+            composite(&split, &[&live], rect, &mut pieces);
         }
         assert!(pieces.data_as_u8_slice() == whole_shown.data_as_u8_slice());
         let (_, without) = self::split(&history, first, 3);
         assert!(without.data_as_u8_slice() != whole_shown.data_as_u8_slice());
+    }
+
+    #[test]
+    fn strokes_stamped_together_lay_the_bytes_stamped_one_by_one() {
+        let history = history();
+        let document = history.document();
+        let first = document.layers[0].id;
+        let wobble = layer_wobble(document, first);
+        let mut spray = stroke([20.0, 70.0], [100.0, 10.0], [10, 120, 40, 255], 9);
+        spray.brush.engine = BrushEngine::Spray;
+        let strokes = [
+            (
+                stroke([10.0, 20.0], [110.0, 60.0], [200, 30, 30, 255], 11),
+                false,
+            ),
+            (
+                stroke([110.0, 20.0], [10.0, 60.0], [30, 30, 200, 255], 12),
+                false,
+            ),
+            (spray, false),
+            (
+                stroke([10.0, 40.0], [110.0, 40.0], [0, 0, 0, 255], 13),
+                true,
+            ),
+            (
+                stroke([60.0, 5.0], [60.0, 75.0], [90, 90, 20, 255], 14),
+                false,
+            ),
+        ];
+        let listed: Vec<_> = strokes
+            .iter()
+            .map(|(stroke, erase)| (stroke, *erase, None))
+            .collect();
+        let (mut one_by_one, _) = split(&history, first, 2);
+        let mut stamp = Stamp::default();
+        let mut expected = None;
+        for &(stroke, erase, clip) in &listed {
+            let rect = one_by_one.stamp(&mut stamp, stroke, erase, wobble, document.frames, clip);
+            expected = match (expected, rect) {
+                (Some(a), Some(b)) => Some(union(a, b)),
+                (a, b) => a.or(b),
+            };
+        }
+        let mut shown = canvas(document);
+        composite(&one_by_one, &[], whole(document), &mut shown);
+        for threads in [1, 3, 8] {
+            let (mut together, _) = split(&history, first, 2);
+            let rect = together.stamp_strokes(
+                &mut Stamp::default(),
+                &mut Vec::new(),
+                &listed,
+                wobble,
+                document.frames,
+                threads,
+            );
+            assert_eq!(rect, expected);
+            let mut seen = canvas(document);
+            composite(&together, &[], whole(document), &mut seen);
+            assert!(
+                seen.data_as_u8_slice() == shown.data_as_u8_slice(),
+                "{threads}"
+            );
+        }
+    }
+
+    fn union(a: PixelRect, b: PixelRect) -> PixelRect {
+        [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]
+    }
+
+    #[test]
+    fn crossing_live_strokes_are_shown_as_they_are_committed_one_after_another() {
+        let mut history = history();
+        let first = history.document().layers[0].id;
+        let (split, _) = split(&history, first, 0);
+        // Translucent, so a crossing shows whether they are laid one by one.
+        let strokes = [
+            stroke([10.0, 20.0], [110.0, 60.0], [200, 30, 30, 255], 11),
+            stroke([110.0, 20.0], [10.0, 60.0], [30, 30, 200, 255], 12),
+        ];
+        let document = history.document();
+        let lives: Vec<LiveStroke> = strokes
+            .iter()
+            .map(|line| {
+                let pen =
+                    crate::stroke::Pen::new(line, layer_wobble(document, first), document.frames);
+                let mut live = LiveStroke::new([120, 80], pen, 0, line.color.0, false, None);
+                live.update(&line.points).unwrap();
+                live
+            })
+            .collect();
+        let mut shown = canvas(document);
+        composite(
+            &split,
+            &lives.iter().collect::<Vec<_>>(),
+            whole(document),
+            &mut shown,
+        );
+        let mut first_only = canvas(document);
+        composite(&split, &[&lives[0]], whole(document), &mut first_only);
+        for line in strokes {
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, first, line, false, None)
+                })
+                .unwrap();
+        }
+        let full = render(history.document(), 0);
+        let most = max_difference(&shown, &full);
+        assert!(most <= 2, "differs by {most}");
+        assert!(max_difference(&first_only, &full) > 2, "both strokes show");
     }
 
     #[test]

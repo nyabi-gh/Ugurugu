@@ -314,6 +314,7 @@ actions! {
     TurnRight "rotateCanvasRight" "view-turn-right" [plain(Key::Equals)] [];
     ResetTurn "resetCanvasRotation" "view-turn-reset" [] [];
     Mirror "mirrorCanvas" "view-mirror" [plain(Key::M)] [];
+    Symmetry "symmetryRuler" "view-symmetry" [] [];
     Animate "play" "view-animate" [plain(Key::P)] [];
     AnimationTools "animationTools" "view-animation-tools" [] [];
     PreviousFrame "previousFrame" "frame-previous" [plain(Key::Comma)] [];

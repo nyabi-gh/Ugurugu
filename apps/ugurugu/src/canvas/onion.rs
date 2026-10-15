@@ -12,7 +12,7 @@ use ugu_render::compose::src_over;
 use ugu_render::raster::PixelRect;
 use vello_cpu::Pixmap;
 
-use super::{Canvas, Interaction};
+use super::Canvas;
 use crate::cache::Version;
 
 const RED: [u8; 3] = [230, 40, 40];
@@ -259,11 +259,8 @@ impl Canvas {
             return;
         }
         let whole = [0, 0, width, height];
-        let live = match &self.interaction {
-            Interaction::Drawing { live, .. } => Some(live.as_ref()),
-            _ => None,
-        };
-        ugu_render::compose::composite(split, live, whole, &mut self.tab.display);
+        let drawn = super::drawn(&self.interaction);
+        ugu_render::compose::composite(split, &drawn, whole, &mut self.tab.display);
         self.tab.onion.cover(&mut self.tab.display, whole);
         self.upload_all();
     }

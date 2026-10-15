@@ -430,6 +430,7 @@ impl LiveStroke {
     /// What the stroke shows so far, which threads can read together.
     pub fn painting(&self) -> Painting<'_> {
         Painting {
+            reach: union(self.written, self.tail.as_ref().map(|(rect, _)| *rect)),
             coverage: &self.coverage,
             tail: self.tail.as_ref(),
             clip: self.clip.as_ref(),
@@ -448,6 +449,8 @@ impl LiveStroke {
 
 /// A [`LiveStroke`]'s pixels and how they paint.
 pub struct Painting<'a> {
+    /// Outside it the stroke paints nothing.
+    reach: Option<PixelRect>,
     coverage: &'a Pixmap,
     tail: Option<&'a (PixelRect, Pixmap)>,
     clip: Option<&'a Mask>,
@@ -458,6 +461,13 @@ pub struct Painting<'a> {
 }
 
 impl Painting<'_> {
+    /// Whether the stroke paints any pixel of `rect`.
+    pub fn reaches(&self, rect: PixelRect) -> bool {
+        self.reach.is_some_and(|reach| {
+            reach[0] < rect[2] && rect[0] < reach[2] && reach[1] < rect[3] && rect[1] < reach[3]
+        })
+    }
+
     fn pixel(&self, x: usize, y: usize) -> [u8; 4] {
         let (x32, y32) = (x as u32, y as u32);
         let (pixels, at) = match self.tail {

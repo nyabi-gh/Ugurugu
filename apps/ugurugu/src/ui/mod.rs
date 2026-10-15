@@ -456,6 +456,83 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if settings != before {
         *canvas.brushes_mut().get_mut(tool) = settings;
     }
+    // A shape is not repeated by the ruler.
+    if tool != Tool::Shape {
+        symmetry_settings(ui, canvas);
+    }
+}
+
+/// The symmetry ruler of the document shown.
+fn symmetry_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    use ugu_session::Symmetry;
+    let mut symmetry = canvas.symmetry();
+    let before = symmetry;
+    ui.add_space(theme::space::S);
+    widgets::panel_heading(ui, tr("symmetry"));
+    widgets::check_row(
+        ui,
+        tr("symmetry-on"),
+        tr("symmetry-on-name"),
+        &mut symmetry.on,
+    )
+    .on_hover_text(tr("view-symmetry-tip"));
+    ui.add_enabled_ui(symmetry.on, |ui| {
+        let mut lines = symmetry.lines as f32;
+        let range = Symmetry::LINES;
+        slider_row(
+            ui,
+            tr("symmetry-lines"),
+            tr("symmetry-lines-name"),
+            &mut lines,
+            *range.start() as f32..=*range.end() as f32,
+            "",
+            0,
+        );
+        symmetry.lines = (lines.round() as u32).clamp(*range.start(), *range.end());
+        widgets::check_row(
+            ui,
+            tr("symmetry-mirror"),
+            tr("symmetry-mirror-name"),
+            &mut symmetry.mirror,
+        )
+        .on_hover_text(tr("symmetry-mirror-tip"));
+        let mut angle = symmetry.angle as f32;
+        slider_row(
+            ui,
+            tr("symmetry-angle"),
+            tr("symmetry-angle-name"),
+            &mut angle,
+            -180.0..=180.0,
+            "°",
+            0,
+        );
+        if angle != symmetry.angle as f32 {
+            symmetry.angle = f64::from(angle);
+        }
+        let canvas_size = canvas.session().document().canvas;
+        let [mut x, mut y] = symmetry.centre.map(|value| value as f32);
+        for (label, value, edge) in [
+            (tr("symmetry-x"), &mut x, canvas_size[0]),
+            (tr("symmetry-y"), &mut y, canvas_size[1]),
+        ] {
+            widgets::form_row(ui, label, |ui| {
+                widgets::number(ui, value, 0.0..=edge as f32, " px", 1, 96.0, label);
+            });
+        }
+        if [x, y] != symmetry.centre.map(|value| value as f32) {
+            symmetry.centre = [f64::from(x), f64::from(y)];
+        }
+        if ui
+            .button(tr("symmetry-centre"))
+            .on_hover_text(tr("symmetry-centre-tip"))
+            .clicked()
+        {
+            symmetry.centre = canvas_size.map(|edge| f64::from(edge) / 2.0);
+        }
+    });
+    if symmetry != before {
+        canvas.set_symmetry(symmetry);
+    }
 }
 
 /// Which shape the shape tool drags out, and its corners.
@@ -966,6 +1043,30 @@ fn corners_on_screen(ui: &egui::Ui, canvas: &Canvas, rect: [f64; 4]) -> [egui::P
     let [left, top, right, bottom] = rect;
     [[left, top], [right, top], [right, bottom], [left, bottom]]
         .map(|corner| to_screen(ui, canvas, corner))
+}
+
+/// The symmetry ruler's lines and centre, when it is on.
+pub fn symmetry_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
+    let lines = canvas.symmetry_lines();
+    let Some(&[centre, _]) = lines.first() else {
+        return;
+    };
+    let painter = ui.painter();
+    // The accent, edged with its text colour to show on light and dark
+    // drawings alike.
+    let edge = theme::accent_text().gamma_multiply(0.6);
+    for (stroke, dot) in [
+        (egui::Stroke::new(3.0, edge), 4.0),
+        (egui::Stroke::new(1.0, theme::accent()), 3.0),
+    ] {
+        for [from, to] in &lines {
+            painter.line_segment(
+                [to_screen(ui, canvas, *from), to_screen(ui, canvas, *to)],
+                stroke,
+            );
+        }
+        painter.circle_filled(to_screen(ui, canvas, centre), dot, stroke.color);
+    }
 }
 
 /// The move tool's box around the current layer as the frame shows it.

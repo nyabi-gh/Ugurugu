@@ -167,6 +167,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .frame(egui::Frame::NONE)
         .show(ui, |ui| {
             canvas_area = canvas.layout(ui);
+            super::symmetry_overlay(ui, canvas);
             ants = super::selection_overlay(ui, canvas);
             super::resize::sizing_overlay(ui, canvas);
             super::text_overlay(ui, canvas);
@@ -277,30 +278,35 @@ mod tests {
                 .filter(|(_, bounds)| bounds.y1 > f64::from(height))
                 .map(|(id, _)| id)
                 .collect();
-            // The wheel over the foot of each area.
+            // The wheel over the foot of each area, a little at a time: a
+            // control is in reach once it has been inside the window.
+            let mut reached = std::collections::HashSet::new();
             let y = area[3] as f32 - 20.0;
             for x in [(48 + area[0]) as f32 / 2.0, (area[2] as f32 + width) / 2.0] {
-                for _ in 0..6 {
+                for _ in 0..40 {
                     (output, _) = frame(vec![
                         egui::Event::PointerMoved(egui::pos2(x, y)),
                         egui::Event::MouseWheel {
                             unit: egui::MouseWheelUnit::Point,
-                            delta: egui::vec2(0.0, -400.0),
+                            delta: egui::vec2(0.0, -60.0),
                             phase: egui::TouchPhase::Move,
                             modifiers: egui::Modifiers::NONE,
                         },
                     ]);
+                    for _ in 0..2 {
+                        (output, _) = frame(Vec::new());
+                    }
+                    reached.extend(controls(&output).into_iter().filter_map(|(id, bounds)| {
+                        (bounds.y0 >= 0.0 && bounds.y1 <= f64::from(height)).then_some(id)
+                    }));
                 }
-            }
-            for _ in 0..2 {
-                (output, _) = frame(Vec::new());
             }
             let now = controls(&output);
             for id in below {
-                let bounds = now[&id];
                 assert!(
-                    bounds.y0 >= 0.0 && bounds.y1 <= f64::from(height),
-                    "{width}×{height}: a control stays out of reach at {bounds:?}"
+                    reached.contains(&id),
+                    "{width}×{height}: a control stays out of reach at {:?}",
+                    now.get(&id)
                 );
             }
             drop(frame);

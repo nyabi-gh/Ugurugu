@@ -18,6 +18,7 @@ mod restyling;
 mod selecting;
 mod shaping;
 pub mod stabilizer;
+mod symmetry;
 mod tools;
 mod transforming;
 
@@ -38,6 +39,7 @@ pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
 pub use crate::shaping::{Drag, Shape, ShapePaint, ShapeSettings, outline};
 use crate::stabilizer::Stabilizer;
+pub use crate::symmetry::Symmetry;
 pub use crate::tools::{Brushes, ColorHistory, Kept, Tools, is_pixel};
 pub use crate::transforming::{Ended, Pending};
 use ugu_core::selection::Selection;
@@ -141,9 +143,35 @@ pub struct LiveStroke {
     pub outlined: bool,
     /// The area a shape fills, in the layer's own pixels.
     pub fill: Option<Vec<[f64; 2]>>,
+    /// The strokes the symmetry ruler draws with this one, drawn after it.
+    pub copies: Vec<CopiedStroke>,
+}
+
+/// A stroke the symmetry ruler repeats as the one drawn by hand goes.
+#[derive(Clone, Debug)]
+pub struct CopiedStroke {
+    /// Its own seed, so that it wobbles as a stroke of its own.
+    pub template: Stroke,
+    /// The hand-drawn stroke's points moved, in the layer's own pixels.
+    pub points: Vec<Point>,
+    /// From the hand-drawn stroke's layer pixels to this one's.
+    transform: Affine,
 }
 
 impl LiveStroke {
+    /// Brings the copies' points up to the stroke's own after its last
+    /// point was added or replaced.
+    fn copy_last(&mut self) {
+        let last = *self.points.last().expect("a stroke starts with a point");
+        let kept = self.points.len() - 1;
+        for copy in &mut self.copies {
+            copy.points.truncate(kept);
+            let moved = copy.transform.apply([f64::from(last.x), f64::from(last.y)]);
+            copy.points
+                .push(point(clamp_position(moved), last.pressure));
+        }
+    }
+
     fn last_pressure(&self) -> f32 {
         self.points
             .last()
@@ -167,6 +195,7 @@ impl LiveStroke {
             self.replaced_last = false;
             self.points.push(end);
         }
+        self.copy_last();
     }
 }
 
@@ -191,6 +220,9 @@ pub struct Session {
     /// The cel added for the stroke or fill under way, its folder and the
     /// state the addition left.
     made_cel: Option<(LayerId, StateId)>,
+    /// The symmetry ruler, set for a canvas of `symmetry_canvas`.
+    symmetry: Symmetry,
+    symmetry_canvas: [u32; 2],
 }
 
 /// The window's tools as last handed in with `Session::use_tools`, for the
@@ -206,6 +238,7 @@ impl Session {
     /// already on disk as it is.
     pub fn new(document: Document, saved: bool) -> Self {
         let layer = top_paint_layer(&document.layers).unwrap_or(LayerId(0));
+        let canvas = document.canvas;
         let mut session = Self {
             history: History::new(document, saved),
             layer,
@@ -225,9 +258,37 @@ impl Session {
             strokes_started: 0,
             posing: None,
             made_cel: None,
+            symmetry: Symmetry::new(canvas),
+            symmetry_canvas: canvas,
         };
         session.use_tools(&Tools::default());
         session
+    }
+
+    /// The symmetry ruler. Its centre keeps its place on the canvas, as a
+    /// share of each side, when the canvas changes size, undone or not.
+    pub fn symmetry(&self) -> Symmetry {
+        let canvas = self.document().canvas;
+        if canvas == self.symmetry_canvas {
+            return self.symmetry;
+        }
+        let mut symmetry = self.symmetry;
+        for ((centre, now), then) in symmetry
+            .centre
+            .iter_mut()
+            .zip(canvas)
+            .zip(self.symmetry_canvas)
+        {
+            *centre *= f64::from(now) / f64::from(then);
+        }
+        symmetry
+    }
+
+    /// Sets the symmetry ruler, which applies from the next stroke. It is
+    /// the window's and no edit of the document.
+    pub fn set_symmetry(&mut self, symmetry: Symmetry) {
+        self.symmetry = symmetry;
+        self.symmetry_canvas = self.document().canvas;
     }
 
     pub fn document(&self) -> &Document {
@@ -337,6 +398,16 @@ impl Session {
     /// transform or placed text first, so the stroke is cut to the selection
     /// as they leave it.
     pub fn begin_stroke(&mut self, tools: &Tools, input: InputPoint) -> Result<(), StrokeRefused> {
+        self.start_stroke(tools, input, true)
+    }
+
+    /// `begin_stroke`, with the symmetry ruler's copies when `repeated`.
+    pub(crate) fn start_stroke(
+        &mut self,
+        tools: &Tools,
+        input: InputPoint,
+        repeated: bool,
+    ) -> Result<(), StrokeRefused> {
         self.drop_live();
         // A folder draws on its cel, which may not be there yet.
         if self.folder() != Some(self.layer) {
@@ -385,7 +456,33 @@ impl Session {
             seed: self.seeds.hash_one(self.strokes_started),
         };
         let position = clamp_position(into(to_layer, input.position));
-        self.live = Some(LiveStroke {
+        // The ruler is on the canvas as shown; the copies are found in the
+        // layer's own pixels by way of it.
+        let from_layer = self.layer_transform().filter(|_| to_layer.is_some());
+        let ruler = if repeated {
+            self.symmetry().copies()
+        } else {
+            Vec::new()
+        };
+        let copies = ruler
+            .into_iter()
+            .map(|copy| {
+                let transform = from_layer
+                    .unwrap_or(Affine::IDENTITY)
+                    .then(copy)
+                    .then(to_layer.unwrap_or(Affine::IDENTITY));
+                self.strokes_started += 1;
+                CopiedStroke {
+                    template: Stroke {
+                        seed: self.seeds.hash_one(self.strokes_started),
+                        ..template.clone()
+                    },
+                    points: Vec::new(),
+                    transform,
+                }
+            })
+            .collect();
+        let mut live = LiveStroke {
             layer: self.layer,
             erase,
             template,
@@ -401,7 +498,10 @@ impl Session {
             shaping: None,
             outlined: true,
             fill: None,
-        });
+            copies,
+        };
+        live.copy_last();
+        self.live = Some(live);
         Ok(())
     }
 
@@ -439,6 +539,7 @@ impl Session {
             position,
             pressure(input.pressure, live.uses_pressure),
         ));
+        live.copy_last();
         true
     }
 
@@ -458,22 +559,32 @@ impl Session {
         self.commit(live)
     }
 
-    /// Commits `live` as one edit.
+    /// Commits `live`, and the symmetry ruler's copies after it, as one
+    /// edit.
     fn commit(&mut self, live: LiveStroke) -> Result<Outcome, EditError> {
-        let stroke = Stroke {
+        let color = live.template.color;
+        let strokes: Vec<Stroke> = std::iter::once(Stroke {
             points: Arc::from(live.points),
             ..live.template
-        };
+        })
+        .chain(live.copies.into_iter().map(|copy| Stroke {
+            points: Arc::from(copy.points),
+            ..copy.template
+        }))
+        .collect();
         let label = if live.erase { "Erase" } else { "Draw" };
-        let color = stroke.color;
         let outcome = self.with_cel(|session| {
             session.history_mut()?.group(label, |group| {
                 let clip = match &live.clip {
                     Some(selection) => Some(selecting::stored_mask(group, selection)?),
                     None => None,
                 };
-                group
-                    .apply(|document| command::draw(document, live.layer, stroke, live.erase, clip))
+                for stroke in strokes {
+                    group.apply(|document| {
+                        command::draw(document, live.layer, stroke, live.erase, clip)
+                    })?;
+                }
+                Ok(())
             })
         })?;
         if !live.erase && matches!(outcome, Outcome::Committed(_)) {

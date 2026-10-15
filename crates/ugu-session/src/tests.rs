@@ -2740,3 +2740,113 @@ fn a_bucket_on_a_moved_layer_fills_its_own_pixels_under_the_click() {
     // The whole layer is one area; it is filled where it is drawn.
     assert_eq!(mask.bounds, [0, 0, 200, 100]);
 }
+
+/// The strokes drawn on `layer`, in order.
+fn strokes_on(session: &Session, layer: LayerId) -> Vec<Stroke> {
+    ops(session, layer)
+        .iter()
+        .filter_map(|op| match op {
+            Op::Paint { stroke, .. } | Op::Erase { stroke, .. } => {
+                Some(session.document().store.strokes[stroke].clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn mirrored(session: &mut Session) {
+    let symmetry = Symmetry {
+        on: true,
+        ..session.symmetry()
+    };
+    session.set_symmetry(symmetry);
+}
+
+#[test]
+fn the_symmetry_ruler_draws_the_mirrored_stroke_in_the_same_undo_step() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    mirrored(&mut session);
+    draw(&mut session, &tools, 10.0, 60.0);
+    let strokes = strokes_on(&session, layer);
+    assert_eq!(strokes.len(), 2);
+    let [hand, copy] = [&strokes[0], &strokes[1]];
+    assert_eq!(hand.points.len(), copy.points.len());
+    for (hand, copy) in hand.points.iter().zip(copy.points.iter()) {
+        // Mirrored about x = 100, the middle of the 200 wide canvas.
+        assert_eq!(
+            [copy.x, copy.y, copy.pressure],
+            [200.0 - hand.x, hand.y, hand.pressure]
+        );
+    }
+    assert_ne!(hand.seed, copy.seed, "each wobbles as a stroke of its own");
+    assert_eq!(
+        [hand.width, hand.brush.opacity],
+        [copy.width, copy.brush.opacity]
+    );
+    assert!(session.undo().unwrap());
+    assert!(ops(&session, layer).is_empty());
+}
+
+#[test]
+fn the_ruler_mirrors_erasing_and_the_lift_too() {
+    let mut session = session();
+    let mut tools = Tools::default();
+    let layer = session.current_layer();
+    mirrored(&mut session);
+    tools.tool = Tool::Eraser;
+    session.begin_stroke(&tools, at(10.0, 50.0, 0.0)).unwrap();
+    session.extend_stroke(at(20.0, 50.0, 8.0));
+    // Lifted close to the last point, which the lift replaces.
+    session.end_stroke(at(20.25, 50.5, 16.0)).unwrap();
+    let ops = ops(&session, layer);
+    assert!(matches!(ops[..], [Op::Erase { .. }, Op::Erase { .. }]));
+    let strokes = strokes_on(&session, layer);
+    let last = |stroke: &Stroke| *stroke.points.last().unwrap();
+    assert_eq!([last(&strokes[0]).x, last(&strokes[0]).y], [20.25, 50.5]);
+    assert_eq!([last(&strokes[1]).x, last(&strokes[1]).y], [179.75, 50.5]);
+    assert_eq!(strokes[0].points.len(), strokes[1].points.len());
+}
+
+#[test]
+fn the_ruler_is_on_the_canvas_as_shown_on_a_moved_layer() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    session.set_pose(layer, moved_by(30.0), [0.0, 0.0]).unwrap();
+    mirrored(&mut session);
+    draw(&mut session, &tools, 40.0, 60.0);
+    let strokes = strokes_on(&session, layer);
+    // Shown at 40, mirrored to 160 on the canvas: 10 and 130 in the layer.
+    assert_eq!(strokes[0].points[0].x, 10.0);
+    assert_eq!(strokes[1].points[0].x, 130.0);
+}
+
+#[test]
+fn the_rulers_centre_keeps_its_share_of_the_canvas() {
+    let mut session = session();
+    let symmetry = Symmetry {
+        centre: [50.0, 25.0],
+        ..session.symmetry()
+    };
+    session.set_symmetry(symmetry);
+    session
+        .resample_image([400, 200], Sampling::Smooth)
+        .unwrap();
+    assert_eq!(session.symmetry().centre, [100.0, 50.0]);
+    session.undo().unwrap();
+    assert_eq!(session.symmetry().centre, [50.0, 25.0]);
+}
+
+#[test]
+fn shapes_are_not_repeated_by_the_ruler() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    mirrored(&mut session);
+    session.begin_shape(&tools, [10.0, 10.0]).unwrap();
+    session.drag_shape([40.0, 40.0], Drag::default());
+    session.end_shape([40.0, 40.0], Drag::default()).unwrap();
+    assert_eq!(strokes_on(&session, layer).len(), 1);
+}

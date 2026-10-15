@@ -1523,7 +1523,7 @@ fn splits(document: &Document, threads: u16) {
             .stamp(&mut stamp, &stroke, false, wobble, frames, None)
             .and_then(|rect| split.shown(rect, history.document().canvas))
         {
-            composite(&split, None, rect, &mut display);
+            composite(&split, &[], rect, &mut display);
         }
         pen_ups.push(started.elapsed().as_secs_f64() * 1000.0);
         // Refused at the operation limit, which leaves the next split as it is.
