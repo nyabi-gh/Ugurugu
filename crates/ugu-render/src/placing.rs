@@ -70,7 +70,10 @@ impl Split {
         }
         let mut now = None;
         if let Some((coverage, antialias, color)) = fill {
-            now = union(now, self.stamp_fill(coverage, clip, antialias, color));
+            now = union(
+                now,
+                self.stamp_fill(coverage, clip, antialias, color, false),
+            );
         }
         for stroke in strokes {
             now = union(now, self.stamp(stamp, stroke, false, wobble, frames, clip));

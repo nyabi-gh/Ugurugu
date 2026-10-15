@@ -1537,11 +1537,13 @@ impl Canvas {
         let document = self.tab.session.document();
         let added = match self.tab.split.as_mut() {
             Some((key, split)) if *key == before && after.layer == before.layer => {
-                last_fill(document, after.layer).and_then(|(coverage, clip, antialias, color)| {
-                    let changed = split.stamp_fill(coverage, clip, antialias, color);
-                    *key = after;
-                    changed
-                })
+                last_fill(document, after.layer).and_then(
+                    |(coverage, clip, antialias, color, behind)| {
+                        let changed = split.stamp_fill(coverage, clip, antialias, color, behind);
+                        *key = after;
+                        changed
+                    },
+                )
             }
             _ => None,
         };
@@ -1795,8 +1797,10 @@ impl Canvas {
                             document.frames,
                             clip,
                         )
-                    } else if let Some((coverage, clip, antialias, color)) = op_fill(document, op) {
-                        split.stamp_fill(coverage, clip, antialias, color)
+                    } else if let Some((coverage, clip, antialias, color, behind)) =
+                        op_fill(document, op)
+                    {
+                        split.stamp_fill(coverage, clip, antialias, color, behind)
                     } else {
                         None
                     };
@@ -2036,36 +2040,28 @@ fn committed(outcome: Outcome) -> bool {
     matches!(outcome, Outcome::Committed(_))
 }
 
-/// The coverage, clip, antialiasing and colour of the fill on top of
-/// `layer`'s operations.
-fn last_fill(
-    document: &Document,
-    layer: ugu_core::document::LayerId,
-) -> Option<(
-    &ugu_core::store::Mask,
-    Option<&ugu_core::store::Mask>,
-    bool,
-    [u8; 4],
-)> {
-    op_fill(document, layer_ops(document, layer).last()?)
-}
-
-/// What a fill `op` fills, its clip, whether it is antialiased and its
-/// colour.
-fn op_fill<'a>(
-    document: &'a Document,
-    op: &Op,
-) -> Option<(
+/// A fill's coverage, clip, antialiasing, colour and whether it goes behind.
+type FillParts<'a> = (
     &'a ugu_core::store::Mask,
     Option<&'a ugu_core::store::Mask>,
     bool,
     [u8; 4],
-)> {
+    bool,
+);
+
+/// The fill on top of `layer`'s operations.
+fn last_fill(document: &Document, layer: ugu_core::document::LayerId) -> Option<FillParts<'_>> {
+    op_fill(document, layer_ops(document, layer).last()?)
+}
+
+/// What a fill `op` fills.
+fn op_fill<'a>(document: &'a Document, op: &Op) -> Option<FillParts<'a>> {
     let Op::Fill {
         coverage,
         color,
         antialias,
         clip,
+        behind,
     } = op
     else {
         return None;
@@ -2075,7 +2071,7 @@ fn op_fill<'a>(
         Some(mask) => Some(masks.get(mask)?),
         None => None,
     };
-    Some((masks.get(coverage)?, clip, *antialias, color.0))
+    Some((masks.get(coverage)?, clip, *antialias, color.0, *behind))
 }
 
 /// Calls `each` with every paint layer's id, inside groups too.
@@ -2582,6 +2578,117 @@ mod tests {
             &full.data_as_u8_slice()[middle..middle + 4],
             &[30, 120, 200, 255]
         );
+    }
+
+    /// Fills the inside of a box drawn in black with the pen `width` wide,
+    /// and returns over every frame the most pixels of the line the fill
+    /// does not show behind, and the most outside the box it changed,
+    /// against the same frame before the fill. Behind a black line over
+    /// white paper, a line pixel either stays or becomes the fill colour
+    /// darkened by as much as the line darkened the paper.
+    fn bucket_in_a_box(width: f32, antialias: bool) -> (usize, usize) {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        let corners = [
+            [60.0, 40.0],
+            [260.0, 40.0],
+            [260.0, 160.0],
+            [60.0, 160.0],
+            [60.0, 40.0],
+        ];
+        let mut tools = canvas.tools().clone();
+        tools.plain.pen.width = width;
+        tools.plain.pen.antialias = antialias;
+        canvas.set_tools(tools.clone()).unwrap();
+        canvas.edit(|session| {
+            let point = |position, time| ugu_session::InputPoint {
+                position,
+                pressure: None,
+                time,
+            };
+            session
+                .begin_stroke(&tools, point(corners[0], 0.0))
+                .unwrap();
+            let mut time = 0.0;
+            for pair in corners.windows(2) {
+                for step in 1..=40 {
+                    let t = f64::from(step) / 40.0;
+                    time += 4.0;
+                    let at = [0, 1].map(|axis| pair[0][axis] + (pair[1][axis] - pair[0][axis]) * t);
+                    session.extend_stroke(point(at, time));
+                }
+            }
+            session.end_stroke(point(corners[4], time + 4.0)).unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let frames = canvas.session().document().frames as i64;
+        let before: Vec<Pixmap> = (0..frames)
+            .map(|frame| full_frame(&canvas, frame))
+            .collect();
+        canvas.set_tool(Tool::Fill).unwrap();
+        canvas.tools.color = ugu_core::ops::Rgba8([30, 120, 200, 255]);
+        canvas.click_area([160.0, 100.0]);
+        assert_eq!(canvas.notice(), None);
+        let (mut on_line, mut outside) = (0, 0);
+        for frame in 0..frames {
+            let after = full_frame(&canvas, frame);
+            let (a, b) = (
+                after.data_as_u8_slice(),
+                before[frame as usize].data_as_u8_slice(),
+            );
+            let (mut line, mut out) = (0, 0);
+            for (index, (a, b)) in a.chunks(4).zip(b.chunks(4)).enumerate() {
+                let changed = a.iter().zip(b).any(|(a, b)| a.abs_diff(*b) > 8);
+                if !changed {
+                    continue;
+                }
+                let inked = b[..3].iter().any(|&channel| channel < 250);
+                let [x, y] = [index % 320, index / 320];
+                let beyond = !(50..=270).contains(&x) || !(30..=170).contains(&y);
+                let behind =
+                    [30u32, 120, 200]
+                        .iter()
+                        .zip(b)
+                        .zip(a)
+                        .all(|((&fill, &paper), &shown)| {
+                            (fill * u32::from(paper) / 255).abs_diff(u32::from(shown)) <= 12
+                        });
+                if inked && !behind {
+                    line += 1;
+                } else if !inked && beyond {
+                    out += 1;
+                }
+            }
+            on_line = on_line.max(line);
+            outside = outside.max(out);
+        }
+        (on_line, outside)
+    }
+
+    fn full_frame(canvas: &super::Canvas, frame: i64) -> Pixmap {
+        let mut full = Pixmap::new(320, 200);
+        ugu_render::document::DocumentRenderer::new(0).render(
+            canvas.session().document(),
+            frame,
+            Purpose::Display,
+            &mut full,
+        );
+        full
+    }
+
+    #[test]
+    fn a_bucket_fill_goes_behind_the_lines_on_every_wobbling_frame() {
+        // Before, the fill took the soft inner edge of a line and showed on
+        // it, and past it where the line wobbled in.
+        for (width, antialias) in [(6.0, false), (6.0, true), (4.0, true)] {
+            assert_eq!(
+                bucket_in_a_box(width, antialias),
+                (0, 0),
+                "a {width} px line, antialiased {antialias}"
+            );
+        }
     }
 
     fn max_difference(a: &Pixmap, b: &Pixmap) -> u8 {

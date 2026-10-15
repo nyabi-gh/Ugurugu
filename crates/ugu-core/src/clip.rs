@@ -258,11 +258,13 @@ fn renamed(op: &Op, strokes: &HashMap<StrokeId, StrokeId>, masks: &HashMap<MaskI
             color,
             antialias,
             clip,
+            behind,
         } => Op::Fill {
             coverage: mask(coverage),
             color: *color,
             antialias: *antialias,
             clip: clip.as_ref().map(mask),
+            behind: *behind,
         },
         Op::TransformSelection {
             mask: id,

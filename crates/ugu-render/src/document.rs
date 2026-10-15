@@ -189,10 +189,12 @@ enum Step<'a> {
         clip: Option<Arc<Ready>>,
     },
     /// Puts `color` in place of what is in the area, and when the fill is
-    /// antialiased, behind what is in the fringe (2.2.13 `applyFillStroke`).
+    /// antialiased, behind what is in the fringe (2.2.13 `applyFillStroke`);
+    /// with `behind`, the area goes behind too.
     Fill {
         color: [u8; 4],
         ready: Arc<Ready>,
+        behind: bool,
     },
     /// Removes what is in the area.
     Clear {
@@ -1023,6 +1025,23 @@ impl Raster {
                     Step::Fill {
                         color: [r, g, b, a],
                         ready,
+                        behind: true,
+                    } => {
+                        let color = AlphaColor::from_rgba8(*r, *g, *b, *a);
+                        let behind = BlendMode::new(Mix::Normal, Compose::DestOver);
+                        self.context
+                            .push_layer(None, Some(behind), None, None, None);
+                        self.context.set_paint(color);
+                        self.context.fill_path(&ready.area);
+                        if let Some(fringe) = &ready.fringe {
+                            self.context.fill_path(fringe);
+                        }
+                        self.context.pop_layer();
+                    }
+                    Step::Fill {
+                        color: [r, g, b, a],
+                        ready,
+                        behind: false,
                     } => {
                         let color = AlphaColor::from_rgba8(*r, *g, *b, *a);
                         self.take_away(&ready.area);
@@ -1945,6 +1964,7 @@ fn collect<'a>(
                 color,
                 antialias,
                 clip,
+                behind,
             } => {
                 let Some(coverage) = store.masks.get(coverage) else {
                     continue;
@@ -1955,6 +1975,7 @@ fn collect<'a>(
                     steps.push(Step::Fill {
                         color: color.0,
                         ready,
+                        behind: *behind,
                     });
                 }
             }
@@ -2762,6 +2783,7 @@ mod tests {
                             color: half_green,
                             antialias: true,
                             clip,
+                            behind: false,
                         },
                     ],
                 ),
@@ -2806,6 +2828,7 @@ mod tests {
             color: Rgba8([0, 160, 90, 200]),
             antialias: true,
             clip: Some(clip),
+            behind: false,
         };
         let mixed = with_ops(
             &document,
@@ -3373,6 +3396,7 @@ mod tests {
             color: Rgba8([250, 200, 0, 200]),
             antialias: true,
             clip: None,
+            behind: false,
         };
         let erase = Op::Erase {
             stroke: eraser,

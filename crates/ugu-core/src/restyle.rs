@@ -661,6 +661,7 @@ mod tests {
                 color: Rgba8([255, 0, 0, 255]),
                 antialias: false,
                 clip: None,
+                behind: false,
             },
         ];
         let (document, layer) = document(vec![line], vec![left.mask().clone()], ops);

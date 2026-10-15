@@ -688,6 +688,7 @@ fn fills(from: &Path, to: &Path) -> Result<(), String> {
                 color: Rgba8([40, 140, 200, 200]),
                 antialias: true,
                 clip: Some(stripes),
+                behind: false,
             },
         );
         paint.ops.push(Op::ClearSelection { mask: small });

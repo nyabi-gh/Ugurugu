@@ -183,6 +183,7 @@ impl Split {
         clip: Option<&Mask>,
         antialias: bool,
         color: [u8; 4],
+        behind: bool,
     ) -> Option<PixelRect> {
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
@@ -215,7 +216,13 @@ impl Split {
                 (from.clamp(left, right) - left) as usize..(to.clamp(left, right) - left) as usize
             };
             for run in area.row(y) {
-                line[span(run)].fill(color);
+                if behind {
+                    for target in &mut line[span(run)] {
+                        dest_over(target, color);
+                    }
+                } else {
+                    line[span(run)].fill(color);
+                }
             }
             for run in fringe.iter().flat_map(|fringe| fringe.row(y)) {
                 for target in &mut line[span(run)] {
@@ -740,6 +747,7 @@ mod tests {
                     color: Rgba8([20, 120, 220, 170]),
                     antialias: true,
                     clip: Some(mask),
+                    behind: false,
                 };
                 vec![
                     Change::InsertMask(mask, selection),
@@ -1093,7 +1101,12 @@ mod tests {
                 continue;
             }
             for layer in paint_layers(&history) {
-                for (antialias, clip) in [(true, None), (false, None), (true, Some(selection))] {
+                for (antialias, clip, behind) in [
+                    (true, None, false),
+                    (false, None, false),
+                    (true, Some(selection), false),
+                    (true, None, true),
+                ] {
                     let (mut split, _) = split(&history, layer, 4);
                     let document = history.document();
                     let color = [30, 140, 90, 200];
@@ -1103,6 +1116,7 @@ mod tests {
                             clip.and_then(|id| document.store.masks.get(&id)),
                             antialias,
                             color,
+                            behind,
                         )
                         .unwrap();
                     assert!(rect[2] > rect[0]);
@@ -1123,6 +1137,7 @@ mod tests {
                                     Rgba8(color),
                                     antialias,
                                     clip,
+                                    behind,
                                 )
                             })
                         })

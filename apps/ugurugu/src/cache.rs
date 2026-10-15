@@ -711,6 +711,7 @@ mod tests {
             color: Rgba8([0, 0, 0, 255]),
             antialias: false,
             clip: None,
+            behind: false,
         });
         assert!(matches!(export_within(&renders, broken), Some(None)));
         assert!(matches!(

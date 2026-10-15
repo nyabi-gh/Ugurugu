@@ -207,6 +207,9 @@ pub enum Op {
         color: Rgba8,
         antialias: bool,
         clip: Option<MaskId>,
+        /// Laid behind what the layer holds instead of replacing it: a
+        /// bucket that stops at lines, whose coverage reaches under them.
+        behind: bool,
     },
     PlaceImage {
         asset: AssetId,

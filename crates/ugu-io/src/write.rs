@@ -59,11 +59,28 @@ fn required(document: &Document) -> Vec<String> {
         (folders, CELS_FEATURE),
         (long, FRAMES_FEATURE),
         (document.fades(), KEY_OPACITY_FEATURE),
+        (fills_behind(&document.layers), FILL_BEHIND_FEATURE),
     ]
     .into_iter()
     .filter(|(used, _)| *used)
     .map(|(_, name)| name.to_owned())
     .collect()
+}
+
+/// Whether a fill in `layers`, inside groups and merged sections too, is
+/// laid behind.
+fn fills_behind(layers: &[ugu_core::document::Layer]) -> bool {
+    fn ops_behind(ops: &[Op]) -> bool {
+        ops.iter().any(|op| match op {
+            Op::Fill { behind, .. } => *behind,
+            Op::Isolated(section) => ops_behind(&section.ops),
+            _ => false,
+        })
+    }
+    layers.iter().any(|layer| match &layer.kind {
+        ugu_core::document::LayerKind::Paint(paint) => ops_behind(&paint.ops),
+        ugu_core::document::LayerKind::Group(group) => fills_behind(&group.children),
+    })
 }
 
 fn keys(keys: &Keys) -> Option<KeysDto> {
@@ -375,11 +392,13 @@ fn op(op: &Op) -> OpDto {
             color,
             antialias,
             clip,
+            behind,
         } => OpDto::Fill {
             coverage: coverage.0,
             color: color_hex(color.0),
             antialias: *antialias,
             clip: clip.map(|mask| mask.0),
+            behind: *behind,
         },
         Op::PlaceImage {
             asset,

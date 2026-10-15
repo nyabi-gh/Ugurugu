@@ -81,6 +81,10 @@ impl From<EditError> for FillError {
     }
 }
 
+/// How far a bucket fill reaches under the lines that stop it, at most:
+/// to the middle of a line up to 32 pixels wide.
+const UNDER_LINES: u8 = 16;
+
 impl Session {
     /// The pixel `position` is in, if it is on the canvas.
     fn pixel(&self, position: [f64; 2]) -> Option<[u32; 2]> {
@@ -176,19 +180,31 @@ impl Session {
             }) {
                 return Err(FillError::OutsideSelection);
             }
+            // Stopped at lines, the fill goes behind them and reaches under
+            // them to their middles, so that their soft edges stay theirs
+            // and a line that wobbles never shows a gap or the fill past it.
+            // Matched by colour, it replaces what it covers.
+            let behind = !tools.fill.by_colour;
+            let found = |session: &Self, seed| {
+                let area = session.area(seed, reference, &tools.fill)?;
+                Ok::<_, FillError>(match reference {
+                    Some(pixels) if behind => area.under_lines(pixels, UNDER_LINES),
+                    _ => area,
+                })
+            };
             // The current layer alone is read in its own pixels, anything
             // else as shown.
             let area = if tools.fill.reads == Reads::Current {
                 let seed = session
                     .pixel(session.to_layer(position))
                     .ok_or(FillError::NothingThere)?;
-                Arc::new(session.area(seed, reference, &tools.fill)?)
+                Arc::new(found(session, seed)?)
             } else {
-                let area = Arc::new(session.area(clicked, reference, &tools.fill)?);
+                let area = Arc::new(found(session, clicked)?);
                 session.in_layer(&area).ok_or(FillError::NothingThere)?
             };
             let clip = session.layer_clip()?;
-            session.commit_fill(tools, &area, clip)
+            session.commit_fill(tools, &area, clip, behind)
         })
     }
 
@@ -217,7 +233,7 @@ impl Session {
             let coverage = session
                 .in_layer(&selection)
                 .ok_or(FillError::OutsideSelection)?;
-            session.commit_fill(tools, &coverage, clip)
+            session.commit_fill(tools, &coverage, clip, false)
         })
     }
 
@@ -240,7 +256,7 @@ impl Session {
                 return Ok(Outcome::NoChange);
             };
             let clip = session.layer_clip()?;
-            session.commit_fill(tools, &shape, clip)
+            session.commit_fill(tools, &shape, clip, false)
         })
     }
 
@@ -258,6 +274,7 @@ impl Session {
         tools: &Tools,
         coverage: &Selection,
         clip: Option<Arc<Selection>>,
+        behind: bool,
     ) -> Result<Outcome, FillError> {
         let antialias = tools.fill.antialias && !self.pixel_mode();
         let (layer, color) = (self.layer, tools.color);
@@ -267,7 +284,9 @@ impl Session {
                 Some(selection) => Some(selecting::stored_mask(group, selection)?),
                 None => None,
             };
-            group.apply(|document| command::fill(document, layer, coverage, color, antialias, clip))
+            group.apply(|document| {
+                command::fill(document, layer, coverage, color, antialias, clip, behind)
+            })
         })?;
         if let Outcome::Committed(_) = outcome {
             self.used.push(color);

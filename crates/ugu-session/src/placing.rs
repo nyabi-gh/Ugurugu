@@ -257,6 +257,7 @@ pub(crate) fn text_into(
                 color,
                 drawing.antialias,
                 clip,
+                false,
             )
         })?;
     }

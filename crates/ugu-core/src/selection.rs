@@ -357,6 +357,92 @@ impl Selection {
         reached.selection()
     }
 
+    /// This area grown into the lines that bound it, up to their middles:
+    /// the pixels of `pixels` (premultiplied rows of the canvas) at least
+    /// half opaque that are nearer this area than any other open pixel, at
+    /// most `reach` steps in. A fill laid behind the lines then meets them
+    /// when a line's edges move by less than half its width, and never shows
+    /// past it.
+    pub fn under_lines(&self, pixels: &[[u8; 4]], reach: u8) -> Selection {
+        let [width, height] = self.canvas.map(|edge| edge as usize);
+        if pixels.len() != width * height || reach == 0 {
+            return self.clone();
+        }
+        let inside = Canvas::of(self);
+        let line = |x: usize, y: usize| pixels[y * width + x][3] >= 128;
+        let [left, top, mask_width, mask_height] = self.mask.bounds;
+        let reach_px = i32::from(reach);
+        let [x0, y0] = [left - reach_px, top - reach_px].map(|at| at.max(0) as usize);
+        let x1 = ((left + mask_width + reach_px) as usize).min(width);
+        let y1 = ((top + mask_height + reach_px) as usize).min(height);
+        let box_width = x1 - x0;
+        let at = |x: usize, y: usize| (y - y0) * box_width + (x - x0);
+        // Steps into the lines from this area and from every other open
+        // pixel, each from the line pixels next to them.
+        let mut near = vec![u8::MAX; box_width * (y1 - y0)];
+        let mut far = near.clone();
+        let mut from_near = std::collections::VecDeque::new();
+        let mut from_far = std::collections::VecDeque::new();
+        let neighbours = |x: usize, y: usize| {
+            [
+                (x > 0).then(|| (x - 1, y)),
+                (x + 1 < width).then_some((x + 1, y)),
+                (y > 0).then(|| (x, y - 1)),
+                (y + 1 < height).then_some((x, y + 1)),
+            ]
+            .into_iter()
+            .flatten()
+        };
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if !line(x, y) {
+                    continue;
+                }
+                for (nx, ny) in neighbours(x, y) {
+                    if line(nx, ny) {
+                        continue;
+                    }
+                    if inside.get(nx, ny) {
+                        if near[at(x, y)] != 1 {
+                            near[at(x, y)] = 1;
+                            from_near.push_back((x, y));
+                        }
+                    } else if far[at(x, y)] != 1 {
+                        far[at(x, y)] = 1;
+                        from_far.push_back((x, y));
+                    }
+                }
+            }
+        }
+        for (steps, queue) in [(&mut near, &mut from_near), (&mut far, &mut from_far)] {
+            while let Some((x, y)) = queue.pop_front() {
+                let next = steps[at(x, y)] + 1;
+                if next > reach {
+                    continue;
+                }
+                for (nx, ny) in neighbours(x, y) {
+                    let inside_box = (x0..x1).contains(&nx) && (y0..y1).contains(&ny);
+                    if inside_box && line(nx, ny) && steps[at(nx, ny)] > next {
+                        steps[at(nx, ny)] = next;
+                        queue.push_back((nx, ny));
+                    }
+                }
+            }
+        }
+        let mut grown = inside;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (near, far) = (near[at(x, y)], far[at(x, y)]);
+                // A middle pixel as near either side is the other side's:
+                // the fill's soft edge goes behind it.
+                if near <= reach && near < far {
+                    grown.fill(y, x, x + 1);
+                }
+            }
+        }
+        grown.selection().unwrap_or_else(|| self.clone())
+    }
+
     /// Where the selected pixels land when `transform` moves them: every
     /// canvas pixel a moved pixel square overlaps. The renderer draws moved
     /// content cut to that shape with soft edges, so later strokes cut to
@@ -1028,6 +1114,39 @@ mod tests {
             }
         }
         (pixels, size)
+    }
+
+    #[test]
+    fn under_lines_a_fill_reaches_the_middle_of_each_line_that_stops_it() {
+        // A line 6 pixels wide at x 10..16 and one 1 pixel wide at x 20.
+        let size = [30, 9];
+        let pixels: Vec<[u8; 4]> = (0..30 * 9)
+            .map(|at| match at % 30 {
+                10..16 | 20 => [0, 0, 0, 255],
+                _ => [0; 4],
+            })
+            .collect();
+        let columns = |selection: &Selection| {
+            (0..30)
+                .filter(|&x| (0..9).all(|y| selection.mask.contains(x, y)))
+                .collect::<Vec<_>>()
+        };
+        let left = Selection::flood(&pixels, size, [2, 4], Compare::AlphaBoundary).unwrap();
+        assert_eq!(
+            columns(&left.under_lines(&pixels, 16)),
+            (0..13).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            columns(&left.under_lines(&pixels, 2)),
+            (0..12).collect::<Vec<_>>()
+        );
+        // Between the two: half the wide line, none of the thin one, whose
+        // only pixel is as near the other side.
+        let between = Selection::flood(&pixels, size, [17, 4], Compare::AlphaBoundary).unwrap();
+        assert_eq!(
+            columns(&between.under_lines(&pixels, 16)),
+            (13..20).collect::<Vec<_>>()
+        );
     }
 
     #[test]

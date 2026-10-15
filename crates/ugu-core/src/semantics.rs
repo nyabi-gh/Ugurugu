@@ -165,12 +165,18 @@ impl World {
                     color,
                     antialias,
                     clip,
+                    behind,
                 } => {
                     let [r, g, b, a] = color.0.map(|c| f32::from(c) / 255.0);
                     let color = [r * a, g * a, b * a, a];
                     let covered: Vec<_> = self.masks[coverage].cells().collect();
                     for &(x, y) in &covered {
-                        if self.masked(*clip, x, y) {
+                        if !self.masked(*clip, x, y) {
+                            continue;
+                        }
+                        if *behind {
+                            surface.under(x, y, color);
+                        } else {
                             surface.set(x, y, color);
                         }
                     }
@@ -537,6 +543,7 @@ fn a_fill_keeps_its_coverage_while_lines_move() {
         color: Rgba8([0, 255, 0, 255]),
         antialias: false,
         clip: None,
+        behind: false,
     };
     let mut filled = layer(vec![fill, paint(outline)], [4, 3]);
     filled.wobble = Some(Wobble::classic(1.0));
@@ -564,6 +571,7 @@ fn a_fill_replaces_what_it_covers_and_goes_behind_its_edge() {
         color: half_green,
         antialias,
         clip: None,
+        behind: false,
     };
     let green = [0.0, 128.0 / 255.0, 0.0, 128.0 / 255.0];
     let plain = world.layer(&layer(vec![paint(under), fill(false)], [6, 1]), 0);

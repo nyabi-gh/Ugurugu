@@ -106,6 +106,7 @@ pub(crate) fn sample() -> Document {
             color: Rgba8([1, 2, 3, 4]),
             antialias: true,
             clip: None,
+            behind: false,
         },
         Op::PlaceImage {
             asset,
@@ -714,6 +715,27 @@ fn a_key_that_fades_reads_back_and_is_named_as_required() {
     let bytes = written(&document);
     assert!(
         manifest_of(&bytes).ends_with(r#""required":["keys","key-opacity"]}"#),
+        "{}",
+        manifest_of(&bytes)
+    );
+    assert!(read_bytes(bytes).unwrap().0.layers == document.layers);
+}
+
+#[test]
+fn a_fill_behind_the_lines_reads_back_and_is_named_as_required() {
+    let mut document = sample();
+    assert!(!manifest_of(&written(&document)).contains("fill-behind"));
+    let LayerKind::Paint(base) = &mut document.layers[0].kind else {
+        unreachable!()
+    };
+    for op in &mut base.ops {
+        if let Op::Fill { behind, .. } = op {
+            *behind = true;
+        }
+    }
+    let bytes = written(&document);
+    assert!(
+        manifest_of(&bytes).ends_with(r#""required":["fill-behind"]}"#),
         "{}",
         manifest_of(&bytes)
     );

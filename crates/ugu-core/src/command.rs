@@ -63,7 +63,7 @@ pub fn draw(
 }
 
 /// Fills `coverage`, a stored mask, with `color` on top of `layer`'s
-/// operations.
+/// operations, behind what is there when `behind`.
 pub fn fill(
     document: &Document,
     layer: LayerId,
@@ -71,6 +71,7 @@ pub fn fill(
     color: Rgba8,
     antialias: bool,
     clip: Option<MaskId>,
+    behind: bool,
 ) -> Vec<Change> {
     let index = top_of(document, layer);
     let op = Op::Fill {
@@ -78,6 +79,7 @@ pub fn fill(
         color,
         antialias,
         clip,
+        behind,
     };
     vec![Change::InsertOp { layer, index, op }]
 }

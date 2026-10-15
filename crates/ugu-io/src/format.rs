@@ -18,11 +18,14 @@ pub const CELS_FEATURE: &str = "cels";
 pub const FRAMES_FEATURE: &str = "frames";
 /// Keys that fade a layer, which 3.2 would read without the fade.
 pub const KEY_OPACITY_FEATURE: &str = "key-opacity";
-pub const FEATURES: [&str; 4] = [
+/// Fills laid behind the lines, which 3.2 would draw over them.
+pub const FILL_BEHIND_FEATURE: &str = "fill-behind";
+pub const FEATURES: [&str; 5] = [
     KEYS_FEATURE,
     CELS_FEATURE,
     FRAMES_FEATURE,
     KEY_OPACITY_FEATURE,
+    FILL_BEHIND_FEATURE,
 ];
 
 pub const MANIFEST: &str = "manifest.json";
@@ -219,6 +222,8 @@ pub enum OpDto {
         color: String,
         antialias: bool,
         clip: Option<u32>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        behind: bool,
     },
     Image {
         image: String,

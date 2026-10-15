@@ -711,6 +711,43 @@ Step 'Pressing during playback keeps the frame shown' {
 
 # Issue #51: a large shape dragged with a fast mouse shows its last size
 # soon after the pointer stops (evidence 58).
+Step 'A bucket fill during playback plays on' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    # A closed box of pen strokes in the middle.
+    $box = @(($paper.Left + [int]($w * 0.3)), ($paper.Top + [int]($h * 0.3)),
+        ($paper.Left + [int]($w * 0.7)), ($paper.Top + [int]($h * 0.7)))
+    Send-Keys $process 'b'
+    [Native]::Drag(@($box[0], $box[2], $box[2], $box[0], $box[0]), @($box[1], $box[1], $box[3], $box[3], ($box[1] - 4)))
+    Send-Keys $process 'g'
+    [Native]::MoveTo($paper.Right - 5, $paper.Bottom - 5)
+    Send-Keys $process 'p'
+    Start-Sleep -Milliseconds 1500
+    $before = Get-Value $process 'Current frame'
+    Start-Sleep -Milliseconds 700
+    $playing = (Get-Value $process 'Current frame') -ne $before
+    # Click inside the box while it plays.
+    [Native]::Drag(@([int](($box[0] + $box[2]) / 2), [int](($box[0] + $box[2]) / 2)), @([int](($box[1] + $box[3]) / 2), [int](($box[1] + $box[3]) / 2)))
+    [Native]::MoveTo($paper.Right - 5, $paper.Bottom - 5)
+    Start-Sleep -Milliseconds 300
+    $frames = @()
+    for ($i = 0; $i -lt 6; $i++) {
+        $frames += Get-Value $process 'Current frame'
+        Start-Sleep -Milliseconds 400
+    }
+    $shot = Save-Screen 'bucket-during-playback'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $moving = @($frames | Select-Object -Unique).Count -gt 1
+    $detail = "playing before $playing; frames after the fill $($frames -join ', '); $shot"
+    if (-not ($playing -and $moving)) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'A dragged shape keeps up with the pointer' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App

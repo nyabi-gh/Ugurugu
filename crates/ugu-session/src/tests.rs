@@ -892,6 +892,7 @@ fn fills(session: &Session, layer: LayerId) -> Vec<(MaskId, Rgba8, bool, Option<
                 color,
                 antialias,
                 clip,
+                ..
             } => Some((coverage, color, antialias, clip)),
             _ => None,
         })
@@ -974,14 +975,38 @@ fn the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection() {
         (color, antialias, clip),
         (Rgba8([200, 30, 30, 255]), true, None)
     );
+    // Behind the 2 pixel line around it, and under its inner half.
+    assert!(matches!(
+        ops(&session, layer)[..],
+        [Op::Fill { behind: true, .. }]
+    ));
     assert_eq!(
         session.document().store.masks[&coverage].bounds,
-        [42, 22, 76, 56]
+        [41, 21, 78, 58]
     );
     assert_eq!(session.undo_label(), Some("Fill"));
     assert!(session.undo().unwrap());
     assert!(fills(&session, layer).is_empty());
     assert!(session.document().store.masks.is_empty());
+    // Matched by colour, it replaces what it covers and stops at the line.
+    tools.fill.by_colour = true;
+    session.bucket(&tools, [60.0, 50.0], read).unwrap();
+    let [
+        Op::Fill {
+            coverage,
+            behind: false,
+            ..
+        },
+    ] = ops(&session, layer)[..]
+    else {
+        panic!("one fill over what is there");
+    };
+    assert_eq!(
+        session.document().store.masks[&coverage].bounds,
+        [42, 22, 76, 56]
+    );
+    session.undo().unwrap();
+    tools.fill.by_colour = false;
     // With a selection, a click outside it fills nothing; inside, the fill
     // is cut to it.
     drag(

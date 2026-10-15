@@ -724,6 +724,7 @@ impl<'a> Importer<'a> {
                     color: Rgba8(rgba),
                     antialias,
                     clip,
+                    behind: false,
                 }
             }
             "image" => {

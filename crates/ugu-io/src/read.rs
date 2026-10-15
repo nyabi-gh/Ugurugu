@@ -665,11 +665,13 @@ fn op(dto: &OpDto) -> Result<Op, ReadError> {
             color,
             antialias,
             clip: mask,
+            behind,
         } => Op::Fill {
             coverage: MaskId(*coverage),
             color: Rgba8(parse_color(color).ok_or_else(|| corrupt("fill colour"))?),
             antialias: *antialias,
             clip: clip(mask),
+            behind: *behind,
         },
         OpDto::Image {
             image,
