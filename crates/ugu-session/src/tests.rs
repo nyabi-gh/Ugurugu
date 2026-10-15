@@ -2409,6 +2409,42 @@ fn a_shape_in_pixel_mode_runs_through_pixel_centres() {
     assert_eq!(ends, [3.5, 20.5]);
 }
 
+#[test]
+fn a_filled_shape_in_pixel_mode_takes_its_edge_pixels_on_every_side() {
+    for shape in [Shape::Rectangle, Shape::Ellipse] {
+        let mut document = Document::new([40, 40]);
+        document.pixel = true;
+        let mut session = Session::new(document, false);
+        let tools = Tools {
+            tool: Tool::Shape,
+            shape: ShapeSettings {
+                shape,
+                paint: ShapePaint::Fill,
+                ..ShapeSettings::DEFAULT
+            },
+            ..Tools::default()
+        };
+        // From the centre of pixel 10 to the centre of pixel 30 both ways.
+        session.begin_shape(&tools, [10.2, 10.7]).unwrap();
+        session.end_shape([30.9, 30.1], Drag::default()).unwrap();
+        let layer = session.current_layer();
+        let [Op::Fill { coverage, .. }] = ops(&session, layer)[..] else {
+            panic!("one fill: {:?}", ops(&session, layer));
+        };
+        let mask = &session.document().store.masks[&coverage];
+        for y in 0..40 {
+            for x in 0..40 {
+                // Mirrored about the middle, at 20.5, either way.
+                let at = mask.contains(x, y);
+                assert_eq!(at, mask.contains(40 - x, y), "{shape:?} {x},{y}");
+                assert_eq!(at, mask.contains(x, 40 - y), "{shape:?} {x},{y}");
+            }
+        }
+        assert!(mask.contains(10, 20) && mask.contains(30, 20), "{shape:?}");
+        assert!(!mask.contains(9, 20) && !mask.contains(31, 20), "{shape:?}");
+    }
+}
+
 fn moved_by(x: f64) -> ugu_core::keys::Pose {
     ugu_core::keys::Pose {
         offset: [x, 0.0],

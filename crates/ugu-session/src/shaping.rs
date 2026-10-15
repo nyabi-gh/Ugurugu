@@ -325,6 +325,51 @@ fn dense(corners: &[[f64; 2]]) -> Vec<[f64; 2]> {
     points
 }
 
+/// `outline` grown by a hair, so that pixels whose centres lie on it are
+/// filled too: in pixel mode its corners and straight edges run through
+/// pixel centres, and a fill of only the centres strictly inside would leave
+/// the right and bottom edge out and keep the left and top one.
+fn with_edges(outline: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    const HAIR: f64 = 1e-6;
+    let count = outline.len();
+    // Twice the signed area: which way round the outline goes, and so which
+    // side of each edge is outside.
+    let turn: f64 = (0..count)
+        .map(|index| {
+            let [a, b] = [outline[index], outline[(index + 1) % count]];
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let outward = |[x, y]: [f64; 2]| {
+        let length = x.hypot(y);
+        if length == 0.0 {
+            return [0.0, 0.0];
+        }
+        let normal = if turn > 0.0 { [y, -x] } else { [-y, x] };
+        normal.map(|value| value / length)
+    };
+    (0..count)
+        .map(|index| {
+            let point = outline[index];
+            let before = outline[(index + count - 1) % count];
+            let after = outline[(index + 1) % count];
+            let [a, b] = [
+                outward([point[0] - before[0], point[1] - before[1]]),
+                outward([after[0] - point[0], after[1] - point[1]]),
+            ];
+            let normal = [a[0] + b[0], a[1] + b[1]];
+            let length = normal[0].hypot(normal[1]);
+            if length < 1e-9 {
+                return point;
+            }
+            [
+                point[0] + normal[0] / length * HAIR,
+                point[1] + normal[1] / length * HAIR,
+            ]
+        })
+        .collect()
+}
+
 /// In pixel mode a drag goes from pixel centre to pixel centre, so that
 /// straight edges run along one row or column of pixels.
 fn snapped(position: [f64; 2], pixel: bool) -> [f64; 2] {
@@ -405,11 +450,14 @@ impl Session {
             self.drop_cel();
             return Ok(Outcome::NoChange);
         }
+        let pixel = self.pixel_mode();
         let area = live.fill.as_ref().and_then(|outline| {
-            Selection::of_shape(
-                &selection::Shape::Freehand(outline.clone()),
-                self.document().canvas,
-            )
+            let outline = if pixel {
+                with_edges(outline)
+            } else {
+                outline.clone()
+            };
+            Selection::of_shape(&selection::Shape::Freehand(outline), self.document().canvas)
         });
         match area {
             Some(area) => self.commit_filled(live, &area),

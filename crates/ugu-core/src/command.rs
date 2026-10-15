@@ -486,6 +486,17 @@ pub fn merge_down(document: &Document, above: LayerId) -> Result<Vec<Change>, Ed
         .collect::<Result<Vec<_>, _>>()
         .map_err(EditError::Merge)?
         .contains(&true);
+    let mut around = parent;
+    while let Some(group) = around {
+        if moved
+            && document
+                .layer(group)
+                .is_some_and(|group| !group.keys().is_empty())
+        {
+            return Err(EditError::Merge(ops::MergeRefusal::Animated));
+        }
+        around = document.position(group).and_then(|(parent, _)| parent);
+    }
     let all = MaskId(free_mask_ids(&document.store).take());
     let merged =
         ops::merge_down(lower_paint, upper_paint, all, document.pixel).map_err(EditError::Merge)?;
@@ -1076,6 +1087,37 @@ mod tests {
                 Err(EditError::Merge(ops::MergeRefusal::Animated))
             );
         }
+    }
+
+    #[test]
+    fn a_layer_put_in_one_place_is_not_merged_in_a_group_that_keys_move() {
+        let mut document = three_layers();
+        run(&mut document, |document| {
+            update_layer(document, LayerId(2), |layer| {
+                layer.keys_mut().set(key(0, 0.5));
+            })
+            .unwrap()
+        })
+        .unwrap();
+        let (group, changes) = wrap_in_group(&document, LayerId(2), "G".to_owned()).unwrap();
+        commit(&mut document, changes).unwrap();
+        run(&mut document, |document| {
+            move_layer(document, LayerId(1), Some(group), 0).unwrap()
+        })
+        .unwrap();
+        // The group stays: the move is the layer's own, kept in the merge.
+        assert!(merge_down(&document, LayerId(2)).is_ok());
+        run(&mut document, |document| {
+            update_layer(document, group, |layer| {
+                layer.keys_mut().set(key(0, 0.5));
+            })
+            .unwrap()
+        })
+        .unwrap();
+        assert_eq!(
+            merge_down(&document, LayerId(2)),
+            Err(EditError::Merge(ops::MergeRefusal::Animated))
+        );
     }
 
     #[test]

@@ -81,7 +81,7 @@ impl Canvas {
     /// the order of `HANDLES`, in document pixels. `None` unless the move
     /// tool is chosen.
     pub fn pose_box(&self) -> Option<[[f64; 2]; 8]> {
-        if self.tools.tool != ugu_session::Tool::Move {
+        if self.tools.tool != ugu_session::Tool::Move || self.sizing.is_some() {
             return None;
         }
         let session = &self.tab.session;

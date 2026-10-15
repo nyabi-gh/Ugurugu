@@ -14,6 +14,9 @@ impl Canvas {
     /// or Alt with a tool that paints, as in 2.2.13. The selection tools take
     /// Alt to subtract.
     pub fn picks_with(&self, alt: bool) -> bool {
+        if self.sizing.is_some() {
+            return false;
+        }
         match self.tools.tool {
             Tool::Eyedropper => true,
             Tool::Pen | Tool::Eraser | Tool::Fill => alt,

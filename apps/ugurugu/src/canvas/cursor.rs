@@ -35,6 +35,9 @@ impl Canvas {
     /// pixels), or at the stroke's last point while one is drawn; `None`
     /// when a press would not draw.
     pub fn brush_cursor(&self, pointer: [f64; 2]) -> Option<BrushCursor> {
+        if self.sizing.is_some() {
+            return None;
+        }
         let position = match self.interaction {
             Interaction::Idle if !self.picks() => pointer,
             Interaction::Drawing { .. } => self.drawn_at?,

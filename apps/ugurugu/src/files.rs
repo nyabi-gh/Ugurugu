@@ -110,6 +110,8 @@ pub enum FileEvent {
     Exported {
         number: u64,
         path: PathBuf,
+        /// Whether the document exported had an opaque background.
+        opaque: bool,
         outcome: Outcome,
     },
     /// An image read to insert into document `.1`, as an asset.
@@ -453,7 +455,13 @@ impl Files {
                         break;
                     }
                     if let Some(event) = run_answering(job, run) {
+                        let recent = recent_document(&event);
                         worker_events(event);
+                        // After the answer: the shell can take long for a
+                        // document on a network share.
+                        if let Some(path) = recent {
+                            ugu_win::recent::add(&path);
+                        }
                     }
                 }
             })
@@ -1471,9 +1479,11 @@ impl Files {
         let number = self.exports;
         let events = self.events.clone();
         let done_path = path.clone();
+        let document = canvas.snapshot_now();
+        let opaque = document.background.0[3] == 255;
         match Exporting::start(
             number,
-            canvas.snapshot_now(),
+            document,
             job,
             path,
             canvas.renders(),
@@ -1481,6 +1491,7 @@ impl Files {
                 events(FileEvent::Exported {
                     number,
                     path: done_path,
+                    opaque,
                     outcome,
                 });
             },
@@ -1649,6 +1660,7 @@ impl Files {
             FileEvent::Exported {
                 number,
                 path,
+                opaque,
                 outcome,
             } => {
                 // A cancelled one was answered when it was cancelled, unless
@@ -1659,13 +1671,13 @@ impl Files {
                     .is_none_or(|export| export.number != number)
                 {
                     if self.last_cancelled == Some(number) && matches!(outcome, Outcome::Done) {
-                        self.say(exported(&path, canvas.session().document()));
+                        self.say(exported(&path, opaque));
                     }
                     return;
                 }
                 self.exporting = None;
                 match outcome {
-                    Outcome::Done => self.say(exported(&path, canvas.session().document())),
+                    Outcome::Done => self.say(exported(&path, opaque)),
                     Outcome::Cancelled => self.say(tr("export-canceled").to_owned()),
                     Outcome::Failed(error) => {
                         self.fail(format!("{}: {error}", tr("export-failed")));
@@ -2096,6 +2108,23 @@ impl Files {
     }
 }
 
+/// The document `event` saved or opened, for the taskbar's recent
+/// documents. Only documents open again as they are; a 2.x project is
+/// imported into a new one. Tests save to temporary folders, which are no
+/// one's recent documents.
+fn recent_document(event: &FileEvent) -> Option<PathBuf> {
+    match event {
+        _ if cfg!(test) => None,
+        FileEvent::Saved {
+            path,
+            result: Ok(_),
+            ..
+        }
+        | FileEvent::Opened(path, Ok(Opened::Document(..))) => Some(path.clone()),
+        _ => None,
+    }
+}
+
 /// Runs `job`; one that panics is answered as failed, which the panic hook
 /// has recorded, so what waits for it goes on and the thread takes the next.
 fn run_answering(job: Job, run: impl FnOnce(Job) -> Option<FileEvent>) -> Option<FileEvent> {
@@ -2179,11 +2208,6 @@ fn run(job: Job) -> Option<FileEvent> {
                 ok = result.is_ok(),
                 "document saved"
             );
-            // Tests save to temporary folders, which are no one's recent
-            // documents.
-            if result.is_ok() && !cfg!(test) {
-                ugu_win::recent::add(&path);
-            }
             FileEvent::Saved {
                 number,
                 document: generation,
@@ -2232,11 +2256,6 @@ fn run(job: Job) -> Option<FileEvent> {
                 ok = result.is_ok(),
                 "document opened"
             );
-            // Only documents open again as they are; a 2.x project is
-            // imported into a new one.
-            if matches!(result, Ok(Opened::Document(..))) && !cfg!(test) {
-                ugu_win::recent::add(&path);
-            }
             FileEvent::Opened(path, result)
         }
         Job::BeginRecovery { root, folder } => FileEvent::RecoveryBegun(
@@ -2962,22 +2981,45 @@ mod tests {
 
     #[test]
     fn a_transparent_drawing_exported_as_jpeg_is_said_to_be_on_white() {
-        let mut document = ugu_core::document::Document::new([8, 8]);
         let path = Path::new("frame.JPG");
         assert_eq!(
-            exported(path, &document),
+            exported(path, true),
             tr_with("export-done", &args_path(path))
         );
-        document.background.0[3] = 0;
         assert_eq!(
-            exported(path, &document),
+            exported(path, false),
             tr_with("export-done-white", &args_path(path))
         );
         let png = Path::new("frame.png");
         assert_eq!(
-            exported(png, &document),
+            exported(png, false),
             tr_with("export-done", &args_path(png))
         );
+    }
+
+    #[test]
+    fn the_white_jpeg_notice_is_of_the_drawing_exported_not_the_tab_shown() {
+        let (mut files, mut canvas, events) = setup();
+        let folder = folder("export-white");
+        let mut transparent = ugu_core::document::Document::new([8, 8]);
+        transparent.background.0[3] = 0;
+        canvas.replace(transparent, true);
+        let path = folder.join("frame.jpg");
+        files.handle(
+            FileEvent::Picked(Purpose::ExportImage, Some(path.clone())),
+            &mut canvas,
+        );
+        // Another tab, on an opaque background, is shown when it is done.
+        canvas
+            .open_tab(ugu_core::document::Document::new([8, 8]), true)
+            .unwrap();
+        assert_eq!(canvas.session().document().background.0[3], 255);
+        files.handle(next(&events), &mut canvas);
+        assert_eq!(
+            files.message(),
+            Some(tr_with("export-done-white", &args_path(&path)).as_str())
+        );
+        files.end();
     }
 
     #[test]
@@ -3029,6 +3071,7 @@ mod tests {
             FileEvent::Exported {
                 number,
                 path: second.clone(),
+                opaque: true,
                 outcome: Outcome::Done,
             },
             &mut canvas,
@@ -3101,6 +3144,7 @@ mod tests {
             FileEvent::Exported {
                 number,
                 path: folder.join("first.png"),
+                opaque: true,
                 outcome: Outcome::Failed("disk full".to_owned()),
             },
             &mut canvas,
@@ -3173,12 +3217,14 @@ fn open(path: &Path) -> Result<Opened, String> {
 
 /// What is said once `path` is exported from `document`: a JPEG, which has
 /// no transparency, puts transparent areas on white.
-fn exported(path: &Path, document: &ugu_core::document::Document) -> String {
+/// What is said when `path` was exported, from a document whose background
+/// was `opaque` or not.
+fn exported(path: &Path, opaque: bool) -> String {
     let jpeg = path
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "jpg" | "jpeg"));
-    let key = if jpeg && document.background.0[3] < 255 {
+    let key = if jpeg && !opaque {
         "export-done-white"
     } else {
         "export-done"

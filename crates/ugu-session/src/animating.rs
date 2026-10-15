@@ -191,7 +191,10 @@ impl Session {
     }
 
     /// Puts what `id` turns, scales and flips about at `pivot`, in document
-    /// pixels, keeping where it is shown on this frame.
+    /// pixels, keeping where each key shows it. Frames between keys that
+    /// turn or scale it turn about the new pivot, so they can show it
+    /// elsewhere, as moving a pivot changes the path in other animation
+    /// apps.
     pub fn set_pivot(&mut self, id: LayerId, pivot: [f64; 2]) -> Result<Outcome, EditError> {
         self.update_layer(id, "Move pivot", |layer| {
             let keys = layer.keys_mut();

@@ -16,7 +16,7 @@ use crate::i18n::tr;
 use super::{Canvas, Interaction, Key, preview_shrink, union};
 
 /// Logical pixels from a handle's middle that still grab it.
-const HANDLE_REACH: f64 = 7.0;
+pub(super) const HANDLE_REACH: f64 = 7.0;
 const SNAP: f64 = std::f64::consts::PI / 12.0;
 /// Selections smaller than this many pixels are shown at full size while
 /// dragged: changing them takes a few milliseconds.

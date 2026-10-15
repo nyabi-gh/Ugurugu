@@ -299,8 +299,11 @@ pub enum MergeRefusal {
     CanvasEpoch,
     /// A crop or resample in the upper layer would also move the lower layer.
     CanvasChange,
-    /// Either layer moves from frame to frame, or both are cels of an
-    /// animation folder.
+    /// Either layer moves from frame to frame, both are cels of an
+    /// animation folder, or keys put a layer in one place inside a group
+    /// that keys move too: before the merge the two moves are one, taken
+    /// from the pixels once, and baking the layer's own would take them
+    /// twice.
     Animated,
 }
 

@@ -1,116 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The canvas size and image size dialogs, as 2.2.13's: a new size,
-//! absolute or relative, with a reference point and offset for the canvas,
-//! and a uniform scale and kept aspect ratio for the image. The image
-//! dialog also chooses how pixels are resampled.
+//! Changing the canvas size and the image size, as 2.2.13's dialogs: a new
+//! size, absolute or relative, with a reference point and offset for the
+//! canvas, and a uniform scale and kept aspect ratio for the image, which
+//! also chooses how pixels are resampled. The canvas size is set beside a
+//! frame on the canvas, which shows it and can be dragged.
 
 use ugu_core::document::limits;
 use ugu_core::ops::Sampling;
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, CanvasSize, clamp_edge};
 use crate::i18n::{tr, tr_with};
 use crate::theme;
 use crate::widgets;
 
-use super::{Panels, args};
-
-/// The dialog open, if any.
-pub enum Dialog {
-    Canvas(CanvasSize),
-    Image(ImageSize),
-}
+use super::{Panels, args, corners_on_screen, transform_box};
 
 const EDGE: std::ops::RangeInclusive<u32> = limits::CANVAS_EDGE;
-
-fn clamp_edge(edge: i64) -> u32 {
-    edge.clamp(i64::from(*EDGE.start()), i64::from(*EDGE.end())) as u32
-}
-
-/// Where the reference point puts the artwork along one axis when the
-/// canvas grows by `delta`: 0 start, 1 middle, 2 end. The middle rounds
-/// toward zero, as 2.2.13 does.
-fn aligned(delta: i32, place: usize) -> i32 {
-    match place {
-        0 => 0,
-        1 => delta / 2,
-        _ => delta,
-    }
-}
-
-/// A new canvas size and where the artwork lands on it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CanvasSize {
-    pub current: [u32; 2],
-    pub size: [u32; 2],
-    /// Whether the size is shown as a change from the current one.
-    pub relative: bool,
-    /// The reference point, row-major from the top left; `None` when the
-    /// offset was typed and matches none.
-    pub anchor: Option<usize>,
-    /// Where the artwork's top left lands on the new canvas.
-    pub offset: [i32; 2],
-}
-
-impl CanvasSize {
-    pub fn new(current: [u32; 2]) -> Self {
-        Self {
-            current,
-            size: current,
-            relative: false,
-            anchor: Some(4),
-            offset: [0, 0],
-        }
-    }
-
-    fn anchored(&self, anchor: usize) -> [i32; 2] {
-        let delta = |axis: usize| self.size[axis] as i32 - self.current[axis] as i32;
-        [aligned(delta(0), anchor % 3), aligned(delta(1), anchor / 3)]
-    }
-
-    pub fn set_size(&mut self, size: [u32; 2]) {
-        self.size = size.map(|edge| clamp_edge(i64::from(edge)));
-        if let Some(anchor) = self.anchor {
-            self.offset = self.anchored(anchor);
-        }
-    }
-
-    pub fn set_anchor(&mut self, anchor: usize) {
-        self.anchor = Some(anchor);
-        self.offset = self.anchored(anchor);
-    }
-
-    /// Takes a typed offset; the reference point becomes the one that
-    /// gives it, keeping the current one when it still does.
-    pub fn set_offset(&mut self, offset: [i32; 2]) {
-        let reach = *EDGE.end() as i32;
-        self.offset = offset.map(|value| value.clamp(-reach, reach));
-        let matches = |anchor: &usize| self.anchored(*anchor) == self.offset;
-        self.anchor = self.anchor.filter(matches).or_else(|| (0..9).find(matches));
-    }
-
-    /// Whether applying changes anything: a new size, or the same size
-    /// with the artwork moved.
-    pub fn changes(&self) -> bool {
-        self.size != self.current || self.offset != [0, 0]
-    }
-
-    fn hint(&self) -> &'static str {
-        let [x, y] = self.offset;
-        let [width, height] = self.current.map(|edge| edge as i32);
-        let [new_width, new_height] = self.size.map(|edge| edge as i32);
-        if x >= new_width || y >= new_height || x + width <= 0 || y + height <= 0 {
-            "canvas-size-outside"
-        } else if x < 0 || y < 0 || x + width > new_width || y + height > new_height {
-            "canvas-size-clipped"
-        } else if self.changes() {
-            "canvas-size-expanded"
-        } else {
-            "canvas-size-unchanged"
-        }
-    }
-}
 
 /// A new image size, its aspect ratio kept or not.
 #[derive(Clone, Debug, PartialEq)]
@@ -227,7 +134,7 @@ impl ImageSize {
     }
 }
 
-/// Shows the open dialog and applies it when confirmed.
+/// Shows the image size dialog and applies it when confirmed.
 pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     let Some(dialog) = panels.resize.as_mut() else {
         return;
@@ -235,21 +142,14 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
     let mut close = false;
     let mut apply = false;
     let pixel = canvas.session().pixel_mode();
-    let (title, description) = match dialog {
-        Dialog::Canvas(_) => (tr("canvas-size-title"), tr("canvas-size-description")),
-        Dialog::Image(_) => (tr("image-size-title"), tr("image-size-description")),
-    };
     let modal = widgets::dialog(
         ctx,
         "resize dialog",
         460.0,
-        title,
-        Some(description),
+        tr("image-size-title"),
+        Some(tr("image-size-description")),
         |ui| {
-            let can_apply = match dialog {
-                Dialog::Canvas(dialog) => canvas_form(ui, dialog),
-                Dialog::Image(dialog) => image_form(ui, dialog, pixel),
-            };
+            let can_apply = image_form(ui, dialog, pixel);
             widgets::dialog_buttons(ui, |ui| {
                 let ok =
                     widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, can_apply);
@@ -266,22 +166,132 @@ pub fn show(ctx: &egui::Context, canvas: &mut Canvas, panels: &mut Panels) {
         },
     );
     if apply {
-        let result = match &*dialog {
-            Dialog::Canvas(dialog) => {
-                let (offset, size) = (dialog.offset, dialog.size);
-                canvas.edit(|session| session.crop_canvas(offset, size))
-            }
-            Dialog::Image(dialog) => {
-                let (size, sampling) = (dialog.size, dialog.sampling);
-                canvas.edit(|session| session.resample_image(size, sampling))
-            }
-        };
-        panels.report(result);
+        let (size, sampling) = (dialog.size, dialog.sampling);
+        panels.report(canvas.edit(|session| session.resample_image(size, sampling)));
         close = true;
     }
     if close || modal.should_close() {
         panels.resize = None;
     }
+}
+
+const SIZING_WIDTH: f32 = 340.0;
+
+/// The window beside the canvas while it is sized, as Clip Studio's: what
+/// the frame does and will do, the size and where the artwork lands, typed,
+/// and applying or cancelling. It starts at the top right of the app's
+/// window, over the right dock, and can be moved; the canvas takes no
+/// presses under it. Tells the canvas where it is, so that the document is
+/// placed clear of it.
+pub fn sizing_window(
+    ctx: &egui::Context,
+    canvas_area: egui::Rect,
+    canvas: &mut Canvas,
+    panels: &mut Panels,
+) {
+    if canvas.sizing().is_none() {
+        return;
+    }
+    let margin = theme::space::M;
+    let (mut apply, mut cancel, mut open) = (false, false, true);
+    let shown = egui::Window::new(tr("canvas-size-title"))
+        .id(egui::Id::new("canvas size"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .default_pos(egui::pos2(
+            ctx.content_rect().right() - margin,
+            canvas_area.top() + margin,
+        ))
+        .constrain_to(ctx.content_rect())
+        .show(ctx, |ui| {
+            ui.set_width(SIZING_WIDTH);
+            let Some(dialog) = canvas.sizing_mut() else {
+                return;
+            };
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(tr("canvas-size-drag-hint"))
+                        .size(theme::SMALL)
+                        .color(theme::muted()),
+                )
+                .wrap(),
+            );
+            ui.add_space(theme::space::S);
+            summary(ui, dialog.current, dialog.size);
+            quiet(ui, tr(dialog.hint()));
+            let can_apply = canvas_form(ui, dialog);
+            widgets::dialog_buttons(ui, |ui| {
+                apply = widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, can_apply)
+                    .clicked();
+                cancel =
+                    widgets::button(ui, tr("dialog-cancel"), widgets::Emphasis::Secondary, true)
+                        .clicked();
+            });
+        });
+    if let Some(shown) = shown {
+        let ppp = ctx.pixels_per_point();
+        let rect = shown.response.rect;
+        let edge = |value: f32| (value * ppp).round() as i32;
+        canvas.set_sizing_cover([
+            edge(rect.left()),
+            edge(rect.top()),
+            edge(rect.right()),
+            edge(rect.bottom()),
+        ]);
+    }
+    if apply {
+        panels.report(canvas.apply_sizing());
+    } else if cancel || !open {
+        canvas.cancel_sizing();
+    }
+}
+
+/// Over the canvas being sized: the drawing the new canvas leaves out,
+/// darkened, the room it adds, in the paper colour it will have, and the
+/// frame with its handles.
+pub fn sizing_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
+    let (Some(size), Some(corners)) = (canvas.sizing(), canvas.sizing_box()) else {
+        return;
+    };
+    let frame = size.frame().map(|edge| edge as f64);
+    let [width, height] = size.current.map(f64::from);
+    let document = [0.0, 0.0, width, height];
+    let [red, green, blue, alpha] = canvas.session().document().background.0;
+    let paper = egui::Color32::from_rgba_unmultiplied(red, green, blue, alpha);
+    let shade = egui::Color32::from_black_alpha(140);
+    for (outer, inner, fill) in [(document, frame, shade), (frame, document, paper)] {
+        for band in outside(outer, inner) {
+            let points = corners_on_screen(ui, canvas, band).to_vec();
+            ui.painter().add(egui::Shape::convex_polygon(
+                points,
+                fill,
+                egui::Stroke::NONE,
+            ));
+        }
+    }
+    transform_box(ui, canvas, &corners, |at| canvas.sizing_grip_at(at));
+}
+
+/// The parts of rectangle `outer` (left, top, right, bottom) outside
+/// `inner`, as at most four rectangles.
+fn outside(outer: [f64; 4], inner: [f64; 4]) -> Vec<[f64; 4]> {
+    let [left, top, right, bottom] = outer;
+    let [in_left, in_right] = [inner[0], inner[2]].map(|x| x.clamp(left, right));
+    let [in_top, in_bottom] = [inner[1], inner[3]].map(|y| y.clamp(top, bottom));
+    if in_left >= in_right || in_top >= in_bottom {
+        return vec![outer];
+    }
+    [
+        [left, top, right, in_top],
+        [left, in_bottom, right, bottom],
+        [left, in_top, in_left, in_bottom],
+        [in_right, in_top, right, in_bottom],
+    ]
+    .into_iter()
+    .filter(|[left, top, right, bottom]| left < right && top < bottom)
+    .collect()
 }
 
 fn summary(ui: &mut egui::Ui, from: [u32; 2], to: [u32; 2]) {
@@ -384,30 +394,9 @@ const ANCHORS: [&str; 9] = [
     "anchor-bottom-right",
 ];
 
-/// The canvas size form; returns whether it can be applied.
+/// The canvas size form: relative or not, width and height, the reference
+/// point and the offset; returns whether the size can be applied.
 fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
-    let [width, height] = dialog.current.map(f64::from);
-    let [new_width, new_height] = dialog.size.map(f64::from);
-    let [x, y] = dialog.offset.map(f64::from);
-    preview(
-        ui,
-        tr("canvas-size-preview"),
-        &[
-            ([0.0, 0.0, new_width, new_height], false),
-            ([x, y, width, height], true),
-        ],
-    );
-    ui.add_space(theme::space::S);
-    summary(ui, dialog.current, dialog.size);
-    quiet(
-        ui,
-        &tr_with(
-            "canvas-size-offset-summary",
-            &args([("x", x.to_string()), ("y", y.to_string())]),
-        ),
-    );
-    quiet(ui, tr(dialog.hint()));
-
     widgets::section(ui, tr("canvas-size-section"), false);
     let mut size = dialog.size;
     widgets::card(ui, |ui| {
@@ -466,13 +455,13 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
         dialog.set_size(size);
     }
 
-    widgets::section(ui, tr("canvas-size-anchor"), false);
+    widgets::section(ui, tr("canvas-size-position"), false);
     let mut offset = dialog.offset.map(i64::from);
     widgets::card(ui, |ui| {
         widgets::tall_setting_row(
             ui,
             true,
-            tr("canvas-size-anchor"),
+            tr("canvas-size-reference"),
             egui::Vec2::splat(ANCHORS_EDGE),
             |ui| anchors(ui, dialog),
         );
@@ -493,13 +482,11 @@ fn canvas_form(ui: &mut egui::Ui, dialog: &mut CanvasSize) -> bool {
     dialog.changes()
 }
 
-const ANCHOR: f32 = 24.0;
+const ANCHOR: f32 = 18.0;
 const ANCHOR_GAP: f32 = 4.0;
 const ANCHORS_EDGE: f32 = 3.0 * ANCHOR + 2.0 * ANCHOR_GAP;
 
-/// The nine points the canvas can grow or shrink around, as squares. Laid
-/// out by hand: a row's control column is filled from the right, which
-/// `egui::Grid` does not expect.
+/// The nine points the canvas can grow or shrink around, as squares.
 fn anchors(ui: &mut egui::Ui, dialog: &mut CanvasSize) {
     let (area, _) = ui.allocate_exact_size(egui::Vec2::splat(ANCHORS_EDGE), egui::Sense::hover());
     for (index, &key) in ANCHORS.iter().enumerate() {
@@ -519,13 +506,13 @@ fn anchors(ui: &mut egui::Ui, dialog: &mut CanvasSize) {
         };
         ui.painter().rect(
             rect,
-            egui::CornerRadius::same(theme::radius::CONTROL),
+            egui::CornerRadius::same(theme::radius::SMALL),
             fill,
             egui::Stroke::new(1.0, edge),
             egui::StrokeKind::Inside,
         );
         if response.has_focus() {
-            widgets::focus_ring(ui.painter(), rect, theme::radius::CONTROL);
+            widgets::focus_ring(ui.painter(), rect, theme::radius::SMALL);
         }
         let response = response.on_hover_text(tr(key));
         response.widget_info(|| {
@@ -663,50 +650,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_reference_point_and_typed_offsets_follow_each_other() {
-        // As 2.2.13's configuresCanvasSizeDialog.
-        let mut dialog = CanvasSize::new([640, 480]);
-        assert_eq!((dialog.anchor, dialog.offset), (Some(4), [0, 0]));
-        assert!(!dialog.changes());
-        dialog.set_size([800, 600]);
-        assert_eq!(dialog.offset, [80, 60]);
-        dialog.set_anchor(0);
-        assert_eq!(dialog.offset, [0, 0]);
-        dialog.set_anchor(8);
-        assert_eq!(dialog.offset, [160, 120]);
-        dialog.set_size([540, 500]);
-        assert_eq!(dialog.offset, [-100, 20]);
-        dialog.set_anchor(4);
-        assert_eq!(dialog.offset, [-50, 10]);
-        dialog.set_offset([-50, 11]);
-        assert_eq!(dialog.anchor, None);
-        dialog.set_offset([0, 20]);
-        assert_eq!(dialog.anchor, Some(6));
-        // The middle rounds toward zero.
-        dialog.set_size([635, 485]);
-        dialog.set_anchor(4);
-        assert_eq!(dialog.offset, [-2, 2]);
-        // The same size with the artwork moved is a change.
-        let mut shift = CanvasSize::new([100, 100]);
-        shift.set_offset([-20, 5]);
-        assert!(shift.changes());
-        assert_eq!(shift.anchor, None);
-    }
-
-    #[test]
-    fn canvas_sizes_and_offsets_stay_within_the_limits() {
-        let mut dialog = CanvasSize::new([100, 80]);
-        dialog.set_size([0, 5000]);
-        assert_eq!(dialog.size, [1, 4096]);
-        dialog.set_offset([-9000, 9000]);
-        assert_eq!(dialog.offset, [-4096, 4096]);
-        assert_eq!(dialog.hint(), "canvas-size-outside");
-        dialog.set_size([100, 80]);
-        dialog.set_offset([-10, 0]);
-        assert_eq!(dialog.hint(), "canvas-size-clipped");
-        dialog.set_size([120, 80]);
-        dialog.set_offset([10, 0]);
-        assert_eq!(dialog.hint(), "canvas-size-expanded");
+    fn the_parts_outside_a_rectangle_cover_the_rest_of_it() {
+        let outer = [0.0, 0.0, 100.0, 80.0];
+        assert_eq!(outside(outer, outer), Vec::<[f64; 4]>::new());
+        assert_eq!(outside(outer, [200.0, 0.0, 300.0, 80.0]), [outer]);
+        // Cropped on the right and grown upward: only a strip on the right.
+        assert_eq!(
+            outside(outer, [0.0, -20.0, 90.0, 80.0]),
+            [[90.0, 0.0, 100.0, 80.0]]
+        );
+        let inner = [10.0, 20.0, 60.0, 50.0];
+        let area: f64 = outside(outer, inner)
+            .iter()
+            .map(|[left, top, right, bottom]| (right - left) * (bottom - top))
+            .sum();
+        assert_eq!(area, 100.0 * 80.0 - 50.0 * 30.0);
     }
 
     #[test]

@@ -70,7 +70,7 @@ pub struct Panels {
     /// Why the last edit from the panels was refused.
     refusal: Option<String>,
     /// The canvas or image size dialog, while open.
-    resize: Option<resize::Dialog>,
+    resize: Option<resize::ImageSize>,
     /// The stroke properties dialog, while open.
     restyle: Option<restyle::Dialog>,
     /// The settings dialog, while open.
@@ -1649,7 +1649,6 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
 fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let keys = &panels.keys;
     let onion = canvas.onion_skin();
-    canvas.set_onion_settings(panels.layout.onion);
     let tip = widgets::with_key(tr("onion-skin-tip"), &keys.text(Action::OnionSkin));
     let response =
         widgets::icon_button_tip(ui, Glyph::OnionSkin, 20.0, tr("onion-skin"), &tip, true);

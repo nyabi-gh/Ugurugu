@@ -175,6 +175,11 @@ impl Canvas {
         self.sync_onion();
     }
 
+    #[cfg(test)]
+    pub fn onion_settings(&self) -> OnionSettings {
+        self.onion_settings
+    }
+
     pub fn set_onion_settings(&mut self, settings: OnionSettings) {
         let settings = settings.clamped();
         if settings != self.onion_settings {

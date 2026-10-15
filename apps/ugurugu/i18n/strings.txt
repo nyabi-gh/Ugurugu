@@ -339,9 +339,7 @@ size-width | Width | 너비 | 幅
 size-height | Height | 높이 | 高さ
 size-change | %1 × %2 px  →  %3 × %4 px | %1 × %2 px  →  %3 × %4 px | %1 × %2 px  →  %3 × %4 px | args=width,height,new_width,new_height
 canvas-size-title | Change canvas size | 캔버스 크기 변경 | キャンバスサイズを変更
-canvas-size-description | Change the canvas bounds without scaling the artwork. | 그림 크기를 바꾸지 않고 캔버스 영역을 변경합니다. | 絵を拡大縮小せずにキャンバス領域を変更します。
-canvas-size-preview | Canvas size preview | 캔버스 크기 미리보기 | キャンバスサイズのプレビュー
-canvas-size-section | CANVAS SIZE | 캔버스 크기 | キャンバスサイズ
+canvas-size-drag-hint | Drag the frame's handles to resize the canvas, or inside it to move it. Shift keeps the proportions, Alt resizes from the middle. The artwork is not scaled. | 테두리의 핸들을 끌어 캔버스 크기를 바꾸고, 안쪽을 끌어 옮깁니다. Shift는 비율을 유지하고 Alt는 가운데를 기준으로 바꿉니다. 그림 크기는 바뀌지 않습니다. | 枠のハンドルをドラッグしてキャンバスサイズを変え、内側をドラッグして移動します。Shiftで縦横比を保ち、Altで中央を基準に変えます。絵は拡大縮小されません。
 canvas-size-relative | Relative size | 상대 크기 | 相対サイズ
 canvas-size-relative-tip | Use relative canvas size | 상대 캔버스 크기 사용 | キャンバスサイズを相対値で指定
 canvas-size-width | Canvas width | 캔버스 너비 | キャンバスの幅
@@ -350,7 +348,9 @@ canvas-size-width-change | Width change | 너비 변경량 | 幅の変更量
 canvas-size-height-change | Height change | 높이 변경량 | 高さの変更量
 canvas-size-width-change-name | Canvas width change | 캔버스 너비 변경량 | キャンバス幅の変更量
 canvas-size-height-change-name | Canvas height change | 캔버스 높이 변경량 | キャンバス高さの変更量
-canvas-size-anchor | REFERENCE POINT | 기준점 | 基準点
+canvas-size-section | CANVAS SIZE | 캔버스 크기 | キャンバスサイズ
+canvas-size-position | POSITION | 위치 | 位置
+canvas-size-reference | Reference point | 기준점 | 基準点
 anchor-top-left | Top left | 왼쪽 위 | 左上
 anchor-top-center | Top center | 가운데 위 | 上中央
 anchor-top-right | Top right | 오른쪽 위 | 右上
@@ -364,7 +364,6 @@ canvas-size-offset-x | X offset | X 오프셋 | Xオフセット
 canvas-size-offset-y | Y offset | Y 오프셋 | Yオフセット
 canvas-size-offset-x-name | Artwork horizontal offset | 그림 가로 오프셋 | 絵の水平方向オフセット
 canvas-size-offset-y-name | Artwork vertical offset | 그림 세로 오프셋 | 絵の垂直方向オフセット
-canvas-size-offset-summary | Artwork offset: X %1, Y %2 | 그림 오프셋: X %1, Y %2 | 絵のオフセット：X %1、Y %2 | args=x,y
 canvas-size-outside | The artwork is entirely outside the new canvas. | 그림이 새 캔버스 영역을 완전히 벗어납니다. | 絵が新しいキャンバスの外側に完全に移動します。
 canvas-size-clipped | Artwork outside the new canvas will be clipped. | 새 캔버스를 벗어난 그림은 잘립니다. | 新しいキャンバスの外側にある絵は切り取られます。
 canvas-size-expanded | The expanded area uses the canvas background. | 확장된 영역에는 캔버스 배경이 사용됩니다. | 拡張した領域にはキャンバスの背景が使用されます。

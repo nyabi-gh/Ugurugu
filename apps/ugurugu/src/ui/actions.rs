@@ -207,7 +207,9 @@ fn enabled(action: Action, canvas: &Canvas, layout: &Layout) -> bool {
         A::Restyle => restyle::available(canvas),
         A::Transform => selected && !pending,
         // Enter also places text, as it did before shortcuts could change.
-        A::ApplyTransform => pending || session.placed_text().is_some(),
+        A::ApplyTransform => {
+            pending || session.placed_text().is_some() || canvas.sizing().is_some()
+        }
         A::CancelTransform => pending,
         // As 2.2.13: without the animation there is nothing to animate.
         A::Animate | A::ExportGif | A::ExportWebP => canvas.animation_allowed(),
@@ -228,7 +230,8 @@ pub fn animated(canvas: &Canvas) -> bool {
 }
 
 /// Turns the animation tools on for a drawing that has keys or folders,
-/// and leaves the move tool when they are off.
+/// and leaves the move tool when they are off. The saved onion skin
+/// settings hold whether or not the bar that sets them is shown.
 pub fn sync_animation_tools(canvas: &mut Canvas, layout: &mut Layout) {
     if !layout.animation_tools && animated(canvas) {
         layout.animation_tools = true;
@@ -241,6 +244,7 @@ pub fn sync_animation_tools(canvas: &mut Canvas, layout: &mut Layout) {
             canvas.set_onion_skin(false);
         }
     }
+    canvas.set_onion_settings(layout.onion);
 }
 
 /// Whether there is a current layer: keys and folders take any.
@@ -403,10 +407,10 @@ pub fn run(
         A::Copy => clipboard.copy(canvas),
         A::Paste => clipboard.paste(canvas),
         A::ImageSize => {
-            panels.resize = Some(resize::Dialog::Image(resize::ImageSize::new(canvas_size)));
+            panels.resize = Some(resize::ImageSize::new(canvas_size));
         }
         A::CanvasSize => {
-            panels.resize = Some(resize::Dialog::Canvas(resize::CanvasSize::new(canvas_size)));
+            canvas.begin_sizing();
         }
         A::PixelMode => {
             let on = !canvas.session().pixel_mode();
@@ -428,6 +432,9 @@ pub fn run(
         A::Transform => canvas.begin_transform(),
         A::FlipHorizontal => canvas.flip(true),
         A::FlipVertical => canvas.flip(false),
+        A::ApplyTransform if canvas.sizing().is_some() => {
+            panels.report(canvas.apply_sizing());
+        }
         A::ApplyTransform => {
             canvas.apply_pending();
         }
@@ -502,6 +509,13 @@ pub fn shortcuts(
     }
 }
 
+/// Whether `action`'s Enter belongs to the focused control: the canvas size
+/// bar's buttons and fields, which are not in a dialog. A pending transform
+/// keeps Enter, as in 2.2.13.
+fn presses_focused(focused: bool, action: Action, canvas: &Canvas) -> bool {
+    focused && action == A::ApplyTransform && canvas.sizing().is_some()
+}
+
 /// Takes the keys of actions that can run out of this frame's input, unless
 /// a text field, a dialog or an open menu has the keyboard. The key of one
 /// that cannot run is left to the focused control, as 2.2.13's disabled
@@ -525,6 +539,7 @@ fn take_pressed(
     }
     // A whole chord can arrive within one frame, so each key is matched with
     // the modifiers it was pressed with, not the frame's last state.
+    let focused = ctx.memory(|memory| memory.focused().is_some());
     let mut pressed = Vec::new();
     ctx.input_mut(|input| {
         input.events.retain(|event| {
@@ -541,6 +556,7 @@ fn take_pressed(
             let Some(action) = keys
                 .action(chord)
                 .filter(|&action| enabled(action, canvas, layout))
+                .filter(|&action| !presses_focused(focused, action, canvas))
             else {
                 return true;
             };
@@ -607,6 +623,15 @@ mod tests {
         sync_animation_tools(&mut canvas, &mut layout);
         assert!(layout.animation_tools);
         assert!(!enabled(A::AnimationTools, &canvas, &layout));
+        // Saved onion settings hold with the animation bar hidden.
+        layout.animation_bar = false;
+        layout.onion = crate::canvas::OnionSettings {
+            before: 3,
+            after: 2,
+            opacity: 55,
+        };
+        sync_animation_tools(&mut canvas, &mut layout);
+        assert_eq!(canvas.onion_settings(), layout.onion);
     }
 
     #[test]

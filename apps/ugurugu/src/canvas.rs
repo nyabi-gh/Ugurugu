@@ -45,6 +45,7 @@ mod cursor;
 mod onion;
 mod picking;
 mod posing;
+mod sizing;
 mod text;
 mod transform;
 mod view;
@@ -52,6 +53,7 @@ mod view;
 pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
 pub use onion::{OnionKey, OnionSettings, tint as tint_onion};
+pub use sizing::{CanvasSize, clamp_edge};
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
@@ -124,6 +126,13 @@ enum Interaction {
         grip: Grip,
         start: [f64; 2],
         base: ugu_core::keys::Pose,
+    },
+    /// Dragging the frame of the canvas being sized from `start` (document
+    /// pixels), where it was at `base`.
+    Sizing {
+        grip: Grip,
+        start: [f64; 2],
+        base: [i64; 4],
     },
     /// Picking up colours with the eyedropper.
     Picking,
@@ -309,6 +318,8 @@ pub struct Canvas {
     onion_settings: OnionSettings,
     /// A key copied to paste on another frame or layer.
     copied_key: Option<ugu_core::keys::Key>,
+    /// The canvas size being changed on the canvas, if it is.
+    sizing: Option<sizing::Sizing>,
 }
 
 /// A cache worker handing its renders to `done`.
@@ -369,6 +380,7 @@ impl Canvas {
             onion_skin: false,
             onion_settings: OnionSettings::DEFAULT,
             copied_key: None,
+            sizing: None,
         }
     }
 
@@ -442,6 +454,7 @@ impl Canvas {
         self.generations += 1;
         self.tab.reset(document, saved, self.generations);
         self.interaction = Interaction::Idle;
+        self.sizing = None;
         self.spare_coverage = None;
         self.upload_all();
         if let Some(area) = self.area {
@@ -558,11 +571,8 @@ impl Canvas {
             self.tab.file = crate::files::DocumentFile::new();
             return;
         }
-        if let Interaction::Drawing { .. } =
-            std::mem::replace(&mut self.interaction, Interaction::Idle)
-        {
-            self.tab.session.cancel_stroke();
-        }
+        self.cancel_gesture();
+        self.sizing = None;
         // The one after it, or before it when it is the last.
         let next = self.position.min(self.others.len() - 1);
         let shown = self.others.remove(next);
@@ -692,7 +702,8 @@ impl Canvas {
     /// playback stops. When the document cannot take what is pending, says
     /// so and returns `false`, and the tab stays shown as it was.
     fn leave_tab(&mut self) -> bool {
-        self.cancel_gesture();
+        // Before `edit`, which would cut off a gesture without ending it.
+        self.cancel_sizing();
         if self.edit(Session::settle).is_err() {
             self.notice = Some(tr("restyle-pending").to_owned());
             return false;
@@ -748,8 +759,16 @@ impl Canvas {
         let key = self.key();
         self.tab.session.use_tools(&self.tools);
         let result = change(&mut self.tab.session);
+        // A transform or text to place is an edit of its own, which the
+        // canvas size would apply first.
+        let session = &self.tab.session;
+        if session.pending().is_some() || session.placed_text().is_some() {
+            self.cancel_sizing();
+        }
         self.record_colors();
         if self.tab.session.document().canvas != before {
+            // A frame is of the canvas before.
+            self.sizing = None;
             // The split is of the canvas before; what it shows stays until
             // the split of the new one arrives.
             self.tab.split = None;
@@ -1045,6 +1064,7 @@ impl Canvas {
 
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
+        self.cancel_sizing();
         // Paused for a stroke, it stays stopped.
         if std::mem::take(&mut self.tab.resume_playback) || self.stop_playback() {
             return;
@@ -1210,6 +1230,10 @@ impl Canvas {
             }
             CanvasInput::Begin(Gesture::Turn, _, sample) => self.begin_turn_drag(sample.position),
             CanvasInput::Begin(Gesture::Zoom, _, sample) => self.begin_zoom_drag(sample.position),
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.sizing.is_some() => {
+                self.sample_count += 1;
+                self.begin_sizing_drag(sample.position);
+            }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.picks() => {
                 self.sample_count += 1;
                 self.begin_pick(sample.position);
@@ -1273,6 +1297,7 @@ impl Canvas {
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::Posing { .. } => self.drag_pose(sample.position),
+                    Interaction::Sizing { .. } => self.drag_sizing(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Picking => self.pick(sample.position),
                     Interaction::Turning { .. } | Interaction::Zooming { .. } => {
@@ -1311,6 +1336,11 @@ impl Canvas {
                     posing @ Interaction::Posing { .. } => {
                         self.interaction = posing;
                         self.end_pose_drag(sample.position);
+                    }
+                    sizing @ Interaction::Sizing { .. } => {
+                        self.interaction = sizing;
+                        self.drag_sizing(sample.position);
+                        self.interaction = Interaction::Idle;
                     }
                     moving @ Interaction::MovingText { .. } => {
                         self.interaction = moving;
@@ -1360,6 +1390,7 @@ impl Canvas {
             Interaction::Posing { .. } => {
                 self.tab.session.cancel_pose();
             }
+            Interaction::Sizing { base, .. } => self.undrag_sizing(base),
             Interaction::MovingText { base, .. } => {
                 if let Some(outline) = self
                     .tab
@@ -1381,9 +1412,15 @@ impl Canvas {
         true
     }
 
-    /// Esc: ends the gesture under way without its result, else deselects.
+    /// Esc: ends the gesture under way without its result, else stops
+    /// sizing the canvas, else deselects.
     pub fn escape(&mut self) {
-        if !self.cancel_gesture() {
+        if self.cancel_gesture() {
+            return;
+        }
+        if self.sizing.is_some() {
+            self.cancel_sizing();
+        } else {
             self.edit(Session::escape);
         }
     }
@@ -1819,6 +1856,7 @@ impl Canvas {
         if !self.tab.placed {
             self.place(area);
         }
+        self.place_sizing(area);
     }
 
     /// 100% if the document fits, otherwise small enough to fit, centred.

@@ -168,11 +168,13 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .show(ui, |ui| {
             canvas_area = canvas.layout(ui);
             ants = super::selection_overlay(ui, canvas);
+            super::resize::sizing_overlay(ui, canvas);
             super::text_overlay(ui, canvas);
             super::pick_cursor(ui, canvas);
             super::pose_overlay(ui, canvas);
             super::brush_cursor(ui, canvas);
             super::selection_actions(ui, canvas, panels);
+            super::resize::sizing_window(ui.ctx(), ui.max_rect(), canvas, panels);
             let ppp = f64::from(ui.ctx().pixels_per_point());
             let area = ui.max_rect();
             panels.pointer = ui

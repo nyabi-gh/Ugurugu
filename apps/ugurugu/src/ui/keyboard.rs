@@ -443,12 +443,19 @@ fn each_tab_s_close_button_names_its_document() {
 }
 
 #[test]
-fn the_canvas_size_dialog_lays_out_inside_the_window() {
+fn the_canvas_size_panel_lays_out_inside_the_window_and_enter_applies_it() {
     let mut window = Window::new();
+    let before = window.canvas.session().document().canvas;
     window.click_named(tr("menu-edit"));
     window.click_named(tr("edit-canvas-size").trim_end_matches('…'));
     window.frame(Vec::new());
-    assert!(window.dialog());
+    assert!(window.canvas.sizing().is_some());
+    // Esc leaves it, the menu starts it again.
+    window.key(NONE, Key::Escape);
+    assert!(window.canvas.sizing().is_none());
+    window.click_named(tr("menu-edit"));
+    window.click_named(tr("edit-canvas-size").trim_end_matches('…'));
+    window.frame(Vec::new());
     let placed: Vec<_> = window
         .tree
         .as_ref()
@@ -467,4 +474,15 @@ fn the_canvas_size_dialog_lays_out_inside_the_window() {
             bounds.x0 >= 0.0 && bounds.y0 >= 0.0 && bounds.x1 <= 1600.0 && bounds.y1 <= 900.0;
         assert!(inside, "{bounds:?}");
     }
+    window
+        .canvas
+        .sizing_mut()
+        .unwrap()
+        .set_size([before[0] + 10, before[1]]);
+    window.key(NONE, Key::Enter);
+    assert!(window.canvas.sizing().is_none());
+    assert_eq!(
+        window.canvas.session().document().canvas,
+        [before[0] + 10, before[1]]
+    );
 }

@@ -373,7 +373,7 @@ function Get-Value($Process, [string] $Name) {
 
 # The document's edges on the screen: from the middle of the window along a
 # row and a column until the colour changes. Run on an empty document.
-function Find-Paper($Process) {
+function Find-Paper($Process, [switch] $Below) {
     $rect = Get-Rect $Process
     [Native]::MoveTo($rect.Right - 5, $rect.Bottom - 5)
     Start-Sleep -Milliseconds 300
@@ -383,6 +383,14 @@ function Find-Paper($Process) {
     $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
     $cx = [int](($rect.Left + $rect.Right) / 2)
     $cy = [int](($rect.Top + $rect.Bottom) / 2)
+    # -Below: the first white below the middle, for a document a bar over
+    # the canvas has pushed down.
+    if ($Below) {
+        $white = { param($y) $c = $bitmap.GetPixel($cx, $y); $c.R -gt 235 -and $c.G -gt 235 -and $c.B -gt 235 }
+        while ($cy -lt $rect.Bottom - 1 -and -not (& $white $cy)) { $cy++ }
+        # Past the frame's handles along its top edge.
+        $cy += 40
+    }
     $paper = $bitmap.GetPixel($cx, $cy)
     $same = {
         param($x, $y)
@@ -1035,6 +1043,57 @@ Step 'Animation icons at 100%' {
         Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     }
     "move tool, key buttons, timeline and layer list; $shot"
+}
+
+Step 'Canvas size by dragging the frame' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $words = Read-Words 'en'
+    Invoke-Word $process $words 'menu-edit'
+    Invoke-Word $process $words 'edit-canvas-size'
+    $width = Get-Value $process $words['canvas-size-width']
+    $height = Get-Value $process $words['canvas-size-height']
+    $paper = Find-Paper $process -Below
+    $my = [int](($paper.Top + $paper.Bottom) / 2)
+    [Native]::MoveTo($paper.Right, $my)
+    Start-Sleep -Milliseconds 300
+    [Native]::MoveTo($paper.Right + 1, $my)
+    Start-Sleep -Milliseconds 300
+    $cursor = [Native]::CursorName()
+    # A quarter of the document's width further right.
+    $by = [int](($paper.Right - $paper.Left) / 4)
+    [Native]::Drag(@($paper.Right, ($paper.Right + $by)), @($my, $my))
+    [Native]::MoveTo($paper.Right + $by + 60, $paper.Bottom + 60)
+    Start-Sleep -Milliseconds 700
+    $dragged = Get-Value $process $words['canvas-size-width']
+    $shot = Save-Screen 'canvas-size-frame'
+    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+    $added = $bitmap.GetPixel($paper.Right + [int]($by / 2), $my)
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    $paperShown = "$($added.R),$($added.G),$($added.B)" -eq $paper.Colour
+    # The window is in front from the drag; Send-Keys taps Alt first, which
+    # opens the menu bar.
+    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Seconds 1
+    $after = Find-Paper $process
+    $applied = Save-Screen 'canvas-size-applied'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $wanted = $width * 1.25
+    $ratio = ($after.Right - $after.Left) / ($after.Bottom - $after.Top)
+    $detail = "edge cursor $cursor; width $width -> $dragged (about $([int]$wanted)), height $height; " +
+        "added area in the paper colour $paperShown; applied ratio $([Math]::Round($ratio, 3)) " +
+        "(wanted $([Math]::Round($dragged / $height, 3))); $shot; $applied"
+    $close = { param($a, $b, $share) [Math]::Abs($a - $b) -le $b * $share }
+    if (-not ($cursor -eq 'sizewe' -and (& $close $dragged $wanted 0.03) -and $paperShown -and
+            (& $close $ratio ($dragged / $height) 0.02))) {
+        throw $detail
+    }
+    $detail
 }
 
 # Photographs every panel, menu and dialog in each of $Languages; the files
