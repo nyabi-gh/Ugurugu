@@ -581,6 +581,7 @@ pivot-y = 중심 Y
 pivot-centre = 그림 가운데로
 pivot-centre-tip = 레이어가 돌고 커지는 중심을 이 프레임에 그린 것의 가운데로 옮깁니다
 onion-skin-tip = 어니언 스킨(오른쪽 클릭으로 프레임 수와 불투명도)
+onion-settings = 어니언 스킨
 onion-before = 앞 프레임
 onion-after = 뒤 프레임
 onion-opacity = 불투명도

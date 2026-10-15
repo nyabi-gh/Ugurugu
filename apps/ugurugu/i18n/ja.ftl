@@ -581,6 +581,7 @@ pivot-y = 中心 Y
 pivot-centre = 絵の中央へ
 pivot-centre-tip = レイヤーが回転・拡大する中心を、このフレームに描いたものの中央に移します
 onion-skin-tip = オニオンスキン(右クリックでフレーム数と不透明度)
+onion-settings = オニオンスキン
 onion-before = 前のフレーム
 onion-after = 後のフレーム
 onion-opacity = 不透明度

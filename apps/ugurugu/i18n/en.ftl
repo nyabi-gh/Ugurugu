@@ -581,6 +581,7 @@ pivot-y = Pivot Y
 pivot-centre = Centre on drawing
 pivot-centre-tip = Puts the point the layer turns and scales about in the middle of what it has drawn on this frame
 onion-skin-tip = Onion skin (right-click for frames and opacity)
+onion-settings = Onion skin
 onion-before = Frames before
 onion-after = Frames after
 onion-opacity = Opacity

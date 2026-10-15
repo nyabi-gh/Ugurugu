@@ -579,6 +579,7 @@ pivot-y | Pivot Y | 중심 Y | 中心 Y
 pivot-centre | Centre on drawing | 그림 가운데로 | 絵の中央へ
 pivot-centre-tip | Puts the point the layer turns and scales about in the middle of what it has drawn on this frame | 레이어가 돌고 커지는 중심을 이 프레임에 그린 것의 가운데로 옮깁니다 | レイヤーが回転・拡大する中心を、このフレームに描いたものの中央に移します
 onion-skin-tip | Onion skin (right-click for frames and opacity) | 어니언 스킨(오른쪽 클릭으로 프레임 수와 불투명도) | オニオンスキン(右クリックでフレーム数と不透明度)
+onion-settings | Onion skin | 어니언 스킨 | オニオンスキン
 onion-before | Frames before | 앞 프레임 | 前のフレーム
 onion-after | Frames after | 뒤 프레임 | 後のフレーム
 onion-opacity | Opacity | 불투명도 | 不透明度

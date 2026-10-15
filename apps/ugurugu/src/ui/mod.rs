@@ -1656,6 +1656,7 @@ fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     egui::Popup::context_menu(&response).show(|ui| {
         ui.set_min_width(240.0);
         ui.set_max_width(280.0);
+        widgets::panel_heading(ui, tr("onion-settings"));
         let settings = &mut panels.layout.onion;
         let frames = OnionSettings::FRAMES;
         let frames = *frames.start() as f32..=*frames.end() as f32;
