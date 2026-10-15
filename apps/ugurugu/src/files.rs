@@ -69,6 +69,51 @@ fn open_type() -> FileType {
     file_type("type-open", &["ugurugu", "ugu"])
 }
 
+/// The export size, of `sizes` of `canvas`, as a drop-down list.
+fn size_row(ui: &mut egui::Ui, id: &str, canvas: [u32; 2], sizes: &[[u32; 2]], index: &mut usize) {
+    let original = export::original(canvas, sizes);
+    let label = |index: usize| {
+        let [width, height] = sizes[index];
+        if index == original {
+            format!("{}  ({width} × {height})", tr("export-size-original"))
+        } else if index < original {
+            let percent = width / canvas[0] * 100;
+            format!("{width} × {height}  ({percent}%)")
+        } else {
+            format!("{width} × {height}")
+        }
+    };
+    widgets::setting_row(ui, true, tr("export-size"), None, |ui| {
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(label(*index))
+            .width(190.0)
+            .show_ui(ui, |ui| {
+                for choice in 0..sizes.len() {
+                    widgets::choice(ui, index, choice, &label(choice));
+                }
+            })
+            .response
+            .widget_info(|| {
+                let mut info =
+                    egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, tr("export-size"));
+                info.current_text_value = Some(label(*index));
+                info
+            });
+    });
+}
+
+/// What enlarging pixel art does, under its export size.
+fn pixel_blocks_note(ui: &mut egui::Ui) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(tr("export-pixel-blocks"))
+                .size(theme::SMALL)
+                .color(theme::muted()),
+        )
+        .wrap(),
+    );
+}
+
 fn still_types() -> Vec<FileType> {
     vec![
         file_type("type-png", &["png"]),
@@ -383,6 +428,11 @@ pub struct Files {
     export_edge: Option<u32>,
     /// One chosen since, for the settings.
     chosen_export_edge: Option<u32>,
+    /// How many times pixel art was last enlarged when exported, from the
+    /// settings.
+    pixel_export_times: Option<u32>,
+    /// One chosen since, for the settings.
+    chosen_pixel_export_times: Option<u32>,
     /// What the status bar says.
     message: Option<String>,
     /// Whether it says what failed, which goes before progress and notes.
@@ -398,12 +448,18 @@ pub struct Files {
     exporting: Option<Exporting>,
     /// The animation export options asked for, while they are.
     animation_dialog: Option<AnimationDialog>,
+    /// Into `export::sizes` of a pixel art document whose image export size
+    /// is asked for, while it is.
+    image_dialog: Option<usize>,
     /// The new document's size, while it is asked for.
     new_document: Option<[i64; 2]>,
     /// Whether the new document asked for is in pixel mode.
     new_pixel: bool,
     /// The animation export chosen, waiting for where it goes.
     animation_job: Option<ExportJob>,
+    /// How many times the image export chosen is enlarged, waiting for
+    /// where it goes.
+    image_times: Option<u32>,
     /// Cancelled exports whose threads may still be finishing.
     cancelled: Vec<Exporting>,
     /// The export cancelled last, whose file may still have been put in
@@ -485,6 +541,8 @@ impl Files {
             chosen_save_folder: None,
             export_edge: None,
             chosen_export_edge: None,
+            pixel_export_times: None,
+            chosen_pixel_export_times: None,
             message: None,
             failing: false,
             upcoming: None,
@@ -494,9 +552,11 @@ impl Files {
             reading_found: false,
             exporting: None,
             animation_dialog: None,
+            image_dialog: None,
             new_document: None,
             new_pixel: false,
             animation_job: None,
+            image_times: None,
             cancelled: Vec::new(),
             last_cancelled: None,
             exports: 0,
@@ -1101,6 +1161,14 @@ impl Files {
         self.chosen_export_edge.take()
     }
 
+    pub fn set_pixel_export_times(&mut self, times: Option<u32>) {
+        self.pixel_export_times = times;
+    }
+
+    pub fn take_chosen_pixel_export_times(&mut self) -> Option<u32> {
+        self.chosen_pixel_export_times.take()
+    }
+
     /// Saves as `file_type` under the document's name, in its folder, or in
     /// the default save folder for a document never saved, as 2.2.13 does.
     fn pick_save(&mut self, file: &DocumentFile, purpose: Purpose, file_types: Vec<FileType>) {
@@ -1170,9 +1238,21 @@ impl Files {
         self.pick_save(canvas.file(), Purpose::ExportTools, vec![tools_type()]);
     }
 
-    /// Asks where to export the frame shown, one export at a time.
+    /// Asks where to export the frame shown, one export at a time; for pixel
+    /// art first how many times to enlarge it.
     pub fn export_image(&mut self, canvas: &Canvas) {
-        if self.exporting.is_none() {
+        if self.exporting.is_some() || self.busy_dialog {
+            return;
+        }
+        let document = canvas.session().document();
+        if document.pixel {
+            let sizes = export::sizes(document.canvas);
+            self.image_dialog = Some(export::pixel_choice(
+                document.canvas,
+                &sizes,
+                self.pixel_export_times,
+            ));
+        } else {
             self.pick_save(canvas.file(), Purpose::ExportImage, still_types());
         }
     }
@@ -1187,11 +1267,15 @@ impl Files {
         let budget = crate::budget::Budget::now(0).render as u64;
         // The size last chosen, or the next smaller one that fits.
         let sizes = export::sizes(document.canvas);
-        let preferred = export::nearest(
-            document.canvas,
-            &sizes,
-            self.export_edge.unwrap_or(export::FIRST_EDGE),
-        );
+        let preferred = if document.pixel {
+            export::pixel_choice(document.canvas, &sizes, self.pixel_export_times)
+        } else {
+            export::nearest(
+                document.canvas,
+                &sizes,
+                self.export_edge.unwrap_or(export::FIRST_EDGE),
+            )
+        };
         let size = (preferred..sizes.len())
             .find(|&index| {
                 export::threads_within(
@@ -1327,18 +1411,6 @@ impl Files {
             threads.unwrap_or(1),
         );
         let mebibytes = format!("{:.0}", bytes as f64 / (1024.0 * 1024.0));
-        let original = export::original(document.canvas, &sizes);
-        let label = |index: usize| {
-            let [width, height] = sizes[index];
-            if index == original {
-                format!("{}  ({width} × {height})", tr("export-size-original"))
-            } else if index < original {
-                let percent = width / document.canvas[0] * 100;
-                format!("{width} × {height}  ({percent}%)")
-            } else {
-                format!("{width} × {height}")
-            }
-        };
         let mut choice = None;
         let title = tr(match dialog.format {
             Animation::Gif => "export-gif-title",
@@ -1346,26 +1418,7 @@ impl Files {
         });
         let modal = widgets::dialog(ctx, "animation export", 420.0, title, None, |ui| {
             widgets::card(ui, |ui| {
-                widgets::setting_row(ui, true, tr("export-size"), None, |ui| {
-                    egui::ComboBox::from_id_salt("gif size")
-                        .selected_text(label(dialog.size))
-                        .width(190.0)
-                        .show_ui(ui, |ui| {
-                            for index in 0..sizes.len() {
-                                widgets::choice(ui, &mut dialog.size, index, &label(index));
-                            }
-                        })
-                        .response
-                        .widget_info(|| {
-                            let mut info = egui::WidgetInfo::labeled(
-                                egui::WidgetType::ComboBox,
-                                true,
-                                tr("export-size"),
-                            );
-                            info.current_text_value = Some(label(dialog.size));
-                            info
-                        });
-                });
+                size_row(ui, "gif size", document.canvas, &sizes, &mut dialog.size);
                 let opaque = (!transparent).then(|| tr("export-opaque-background"));
                 let mut keep = transparent && dialog.keep_transparency;
                 widgets::switch_row(
@@ -1397,6 +1450,9 @@ impl Files {
                 ))
                 .color(theme::accent_ink())
             };
+            if document.pixel {
+                pixel_blocks_note(ui);
+            }
             ui.add(egui::Label::new(estimate.size(theme::SMALL)).wrap());
             let seconds = f64::from(document.frames) / f64::from(document.frames_per_second);
             let length = tr_with(
@@ -1446,7 +1502,11 @@ impl Files {
             Some(true) => {
                 let format = dialog.format;
                 let [width, height] = sizes[dialog.size];
-                self.chosen_export_edge = Some(width.max(height));
+                if !document.pixel {
+                    self.chosen_export_edge = Some(width.max(height));
+                } else if let Some(times) = export::times(document.canvas, sizes[dialog.size]) {
+                    self.chosen_pixel_export_times = Some(times);
+                }
                 self.animation_job = Some(ExportJob::Animation {
                     format,
                     size: sizes[dialog.size],
@@ -1461,6 +1521,58 @@ impl Files {
                 self.pick_save(canvas.file(), Purpose::ExportAnimation, types);
             }
             Some(false) => self.animation_dialog = None,
+            None => {}
+        }
+    }
+
+    /// The size of a pixel art image export, while it is asked for.
+    pub fn ask_image(&mut self, ctx: &egui::Context, canvas: &Canvas) {
+        let Some(size) = self.image_dialog.as_mut() else {
+            return;
+        };
+        let document = canvas.session().document();
+        let all = export::sizes(document.canvas);
+        // An image is not shrunk: a smaller one is a smaller canvas.
+        let sizes = &all[..=export::original(document.canvas, &all)];
+        let mut choice = None;
+        let modal = widgets::dialog(
+            ctx,
+            "image export",
+            420.0,
+            tr("export-image-title"),
+            None,
+            |ui| {
+                widgets::card(ui, |ui| {
+                    size_row(ui, "image size", document.canvas, sizes, size);
+                });
+                ui.add_space(theme::space::L);
+                pixel_blocks_note(ui);
+                widgets::dialog_buttons(ui, |ui| {
+                    if widgets::button(ui, tr("export-confirm"), widgets::Emphasis::Primary, true)
+                        .clicked()
+                    {
+                        choice = Some(true);
+                    }
+                    if widgets::button(ui, tr("export-cancel"), widgets::Emphasis::Secondary, true)
+                        .clicked()
+                    {
+                        choice = Some(false);
+                    }
+                });
+            },
+        );
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false);
+        }
+        match choice {
+            Some(true) => {
+                let times = export::times(document.canvas, sizes[*size]).unwrap_or(1);
+                self.chosen_pixel_export_times = Some(times);
+                self.image_times = Some(times);
+                self.image_dialog = None;
+                self.pick_save(canvas.file(), Purpose::ExportImage, still_types());
+            }
+            Some(false) => self.image_dialog = None,
             None => {}
         }
     }
@@ -1571,6 +1683,7 @@ impl Files {
                 let Some(path) = path else {
                     self.forget_after_save();
                     self.animation_job = None;
+                    self.image_times = None;
                     return;
                 };
                 match purpose {
@@ -1587,8 +1700,9 @@ impl Files {
                         }
                     }
                     Purpose::ExportImage => {
+                        let times = self.image_times.take().unwrap_or(1);
                         let frame = canvas.session().frame();
-                        self.start_export(path, canvas, ExportJob::Still { frame });
+                        self.start_export(path, canvas, ExportJob::Still { frame, times });
                     }
                     Purpose::ExportAnimation => {
                         if let Some(job) = self.animation_job.take() {
@@ -2942,6 +3056,7 @@ mod tests {
         let outcome = crate::export::still(
             Arc::new(document.clone()),
             5,
+            1,
             &path,
             &worker.renders(),
             &not_cancelled,

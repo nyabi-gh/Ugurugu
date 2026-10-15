@@ -84,6 +84,8 @@ pub struct Settings {
     pub default_save_folder: Option<PathBuf>,
     /// The long edge animations were last exported at.
     pub export_edge: Option<u32>,
+    /// How many times pixel art was last enlarged when exported, 1 for not.
+    pub pixel_export_times: Option<u32>,
     /// The tools and colour history as last left.
     pub tools: Tools,
     /// The shortcuts changed from their defaults.
@@ -110,6 +112,7 @@ impl Default for Settings {
             pixel_grid: true,
             default_save_folder: None,
             export_edge: None,
+            pixel_export_times: None,
             tools: Tools::default(),
             shortcuts: Shortcuts::default(),
             check_updates: true,
@@ -128,6 +131,7 @@ impl Settings {
     pub fn restored(&self) -> Self {
         Self {
             export_edge: self.export_edge,
+            pixel_export_times: self.pixel_export_times,
             // Pen pressure is the one tool setting the dialog shows.
             tools: Tools {
                 uses_pressure: Tools::default().uses_pressure,
@@ -218,6 +222,17 @@ impl Settings {
                 _ => tracing::warn!(edge, "the export size in the settings is out of range"),
             }
         }
+        if let Some(times) = take(&mut object, "pixelExportScale", Value::as_u64) {
+            match u32::try_from(times) {
+                Ok(times) if crate::export::offered_times(times) => {
+                    settings.pixel_export_times = Some(times)
+                }
+                _ => tracing::warn!(
+                    times,
+                    "the pixel export scale in the settings is not offered"
+                ),
+            }
+        }
         if let Some(on) = take(&mut object, "checkForUpdates", Value::as_bool) {
             settings.check_updates = on;
         }
@@ -297,6 +312,9 @@ impl Settings {
         }
         if let Some(edge) = self.export_edge {
             object.insert("exportSize".to_owned(), edge.into());
+        }
+        if let Some(times) = self.pixel_export_times {
+            object.insert("pixelExportScale".to_owned(), times.into());
         }
         if !self.check_updates {
             object.insert("checkForUpdates".to_owned(), false.into());
@@ -720,6 +738,7 @@ mod tests {
             pixel_grid: false,
             default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),
             export_edge: Some(384),
+            pixel_export_times: Some(4),
             tools: {
                 let mut tools = Tools {
                     tool: ugu_session::Tool::Fill,
@@ -891,7 +910,8 @@ mod tests {
         let settings = Settings::parse(
             r##"{"format": "ugurugu.settings", "version": 1, "language": "fr",
                 "accent": "#12abef", "wobbleAnimation": "yes",
-                "defaultSaveFolder": "relative\\folder", "exportSize": 9000}"##,
+                "defaultSaveFolder": "relative\\folder", "exportSize": 9000,
+                "pixelExportScale": 3}"##,
         );
         assert_eq!(
             settings,

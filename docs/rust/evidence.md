@@ -1310,3 +1310,11 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 **Windows Sandbox (2026-10-15):** `gui.ps1`의 "Symmetry ruler"는 보기 메뉴로 대칭자를 켜고(도구 설정 스위치가 켜짐), 캔버스 왼쪽 절반에만 획을 그은 뒤 가운데 선 오른쪽(선 둘레 15px 제외)의 어두운 화소를 센다: 0 → 218. 이어서 선 수를 6으로 바꿔 그은 획이 12방향으로 그려진 것을 스크린샷으로 확인했다. 처음 세 번은 시험 스크립트가 실패했다(메뉴 이름 찾기, 함수 정의 순서, 이름이 같은 도구 설정 제목을 메뉴 항목 대신 누른 것으로 보임, 가설. 메뉴 항목을 Toggle·SelectionItem 패턴으로 찾게 한 뒤 통과).
 
 **남은 것:** 사용자 PC의 마우스·태블릿 보고율에서의 입력→표시는 재지 않았다.
+
+## 69. 픽셀 그림의 내보내기 크기 (이슈 #24, 2026-10-15)
+
+**질문:** 이슈 #24 사용자는 GIF로 내보내면 픽셀 칸이 보이지 않는다고 했다. 고치기 전에는 픽셀 모드 문서도 GIF 크기가 긴 변 512(`FIRST_EDGE`)에서 시작해 1024×768 문서가 면적 평균으로 줄었고, 이미지 내보내기에는 확대가 없었다(decisions.md 8절).
+
+**방법:** 단위 시험 `an_image_enlarged_four_times_makes_each_pixel_a_four_by_four_block`(PNG 4배의 화소가 원본 화소의 4×4 블록과 같은지), `pixel_art_is_offered_its_last_enlargement_or_its_own_size`. Windows Sandbox에서 `gui.ps1`의 "Pixel art exports at its own size"가 설정 없이 새 문서에 픽셀 모드를 켜고 현재 프레임 이미지 내보내기와 움직이는 GIF 내보내기 창의 크기 칸을 UI Automation으로 읽었다.
+
+**결과:** 두 시험 통과. Sandbox에서 두 창 모두 "Original size  (1024 × 768)"으로 시작했고, 이미지 창은 원본과 200·400%만 보였다(800%는 긴 변 4096을 넘음). 처음 두 번은 시험 스크립트가 실패했다(단계를 `Invoke-Word` 정의보다 앞에 둠, 애니메이션이 켜진 메뉴의 이름은 "Export current frame as image").

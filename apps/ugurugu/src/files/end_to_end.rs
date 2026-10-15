@@ -153,7 +153,7 @@ fn draw_move_save_reopen_and_export() {
     let shared = Arc::new(reopened.session().document().clone());
     let not_cancelled = std::sync::atomic::AtomicBool::new(false);
     assert_eq!(
-        crate::export::still(shared, 7, &png, &reopened.renders(), &not_cancelled),
+        crate::export::still(shared, 7, 1, &png, &reopened.renders(), &not_cancelled),
         crate::export::Outcome::Done
     );
     let mut decoder =

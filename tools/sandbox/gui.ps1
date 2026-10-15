@@ -966,6 +966,32 @@ function Get-Ink($Process, $Paper) {
     [pscustomobject]@{ Centre = $centre; Count = $count; Red = $red }
 }
 
+Step 'Pixel art exports at its own size' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $words = Read-Words 'en'
+    Invoke-Word $process $words 'menu-edit'
+    Invoke-Word $process $words 'pixel-mode'
+    Start-Sleep -Milliseconds 500
+    $sizes = foreach ($menu in 'file-export-frame', 'export-gif') {
+        Invoke-Word $process $words 'menu-file'
+        Invoke-Word $process $words $menu
+        Start-Sleep -Milliseconds 500
+        $value = (Find-Pattern $process $words['export-size'] @([Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $shot = Save-Screen "pixel-$menu"
+        Send-Keys $process '{ESC}'
+        Start-Sleep -Milliseconds 300
+        [pscustomobject]@{ Menu = $menu; Value = $value; Shot = $shot }
+    }
+    Stop-Apps
+    $detail = ($sizes | ForEach-Object { "$($_.Menu): '$($_.Value)' $($_.Shot)" }) -join '; '
+    if ($sizes | Where-Object { -not $_.Value.StartsWith($words['export-size-original']) }) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'Symmetry ruler' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App

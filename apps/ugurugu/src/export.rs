@@ -37,6 +37,11 @@ pub const FIRST_EDGE: u32 = 512;
 const ENLARGEMENTS: [u32; 3] = [8, 4, 2];
 const MOST_ENLARGED: u32 = 4096;
 
+/// Whether exports are enlarged `times` times, 1 being the document's size.
+pub fn offered_times(times: u32) -> bool {
+    times == 1 || ENLARGEMENTS.contains(&times)
+}
+
 /// Frames drawn ahead of the export thread.
 const QUEUE: usize = 2;
 /// Frames drawn ahead of each WebP run.
@@ -64,8 +69,9 @@ pub enum Animation {
 /// What is exported.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Job {
-    /// One frame at the document's size, as the file's extension says.
-    Still { frame: i64 },
+    /// One frame at the document's size enlarged `times` times, as the
+    /// file's extension says.
+    Still { frame: i64, times: u32 },
     /// Every frame.
     Animation {
         format: Animation,
@@ -114,6 +120,21 @@ pub fn nearest(canvas: [u32; 2], sizes: &[[u32; 2]], edge: u32) -> usize {
 /// Where the document's own size is in its `sizes`.
 pub fn original(canvas: [u32; 2], sizes: &[[u32; 2]]) -> usize {
     sizes.iter().position(|&size| size == canvas).unwrap_or(0)
+}
+
+/// Of `sizes` of a pixel art `canvas`, the one enlarged `times` times if
+/// offered, else the document's own: shrinking would blend its pixels.
+pub fn pixel_choice(canvas: [u32; 2], sizes: &[[u32; 2]], times: Option<u32>) -> usize {
+    let enlarged = times.map(|times| canvas.map(|side| side * times));
+    sizes
+        .iter()
+        .position(|&size| Some(size) == enlarged)
+        .unwrap_or_else(|| original(canvas, sizes))
+}
+
+/// How many times `size` enlarges `canvas`, 1 for its own; `None` when shrunk.
+pub fn times(canvas: [u32; 2], size: [u32; 2]) -> Option<u32> {
+    (size[0] >= canvas[0]).then(|| size[0] / canvas[0])
 }
 
 /// Premultiplied RGBA8 `pixels` of `from` made `to`: shrunk by averaging,
@@ -221,7 +242,9 @@ impl Exporting {
                     let started = std::time::Instant::now();
                     // A panic, which the panic hook records, still ends the export.
                     let run = std::panic::AssertUnwindSafe(|| match job {
-                        Job::Still { frame } => still(document, frame, &path, &renders, &cancel),
+                        Job::Still { frame, times } => {
+                            still(document, frame, times, &path, &renders, &cancel)
+                        }
                         Job::Animation {
                             format,
                             size,
@@ -290,31 +313,35 @@ fn replace_unless(cancel: &AtomicBool) -> impl Fn(&Path, &Path) -> std::io::Resu
 }
 
 /// Renders `frame` without reference layers at the document's size, on the
-/// render worker after the canvas's own work, and writes it to `path`, in
-/// the format its extension names (PNG for any other).
+/// render worker after the canvas's own work, enlarges it `times` times with
+/// each pixel a block, and writes it to `path`, in the format its extension
+/// names (PNG for any other).
 pub fn still(
     document: Arc<Document>,
     frame: i64,
+    times: u32,
     path: &Path,
     renders: &Renders,
     cancel: &AtomicBool,
 ) -> Outcome {
     let cancelled = || cancel.load(Ordering::Relaxed);
-    let size = document.canvas;
+    let canvas = document.canvas;
     let Some(pixmap) = renders.export(document, frame) else {
         return Outcome::Failed("the render worker has stopped".to_owned());
     };
     if cancelled() {
         return Outcome::Cancelled;
     }
+    let size = canvas.map(|side| side * times);
+    let enlarged;
+    let pixels = if times > 1 {
+        enlarged = ugu_io::image::enlarge(pixmap.data_as_u8_slice(), canvas, times);
+        &enlarged[..]
+    } else {
+        pixmap.data_as_u8_slice()
+    };
     let format = Format::of(path).unwrap_or(Format::Png);
-    match ugu_io::image::export(
-        pixmap.data_as_u8_slice(),
-        size,
-        format,
-        path,
-        &replace_unless(cancel),
-    ) {
+    match ugu_io::image::export(pixels, size, format, path, &replace_unless(cancel)) {
         Ok(()) => Outcome::Done,
         Err(_) if cancelled() => Outcome::Cancelled,
         Err(error) => Outcome::Failed(error.to_string()),
@@ -618,6 +645,7 @@ mod tests {
         still(
             document,
             0,
+            1,
             path,
             &worker.renders(),
             &AtomicBool::new(cancel),
@@ -840,6 +868,50 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn an_image_enlarged_four_times_makes_each_pixel_a_four_by_four_block() {
+        let folder = folder("still-enlarged");
+        let worker = CacheWorker::start(|_| {}).unwrap();
+        let document = Arc::new(pixel_art());
+        let export = |times, name: &str| {
+            let path = folder.join(name);
+            let outcome = still(
+                document.clone(),
+                0,
+                times,
+                &path,
+                &worker.renders(),
+                &AtomicBool::new(false),
+            );
+            assert_eq!(outcome, Outcome::Done);
+            image::open(&path).unwrap().to_rgba8()
+        };
+        let small = export(1, "one.png");
+        let large = export(4, "four.png");
+        assert_eq!(small.dimensions(), (16, 12));
+        assert_eq!(large.dimensions(), (64, 48));
+        for (x, y, pixel) in large.enumerate_pixels() {
+            assert_eq!(*pixel, *small.get_pixel(x / 4, y / 4), "{x}, {y}");
+        }
+    }
+
+    #[test]
+    fn pixel_art_is_offered_its_last_enlargement_or_its_own_size() {
+        let canvas = [600, 400];
+        let offered = sizes(canvas);
+        assert_eq!(offered[pixel_choice(canvas, &offered, None)], canvas);
+        assert_eq!(offered[pixel_choice(canvas, &offered, Some(1))], canvas);
+        assert_eq!(
+            offered[pixel_choice(canvas, &offered, Some(4))],
+            [2400, 1600]
+        );
+        // 8 times would pass the longest edge offered.
+        assert_eq!(offered[pixel_choice(canvas, &offered, Some(8))], canvas);
+        assert_eq!(times(canvas, [2400, 1600]), Some(4));
+        assert_eq!(times(canvas, canvas), Some(1));
+        assert_eq!(times(canvas, fit(canvas, 256)), None);
     }
 
     #[test]

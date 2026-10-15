@@ -27,6 +27,8 @@ export-gif | Export animated &GIF… | 움직이는 GIF 내보내기(&G)… | �
 export-gif-title | Export animated GIF | 움직이는 GIF 내보내기 | アニメーションGIFを書き出す
 export-webp | Export animated &WebP… | 움직이는 WebP 내보내기(&W)… | アニメーションWebPを書き出す(&W)…
 export-webp-title | Export animated WebP | 움직이는 WebP 내보내기 | アニメーションWebPを書き出す
+export-image-title | Export image | 이미지로 내보내기 | 画像で書き出す
+export-pixel-blocks | Enlarged sizes make each pixel a square block, so pixel art keeps its look at 100%. | 확대한 크기는 화소 하나하나가 네모난 블록이 되어, 100%로 보아도 픽셀 그림 모양 그대로입니다. | 拡大したサイズでは 1 画素ずつ四角いブロックになり、100% で見てもピクセルアートの見た目のままです。
 export-confirm | Export | 내보내기 | 書き出し
 export-size | Size | 크기 | サイズ
 export-size-original | Original size | 원본 크기 | 元のサイズ

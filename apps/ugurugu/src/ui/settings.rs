@@ -118,6 +118,7 @@ pub fn apply(
     canvas.tools_mut().uses_pressure = settings.tools.uses_pressure;
     files.set_default_save_folder(settings.default_save_folder.clone());
     files.set_export_edge(settings.export_edge);
+    files.set_pixel_export_times(settings.pixel_export_times);
     files.follow_updates(settings.check_updates, settings.update_checked);
     *keys = Keymap::new(&settings.shortcuts);
 }
@@ -147,6 +148,10 @@ pub fn show(
     if let Some(edge) = files.take_chosen_export_edge() {
         store.change(|settings| settings.export_edge = Some(edge));
         files.set_export_edge(Some(edge));
+    }
+    if let Some(times) = files.take_chosen_pixel_export_times() {
+        store.change(|settings| settings.pixel_export_times = Some(times));
+        files.set_pixel_export_times(Some(times));
     }
     let Some(dialog) = panels.settings.as_mut() else {
         return;
