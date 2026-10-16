@@ -41,10 +41,11 @@ it.
   hides the symptom is not a fix. When the cause cannot be fixed in this change,
   say so and record it in `docs/rust/backlog.md` instead of shipping a
   workaround as the fix.
-- Work on a branch. Only release preparation (version bump and release notes)
-  is committed on `main`. PRs are merged by fast-forwarding `main`
-  (`git push origin <branch>:main`) after CI passes; dependent PRs are stacked
-  and merged in order.
+- Work on a branch, release preparation included. PRs are merged by
+  fast-forwarding `main` (`git push origin <branch>:main`) after CI passes;
+  dependent PRs are stacked and merged in order. A ruleset rejects any push to
+  `main` whose commit lacks a passing "Quality gate", and `v3.*` tags cannot be
+  moved or deleted (`docs/rust/decisions.md` section 10).
 - Before committing, run the checks in [BUILDING.md](BUILDING.md#checks),
   including `cargo test --workspace --release --locked`, which CI does not run
   (it tests the debug build only). Read their output before the commit runs:
