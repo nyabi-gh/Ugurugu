@@ -2789,6 +2789,59 @@ fn the_symmetry_ruler_draws_the_mirrored_stroke_in_the_same_undo_step() {
     assert!(ops(&session, layer).is_empty());
 }
 
+/// Two closed boxes mirrored about x = 100, the ruler's upright line.
+fn two_boxes() -> Vec<[u8; 4]> {
+    let mut pixels = vec![[0; 4]; 200 * 100];
+    for [left, right] in [[20, 60], [140, 180]] {
+        for y in 20..80 {
+            for x in left..right {
+                if !(left + 2..right - 2).contains(&x) || !(22..78).contains(&y) {
+                    pixels[y * 200 + x] = [0, 0, 0, 255];
+                }
+            }
+        }
+    }
+    pixels
+}
+
+#[test]
+fn the_ruler_fills_the_mirrored_area_too_in_one_fill() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    let reference = two_boxes();
+    let read = Some(reference.as_slice());
+    let filled = |session: &Session| -> Vec<[i32; 4]> {
+        fills(session, layer)
+            .into_iter()
+            .map(|(coverage, ..)| session.document().store.masks[&coverage].bounds)
+            .collect()
+    };
+    session.bucket(&tools, [40.0, 50.0], read).unwrap();
+    assert_eq!(filled(&session), [[21, 21, 38, 58]]);
+    assert!(session.undo().unwrap());
+    // With the ruler, the mirrored box is filled by the same fill, undone
+    // in one step.
+    mirrored(&mut session);
+    session.bucket(&tools, [40.0, 50.0], read).unwrap();
+    assert_eq!(filled(&session), [[21, 21, 158, 58]]);
+    assert!(session.undo().unwrap());
+    assert!(fills(&session, layer).is_empty());
+    // A repeat that lands in the area clicked adds nothing.
+    let mut wide = vec![[0; 4]; 200 * 100];
+    for y in 20..80 {
+        for x in 20..180 {
+            if !(22..178).contains(&x) || !(22..78).contains(&y) {
+                wide[y * 200 + x] = [0, 0, 0, 255];
+            }
+        }
+    }
+    session
+        .bucket(&tools, [40.0, 50.0], Some(wide.as_slice()))
+        .unwrap();
+    assert_eq!(filled(&session), [[21, 21, 158, 58]]);
+}
+
 #[test]
 fn the_ruler_mirrors_erasing_and_the_lift_too() {
     let mut session = session();

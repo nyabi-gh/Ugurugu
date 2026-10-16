@@ -194,13 +194,40 @@ impl Session {
             };
             // The current layer alone is read in its own pixels, anything
             // else as shown.
-            let area = if tools.fill.reads == Reads::Current {
-                let seed = session
-                    .pixel(session.to_layer(position))
-                    .ok_or(FillError::NothingThere)?;
-                Arc::new(found(session, seed)?)
+            let own = tools.fill.reads == Reads::Current;
+            let seed_at = |session: &Self, at: [f64; 2]| {
+                session.pixel(if own { session.to_layer(at) } else { at })
+            };
+            let seed = seed_at(session, position).ok_or(FillError::NothingThere)?;
+            let mut area = found(session, seed)?;
+            // The symmetry ruler fills where it repeats the clicked pixel
+            // too, in the same fill; a repeat off the canvas, outside the
+            // selection or on nothing to fill is left out.
+            let middle = clicked.map(|edge| f64::from(edge) + 0.5);
+            for copy in session.symmetry().copies() {
+                let at = copy.apply(middle);
+                let Some(seed) = seed_at(session, at) else {
+                    continue;
+                };
+                let covered = area.mask().contains(seed[0] as i32, seed[1] as i32);
+                let outside = session.selection().is_some_and(|selection| {
+                    !session.pixel(at).is_some_and(|pixel| {
+                        selection.mask().contains(pixel[0] as i32, pixel[1] as i32)
+                    })
+                });
+                if covered || outside {
+                    continue;
+                }
+                if let Ok(more) = found(session, seed)
+                    && let Some(both) = Selection::combine(Some(&area), Some(more), Combine::Add)
+                {
+                    area = both;
+                }
+            }
+            let area = Arc::new(area);
+            let area = if own {
+                area
             } else {
-                let area = Arc::new(found(session, clicked)?);
                 session.in_layer(&area).ok_or(FillError::NothingThere)?
             };
             let clip = session.layer_clip()?;
