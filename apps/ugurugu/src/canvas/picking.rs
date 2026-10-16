@@ -20,7 +20,9 @@ impl Canvas {
         match self.tools.tool {
             Tool::Eyedropper => true,
             Tool::Pen | Tool::Eraser | Tool::Fill => alt,
-            Tool::Select | Tool::Wand | Tool::Text | Tool::Shape | Tool::Move => false,
+            Tool::Select | Tool::Wand | Tool::Text | Tool::Shape | Tool::Move | Tool::Symmetry => {
+                false
+            }
         }
     }
 

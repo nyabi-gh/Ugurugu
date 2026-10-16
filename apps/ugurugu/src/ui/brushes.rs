@@ -79,7 +79,8 @@ impl Presets {
             | Tool::Text
             | Tool::Eyedropper
             | Tool::Shape
-            | Tool::Move => canvas.brushes().pen.preset,
+            | Tool::Move
+            | Tool::Symmetry => canvas.brushes().pen.preset,
             Tool::Eraser => canvas.brushes().eraser.preset,
         };
         let presets: Vec<&'static Preset> = match tool {
@@ -105,7 +106,8 @@ impl Presets {
             | Tool::Text
             | Tool::Eyedropper
             | Tool::Shape
-            | Tool::Move => {
+            | Tool::Move
+            | Tool::Symmetry => {
                 let shown = self.category.unwrap_or(current.category);
                 // As many equal tabs a row as fit their names, so the tabs
                 // never widen the panel.

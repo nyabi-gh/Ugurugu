@@ -52,6 +52,8 @@ pub enum Glyph {
     OnionSkin = 38,
     AnimationFolder = 39,
     NewCel = 40,
+    /// The symmetry ruler tool.
+    Symmetry = 41,
 }
 
 /// A diamond, as a key is drawn on a timeline.
@@ -379,6 +381,14 @@ fn shapes(glyph: Glyph) -> Shapes {
             lines.push(vec![[5.0, 4.4], [5.0, 19.6], [12.4, 19.6]]);
             lines.push(vec![[17.6, 13.4], [17.6, 21.0]]);
             lines.push(vec![[13.8, 17.2], [21.4, 17.2]]);
+        }
+        Glyph::Symmetry => {
+            // A broken upright line with a wedge mirrored either side.
+            for [top, bottom] in [[2.6, 7.0], [9.6, 14.4], [17.0, 21.4]] {
+                lines.push(vec![[12.0, top], [12.0, bottom]]);
+            }
+            lines.push(vec![[8.6, 6.4], [3.6, 12.0], [8.6, 17.6]]);
+            lines.push(vec![[15.4, 6.4], [20.4, 12.0], [15.4, 17.6]]);
         }
         Glyph::Shape => {
             // A square, and a circle over its corner.

@@ -333,6 +333,7 @@ actions! {
     Text "text" "tool-text" [plain(Key::T)] [];
     Eyedropper "eyedropper" "tool-eyedropper" [plain(Key::I)] [];
     Shape "shape" "tool-shape" [plain(Key::U)] [];
+    SymmetryRuler "symmetryRulerTool" "tool-symmetry" [plain(Key::R)] [];
     MoveLayer "moveLayer" "tool-move" [plain(Key::V)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];

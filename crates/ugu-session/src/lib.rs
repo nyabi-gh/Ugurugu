@@ -59,6 +59,8 @@ pub enum Tool {
     Shape,
     /// Moves, turns and scales the current layer on the frame shown.
     Move,
+    /// Places the symmetry ruler on the canvas.
+    Symmetry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

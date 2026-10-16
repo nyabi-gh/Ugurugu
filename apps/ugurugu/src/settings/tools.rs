@@ -14,7 +14,7 @@ use ugu_session::{
     Tool, ToolSettings, Tools, is_pixel,
 };
 
-const TOOLS: [(Tool, &str); 9] = [
+const TOOLS: [(Tool, &str); 10] = [
     (Tool::Pen, "brush"),
     (Tool::Eraser, "eraser"),
     (Tool::Select, "select"),
@@ -24,6 +24,7 @@ const TOOLS: [(Tool, &str); 9] = [
     (Tool::Eyedropper, "eyedropper"),
     (Tool::Shape, "shape"),
     (Tool::Move, "move"),
+    (Tool::Symmetry, "symmetry"),
 ];
 const SHAPES: [(ShapeKind, &str); 3] = [
     (ShapeKind::Freehand, "freehand"),
@@ -517,6 +518,7 @@ mod tests {
             Tool::Eyedropper,
             Tool::Shape,
             Tool::Move,
+            Tool::Symmetry,
         ];
         for tool in every {
             // A new tool does not build here until it is listed above.
@@ -529,7 +531,8 @@ mod tests {
                 | Tool::Text
                 | Tool::Eyedropper
                 | Tool::Shape
-                | Tool::Move => {}
+                | Tool::Move
+                | Tool::Symmetry => {}
             }
             let tools = Tools {
                 tool,

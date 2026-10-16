@@ -247,6 +247,7 @@ antialiasing-name | Anti-aliasing | 안티앨리어싱 | アンチエイリア�
 antialiasing-tip | Smooth stroke edges | 선 가장자리를 부드럽게 | 線の縁を滑らかにします
 symmetry | Symmetry ruler | 대칭자 | 対称定規
 symmetry-on | On | 사용 | 使用
+symmetry-hint | Drag on the canvas to lay the ruler's first line from its centre. Drag the centre to move it; Shift turns the line in 15° steps. | 캔버스에서 끌면 끈 곳을 중심으로 대칭자의 첫 선이 놓입니다. 중심을 끌면 대칭자를 옮기고, Shift를 누르면 선이 15°씩 돕니다. | キャンバスでドラッグすると、ドラッグした所を中心に対称定規の最初の線を置きます。中心をドラッグすると定規を移動し、Shift で線が 15° ずつ回ります。
 symmetry-on-name | Use the symmetry ruler | 대칭자 사용 | 対称定規を使用
 symmetry-lines | Lines | 선 수 | 線の数
 symmetry-lines-name | Number of symmetry lines | 대칭선 수 | 対称線の数
@@ -421,6 +422,8 @@ tool-eyedropper | E&yedropper | 스포이드(&Y) | スポイト(&Y)
 tool-eyedropper-rail | Eyedropper | 스포이드 | スポイト
 tool-shape | &Shape | 도형(&S) | 図形(&S)
 tool-shape-rail | Shape | 도형 | 図形
+tool-symmetry | Symmetry &ruler | 대칭자(&R) | 対称定規(&R)
+tool-symmetry-rail | Symmetry ruler | 대칭자 | 対称定規
 shape-kind | Shape | 모양 | 形
 shape-line | Line | 직선 | 直線
 shape-polygon | Polygon | 다각형 | 多角形

@@ -55,6 +55,7 @@ pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
 pub use onion::{OnionKey, OnionSettings, tint as tint_onion};
 pub use sizing::{CanvasSize, clamp_edge};
+pub use symmetry::RulerGrip;
 pub use transform::{Grip, HANDLES};
 pub use view::TURN_STEP;
 
@@ -129,6 +130,13 @@ enum Interaction {
         grip: Grip,
         start: [f64; 2],
         base: ugu_core::keys::Pose,
+    },
+    /// Placing the symmetry ruler with its tool from `start` (client
+    /// physical pixels), where it was `base`.
+    Ruling {
+        grip: symmetry::RulerGrip,
+        start: [f64; 2],
+        base: ugu_session::Symmetry,
     },
     /// Dragging the frame of the canvas being sized from `start` (document
     /// pixels), where it was at `base`.
@@ -1251,6 +1259,10 @@ impl Canvas {
                 self.sample_count += 1;
                 self.begin_pose_drag(sample.position);
             }
+            CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Symmetry => {
+                self.sample_count += 1;
+                self.begin_ruler_drag(sample.position);
+            }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.tools.tool == Tool::Select => {
                 self.sample_count += 1;
                 self.notice = None;
@@ -1300,6 +1312,7 @@ impl Canvas {
                     }
                     Interaction::Transforming { .. } => self.drag_transform(sample.position),
                     Interaction::Posing { .. } => self.drag_pose(sample.position),
+                    Interaction::Ruling { .. } => self.drag_ruler(sample.position),
                     Interaction::Sizing { .. } => self.drag_sizing(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Picking => self.pick(sample.position),
@@ -1348,6 +1361,10 @@ impl Canvas {
                         self.interaction = sizing;
                         self.drag_sizing(sample.position);
                         self.interaction = Interaction::Idle;
+                    }
+                    ruling @ Interaction::Ruling { .. } => {
+                        self.interaction = ruling;
+                        self.end_ruler_drag(sample.position);
                     }
                     moving @ Interaction::MovingText { .. } => {
                         self.interaction = moving;
@@ -1398,6 +1415,7 @@ impl Canvas {
                 self.tab.session.cancel_pose();
             }
             Interaction::Sizing { base, .. } => self.undrag_sizing(base),
+            Interaction::Ruling { base, .. } => self.set_symmetry(base),
             Interaction::MovingText { base, .. } => {
                 if let Some(outline) = self
                     .tab
@@ -3131,6 +3149,58 @@ mod tests {
             time: Ticks(0),
             frame_id: 0,
         }
+    }
+
+    #[test]
+    fn the_ruler_tool_lays_a_line_where_dragged_and_moves_by_its_centre() {
+        let (to_test, _renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        canvas.set_tool(Tool::Symmetry).unwrap();
+        let revision = canvas.session().revision();
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let drag = |canvas: &mut super::Canvas, from: [f64; 2], to: [f64; 2]| {
+            let begin = at(canvas, from[0], from[1]);
+            canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+            let end = at(canvas, to[0], to[1]);
+            canvas.apply(CanvasInput::Extend(end));
+            canvas.apply(CanvasInput::End(end));
+        };
+        // A new line from where the drag starts, on a half pixel, towards
+        // where it ends: to the right is 90° from upright.
+        drag(&mut canvas, [30.2, 40.7], [70.0, 40.7]);
+        let ruler = canvas.symmetry();
+        assert!(ruler.on);
+        assert_eq!(ruler.centre, [30.0, 40.5]);
+        assert!((ruler.angle - 90.0).abs() < 0.1, "{}", ruler.angle);
+        // From the centre it moves, keeping its angle.
+        drag(&mut canvas, [30.0, 40.5], [50.0, 50.5]);
+        let ruler = canvas.symmetry();
+        assert_eq!(ruler.centre, [50.0, 50.5]);
+        assert!((ruler.angle - 90.0).abs() < 0.1, "{}", ruler.angle);
+        // With Shift the line snaps to 15° steps.
+        canvas.set_modifiers(true, false);
+        drag(&mut canvas, [80.0, 60.0], [90.0, 71.0]);
+        canvas.set_modifiers(false, false);
+        assert_eq!(canvas.symmetry().angle, 135.0);
+        // Not past the canvas, where its lines would not show.
+        drag(&mut canvas, [80.0, 60.0], [80.0, 60.0]);
+        drag(&mut canvas, [80.0, 60.0], [200.0, 300.0]);
+        assert_eq!(canvas.symmetry().centre, [120.0, 90.0]);
+        // Esc during a drag leaves it where it was.
+        let before = canvas.symmetry();
+        let begin = at(&canvas, 20.0, 20.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        canvas.apply(CanvasInput::Extend(at(&canvas, 60.0, 30.0)));
+        canvas.escape();
+        assert_eq!(canvas.symmetry(), before);
+        // Placing the ruler draws nothing and is not an edit.
+        assert_eq!(canvas.session().revision(), revision);
     }
 
     #[test]

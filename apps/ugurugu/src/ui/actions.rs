@@ -102,6 +102,7 @@ pub const TOOLS: &[Entry] = &[
     Do(A::Text),
     Do(A::Eyedropper),
     Do(A::Shape),
+    Do(A::SymmetryRuler),
     Do(A::MoveLayer),
     Gap,
     Do(A::ImportTools),
@@ -147,6 +148,7 @@ pub fn tool(action: Action) -> Option<Tool> {
         A::Text => Tool::Text,
         A::Eyedropper => Tool::Eyedropper,
         A::Shape => Tool::Shape,
+        A::SymmetryRuler => Tool::Symmetry,
         A::MoveLayer => Tool::Move,
         _ => return None,
     })
@@ -490,6 +492,7 @@ pub fn run(
         | A::Text
         | A::Eyedropper
         | A::Shape
+        | A::SymmetryRuler
         | A::MoveLayer
         | A::AnimationBar
         | A::ToolSettings

@@ -1018,29 +1018,39 @@ Step 'Symmetry ruler' {
         $bitmap.Dispose()
         $count
     }
-    $words = Read-Words 'en'
-    Invoke-Word $process $words 'menu-view'
-    # The tool settings' heading has the same name and can be invoked too.
-    $item = Find-Pattern $process $words['view-symmetry'] @([Windows.Automation.SelectionItemPattern]::Pattern,
-        [Windows.Automation.TogglePattern]::Pattern)
-    if ($item -is [Windows.Automation.SelectionItemPattern]) { $item.Select() } else { $item.Toggle() }
-    Start-Sleep -Milliseconds 500
+    # The ruler tool: a drag down the middle lays an upright line.
+    Send-Keys $process 'r'
+    Start-Sleep -Milliseconds 300
+    $top = $paper.Top + [int]($h * 0.2)
+    [Native]::Drag(@($middle, $middle), @($top, ($paper.Top + [int]($h * 0.6))))
+    Start-Sleep -Milliseconds 300
     $switch = Find-Pattern $process 'Use the symmetry ruler' @([Windows.Automation.TogglePattern]::Pattern)
     $on = $switch.Current.ToggleState -eq [Windows.Automation.ToggleState]::On
+    $placed = Save-Screen 'symmetry-placed'
     $before = & $right
     Send-Keys $process 'b'
+    Start-Sleep -Milliseconds 300
+    $inBrush = Test-Named $process 'Use the symmetry ruler'
     # On the left half only.
     [Native]::Drag(@(($paper.Left + [int]($w * 0.1)), ($paper.Left + [int]($w * 0.25)), ($paper.Left + [int]($w * 0.4))),
         @(($paper.Top + [int]($h * 0.2)), ($paper.Top + [int]($h * 0.35)), ($paper.Top + [int]($h * 0.25))))
     $after = & $right
     $mirrored = Save-Screen 'symmetry-mirror'
+    # From the centre, the ruler tool moves it.
+    Send-Keys $process 'r'
+    Start-Sleep -Milliseconds 300
+    $x = Get-Value $process 'Centre X'
+    [Native]::Drag(@($middle, ($middle + [int]($w * 0.2))), @($top, $top))
+    Start-Sleep -Milliseconds 300
+    $moved = Get-Value $process 'Centre X'
     Set-Field $process 'Number of symmetry lines' '6'
+    Send-Keys $process 'b'
     [Native]::Drag(@(($paper.Left + [int]($w * 0.45)), ($paper.Left + [int]($w * 0.48))),
         @(($paper.Top + [int]($h * 0.6)), ($paper.Top + [int]($h * 0.85))))
     $six = Save-Screen 'symmetry-six-lines'
     Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
-    $detail = "switch on $on, dark pixels right of the line $before -> $after; $mirrored; $six"
-    if (-not $on -or $before -gt 20 -or $after -lt 50) {
+    $detail = "placed on $on, switch under the brush $inBrush, dark pixels right of the line $before -> $after, centre x $x -> $moved; $placed; $mirrored; $six"
+    if (-not $on -or $inBrush -or $before -gt 20 -or $after -lt 50 -or $moved - $x -lt 150) {
         throw $detail
     }
     $detail
@@ -1239,6 +1249,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'tool-text' = { param($p) Send-Keys $p 't' }
             'tool-eyedropper' = { param($p) Send-Keys $p 'i' }
             'tool-shape' = { param($p) Send-Keys $p 'u' }
+            'tool-symmetry' = { param($p) Send-Keys $p 'r' }
             'tool-move-timeline' = {
                 param($p)
                 Enable-AnimationTools $p $language

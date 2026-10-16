@@ -36,7 +36,7 @@ use ugu_core::ops::{Affine, MotionStyle, Sampling, Wobble};
 use ugu_core::selection::{Combine, Selection};
 use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
-use crate::canvas::{BrushCursor, Canvas, Grip, HANDLES, ZOOM_RANGE};
+use crate::canvas::{BrushCursor, Canvas, Grip, HANDLES, RulerGrip, ZOOM_RANGE};
 use crate::clipboard::Clipboard;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
@@ -314,6 +314,12 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap, animation_too
         (Tool::Text, Action::Text, Glyph::Text, "tool-text-rail"),
         (Tool::Shape, Action::Shape, Glyph::Shape, "tool-shape-rail"),
         (
+            Tool::Symmetry,
+            Action::SymmetryRuler,
+            Glyph::Symmetry,
+            "tool-symmetry-rail",
+        ),
+        (
             Tool::Move,
             Action::MoveLayer,
             Glyph::MoveLayer,
@@ -367,6 +373,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         Tool::Wand | Tool::Fill => return fill_settings(ui, canvas, tool == Tool::Fill),
         Tool::Text => return text::settings(ui, canvas),
         Tool::Move => return motion::settings(ui, canvas, &panels.keys),
+        Tool::Symmetry => return symmetry_settings(ui, canvas),
         Tool::Eyedropper => {
             ui.label(
                 egui::RichText::new(tr("eyedropper-hint"))
@@ -393,7 +400,8 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         | Tool::Text
         | Tool::Eyedropper
         | Tool::Shape
-        | Tool::Move => tr("brush-size"),
+        | Tool::Move
+        | Tool::Symmetry => tr("brush-size"),
     };
     let range = 1.0..=128.0;
     slider_row(
@@ -456,10 +464,6 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     if settings != before {
         *canvas.brushes_mut().get_mut(tool) = settings;
     }
-    // A shape is not repeated by the ruler.
-    if tool != Tool::Shape {
-        symmetry_settings(ui, canvas);
-    }
 }
 
 /// The symmetry ruler of the document shown.
@@ -467,8 +471,13 @@ fn symmetry_settings(ui: &mut egui::Ui, canvas: &mut Canvas) {
     use ugu_session::Symmetry;
     let mut symmetry = canvas.symmetry();
     let before = symmetry;
-    ui.add_space(theme::space::S);
     widgets::panel_heading(ui, tr("symmetry"));
+    ui.label(
+        egui::RichText::new(tr("symmetry-hint"))
+            .size(theme::SMALL)
+            .color(theme::muted()),
+    );
+    ui.add_space(theme::space::S);
     widgets::check_row(
         ui,
         tr("symmetry-on"),
@@ -1067,6 +1076,29 @@ pub fn symmetry_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
         }
         painter.circle_filled(to_screen(ui, canvas, centre), dot, stroke.color);
     }
+    if canvas.tool() == Tool::Symmetry {
+        let at = to_screen(ui, canvas, centre);
+        painter.circle_stroke(at, 8.0, egui::Stroke::new(3.0, egui::Color32::WHITE));
+        painter.circle_stroke(at, 8.0, egui::Stroke::new(1.0, theme::accent_text()));
+    }
+}
+
+/// The pointer over the canvas for what a drag with the ruler tool does.
+pub fn ruler_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
+    let ppp = ui.ctx().pixels_per_point();
+    let Some(pointer) = ui
+        .input(|input| input.pointer.hover_pos())
+        .filter(|pointer| ui.max_rect().contains(*pointer))
+    else {
+        return;
+    };
+    let icon = match canvas.ruler_grip_at([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)])
+    {
+        Some(RulerGrip::Centre) => egui::CursorIcon::Move,
+        Some(RulerGrip::Line) => egui::CursorIcon::Crosshair,
+        None => return,
+    };
+    ui.ctx().set_cursor_icon(icon);
 }
 
 /// The move tool's box around the current layer as the frame shows it.

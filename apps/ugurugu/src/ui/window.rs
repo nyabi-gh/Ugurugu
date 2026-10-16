@@ -169,6 +169,7 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .show(ui, |ui| {
             canvas_area = canvas.layout(ui);
             super::symmetry_overlay(ui, canvas);
+            super::ruler_cursor(ui, canvas);
             ants = super::selection_overlay(ui, canvas);
             super::resize::sizing_overlay(ui, canvas);
             super::text_overlay(ui, canvas);
