@@ -1422,3 +1422,13 @@ pull_request 71회는 중앙값 486·p90 609초, push 48회는 511.5·619초다.
 | `line-tables-only` | 83 s | 2,107 MB | 11 s | 2,652 MB |
 
 CI 캐시에는 의존성만 들어간다(rust-cache는 workspace crate를 지운다). `line-tables-only`에서도 실패한 시험의 backtrace에는 파일과 줄이 남는다.
+
+## 77. Sandbox의 UI Automation 시간 초과 (2026-10-16)
+
+**질문:** 시험 스크립트의 `Wait-Until`은 UI Automation 시간 초과를 다시 묻는데, 왜 `FromHandle` 시간 초과 단계가 1초 안에 실패했나(B3-97).
+
+**방법:** 이 PC에 남은 Sandbox 결과(`results.md`, 2026-10-13~16)에서 시간 초과로 실패한 단계를 모았다. Sandbox가 시험을 돌리는 Windows PowerShell 5.1에서 `Marshal.GetExceptionForHR(0x80131505)`의 형식을 보았다. `common.ps1`을 불러 가짜 조건(UI Automation처럼 `ThrowExceptionForHR(0x80131505)`를 두 번 던진 뒤 값을 냄)을 고치기 전과 뒤로 돌렸다.
+
+**결과:** 결과 파일 14개에서 17단계가 모두 `Exception calling "FromHandle" ... "Operation timed out. (Exception from HRESULT: 0x80131505)"`로 실패했다. 그중 "Update that fails to download" 7회는 `Press` → `Find-Element`, 곧 `Wait-Until` 안에서 불렸다. .NET Framework는 0x80131505(COR_E_TIMEOUT)를 `System.Runtime.InteropServices.COMException`으로 바꾸고 메시지도 같은 꼴이다. `Wait-Until`은 가장 안쪽 예외가 `TimeoutException`일 때만 다시 물었으므로 곧바로 다시 던졌다. 가짜 조건은 고치기 전 곧바로 FAIL, 고친 뒤 "pass after retry"(무엇을 두 번 다시 물었는지 남김)였다. 잘못된 창 핸들의 `ElementNotAvailableException`(0x80040201)은 고친 뒤에도 곧바로 실패하고 결과에 형식과 HRESULT가 남는다.
+
+**결론:** `Wait-Until`은 시간 초과를 형식이 아니라 HRESULT로 알아보고, 밖에 있던 `FromHandle` 호출(`Test-Named`, 저장 대화상자 이름, 양파 껍질 단추, `pointer.ps1`의 `Get-Value`·`Set-Toggle`)도 그 안에서 부른다. 다시 물어 통과한 단계는 "pass after retry"로 남아, 창이 시작 직후 답하지 않는 앱 쪽 원인(B3-97)을 가리지 않는다.

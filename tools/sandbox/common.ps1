@@ -12,6 +12,13 @@ $logs and defines Stop-Apps, which a failed step calls.
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
+# UI Automation on a window that is still starting can time out (backlog
+# B3-97). Windows PowerShell gets that as a COMException, not a
+# TimeoutException, so it is known by its HRESULT, COR_E_TIMEOUT.
+$uiaTimeout = 0x80131505
+# What timed out and was asked again in the current step.
+$script:retried = New-Object System.Collections.ArrayList
+
 function Text([int[]] $codes) {
     -join ($codes | ForEach-Object { [char] $_ })
 }
@@ -25,17 +32,51 @@ function Save-Results {
     [IO.File]::WriteAllLines((Join-Path $out 'results.md'), $lines, (New-Object Text.UTF8Encoding $false))
 }
 
+function Get-Cause($Exception) {
+    while ($Exception.InnerException) { $Exception = $Exception.InnerException }
+    $Exception
+}
+
+# The message, and for an exception that did not come from a script's own
+# `throw` its type and HRESULT.
+function Format-Error($Exception) {
+    $cause = Get-Cause $Exception
+    if ($cause.GetType() -eq [Management.Automation.RuntimeException]) {
+        return $Exception.Message
+    }
+    '{0} [{1} 0x{2:X8}]' -f $Exception.Message, $cause.GetType().FullName, $cause.HResult
+}
+
+# A step that passed only because UI Automation was asked again says so, so
+# that the retry does not hide a window that stops answering.
+function Format-Retried {
+    $counts = $script:retried | Group-Object | ForEach-Object {
+        if ($_.Count -gt 1) { "$($_.Name) x$($_.Count)" } else { $_.Name }
+    }
+    "UI Automation timed out and was asked again: $($counts -join ', ')"
+}
+
 function Step([string] $Name, [scriptblock] $Body) {
     $chosen = Get-Variable only -ValueOnly -ErrorAction SilentlyContinue
     if ($chosen -and $Name -notin $chosen) {
         return
     }
     Write-Host "== $Name"
+    $script:retried.Clear()
     try {
         $detail = @(& $Body) -join '; '
-        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = 'pass'; Detail = $detail })
+        $result = 'pass'
+        if ($script:retried.Count) {
+            $result = 'pass after retry'
+            $detail = "$detail; $(Format-Retried)"
+        }
+        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = $result; Detail = $detail })
     } catch {
-        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = 'FAIL'; Detail = $_.Exception.Message })
+        $detail = Format-Error $_.Exception
+        if ($script:retried.Count) {
+            $detail = "$detail; $(Format-Retried)"
+        }
+        [void]$results.Add([pscustomobject]@{ Step = $Name; Result = 'FAIL'; Detail = $detail })
         Stop-Apps
     }
     Save-Results
@@ -62,15 +103,16 @@ function Get-InstalledVersion([string] $Root = $installRoot) {
 
 function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
     $deadline = (Get-Date).AddSeconds($Seconds)
+    $timedOut = $null
     while ((Get-Date) -lt $deadline) {
-        # A window still starting can let UI Automation time out; that is
-        # not there yet, not a failure.
+        # A UI Automation timeout is not there yet, not a failure.
         try {
             $value = & $Condition
         } catch {
-            $cause = $_.Exception
-            while ($cause.InnerException) { $cause = $cause.InnerException }
-            if ($cause -isnot [TimeoutException]) { throw }
+            $cause = Get-Cause $_.Exception
+            if ($cause.HResult -ne $uiaTimeout) { throw }
+            $timedOut = $_.Exception
+            [void]$script:retried.Add(('{0} ({1} 0x{2:X8})' -f $What, $cause.GetType().Name, $cause.HResult))
             $value = $null
         }
         if ($value) {
@@ -78,7 +120,16 @@ function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
         }
         Start-Sleep -Milliseconds 500
     }
+    if ($timedOut) {
+        throw "Timed out after $Seconds s waiting for $What; last: $(Format-Error $timedOut)"
+    }
     throw "Timed out after $Seconds s waiting for $What"
+}
+
+# A UI Automation read whose answer may be empty or false, asked again only
+# while it times out.
+function Read-Automation([scriptblock] $Read, [int] $Seconds, [string] $What) {
+    (Wait-Until { [pscustomobject]@{ Answer = & $Read } } $Seconds $What).Answer
 }
 
 function Wait-Window([int] $Seconds = 90, [string] $Root = $installRoot) {

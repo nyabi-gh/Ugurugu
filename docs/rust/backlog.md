@@ -140,7 +140,7 @@
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |
 | B3-95 | 같은 레이어가 같은 획 id를 두 번 쓸 때 재스타일 | 선택이 한쪽만 건드리면 `RemoveStroke`가 남은 참조 때문에 실패해 오류가 난다. 그런 상태로 가는 순서는 찾지 못했다(가설) | `crates/ugu-core/src/restyle.rs` | 검토 |
 | B3-96 | 채우기 기준 그림과 대기 변형 | 영역 클릭은 이제 대기 변형을 먼저 적용하고 기준 그림을 읽는다. 대기 글자도 같이 적용되므로, 배치 중인 글자를 둔 채 자동 선택을 쓰면 글자가 확정된다. 의도와 맞는지 사용자 확인 | `apps/ugurugu/src/canvas.rs` `click_area` | 검토 |
-| B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 시간 초과로 끝나는 일이 되풀이됐다(evidence.md 45절, 53절, 60절). 시험 스크립트의 `Wait-Until`은 시간 초과를 다시 시도하는데도 단계가 1초 안에 실패했으므로, 던져진 예외의 종류가 다를 수 있다(가설). 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절, 60절, 67절 |
+| B3-97 | 막 뜬 창이 잠깐 UI Automation에 답하지 않음 | Sandbox 시험에서 앱을 띄운 직후 `AutomationElement.FromHandle`이 HRESULT 0x80131505(COR_E_TIMEOUT)로 끝나는 일이 되풀이됐다(evidence.md 45절, 53절, 60절). 시험 스크립트가 곧바로 실패한 것은 Windows PowerShell 5.1이 이것을 `TimeoutException`이 아닌 `COMException`으로 받아서였다(77절, 시험 쪽은 고침). 이제 시험은 다시 묻고, 그렇게 통과한 단계는 "pass after retry"와 무엇을 몇 번 다시 물었는지를 남긴다. 창은 보이지만 그 순간 창 스레드가 메시지를 돌리지 않는 것으로 보인다(가설, 원인 미확인). 화면 읽기 프로그램은 시작 직후 잠깐 창을 읽지 못할 수 있다. "pass after retry"가 어느 단계에서 얼마나 자주 나오는지 모아 원인을 가른다 | `apps/ugurugu/src/app.rs` 시작 순서 | evidence.md 45절, 60절, 67절, 77절 |
 
 ## 10. 2026-10-14 외부 검토에서 확인한 것
 

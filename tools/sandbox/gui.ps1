@@ -423,9 +423,11 @@ function Test-Flash([string] $Counts, [int] $Area) {
 # Whether an element named $Name is there now.
 function Test-Named($Process, [string] $Name) {
     Start-Sleep -Milliseconds 500
-    $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
     $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
-    $null -ne $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $match)
+    Read-Automation {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+        $null -ne $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $match)
+    } 15 "whether '$Name' is there"
 }
 
 function Send-Keys($Process, [string] $Keys) {
@@ -568,7 +570,7 @@ Step 'Save dialog with another extension typed' {
     [void](Save-Screen 'save-as-pressed')
     $owner = [uint32]$process.Id
     $dialog = Wait-Until { $found = [Native]::Dialog($owner); if ($found -ne [IntPtr]::Zero) { $found } } 20 'the save dialog'
-    $dialogName = [Windows.Automation.AutomationElement]::FromHandle($dialog).Current.Name
+    $dialogName = Read-Automation { [Windows.Automation.AutomationElement]::FromHandle($dialog).Current.Name } 15 "the save dialog's name"
     Start-Sleep -Seconds 2
     [Native]::Front($dialog)
     Start-Sleep -Milliseconds 500
@@ -581,7 +583,11 @@ Step 'Save dialog with another extension typed' {
     Start-Sleep -Seconds 2
     $shot = Save-Screen 'after-typing-probe-png'
     $next = [Native]::Dialog($owner)
-    $open = if ($next -ne [IntPtr]::Zero) { [Windows.Automation.AutomationElement]::FromHandle($next).Current.Name } else { 'none' }
+    $open = if ($next -ne [IntPtr]::Zero) {
+        Read-Automation { [Windows.Automation.AutomationElement]::FromHandle($next).Current.Name } 15 "the next dialog's name"
+    } else {
+        'none'
+    }
     for ($i = 0; $i -lt 3 -and [Native]::Dialog($owner) -ne [IntPtr]::Zero; $i++) {
         [Native]::Front([Native]::Dialog($owner))
         [Windows.Forms.SendKeys]::SendWait('{ESC}')
@@ -1195,9 +1201,11 @@ Step 'Key opacity, pivot and onion settings' {
     Set-Field $process 'Key opacity' '30'
     $faded = Get-Ink $process $paper
     $shot = Save-Screen 'key-opacity-pivot'
-    $root = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-    $button = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
-        Where-Object { ([string]$_.Current.Name) -like '*Onion skin' } | Select-Object -First 1
+    $button = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+        $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+            Where-Object { ([string]$_.Current.Name) -like '*Onion skin' } | Select-Object -First 1
+    } 15 'the onion skin button'
     $rect = $button.Current.BoundingRectangle
     [Native]::MoveTo([int]($rect.X + $rect.Width / 2), [int]($rect.Y + $rect.Height / 2))
     Start-Sleep -Milliseconds 300
@@ -1357,7 +1365,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
                 Start-Sleep -Milliseconds 700
                 $taken += Save-Screen "$Tag$language-$($shot.Key)"
             } catch {
-                $missed += "$Tag$language-$($shot.Key): $($_.Exception.Message)"
+                $missed += "$Tag$language-$($shot.Key): $(Format-Error $_.Exception)"
             }
             Stop-Apps
             Start-Sleep -Milliseconds 500
@@ -1375,7 +1383,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             [void](Find-Element $process { param($n) $n -eq $words['recovery-title'] } 20 'the recovery notice')
             $taken += Save-Screen "$Tag$language-recovery"
         } catch {
-            $missed += "$Tag$language-recovery: $($_.Exception.Message)"
+            $missed += "$Tag$language-recovery: $(Format-Error $_.Exception)"
         }
         Stop-Apps
     }

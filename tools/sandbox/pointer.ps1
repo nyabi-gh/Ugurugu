@@ -340,9 +340,9 @@ function Get-Strokes([switch] $Changed) {
 }
 
 function Get-Value([string] $Name) {
-    $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
     $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
     $value = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
         foreach ($element in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
             $pattern = $null
             if ($element.TryGetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern, [ref]$pattern)) {
@@ -358,9 +358,9 @@ function Get-Value([string] $Name) {
 
 # Sets the check box named $Name and returns whether it is now on.
 function Set-Toggle([string] $Name, [bool] $On) {
-    $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
     $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
     $pattern = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
         foreach ($element in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
             $found = $null
             if ($element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$found)) {
