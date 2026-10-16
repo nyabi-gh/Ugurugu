@@ -1022,13 +1022,8 @@ impl Files {
 
     /// Whether to check for updates by itself, and when the last check
     /// finished.
-    pub fn follow_updates(&mut self, automatic: bool, checked: Option<u64>) {
-        self.updates.follow(automatic, checked);
-    }
-
-    /// When the last update check finished, for the settings.
-    pub fn updates_checked(&self) -> Option<u64> {
-        self.updates.checked()
+    pub fn follow_updates(&mut self, automatic: bool) {
+        self.updates.follow(automatic);
     }
 
     /// When the automatic update check is due.

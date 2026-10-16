@@ -2,18 +2,20 @@
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
 //! Checking for, downloading and applying updates through Velopack, as
-//! 2.2.13 did (`src/app/UpdateControllerWindows.cpp`): a check two seconds
-//! after start once six hours have passed since the last one that finished,
-//! "Check for Updates…" in the Help menu, Update or Cancel when one is
-//! found, and installing it once the window has closed. Unlike 2.2.13, a
-//! check asked for while an automatic one runs shows that check's result
-//! (D18), and the automatic check can be turned off.
+//! 2.2.13 did (`src/app/UpdateControllerWindows.cpp`): "Check for
+//! Updates…" in the Help menu, Update or Cancel when one is found, and
+//! installing it once the window has closed. Unlike 2.2.13, which checked
+//! at start only once six hours had passed since its last check, it checks
+//! two seconds after every start and every six hours while it runs, so a
+//! release is offered the next time the app starts; a check asked for while
+//! an automatic one runs shows that check's result (D18), and the automatic
+//! check can be turned off.
 //!
 //! The checks and the download run on threads of their own, so the file
 //! thread's saves never wait for the network.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use velopack::sources::{FileSource, HttpSource};
 use velopack::{UpdateCheck, UpdateInfo, UpdateManager};
@@ -25,7 +27,7 @@ use crate::i18n::{args, tr, tr_with};
 /// from there are counted with the rest (`.github/scripts`).
 const FEED: &str = "https://github.com/nyabi-gh/Ugurugu/releases/download/updates";
 const START_DELAY: Duration = Duration::from_secs(2);
-const INTERVAL_SECONDS: u64 = 6 * 60 * 60;
+const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 pub enum Event {
     Checked(Result<Found, String>),
@@ -42,8 +44,6 @@ pub enum Found {
 
 pub struct Updates {
     automatic: bool,
-    /// Seconds since 1970 of the last check that finished.
-    checked: Option<u64>,
     due: Option<Instant>,
     /// Whether the check under way shows its result, while one is.
     checking: Option<bool>,
@@ -56,21 +56,6 @@ pub struct Updates {
     /// A title and a text to show until dismissed.
     notice: Option<(String, String)>,
     events: Arc<dyn Fn(Event) + Send + Sync>,
-}
-
-/// Whether an automatic check is due `now`, both in seconds since 1970.
-/// A clock set back makes it due, as in 2.2.13.
-fn check_due(checked: Option<u64>, now: u64) -> bool {
-    match checked {
-        Some(checked) if checked <= now => now - checked >= INTERVAL_SECONDS,
-        _ => true,
-    }
-}
-
-fn now_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs())
 }
 
 /// The updates release, or the folder of packages `UGURUGU_UPDATE_FEED`
@@ -103,7 +88,6 @@ impl Updates {
     pub fn new(events: impl Fn(Event) + Send + Sync + 'static) -> Self {
         Self {
             automatic: false,
-            checked: None,
             due: None,
             checking: None,
             downloading: false,
@@ -115,24 +99,15 @@ impl Updates {
         }
     }
 
-    /// Follows the settings: whether to check by itself, and when the last
-    /// check finished.
-    pub fn follow(&mut self, automatic: bool, checked: Option<u64>) {
-        self.checked = checked.max(self.checked);
+    /// Follows the settings: whether to check by itself, first shortly
+    /// after start or after being turned on.
+    pub fn follow(&mut self, automatic: bool) {
         self.automatic = automatic;
         if !automatic {
             self.due = None;
-        } else if self.due.is_none()
-            && self.checking.is_none()
-            && check_due(self.checked, now_seconds())
-        {
+        } else if self.due.is_none() {
             self.due = Some(Instant::now() + START_DELAY);
         }
-    }
-
-    /// When the last check finished, for the settings.
-    pub fn checked(&self) -> Option<u64> {
-        self.checked
     }
 
     /// When to wake for the automatic check.
@@ -140,10 +115,12 @@ impl Updates {
         self.due
     }
 
-    /// Starts the automatic check once it is due.
+    /// Starts the automatic check once it is due, and makes the next one
+    /// due an interval later; one that cannot start for an update already
+    /// offered or downloading waits for the next.
     pub fn tick(&mut self, now: Instant) {
         if self.due.is_some_and(|due| due <= now) {
-            self.due = None;
+            self.due = Some(now + INTERVAL);
             self.check(false);
         }
     }
@@ -188,12 +165,10 @@ impl Updates {
                 let interactive = self.checking.take().unwrap_or(false);
                 match result {
                     Ok(Found::Update(update)) => {
-                        self.checked = Some(now_seconds());
                         tracing::info!(version = update.TargetFullRelease.Version, "update found");
                         self.offer = Some(update);
                     }
                     Ok(Found::Latest(version)) => {
-                        self.checked = Some(now_seconds());
                         tracing::info!(version, "no update");
                         if interactive {
                             self.notice = Some((
@@ -211,8 +186,6 @@ impl Updates {
                             ));
                         }
                     }
-                    // Only a check that finished waits out the interval, so
-                    // starting offline costs nothing.
                     Err(error) => {
                         tracing::warn!(error, "update check failed");
                         if interactive {
@@ -352,12 +325,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_check_is_due_after_six_hours_or_a_clock_set_back() {
-        let now = 1_000_000;
-        assert!(check_due(None, now));
-        assert!(!check_due(Some(now - INTERVAL_SECONDS + 1), now));
-        assert!(check_due(Some(now - INTERVAL_SECONDS), now));
-        assert!(check_due(Some(now + 10), now));
+    fn every_start_checks_soon_and_then_every_interval() {
+        let mut updates = Updates::new(|_| {});
+        let started = Instant::now();
+        updates.follow(true);
+        let first = updates.due.unwrap();
+        assert!(first <= started + START_DELAY + Duration::from_secs(1));
+        // The settings followed again change nothing.
+        updates.follow(true);
+        assert_eq!(updates.due, Some(first));
+        // An update offered keeps the check from starting, and the next
+        // is due an interval later all the same.
+        updates.offer = Some(Box::default());
+        updates.tick(first);
+        assert!(updates.checking.is_none());
+        assert_eq!(updates.due, Some(first + INTERVAL));
+        updates.tick(first + INTERVAL - Duration::from_secs(1));
+        assert_eq!(updates.due, Some(first + INTERVAL));
     }
 
     #[test]
@@ -368,29 +352,25 @@ mod tests {
         assert_eq!(updates.checking, Some(true));
         updates.handle(Event::Checked(Ok(Found::Latest("3.0.0".to_owned()))));
         assert!(updates.notice.is_some());
-        assert!(updates.checked.is_some());
     }
 
     #[test]
-    fn only_a_finished_check_waits_out_the_interval() {
+    fn an_automatic_check_that_fails_says_nothing() {
         let mut updates = Updates::new(|_| {});
         updates.checking = Some(false);
         updates.handle(Event::Checked(Err("offline".to_owned())));
-        assert_eq!(updates.checked, None);
         assert!(updates.notice.is_none());
-        updates.follow(true, None);
-        assert!(updates.due.is_some());
     }
 
     #[test]
     fn turning_the_automatic_check_off_cancels_the_one_due() {
         let mut updates = Updates::new(|_| {});
-        updates.follow(true, None);
+        updates.follow(true);
         assert!(updates.due.is_some());
-        updates.follow(false, None);
+        updates.follow(false);
         assert!(updates.due.is_none());
-        updates.follow(true, Some(now_seconds()));
-        assert!(updates.due.is_none());
+        updates.follow(true);
+        assert!(updates.due.is_some());
     }
 
     #[test]

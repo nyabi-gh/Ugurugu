@@ -92,8 +92,6 @@ pub struct Settings {
     pub shortcuts: Shortcuts,
     /// Whether to check for updates by itself.
     pub check_updates: bool,
-    /// Seconds since 1970 of the last update check that finished.
-    pub update_checked: Option<u64>,
     /// Where the panels are.
     pub layout: Layout,
     /// Where the window was when it last closed.
@@ -116,7 +114,6 @@ impl Default for Settings {
             tools: Tools::default(),
             shortcuts: Shortcuts::default(),
             check_updates: true,
-            update_checked: None,
             layout: Layout::default(),
             window: None,
             unknown: Map::new(),
@@ -138,7 +135,6 @@ impl Settings {
                 ..self.tools.clone()
             },
             shortcuts: self.shortcuts.restored(),
-            update_checked: self.update_checked,
             layout: self.layout.clone(),
             window: self.window,
             unknown: self.unknown.clone(),
@@ -236,9 +232,9 @@ impl Settings {
         if let Some(on) = take(&mut object, "checkForUpdates", Value::as_bool) {
             settings.check_updates = on;
         }
-        if let Some(seconds) = take(&mut object, "updateChecked", Value::as_u64) {
-            settings.update_checked = Some(seconds);
-        }
+        // When the last update check finished, before 3.3.2 checked at
+        // every start.
+        object.remove("updateChecked");
         if let Some(value) = object.remove("tools") {
             settings.tools = tools::parse(&value);
         }
@@ -318,9 +314,6 @@ impl Settings {
         }
         if !self.check_updates {
             object.insert("checkForUpdates".to_owned(), false.into());
-        }
-        if let Some(seconds) = self.update_checked {
-            object.insert("updateChecked".to_owned(), seconds.into());
         }
         object.insert("tools".to_owned(), tools::to_json(&self.tools));
         if !self.tools.colors.colors().is_empty() {
@@ -756,7 +749,6 @@ mod tests {
                 shortcuts
             },
             check_updates: false,
-            update_checked: Some(1_790_000_000),
             layout: {
                 let mut layout = Layout::default();
                 layout.move_to(
@@ -903,6 +895,14 @@ mod tests {
         store.change(|settings| settings.pixel_grid = true);
         drop(store);
         assert!(Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid);
+    }
+
+    #[test]
+    fn the_last_update_check_kept_before_is_dropped() {
+        let settings = Settings::parse(
+            r#"{"format": "ugurugu.settings", "version": 1, "updateChecked": 1790000000}"#,
+        );
+        assert!(!settings.to_json().contains("updateChecked"));
     }
 
     #[test]

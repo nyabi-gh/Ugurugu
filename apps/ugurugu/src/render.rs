@@ -806,11 +806,6 @@ impl RenderThread {
             let tools = self.canvas.tools().clone();
             self.settings.change(|settings| settings.tools = tools);
         }
-        if self.files.updates_checked() != self.settings.get().update_checked {
-            let checked = self.files.updates_checked();
-            self.settings
-                .change(|settings| settings.update_checked = checked);
-        }
         if self.panels.layout != self.settings.get().layout {
             let layout = self.panels.layout.clone();
             self.settings.change(|settings| settings.layout = layout);

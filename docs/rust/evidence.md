@@ -707,7 +707,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 **결론과 코드:**
 
 - 2.2.13의 Velopack 설치 루트가 `%LOCALAPPDATA%\Ugurugu`(`--packId Ugurugu`)이고 제거가 루트를 통째로 지워, 그 안에 있던 3.0 지역 데이터(복구·로그)가 사라졌다(첫 회차 FAIL). 3.0 지역 데이터는 `%LOCALAPPDATA%\Ugurugu Data\3`이다(`apps/ugurugu/src/logs.rs` `local_data`). 공백이 든 이름은 NuGet package id가 될 수 없어(`vpk pack`이 거부) 어느 Velopack 설치 루트도 될 수 없다.
-- 업데이트 확인을 기록한 뒤 6시간 안의 시작은 자동 확인을 하지 않는다(2.2.13 `recordAutomaticCheck`와 같은 규칙, `apps/ugurugu/src/update.rs`). 시험 단계마다 `UGURUGU_SETTINGS_PATH`로 설정을 따로 둔다.
+- 이때는 업데이트 확인을 기록한 뒤 6시간 안의 시작은 자동 확인을 하지 않았다(2.2.13 `recordAutomaticCheck`와 같은 규칙). 3.3.2부터는 시작마다 확인한다(decisions.md 10절). 시험 단계마다 `UGURUGU_SETTINGS_PATH`로 설정을 따로 둔다.
 - Sandbox는 `<VGpu>Disable</VGpu>`에도 호스트 GPU를 보여 준다. GPU가 정말 없을 때의 자연 WARP 경로는 CI smoke가 확인한다.
 - 같은 PC에서 Sandbox는 하나만 뜬다. 앞 회차 Sandbox가 남아 있으면 시작되지 않는다.
 

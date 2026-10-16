@@ -119,7 +119,7 @@ pub fn apply(
     files.set_default_save_folder(settings.default_save_folder.clone());
     files.set_export_edge(settings.export_edge);
     files.set_pixel_export_times(settings.pixel_export_times);
-    files.follow_updates(settings.check_updates, settings.update_checked);
+    files.follow_updates(settings.check_updates);
     *keys = Keymap::new(&settings.shortcuts);
 }
 
