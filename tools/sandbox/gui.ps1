@@ -1056,6 +1056,69 @@ Step 'Symmetry ruler' {
     $detail
 }
 
+Step 'The bucket fills where the symmetry ruler mirrors' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    $middle = $paper.Left + [int]($w / 2)
+    # Dark pixels in a square the size of a sixth of the paper's height
+    # around (x, y).
+    $darkAround = {
+        param([int] $x, [int] $y)
+        [Native]::MoveTo($paper.Right + 40, $paper.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+        $half = [int]($h / 12)
+        $count = 0
+        for ($j = $y - $half; $j -lt $y + $half; $j += 2) {
+            for ($i = $x - $half; $i -lt $x + $half; $i += 2) {
+                $c = $bitmap.GetPixel($i, $j)
+                if ($c.R + $c.G + $c.B -lt 200) { $count++ }
+            }
+        }
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $count
+    }
+    # An upright line down the middle.
+    Send-Keys $process 'r'
+    Start-Sleep -Milliseconds 300
+    [Native]::Drag(@($middle, $middle), @(($paper.Top + [int]($h * 0.2)), ($paper.Top + [int]($h * 0.6))))
+    # A closed box on the left, drawn again mirrored on the right.
+    Send-Keys $process 'b'
+    Start-Sleep -Milliseconds 300
+    $left = $paper.Left + [int]($w * 0.15)
+    $right = $paper.Left + [int]($w * 0.35)
+    $top = $paper.Top + [int]($h * 0.3)
+    $bottom = $paper.Top + [int]($h * 0.7)
+    [Native]::Drag(@($left, $right, $right, $left, $left, ($left + 20)), @($top, $top, $bottom, $bottom, $top, $top))
+    $inside = [int](($left + $right) / 2)
+    $mirrored = 2 * $middle - $inside
+    $row = [int](($top + $bottom) / 2)
+    $before = & $darkAround $inside $row
+    $beforeMirrored = & $darkAround $mirrored $row
+    # The bucket inside the left box only.
+    Send-Keys $process 'g'
+    Start-Sleep -Milliseconds 300
+    [Native]::Drag(@($inside, $inside), @($row, $row))
+    Start-Sleep -Milliseconds 500
+    $filled = & $darkAround $inside $row
+    $filledMirrored = & $darkAround $mirrored $row
+    $outside = & $darkAround $inside ($paper.Top + [int]($h * 0.88))
+    $shot = Save-Screen 'symmetry-bucket'
+    Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $detail = "dark around the box clicked $before -> $filled, around its mirror $beforeMirrored -> $filledMirrored, below both $outside; $shot"
+    if ($filled -lt 100 -or $filledMirrored -lt 100 -or $outside -gt 20) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'Keyframes' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App
