@@ -2624,6 +2624,23 @@ mod tests {
     }
 
     #[test]
+    fn a_document_saves_and_saves_over_itself_past_the_old_path_limit() {
+        let (mut files, mut canvas, events) = setup();
+        let deep = folder("long").join("d".repeat(120)).join("e".repeat(120));
+        std::fs::create_dir_all(&deep).unwrap();
+        let path = deep.join("drawing.ugurugu");
+        assert!(path.as_os_str().len() > 260);
+        canvas.file_mut().path = Some(path.clone());
+        for layers in [2, 3] {
+            canvas.edit(Session::add_layer).unwrap();
+            files.save(&mut canvas);
+            files.handle(next(&events), &mut canvas);
+            assert!(!canvas.session().is_dirty(), "{:?}", files.message());
+            assert_eq!(layers_in(&path), layers);
+        }
+    }
+
+    #[test]
     fn a_pending_transform_is_applied_before_saving_and_asked_about_before_closing() {
         let (mut files, mut canvas, events) = setup();
         let path = folder("pending").join("drawing.ugurugu");

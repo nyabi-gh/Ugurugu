@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use velopack::sources::{FileSource, HttpSource};
-use velopack::{UpdateCheck, UpdateInfo, UpdateManager};
+use velopack::{HttpOptions, UpdateCheck, UpdateInfo, UpdateManager};
 
 use crate::i18n::{args, tr, tr_with};
 
@@ -28,6 +28,13 @@ use crate::i18n::{args, tr, tr_with};
 const FEED: &str = "https://github.com/nyabi-gh/Ugurugu/releases/download/updates";
 const START_DELAY: Duration = Duration::from_secs(2);
 const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// How long a request of the check may take: the list of releases is a few
+/// kilobytes. Without a limit Velopack waits on a stalled connection for
+/// ever, and every later check waits behind it.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a package download may take. The full package of 3.3.2 is
+/// 16.3 MB, so this gives up below about 220 kbit/s.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub enum Event {
     Checked(Result<Found, String>),
@@ -58,17 +65,46 @@ pub struct Updates {
     events: Arc<dyn Fn(Event) + Send + Sync>,
 }
 
-/// The updates release, or the folder of packages `UGURUGU_UPDATE_FEED`
-/// names, to try an update before it is published.
-fn manager() -> Result<UpdateManager, velopack::Error> {
+/// The updates release, whose requests each give up after `timeout`, or
+/// the folder of packages `UGURUGU_UPDATE_FEED` names, to try an update
+/// before it is published.
+fn manager(timeout: Duration) -> Result<UpdateManager, velopack::Error> {
     match std::env::var_os("UGURUGU_UPDATE_FEED") {
         Some(folder) => UpdateManager::new(FileSource::new(folder), None, None),
-        None => UpdateManager::new(HttpSource::new(FEED), None, None),
+        None => UpdateManager::new(feed(FEED, timeout), None, None),
     }
 }
 
+fn feed(url: &str, timeout: Duration) -> HttpSource {
+    let options = HttpOptions {
+        TimeoutMilliseconds: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        ..HttpOptions::default()
+    };
+    HttpSource::new_with_options(url, options)
+}
+
+/// Runs `work` on a thread of its own and hands over what it gives, or
+/// `failed` when it panics (the panic hook has recorded it), so the check or
+/// download waiting for it always ends.
+fn spawn(
+    name: &str,
+    events: Arc<dyn Fn(Event) + Send + Sync>,
+    work: impl FnOnce() -> Event + Send + 'static,
+    failed: impl FnOnce(String) -> Event + Send + 'static,
+) -> std::io::Result<()> {
+    let name = name.to_owned();
+    std::thread::Builder::new()
+        .name(name.clone())
+        .spawn(move || {
+            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+                .unwrap_or_else(|_| failed(format!("the {name} stopped unexpectedly")));
+            events(event);
+        })?;
+    Ok(())
+}
+
 fn check() -> Result<Found, String> {
-    let manager = match manager() {
+    let manager = match manager(CHECK_TIMEOUT) {
         Ok(manager) => manager,
         Err(velopack::Error::NotInstalled(_)) => return Ok(Found::NotInstalled),
         Err(error) => return Err(error.to_string()),
@@ -144,10 +180,12 @@ impl Updates {
             return;
         }
         self.checking = Some(interactive);
-        let events = self.events.clone();
-        let spawned = std::thread::Builder::new()
-            .name("update check".to_owned())
-            .spawn(move || events(Event::Checked(check())));
+        let spawned = spawn(
+            "update check",
+            self.events.clone(),
+            || Event::Checked(check()),
+            |error| Event::Checked(Err(error)),
+        );
         if let Err(error) = spawned {
             self.checking = None;
             tracing::warn!(%error, "cannot start the update check");
@@ -218,16 +256,18 @@ impl Updates {
 
     fn download(&mut self, update: Box<UpdateInfo>) {
         self.downloading = true;
-        let events = self.events.clone();
-        let spawned = std::thread::Builder::new()
-            .name("update download".to_owned())
-            .spawn(move || {
-                let result = manager()
+        let spawned = spawn(
+            "update download",
+            self.events.clone(),
+            move || {
+                let result = manager(DOWNLOAD_TIMEOUT)
                     .and_then(|manager| manager.download_updates(&update, None))
                     .map(|()| update)
                     .map_err(|error| error.to_string());
-                events(Event::Downloaded(result));
-            });
+                Event::Downloaded(result)
+            },
+            |error| Event::Downloaded(Err(error)),
+        );
         if let Err(error) = spawned {
             self.downloading = false;
             tracing::warn!(%error, "cannot start the update download");
@@ -242,7 +282,7 @@ impl Updates {
         let Some(update) = self.ready.as_deref() else {
             return Err("no update is downloaded".to_owned());
         };
-        manager()
+        manager(CHECK_TIMEOUT)
             .and_then(|manager| {
                 manager.wait_exit_then_apply_updates(update, false, true, Vec::<String>::new())
             })
@@ -323,6 +363,7 @@ impl Updates {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use velopack::sources::UpdateSource;
 
     #[test]
     fn every_start_checks_soon_and_then_every_interval() {
@@ -386,6 +427,60 @@ mod tests {
         assert!(updates.take_install());
         assert!(updates.ready.is_some());
         assert!(updates.checking.is_none());
+    }
+
+    #[test]
+    fn a_check_or_download_that_panics_still_ends() {
+        let (sender, answers) = std::sync::mpsc::channel();
+        let sender = std::sync::Mutex::new(sender);
+        let mut updates = Updates::new(move |event| {
+            let _ = sender.lock().unwrap().send(event);
+        });
+        updates.checking = Some(true);
+        spawn(
+            "update check",
+            updates.events.clone(),
+            || panic!("a bug in the check"),
+            |error| Event::Checked(Err(error)),
+        )
+        .unwrap();
+        updates.handle(answers.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert!(updates.checking.is_none());
+        assert!(updates.notice.is_some());
+        updates.downloading = true;
+        spawn(
+            "update download",
+            updates.events.clone(),
+            || panic!("a bug in the download"),
+            |error| Event::Downloaded(Err(error)),
+        )
+        .unwrap();
+        updates.handle(answers.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert!(!updates.busy());
+    }
+
+    #[test]
+    fn a_feed_that_stops_answering_is_given_up() {
+        // Takes connections and never answers them.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let held: Vec<_> = listener.incoming().collect();
+            drop(held);
+        });
+        let (sender, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let asset = velopack::VelopackAsset {
+                FileName: "Ugurugu3-full.nupkg".to_owned(),
+                ..Default::default()
+            };
+            let file = std::env::temp_dir().join(format!("ugurugu-stalled-{}", std::process::id()));
+            let result =
+                feed(&url, Duration::from_millis(500)).download_release_entry(&asset, &file, None);
+            let _ = std::fs::remove_file(&file);
+            let _ = sender.send(result.is_err());
+        });
+        assert_eq!(answer.recv_timeout(Duration::from_secs(20)), Ok(true));
     }
 
     #[test]

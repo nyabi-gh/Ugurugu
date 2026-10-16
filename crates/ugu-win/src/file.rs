@@ -5,7 +5,7 @@
 
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Component, Path, Prefix};
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, STILL_ACTIVE};
 use windows::Win32::System::Threading::{
@@ -16,8 +16,27 @@ use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACEFILE_IGNORE_MERGE_ERRORS, ReplaceFileW,
 };
 
-fn wide(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
+/// `path` made whole and verbatim (`\\?\`), NUL-terminated. Without the
+/// long-path manifest and policy, the calls below take a path longer than
+/// `MAX_PATH` only so; `std::fs` does the same with its own.
+fn wide(path: &Path) -> io::Result<Vec<u16>> {
+    let whole = std::path::absolute(path)?;
+    let mut wide: Vec<u16> = whole.as_os_str().encode_wide().collect();
+    let prefix = match whole.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(_) => r"\\?\",
+            Prefix::UNC(..) => {
+                wide.drain(..2);
+                r"\\?\UNC\"
+            }
+            Prefix::Verbatim(_)
+            | Prefix::VerbatimUNC(..)
+            | Prefix::VerbatimDisk(_)
+            | Prefix::DeviceNS(_) => "",
+        },
+        _ => "",
+    };
+    Ok(prefix.encode_utf16().chain(wide).chain(Some(0)).collect())
 }
 
 /// Moves `replacement` to `target`. An existing target is replaced with
@@ -33,7 +52,7 @@ pub fn replace_file(replacement: &Path, target: &Path) -> io::Result<()> {
     }
     let backup = replacement.with_extension("old");
     let (replacement_wide, target_wide, backup_wide) =
-        (wide(replacement), wide(target), wide(&backup));
+        (wide(replacement)?, wide(target)?, wide(&backup)?);
     // SAFETY: all strings are NUL-terminated and outlive the call.
     let replaced = unsafe {
         ReplaceFileW(
@@ -64,7 +83,7 @@ pub fn replace_file(replacement: &Path, target: &Path) -> io::Result<()> {
 
 /// A write-through move that fails if `to` exists.
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    let (from, to) = (wide(from), wide(to));
+    let (from, to) = (wide(from)?, wide(to)?);
     // SAFETY: both strings are NUL-terminated and outlive the call.
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
         Err(io::Error::last_os_error())
@@ -153,6 +172,38 @@ mod tests {
         let replacement = folder.file("fresh.tmp", b"first");
         replace_file(&replacement, &fresh).unwrap();
         assert_eq!(std::fs::read(&fresh).unwrap(), b"first");
+    }
+
+    #[test]
+    fn a_file_past_the_old_path_limit_is_replaced_and_created() {
+        let folder = Folder::new("long");
+        let deep = folder.0.join("d".repeat(120)).join("e".repeat(120));
+        std::fs::create_dir_all(&deep).unwrap();
+        let target = deep.join("doc.ugurugu");
+        assert!(target.as_os_str().len() > 260);
+        std::fs::write(&target, b"old").unwrap();
+        let replacement = deep.join("doc.tmp");
+        std::fs::write(&replacement, b"new").unwrap();
+        replace_file(&replacement, &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert!(!replacement.with_extension("old").exists());
+
+        let fresh = deep.join("fresh.ugurugu");
+        std::fs::write(&replacement, b"first").unwrap();
+        replace_file(&replacement, &fresh).unwrap();
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"first");
+    }
+
+    #[test]
+    fn paths_are_given_whole_and_verbatim() {
+        let text = |path: &str| String::from_utf16(&wide(Path::new(path)).unwrap()).unwrap();
+        assert_eq!(text(r"C:\a\..\b/c.txt"), "\\\\?\\C:\\b\\c.txt\0");
+        assert_eq!(
+            text(r"\\server\share\d.txt"),
+            "\\\\?\\UNC\\server\\share\\d.txt\0"
+        );
+        assert_eq!(text(r"\\?\C:\e.txt"), "\\\\?\\C:\\e.txt\0");
+        assert!(text("f.txt").starts_with(r"\\?\"));
     }
 
     #[test]
