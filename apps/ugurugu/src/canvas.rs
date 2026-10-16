@@ -71,6 +71,17 @@ const SMALL_EDGE: f64 = 256.0;
 /// one on screen, and the timing starts again from when it arrives, so a
 /// cold start plays slowly instead of standing still until frames that were
 /// due long ago come round again.
+/// A wand or bucket click waiting for the worker to draw what it reads.
+struct AreaClick {
+    number: u64,
+    /// What it was clicked on; anything else drops it.
+    key: Key,
+    point: [f64; 2],
+    tools: Tools,
+    combine: Combine,
+    started: Instant,
+}
+
 struct Playback {
     /// The next frame to show, as a frame number.
     next: i64,
@@ -192,6 +203,9 @@ struct Tab {
     resume_playback: bool,
     /// What the wand and the bucket last read, kept for the next click.
     reference: Option<Pixmap>,
+    /// The click whose reference the worker draws, and how many were made.
+    area_click: Option<AreaClick>,
+    clicks: u64,
     /// Physical pixels per document pixel.
     scale: f64,
     /// The document's top-left corner from the area's, in physical pixels.
@@ -234,6 +248,8 @@ impl Tab {
             held: None,
             resume_playback: false,
             reference: None,
+            area_click: None,
+            clicks: 0,
             scale: 1.0,
             offset: [0.0, 0.0],
             angle: 0.0,
@@ -724,7 +740,10 @@ impl Canvas {
         }
         self.interaction = Interaction::Idle;
         self.tab.playback = None;
+        self.tab.cache.drop_frames();
         self.tab.resume_playback = false;
+        // Its answer would come while the tab is hidden, and be dropped.
+        self.tab.area_click = None;
         self.tab.left_area = self.area;
         true
     }
@@ -950,10 +969,18 @@ impl Canvas {
         self.refresh_text_preview();
         self.sync_thumbnails();
         self.sync_onion();
+        let key = self.key();
+        if self
+            .tab
+            .area_click
+            .as_ref()
+            .is_some_and(|click| click.key != key)
+        {
+            self.tab.area_click = None;
+        }
         if self.tab.playback.is_some() {
             return;
         }
-        let key = self.key();
         if self.tab.split.as_ref().map(|(shown, _)| *shown) != Some(key)
             && self.tab.requested != Some(key)
         {
@@ -1018,6 +1045,21 @@ impl Canvas {
                     self.adopt_onion(key, pixels);
                 }
             }
+            Rendered::Reference { number, pixels } => {
+                let key = self.key();
+                let Some(click) = self
+                    .tab
+                    .area_click
+                    .take_if(|click| click.number == number && click.key == key)
+                else {
+                    return;
+                };
+                let read = pixels.is_some();
+                if read {
+                    self.tab.reference = pixels;
+                }
+                self.fill_area(click, read);
+            }
             Rendered::Thumbnails {
                 document,
                 thumbnails,
@@ -1063,6 +1105,7 @@ impl Canvas {
         let Some(playback) = self.tab.playback.take() else {
             return false;
         };
+        self.tab.cache.drop_frames();
         self.tab.held = Some(playback.shown);
         self.upload_all();
         true
@@ -1117,7 +1160,10 @@ impl Canvas {
     /// Shows the next frame if it is due and rendered, and returns when to
     /// look again; `None` when not playing.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
-        if self.tab.resume_playback && !matches!(self.interaction, Interaction::Drawing { .. }) {
+        if self.tab.resume_playback
+            && !matches!(self.interaction, Interaction::Drawing { .. })
+            && self.tab.area_click.is_none()
+        {
             self.tab.resume_playback = false;
             self.toggle_playback();
         }
@@ -1464,7 +1510,9 @@ impl Canvas {
         }
     }
 
-    /// A click with the wand or the bucket at `point`.
+    /// A click with the wand or the bucket at `point`. What it reads is put
+    /// together from the split when it can be; else the worker draws it and
+    /// the click ends when that comes, so the render thread does not wait.
     fn click_area(&mut self, point: [f64; 2]) {
         let started = Instant::now();
         self.notice = None;
@@ -1473,7 +1521,25 @@ impl Canvas {
         if let Err(error) = self.tab.session.settle() {
             return self.fill_notice(&FillError::Edit(error));
         }
-        let read = self.read_reference();
+        self.tab.clicks += 1;
+        let click = AreaClick {
+            number: self.tab.clicks,
+            key: self.key(),
+            point,
+            tools: self.tools.clone(),
+            combine: self.combine(),
+            started,
+        };
+        self.tab.area_click = None;
+        match self.read_reference(click.number) {
+            Some(read) => self.fill_area(click, read),
+            None => self.tab.area_click = Some(click),
+        }
+    }
+
+    /// Ends `click` with the wand or the bucket, on what is in
+    /// `self.tab.reference` when `read`.
+    fn fill_area(&mut self, click: AreaClick, read: bool) {
         let reference = self
             .tab
             .reference
@@ -1481,22 +1547,24 @@ impl Canvas {
             .filter(|_| read)
             .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
         let before = self.key();
-        if self.tools.tool == Tool::Wand {
-            let combine = self.combine();
-            if let Err(error) = self
-                .tab
-                .session
-                .wand(&self.tools, point, combine, reference)
+        if click.tools.tool == Tool::Wand {
+            if let Err(error) =
+                self.tab
+                    .session
+                    .wand(&click.tools, click.point, click.combine, reference)
             {
                 self.fill_notice(&error);
             }
         } else {
-            let filled = self.tab.session.bucket(&self.tools, point, reference);
+            let filled = self
+                .tab
+                .session
+                .bucket(&click.tools, click.point, reference);
             self.record_colors();
             self.after_fill(before, filled.map(committed));
         }
         tracing::debug!(
-            ms = started.elapsed().as_secs_f64() * 1000.0,
+            ms = click.started.elapsed().as_secs_f64() * 1000.0,
             "area click shown"
         );
     }
@@ -1512,19 +1580,20 @@ impl Canvas {
     }
 
     /// Draws `reference`'s pixels as the wand and the bucket read them into
-    /// `self.tab.reference`: put together from the split when it shows this
-    /// frame and holds the layers, else drawn by the worker. `false` when
-    /// there is nothing to read.
-    fn read_reference(&mut self) -> bool {
+    /// `self.tab.reference` when the split shows this frame and holds the
+    /// layers; `false` when there is nothing to read, `None` when the worker
+    /// draws them instead, for click `number`.
+    fn read_reference(&mut self, number: u64) -> Option<bool> {
         let document = self.tab.session.document();
         let reference = match self.tools.fill.reads {
             Reads::Current => Reference::Layer(self.tab.session.current_layer()),
             Reads::Marked => Reference::Marked,
             Reads::Visible => Reference::Visible,
         };
-        let plan = RenderPlan::reference(document, reference, self.tab.session.frame());
+        let frame = self.tab.session.frame();
+        let plan = RenderPlan::reference(document, reference, frame);
         if plan.layers.is_empty() {
-            return false;
+            return Some(false);
         }
         let [width, height] = document.canvas.map(|edge| edge as u16);
         let pixels = match self.tab.reference.take() {
@@ -1537,17 +1606,15 @@ impl Canvas {
         let from_split = self.tab.split.as_ref().is_some_and(|(shown, split)| {
             *shown == key && split.reference(&plan, &mut pixels, threads)
         });
+        self.tab.reference = Some(pixels);
         if from_split {
-            self.tab.reference = Some(pixels);
-            return true;
+            return Some(true);
         }
-        let document = self.snapshot().document;
-        self.tab.reference =
-            self.tab
-                .cache
-                .renders()
-                .render(document, plan, self.tab.session.frame());
-        self.tab.reference.is_some()
+        let snapshot = self.snapshot();
+        self.tab
+            .cache
+            .request_reference(number, snapshot, plan, frame);
+        None
     }
 
     /// Shows a fill just committed (`Ok(true)`), added to the split's layer
@@ -2474,6 +2541,15 @@ mod tests {
                 assert!(!canvas.is_playing(), "still drawing");
             }
             canvas.apply(CanvasInput::End(press(90.0, 50.0)));
+            // A click plays on once what it reads has come.
+            canvas.tick(now);
+            while canvas.tab.area_click.is_some() {
+                assert!(!canvas.is_playing());
+                let rendered = renders
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the reference renders");
+                canvas.adopt(rendered);
+            }
             canvas.tick(now);
             assert!(canvas.is_playing(), "{tool:?}");
         }
@@ -2586,6 +2662,115 @@ mod tests {
     }
 
     #[test]
+    fn a_click_during_playback_reads_before_the_frames_waiting() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([640, 400]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_tool(Tool::Fill).unwrap();
+        canvas.toggle_playback();
+        canvas.tick(Instant::now());
+        let revision = canvas.session().revision();
+        canvas.click_area([100.0, 100.0]);
+        let mut frames = 0;
+        while canvas.session().revision() == revision {
+            let rendered = renders
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the fill comes in");
+            frames += usize::from(matches!(rendered, Rendered::Frame { .. }));
+            canvas.adopt(rendered);
+        }
+        while let Ok(rendered) = renders.recv_timeout(Duration::from_secs(1)) {
+            frames += usize::from(matches!(rendered, Rendered::Frame { .. }));
+        }
+        // At most the one under way when it was clicked: the rest are no
+        // longer shown.
+        assert!(frames <= 1, "{frames} frames drawn after the click");
+        assert!(!canvas.is_playing());
+    }
+
+    /// How long a bucket click right after playback stops and right after
+    /// an undo holds the render thread, and how long until the fill is in,
+    /// on the document at `UGU_FILL_FIXTURE` (`ugu-doc fixture 2`):
+    /// `UGU_WORKER_THREADS=8 cargo test --release -p ugurugu fill_wait --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement"]
+    fn fill_wait_after_playback_and_undo() {
+        let path = std::env::var("UGU_FILL_FIXTURE").expect("UGU_FILL_FIXTURE");
+        let file = std::fs::File::open(path).unwrap();
+        let (document, _) = ugu_io::read::read(std::io::BufReader::new(file)).unwrap();
+        let centre = document.canvas.map(|edge| f64::from(edge) / 2.0);
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(document, move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_tool(Tool::Fill).unwrap();
+        let quiet = |canvas: &mut super::Canvas| {
+            settle(canvas, &renders);
+            while let Ok(rendered) = renders.recv_timeout(Duration::from_millis(500)) {
+                canvas.adopt(rendered);
+            }
+        };
+        // Blocked, then until the fill is in.
+        let click = |canvas: &mut super::Canvas| {
+            let revision = canvas.session().revision();
+            let started = Instant::now();
+            canvas.click_area(centre);
+            let blocked = started.elapsed().as_secs_f64() * 1000.0;
+            while canvas.session().revision() == revision && canvas.notice().is_none() {
+                let rendered = renders
+                    .recv_timeout(Duration::from_secs(60))
+                    .expect("the fill comes in");
+                canvas.adopt(rendered);
+            }
+            if let Some(notice) = canvas.notice() {
+                println!("notice: {notice}");
+            }
+            (blocked, started.elapsed().as_secs_f64() * 1000.0)
+        };
+        let report = |what: &str, mut times: Vec<(f64, f64)>| {
+            times.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let blocked: Vec<String> = times.iter().map(|t| format!("{:.0}", t.0)).collect();
+            let done: Vec<String> = times.iter().map(|t| format!("{:.0}", t.1)).collect();
+            println!(
+                "{what}: blocked {} ms, filled {} ms",
+                blocked.join("/"),
+                done.join("/")
+            );
+        };
+        // It reads the current layer, as it does unless set otherwise.
+        let mut played = Vec::new();
+        let mut undone = Vec::new();
+        for _ in 0..5 {
+            quiet(&mut canvas);
+            canvas.toggle_playback();
+            let mut now = Instant::now();
+            let first = canvas.session().frame();
+            while canvas.session().frame() < first + 3 {
+                canvas.tick(now);
+                now += Duration::from_millis(100);
+                if let Ok(rendered) = renders.recv_timeout(Duration::from_millis(100)) {
+                    canvas.adopt(rendered);
+                }
+            }
+            played.push(click(&mut canvas));
+            canvas.tab.resume_playback = false;
+            canvas.edit(Session::undo).unwrap();
+
+            quiet(&mut canvas);
+            click(&mut canvas);
+            quiet(&mut canvas);
+            canvas.edit(Session::undo).unwrap();
+            canvas.sync();
+            undone.push(click(&mut canvas));
+            canvas.edit(Session::undo).unwrap();
+        }
+        report("after playback", played);
+        report("after undo", undone);
+    }
+
+    #[test]
     fn a_bucket_fill_shows_at_once_as_a_full_render_and_the_wand_reads_alike_without_a_split() {
         let (to_test, renders) = std::sync::mpsc::channel();
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
@@ -2632,6 +2817,14 @@ mod tests {
         canvas.edit(Session::deselect).unwrap();
         canvas.tab.split = None;
         canvas.click_area([160.0, 100.0]);
+        // The worker draws what it reads, and the click ends then.
+        assert_eq!(canvas.session().selection(), None);
+        while canvas.tab.area_click.is_some() {
+            let rendered = renders
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the reference renders");
+            canvas.adopt(rendered);
+        }
         assert_eq!(canvas.session().selection(), Some(&from_split));
         canvas.edit(Session::deselect).unwrap();
         settle(&mut canvas, &renders);

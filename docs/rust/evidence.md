@@ -1447,3 +1447,18 @@ CI 캐시에는 의존성만 들어간다(rust-cache는 workspace crate를 지�
 **결론:** `Wait-Until`은 시간 초과를 형식이 아니라 HRESULT로 알아보고, 밖에 있던 `FromHandle` 호출(`Test-Named`, 저장 대화상자 이름, 양파 껍질 단추, `pointer.ps1`의 `Get-Value`·`Set-Toggle`)도 그 안에서 부른다. 다시 물어 통과한 단계는 "pass after retry"로 남아, 창이 시작 직후 답하지 않는 앱 쪽 원인(B3-97)을 가리지 않는다.
 
 **Sandbox:** 고친 스크립트로 `gui.ps1 -Only`의 "Save dialog with another extension typed"와 "Key opacity, pivot and onion settings"를 돌려 둘 다 pass(다시 물음 없음)였다. 이번 실행에서는 시간 초과가 나지 않아 실제 "pass after retry"는 아직 보지 못했다.
+
+## 78. 페인트통 클릭의 참조 읽기 대기 (2026-10-16)
+
+**질문:** 페인트통·자동 선택이 읽을 그림을 분할에서 만들 수 없을 때, render 스레드가 캐시 작업자를 얼마나 기다리는가. 3.3.2까지는 그 요청이 내보내기 대기열 끝에 들어가 분할·남은 재생 프레임 뒤에서 기다렸다.
+
+**방법:** 호스트(Intel Core Ultra 7 270K Plus, RAM 32GiB), release 빌드, `UGU_WORKER_THREADS=8`. `ugu-doc fixture 2`(2048², 16레이어)를 `canvas::tests::fill_wait_after_playback_and_undo`(`--ignored`)로 열어, 페인트통(현재 레이어 읽기)으로 가운데를 누른다. "재생 뒤"는 재생을 켜 세 프레임을 보인 뒤 누르기, "undo 뒤"는 채우기·분할을 마친 뒤 undo하고 분할을 요청한 다음 누르기. 각 5번. render 스레드가 `click_area`에 막힌 시간과 채우기가 문서에 들어오기까지를 쟀다. 고치기 전은 같은 측정 시험을 고치기 전 코드(바로 앞 커밋)에 얹어, 고친 뒤는 이 커밋에서 쟀다.
+
+**결과(ms, 작은 것부터):**
+
+| | 고치기 전 막힘 = 채우기까지 | 고친 뒤 막힘 | 고친 뒤 채우기까지 |
+|---|---|---|---|
+| 재생 뒤 | 1237/1238/1252/1261/1269 | 2/2/2/2/5 | 46/47/53/53/56 |
+| undo 뒤 | 54/57/57/57/60 | 0/0/0/0/0 | 41/42/44/44/44 |
+
+고치기 전에는 재생을 멈춰도 기다리던 재생 프레임(이 문서에서 30개)을 다 그린 뒤에야 읽었다(`a_click_during_playback_reads_before_the_frames_waiting`이 고치기 전 코드에서 "30 frames drawn after the click"으로 실패). undo 뒤 채우기까지가 짧아진 것은 참조 읽기가 분할보다 먼저 돌고 작업자가 쥔 레이어 표면을 다시 쓰기 때문이라는 **가설**이다(나누어 재지 않음). "보이는 레이어 읽기"는 이 문서 가운데에서 채울 영역이 없다고 끝나 표에서 뺐다.

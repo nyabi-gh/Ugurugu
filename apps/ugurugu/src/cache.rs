@@ -5,12 +5,13 @@
 //! previous image and taking input while a frame is drawn, and renders never
 //! compete with each other for the processor.
 //!
-//! Work goes in this order: the canvas split for editing, playback frames
-//! (the one due first at the front), export frames, then layer thumbnails. Only the newest
-//! split and the newest list of playback frames matter; anything waiting
-//! that they replace is dropped. A render under way that is no longer wanted
-//! is stopped between layers or rows, and an export stopped that way starts
-//! again later.
+//! Work goes in this order: what a wand or bucket click reads, the canvas
+//! split for editing, playback frames (the one due first at the front),
+//! export frames, then layer thumbnails. Only the newest click, split and
+//! list of playback frames matter; anything waiting that they replace is
+//! dropped. A render under way that is no longer wanted is stopped between
+//! layers or rows, and an export stopped that way starts again later. A
+//! click stops whatever is under way, as the user waits for it.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -81,6 +82,11 @@ pub enum Rendered {
         key: OnionKey,
         pixels: Pixmap,
     },
+    /// What click `number` reads; `None` when it could not be drawn.
+    Reference {
+        number: u64,
+        pixels: Option<Pixmap>,
+    },
 }
 
 /// Thumbnails fit in this many pixels, twice the layer list's size.
@@ -95,6 +101,12 @@ pub struct Snapshot {
 }
 
 enum Job {
+    Reference {
+        number: u64,
+        snapshot: Snapshot,
+        plan: RenderPlan,
+        frame: i64,
+    },
     Split(Key, Snapshot),
     Frame(Version, u32, Preview, Snapshot),
     Export {
@@ -111,6 +123,7 @@ enum Job {
 /// What the worker is doing now.
 #[derive(Clone, Copy, PartialEq)]
 enum Running {
+    Reference,
     Split,
     Onion,
     Frame(Version, u32, Preview),
@@ -120,6 +133,7 @@ enum Running {
 
 #[derive(Default)]
 struct Queue {
+    reference: Option<Job>,
     split: Option<(Key, Snapshot)>,
     onion: Option<Job>,
     frames: VecDeque<(Version, u32, Preview, Snapshot)>,
@@ -203,13 +217,24 @@ impl CacheWorker {
                 let mut onion = Vec::new();
                 while let Some(job) = next(&worker) {
                     renderer.set_surface_budget(worker.surface_budget.load(Ordering::Relaxed));
+                    let click = match &job {
+                        Job::Reference { number, .. } => Some(*number),
+                        _ => None,
+                    };
                     // A job that panics is dropped, so an export waiting for
-                    // it gets no picture; the panic hook has recorded it.
+                    // it gets no picture and a click reads nothing; the
+                    // panic hook has recorded it.
                     let again = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         run(&mut renderer, &mut onion, job, &done)
                     }))
                     .unwrap_or_else(|_| {
                         renderer = renderer_for(&worker);
+                        if let Some(number) = click {
+                            done(Rendered::Reference {
+                                number,
+                                pixels: None,
+                            });
+                        }
                         None
                     });
                     if let Some(job) = again {
@@ -226,7 +251,8 @@ impl CacheWorker {
                         .store(renderer.surface_bytes(), Ordering::Relaxed);
                     let mut queue = worker.queue.lock().expect("queue lock");
                     queue.running = None;
-                    let idle = queue.split.is_none()
+                    let idle = queue.reference.is_none()
+                        && queue.split.is_none()
                         && queue.onion.is_none()
                         && queue.frames.is_empty()
                         && queue.exports.is_empty()
@@ -277,6 +303,23 @@ impl CacheWorker {
             .request_frames(version, frames, snapshot, preview);
     }
 
+    /// Draws what click `number` reads, `plan` on `frame` of `snapshot`,
+    /// before anything else: what is under way stops, and a click waiting
+    /// is replaced. Answered as `Rendered::Reference`.
+    pub fn request_reference(&self, number: u64, snapshot: Snapshot, plan: RenderPlan, frame: i64) {
+        self.shared.request_reference(Job::Reference {
+            number,
+            snapshot,
+            plan,
+            frame,
+        });
+    }
+
+    /// Drops the playback frames waiting, and stops the one under way.
+    pub fn drop_frames(&self) {
+        self.shared.drop_frames();
+    }
+
     /// Replaces the onion skin waiting to be drawn: the key's folder alone
     /// on `frames`, each with whether it is before the frame shown.
     pub fn request_onion(&self, key: OnionKey, frames: Vec<(i64, bool)>, snapshot: Snapshot) {
@@ -302,12 +345,32 @@ impl CacheWorker {
 }
 
 impl Shared {
+    fn request_reference(&self, job: Job) {
+        let mut queue = self.queue.lock().expect("queue lock");
+        queue.reference = Some(job);
+        if queue.running.is_some() {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+        self.wake.notify_one();
+    }
+
+    fn drop_frames(&self) {
+        let mut queue = self.queue.lock().expect("queue lock");
+        queue.frames.clear();
+        if matches!(queue.running, Some(Running::Frame(..))) {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+    }
+
     fn request(&self, key: Key, snapshot: Snapshot) {
         let mut queue = self.queue.lock().expect("queue lock");
         queue.split = Some((key, snapshot));
         // Editing comes first: whatever is under way is no longer wanted
-        // now, or waits.
-        if queue.running.is_some() {
+        // now, or waits. Only what a click reads goes before it.
+        if queue
+            .running
+            .is_some_and(|running| running != Running::Reference)
+        {
             self.stop.store(true, Ordering::Relaxed);
         }
         self.wake.notify_one();
@@ -370,6 +433,7 @@ fn next(shared: &Shared) -> Option<Job> {
     loop {
         if queue.quit {
             // Nothing shows them any more.
+            queue.reference = None;
             queue.split = None;
             queue.onion = None;
             queue.frames.clear();
@@ -378,7 +442,9 @@ fn next(shared: &Shared) -> Option<Job> {
                 return None;
             }
         }
-        let job = if let Some((key, snapshot)) = queue.split.take() {
+        let job = if let Some(job) = queue.reference.take() {
+            Some((Running::Reference, job))
+        } else if let Some((key, snapshot)) = queue.split.take() {
             Some((Running::Split, Job::Split(key, snapshot)))
         } else if let Some(job) = queue.onion.take() {
             Some((Running::Onion, job))
@@ -429,6 +495,26 @@ fn run(
         _ => FULL_DETAIL,
     });
     match job {
+        Job::Reference {
+            number,
+            snapshot,
+            plan,
+            frame,
+        } => {
+            let document = &snapshot.document;
+            let [width, height] = document.canvas.map(|edge| edge as u16);
+            let mut pixels = Pixmap::new(width, height);
+            // Stopped only by a newer click, which reads instead.
+            if !renderer.render_plan(document, &plan, frame, Some(&snapshot.layers), &mut pixels) {
+                tracing::debug!(ms = ms(), "reference stopped");
+                return None;
+            }
+            tracing::debug!(ms = ms(), "reference rendered");
+            done(Rendered::Reference {
+                number,
+                pixels: Some(pixels),
+            });
+        }
         Job::Split(key, snapshot) => {
             let document = &snapshot.document;
             let [width, height] = document.canvas.map(|edge| edge as u16);
@@ -741,6 +827,47 @@ mod tests {
     }
 
     #[test]
+    fn a_click_reads_before_anything_else_and_stops_what_is_under_way() {
+        let shared = shared();
+        let version = Version {
+            document: 0,
+            revision: 0,
+            posed: 0,
+        };
+        let state = snapshot(Document::new([8, 8]));
+        let key = Key {
+            version,
+            layer: LayerId(1),
+            frame: 0,
+        };
+        shared.queue.lock().unwrap().running = Some(Running::Frame(version, 2, full(1)));
+        shared.request_frames(version, &[2, 3, 4], &state, full(1));
+        let reference = |number| Job::Reference {
+            number,
+            snapshot: state.clone(),
+            plan: RenderPlan::new(&state.document, Purpose::Reference, 0),
+            frame: 0,
+        };
+        shared.request_reference(reference(1));
+        assert!(shared.stop.swap(false, Ordering::Relaxed));
+        // A split asked for while it reads waits; frames left behind go.
+        shared.queue.lock().unwrap().running = Some(Running::Reference);
+        shared.request(key, state.clone());
+        assert!(!shared.stop.load(Ordering::Relaxed));
+        shared.drop_frames();
+        assert!(!shared.stop.load(Ordering::Relaxed));
+        // Only the newest click is read.
+        shared.request_reference(reference(2));
+        assert!(shared.stop.swap(false, Ordering::Relaxed));
+        assert!(matches!(
+            next(&shared),
+            Some(Job::Reference { number: 2, .. })
+        ));
+        assert!(matches!(next(&shared), Some(Job::Split(..))));
+        assert!(shared.queue.lock().unwrap().frames.is_empty());
+    }
+
+    #[test]
     fn a_split_goes_before_frames_frames_before_exports_and_exports_before_thumbnails() {
         let shared = shared();
         let version = Version {
@@ -780,6 +907,7 @@ mod tests {
                 Job::Export { .. } => "export",
                 Job::Thumbnails(..) => "thumbnails",
                 Job::Onion(..) => "onion",
+                Job::Reference { .. } => "reference",
             })
             .collect();
         assert_eq!(order, ["split", "frame", "export", "thumbnails"]);
