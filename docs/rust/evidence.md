@@ -1423,6 +1423,19 @@ pull_request 71회는 중앙값 486·p90 609초, push 48회는 511.5·619초다.
 
 CI 캐시에는 의존성만 들어간다(rust-cache는 workspace crate를 지운다). `line-tables-only`에서도 실패한 시험의 backtrace에는 파일과 줄이 남는다.
 
+**바꾼 뒤 (이 PR, 2026-10-16):** 캐시 없는 실행은 PR이 캐시를 저장하게 한 임시 커밋으로 돌렸고, 따뜻한 실행은 그 캐시를 읽은 최종 커밋이다. 초:
+
+| | 캐시 없음 (38869753737) | 캐시 있음 (38871228522) | 바꾸기 전 캐시 있음 중앙값 |
+|---|---|---|---|
+| 실행 | 777 | 224 | 523 |
+| Rust Windows tests (캐시 복원 · clippy · debug 시험) | 434 (6 · 139 · 232) | 208 (30 · 30 · 121) | — |
+| Rust Windows release tests (캐시 복원 · 시험) | 755 (6 · 679) | 196 (26 · 148) | — |
+| Windows package (캐시 복원 · release 빌드 · 패키지) | 660 (5 · 497 · 58) | 189 (19 · 62 · 46) | — |
+| Format and dependencies (ubuntu) | 23 | 20 | fmt 3 + deny 47 (Windows) |
+| 캐시 저장 | 37 · 45 · 16 | 없음(PR) | 360~504 (저장한 실행) |
+
+캐시 있는 실행은 한 번만 쟀다. 바꾸기 전과 같이 따뜻한 캐시의 실행 시간은 523초에서 224초로, 캐시 없는 실행은 1,269초에서 777초로 줄었다. release 시험은 캐시가 있을 때 196초로, 나란히 도는 다른 두 Windows 작업과 비슷해 실행 시간을 늘리지 않았다. 캐시가 없을 때는 release 시험(755초)이 가장 길다. 세 캐시 저장은 모두 1분이 안 됐다(바꾸기 전 360~504초). main은 이 변경 뒤 첫 push에서 캐시 없이 돌고 저장한다.
+
 ## 77. Sandbox의 UI Automation 시간 초과 (2026-10-16)
 
 **질문:** 시험 스크립트의 `Wait-Until`은 UI Automation 시간 초과를 다시 묻는데, 왜 `FromHandle` 시간 초과 단계가 1초 안에 실패했나(B3-97).
@@ -1432,3 +1445,5 @@ CI 캐시에는 의존성만 들어간다(rust-cache는 workspace crate를 지�
 **결과:** 결과 파일 14개에서 17단계가 모두 `Exception calling "FromHandle" ... "Operation timed out. (Exception from HRESULT: 0x80131505)"`로 실패했다. 그중 "Update that fails to download" 7회는 `Press` → `Find-Element`, 곧 `Wait-Until` 안에서 불렸다. .NET Framework는 0x80131505(COR_E_TIMEOUT)를 `System.Runtime.InteropServices.COMException`으로 바꾸고 메시지도 같은 꼴이다. `Wait-Until`은 가장 안쪽 예외가 `TimeoutException`일 때만 다시 물었으므로 곧바로 다시 던졌다. 가짜 조건은 고치기 전 곧바로 FAIL, 고친 뒤 "pass after retry"(무엇을 두 번 다시 물었는지 남김)였다. 잘못된 창 핸들의 `ElementNotAvailableException`(0x80040201)은 고친 뒤에도 곧바로 실패하고 결과에 형식과 HRESULT가 남는다.
 
 **결론:** `Wait-Until`은 시간 초과를 형식이 아니라 HRESULT로 알아보고, 밖에 있던 `FromHandle` 호출(`Test-Named`, 저장 대화상자 이름, 양파 껍질 단추, `pointer.ps1`의 `Get-Value`·`Set-Toggle`)도 그 안에서 부른다. 다시 물어 통과한 단계는 "pass after retry"로 남아, 창이 시작 직후 답하지 않는 앱 쪽 원인(B3-97)을 가리지 않는다.
+
+**Sandbox:** 고친 스크립트로 `gui.ps1 -Only`의 "Save dialog with another extension typed"와 "Key opacity, pivot and onion settings"를 돌려 둘 다 pass(다시 물음 없음)였다. 이번 실행에서는 시간 초과가 나지 않아 실제 "pass after retry"는 아직 보지 못했다.
