@@ -49,9 +49,10 @@ Ugurugu 3 (`apps/`, `crates/`) is the maintained app. The C++ 2.x sources
 are at the `v2.2.13` tag.
 
 - Run the checks in [BUILDING.md](BUILDING.md#checks).
-- Write interface text in `apps/ugurugu/i18n/strings.txt` with Korean and
-  Japanese translations, then generate the `.ftl` files with
-  `python -X utf8 tools/strings_to_ftl.py`. Do not edit the `.ftl` files by hand.
+- Write interface text in `apps/ugurugu/i18n/strings.txt` with Korean,
+  Japanese and Simplified Chinese translations, then generate the `.ftl`
+  files with `python -X utf8 tools/strings_to_ftl.py`. Do not edit the
+  `.ftl` files by hand.
 - Add a release note to `release-notes/<version>.en.md` when the change is
   user visible. Release notes are written in English only. End each entry
   with the issues it answers and the pull requests that made it, in

@@ -1363,3 +1363,9 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 **출시:** 태그 `v3.3.2`(annotated, `49b7000`) → `release-3.yml` 실행 38844964892 성공. `v3.3.2`에는 `Ugurugu-3.3.2-Windows-x64-Setup.exe`만, 본문 끝에 "What's Changed"(#87~#91)와 비교 링크가 붙었다. `updates`의 `releases.win-x64.json`이 3.3.2를 가리킨다. 다운로드 배지 workflow(38845653307)가 이어서 돌았다.
 
 **남은 것:** 3.3.1에서 3.3.2로의 실제 업데이트는 사용자 PC에서 보지 않았다.
+
+## 74. 간체 중국어 화면 (2026-10-16)
+
+**방법:** 간체 중국어를 더한 release 빌드로 Windows Sandbox에서 `gui.ps1`의 "Screen set at 100%"(ko·en·ja·zh-Hans, 인터페이스 100%)를 돌렸다. 언어마다 메뉴·도구 설정·설정 창·대화상자·도움말 등 33장을 찍는다.
+
+**결과:** 중국어 33장을 모두 찍었고, 로그의 인터페이스 언어는 `zh-Hans`였으며 "cannot read the Chinese interface font"는 없었다. 메뉴, 설정 창, 도움말을 눈으로 보았고 네모로 깨진 글자나 넘친 글은 보지 못했다. 이 단계는 한국어 3장(글자·스포이드 도구 등)이 UI Automation `FromHandle` 시간 초과(B3-97)로 빠져 실패로 끝났다. Sandbox는 한국어 Windows라, 다른 언어판 Windows에 `msyh.ttc`가 있는지는 이 실행으로 알 수 없다. 글꼴을 읽는 시작 비용은 재지 않았다.

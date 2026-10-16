@@ -3,7 +3,8 @@
 
 //! Interface text in the user's language, from the Fluent files in `i18n/`.
 //! English is the source. `tools/strings_to_ftl.py` writes the files from
-//! `i18n/strings.txt`; Korean and Japanese reuse 2.2.13's translations.
+//! `i18n/strings.txt`; Korean and Japanese reuse 2.2.13's translations, and
+//! Simplified Chinese has none to reuse.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -14,10 +15,11 @@ use unic_langid::LanguageIdentifier;
 
 use crate::settings::Language;
 
-const LANGUAGES: [(&str, &str); 3] = [
+const LANGUAGES: [(&str, &str); 4] = [
     ("en", include_str!("../i18n/en.ftl")),
     ("ko", include_str!("../i18n/ko.ftl")),
     ("ja", include_str!("../i18n/ja.ftl")),
+    ("zh-Hans", include_str!("../i18n/zh-Hans.ftl")),
 ];
 
 struct Text {
@@ -63,14 +65,25 @@ fn text() -> &'static Text {
 fn language_for(preferred: &[String]) -> &'static str {
     preferred
         .iter()
-        .find_map(|name| {
-            let primary = name.split(['-', '_']).next()?.to_ascii_lowercase();
-            LANGUAGES
-                .iter()
-                .find(|(code, _)| *code != "en" && *code == primary)
-                .map(|(code, _)| *code)
-        })
+        .find_map(|name| catalogue(name))
         .unwrap_or("en")
+}
+
+/// The catalogue for a language tag such as "ko-KR". Chinese written with
+/// traditional characters, or in Taiwan, Hong Kong or Macao, has none: the
+/// simplified one would not be what its readers write.
+fn catalogue(name: &str) -> Option<&'static str> {
+    let name = name.to_ascii_lowercase();
+    let mut subtags = name.split(['-', '_']);
+    let primary = subtags.next()?;
+    if primary == "zh" {
+        let traditional = subtags.any(|subtag| matches!(subtag, "hant" | "tw" | "hk" | "mo"));
+        return (!traditional).then_some("zh-Hans");
+    }
+    LANGUAGES
+        .iter()
+        .find(|(code, _)| *code != "en" && *code == primary)
+        .map(|(code, _)| *code)
 }
 
 fn bundle(code: &str) -> (FluentBundle<FluentResource>, Vec<String>) {
@@ -197,7 +210,7 @@ mod tests {
     fn every_language_has_every_message_and_no_other() {
         let english = ids("en");
         assert!(!english.is_empty());
-        for code in ["ko", "ja"] {
+        for code in ["ko", "ja", "zh-Hans"] {
             assert_eq!(ids(code), english, "{code}.ftl");
         }
     }
@@ -213,6 +226,20 @@ mod tests {
         assert_eq!(language_for(&names(&["fr-FR", "ja-JP"])), "ja");
         assert_eq!(language_for(&names(&["en-US", "ko-KR"])), "ko");
         assert_eq!(language_for(&names(&["de-DE"])), "en");
+        for simplified in ["zh-CN", "zh-Hans-CN", "zh-SG", "zh", "zh-Hans"] {
+            assert_eq!(
+                language_for(&names(&[simplified])),
+                "zh-Hans",
+                "{simplified}"
+            );
+        }
+        for traditional in ["zh-TW", "zh-HK", "zh-MO", "zh-Hant-TW", "zh-Hant"] {
+            assert_eq!(
+                language_for(&names(&[traditional, "ja-JP"])),
+                "ja",
+                "{traditional}"
+            );
+        }
         assert_eq!(language_for(&[]), "en");
     }
 

@@ -286,6 +286,26 @@ pub mod space {
     pub const XXL: f32 = 24.0;
 }
 
+/// Windows' Microsoft YaHei, read once; `None`, logged, when it cannot be
+/// read, and the interface then shows what Pretendard JP has.
+fn chinese_font() -> Option<Arc<egui::FontData>> {
+    static FONT: std::sync::OnceLock<Option<Arc<egui::FontData>>> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
+        let path = std::path::Path::new(&windows)
+            .join("Fonts")
+            .join("msyh.ttc");
+        match std::fs::read(&path) {
+            Ok(bytes) => Some(Arc::new(egui::FontData::from_owned(bytes))),
+            Err(error) => {
+                tracing::warn!(?path, %error, "cannot read the Chinese interface font");
+                None
+            }
+        }
+    })
+    .clone()
+}
+
 /// Sets the font, text sizes and widget style on `ctx`.
 pub fn apply(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -296,12 +316,21 @@ pub fn apply(ctx: &egui::Context) {
         ))),
     );
     // In front of egui's own fonts, which stay as fallbacks for symbols.
+    let mut first = vec!["Pretendard JP".to_owned()];
+    // Pretendard JP has the Han characters in Japanese forms and lacks many
+    // simplified ones, so Chinese reads from Windows' own Chinese font
+    // first, Pretendard JP after it for Hangul.
+    if crate::i18n::language() == "zh-Hans"
+        && let Some(yahei) = chinese_font()
+    {
+        fonts.font_data.insert("Microsoft YaHei".to_owned(), yahei);
+        first.insert(0, "Microsoft YaHei".to_owned());
+    }
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .insert(0, "Pretendard JP".to_owned());
+        let names = fonts.families.entry(family).or_default();
+        for (index, name) in first.iter().enumerate() {
+            names.insert(index, name.clone());
+        }
     }
     ctx.set_fonts(fonts);
 

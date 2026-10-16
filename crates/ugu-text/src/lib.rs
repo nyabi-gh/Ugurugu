@@ -30,12 +30,15 @@ pub struct Fonts {
 }
 
 impl Fonts {
-    /// `language` (as "ko" or "ja") orders the fallback, so kana and kanji
-    /// take that language's forms.
+    /// `language` (as "ko", "ja" or "zh-Hans") orders the fallback, so kana
+    /// and Han characters take that language's forms.
     pub fn new(language: &str) -> Self {
         let fallback = match language {
             "ko" => "\"Malgun Gothic\", \"Yu Gothic UI\", sans-serif",
             "ja" => "\"Yu Gothic UI\", Meiryo, \"Malgun Gothic\", sans-serif",
+            "zh-Hans" => {
+                "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Malgun Gothic\", sans-serif"
+            }
             _ => "\"Segoe UI\", \"Yu Gothic UI\", \"Malgun Gothic\", sans-serif",
         };
         Self {

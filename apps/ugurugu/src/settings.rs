@@ -46,10 +46,18 @@ pub enum Language {
     English,
     Korean,
     Japanese,
+    /// Simplified Chinese.
+    Chinese,
 }
 
 impl Language {
-    pub const ALL: [Self; 4] = [Self::System, Self::English, Self::Korean, Self::Japanese];
+    pub const ALL: [Self; 5] = [
+        Self::System,
+        Self::English,
+        Self::Korean,
+        Self::Japanese,
+        Self::Chinese,
+    ];
 
     /// The code stored in the file, and the interface catalogue's for all
     /// but `System`.
@@ -59,6 +67,7 @@ impl Language {
             Self::English => "en",
             Self::Korean => "ko",
             Self::Japanese => "ja",
+            Self::Chinese => "zh-Hans",
         }
     }
 

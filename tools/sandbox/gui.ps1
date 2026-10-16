@@ -1394,7 +1394,7 @@ Step 'Screen set' { Invoke-ScreenSet @('ko', 'en') }
 Step 'Screen set at 100%' {
     $env:UGURUGU_UI_SCALE = '100'
     try {
-        Invoke-ScreenSet @('ko', 'en', 'ja') '100-'
+        Invoke-ScreenSet @('ko', 'en', 'ja', 'zh-Hans') '100-'
     } finally {
         Remove-Item Env:UGURUGU_UI_SCALE
     }
