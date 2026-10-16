@@ -67,6 +67,17 @@ jobs:
           fi
           echo "commit=$source_commit" >> "$GITHUB_OUTPUT"
 
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: cargo-deny@0.18.9
+
+      # CI leaves advisories out of pull requests; a release ships none.
+      - name: Check dependency advisories
+        run: cargo deny --locked check advisories
+
       - name: Require successful main CI for this commit
         shell: bash
         env:

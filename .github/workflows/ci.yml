@@ -9,9 +9,13 @@ on:
 permissions:
   contents: read
 
+# A pull request's new push cancels its older run. Each push to main has a
+# group of its own and runs to the end: a release requires the main CI of
+# its tagged commit, and in a shared group a third push would still cancel
+# the run waiting behind the first.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Runs only the jobs the changes can affect: a pull request against its base,
@@ -73,7 +77,7 @@ jobs:
           echo "rust=$rust"
 
   static:
-    name: Format and release metadata
+    name: Sources and release metadata
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -88,7 +92,7 @@ jobs:
             if ! head -n 3 "$file" | grep -qF "$identifier"; then
               missing+=("$file")
             fi
-          done < <(git ls-files -- '*.js' '*.rs')
+          done < <(git ls-files -- '*.js' '*.ps1' '*.py' '*.rs' '*.sh')
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "Sources missing the '$identifier' header:"
             printf '  %s\n' "${missing[@]}"
@@ -97,6 +101,17 @@ jobs:
 
       - name: Check document links and backlog IDs
         run: python3 -X utf8 tools/check_docs.py
+
+      - name: Check the Fluent files against strings.txt
+        shell: bash
+        run: |
+          python3 -X utf8 tools/strings_to_ftl.py
+          if [[ -n "$(git status --porcelain -- apps/ugurugu/i18n)" ]]; then
+            git status --short -- apps/ugurugu/i18n
+            git diff -- apps/ugurugu/i18n
+            echo "The .ftl files are not what strings.txt makes; run python -X utf8 tools/strings_to_ftl.py"
+            exit 1
+          fi
 
       - name: Test download badge aggregation
         run: node --test .github/scripts/update-download-badge.test.js
@@ -116,8 +131,63 @@ jobs:
             exit 1
           fi
 
-  rust:
-    name: Rust Windows
+  rust-static:
+    name: Format and dependencies
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: cargo-deny@0.18.9
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Advisories are checked weekly and before a release (advisories.yml,
+      # release-3.yml), so one published today fails no unrelated change.
+      - name: Dependencies
+        run: cargo deny --locked check bans licenses sources
+
+  test:
+    name: Rust Windows tests
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      # A failing test's backtrace keeps its files and lines, without the
+      # full debug information to build, link and cache.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      # Only main saves: a pull request's cache serves that pull request
+      # alone, and saving one took minutes.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  release-test:
+    name: Rust Windows release tests
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: windows-2025
@@ -131,33 +201,45 @@ jobs:
         run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Some faults show only in the optimised build.
+      - name: Test optimised
+        run: cargo test --workspace --release --locked
+
+  # The executable, package and checks of release-3.yml, so a release does
+  # not find a build or packaging problem first.
+  package:
+    name: Windows package
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
         with:
-          tool: cargo-deny@0.18.9,cargo-about@0.9.2
+          tool: cargo-about@0.9.2
 
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Dependencies
-        run: cargo deny --locked check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Test
-        run: cargo test --workspace --locked
-
-      - name: Release build
-        run: cargo build --workspace --release --locked
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version 1.2.161
 
       - name: Native dependencies
         run: python tools/native_deps.py
 
-      # The same package and checks as release-3.yml, so a release does not
-      # find a packaging problem first.
-      - name: Install Velopack
-        run: dotnet tool install --global vpk --version 1.2.161
+      - name: Release build
+        run: cargo build --package ugurugu --release --locked
 
       - name: Package
         shell: pwsh
@@ -177,7 +259,7 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, rust]
+    needs: [changes, static, rust-static, test, release-test, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -185,7 +267,10 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_RESULT: ${{ needs.static.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
+          RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          RELEASE_TEST_RESULT: ${{ needs.release-test.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           failed=0
           # A check may be skipped only because its paths did not change,
@@ -194,7 +279,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC RUST; do
+          for check in STATIC RUST_STATIC TEST RELEASE_TEST PACKAGE; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

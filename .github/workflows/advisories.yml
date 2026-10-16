@@ -1,0 +1,33 @@
+name: Advisories
+
+# RustSec advisories and yanked crates in Cargo.lock. Pull requests leave
+# them out (ci.yml), so an advisory published today fails no unrelated
+# change; this finds it within a week, and a release checks again
+# (release-3.yml).
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: cargo-deny@0.18.9
+
+      - name: Advisories
+        run: cargo deny --locked check advisories

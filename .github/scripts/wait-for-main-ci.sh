@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nyabi (nyabi-gh)
+
 # Waits for the main-branch CI run of SOURCE_COMMIT and fails unless it
 # succeeded, so a release publishes only a commit CI passed on main.
 set -eo pipefail

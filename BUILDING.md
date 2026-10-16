@@ -37,37 +37,47 @@ To keep a development run apart from an installed Ugurugu 3, point
 
 ### Checks
 
-CI (`.github/workflows/ci.yml`) runs two jobs before anything is merged.
-"Format and release metadata" checks that every tracked `.rs` and `.js` file
-has the `SPDX-License-Identifier` line, runs `tools/check_docs.py` and the
-download badge test (`node --test
-.github/scripts/update-download-badge.test.js`), and checks that the
-workspace version has release notes in `release-notes/<version>.en.md`.
-"Rust Windows" runs only when something other than documents changed (the
-paths are listed in the "Detect changes" job):
+CI (`.github/workflows/ci.yml`) runs these jobs before anything is merged.
+"Sources and release metadata" checks that every tracked `.rs`, `.js`,
+`.py`, `.ps1` and `.sh` file has the `SPDX-License-Identifier` line, runs
+`tools/check_docs.py` and the download badge test (`node --test
+.github/scripts/update-download-badge.test.js`), checks that the `.ftl` files
+are what `tools/strings_to_ftl.py` makes, and checks that the workspace
+version has release notes in `release-notes/<version>.en.md`. The others run
+only when something other than documents changed (the paths are listed in
+the "Detect changes" job), side by side: "Format and dependencies" on Ubuntu,
+and "Rust Windows tests", "Rust Windows release tests" and "Windows package"
+on Windows. Together they run:
 
 ```powershell
 cargo fmt --all --check
-cargo deny --locked check
+cargo deny --locked check bans licenses sources
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo build --workspace --release --locked
+cargo test --workspace --release --locked
 python tools/native_deps.py
+cargo build --package ugurugu --release --locked
 ```
 
-It then packs the release build with `tools/package_windows.ps1` and installs,
-runs and uninstalls the result with `tools/package_smoke.ps1` (see Package).
-Run `python -X utf8 tools/check_docs.py` yourself as well.
+The release build is the command `release-3.yml` builds the installer's
+executable with; "Windows package" then packs it with
+`tools/package_windows.ps1` and installs, runs and uninstalls the result with
+`tools/package_smoke.ps1` (see Package). CI leaves the advisories of
+`cargo deny` out of pull requests, so an advisory published today fails no
+unrelated change; it checks them weekly (`advisories.yml`) and the release
+workflow checks them before it builds. Locally, run the commands above with
+the whole `cargo deny --locked check`, and also:
 
-CI tests the debug build only, and the release workflow runs no tests. Also
-run `cargo test --workspace --release --locked` before you commit: it catches
-differences that only the optimised build shows (`docs/rust/backlog.md`
-B3-116 records one).
+```powershell
+python -X utf8 tools/check_docs.py
+python -X utf8 tools/strings_to_ftl.py; git diff --exit-code apps/ugurugu/i18n
+```
 
 `tools/native_deps.py` fails when a crate the app links builds or links
 native code that is not on its approved list. `tools/check_docs.py` fails
 when a document links to a file that is not in the tree, or names a backlog
-ID that `docs/rust/backlog.md` has no row for.
+ID that `docs/rust/backlog.md` has no row for. The last line fails when the
+`.ftl` files are not what `strings.txt` makes.
 
 ### Package
 
@@ -96,7 +106,7 @@ in `<folder>\out\results.md`. The app looks for updates in the folder
 `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
-commit; the release workflow runs no tests of its own.
+commit and no advisory is open; the release workflow runs no tests of its own.
 
 ## Ugurugu 2.x
 
