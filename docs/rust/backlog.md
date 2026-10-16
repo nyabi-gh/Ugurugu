@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-10-14 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이고, 어디 칸의 줄 번호는 적은 때의 코드 기준이라 어긋날 수 있다. 새로 적는 행은 함수 이름을 쓴다.
+2026-10-12 정리, 2026-10-16 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -11,6 +11,7 @@
 | ID | 할 일 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-03 | 픽셀 모드를 직접 써 본다 | 이슈 #24, 문서 단위 모드(M6-17). Sandbox GUI 단계만 통과했다 | 편집 메뉴, 새 문서 대화상자 | m6-plan 2절 24 |
+| B3-142 | 간체 중국어 번역을 읽어 본다 | 2.2.13 번역이 없어 새로 옮겼고 중국어를 읽는 사람의 검토를 받지 않았다(decisions.md 9절). 용어와 어색한 문장을 고친다 | `apps/ugurugu/i18n/strings.txt`의 다섯째 열 | 2026-10-16 간체 중국어 |
 
 ## 2. 열린 gate
 
@@ -52,6 +53,7 @@
 | B3-20 | 그리는 중 픽셀 획은 프레임마다 전체를 다시 계산 | 3초 빠른 획 끝에서 약 1.5ms/프레임(잉크 펜의 10배 이상). 프레임을 놓치지 않아 그대로 둔다. B3-24와 관련 | `crates/ugu-render/src/pixel.rs` | m6-plan 6절 M6-16, 8절 |
 | B3-21 | 진행 중 dab 획은 표본 상한(`MAX_DABS` 5만)을 모르고 그린다 | 상한을 넘는 긴 에어브러시·스프레이 획은 확정 뒤 간격이 넓어진 모양으로 바뀐다. 기록 당시 사실이고 지금도 같은지는 다시 확인하지 않았다(가설) | `crates/ugu-render/src/dab.rs` | m4-plan 603행 |
 | B3-22 | Windows 10은 따로 시험하지 않음 | 막지 않고 "Windows 10 이상"을 둔다(사용자 결정). Sandbox 게스트는 Windows 11 계열(10.0.26100) | — | m6-plan 2절 12 |
+| B3-143 | 번체 중국어 Windows는 영어(또는 다음 선호 언어)로 보임 | 중국어 번역은 간체 하나다(사용자 결정 2026-10-16). 번체 표시(`Hant`·`TW`·`HK`·`MO`)가 있으면 `catalogue`가 번역이 없다고 답해 다음 선호 언어, 없으면 영어로 간다. 번체 번역을 더하려면 문자열 열과 글꼴(번체 자형)을 함께 정해야 한다 | `apps/ugurugu/src/i18n.rs` `catalogue` | 2026-10-16 간체 중국어 |
 
 "그리는 동안에도 우글거림 유지" 선택지가 없는 것도 한계로 기록돼 있었다. B3-23으로 옮긴다.
 
@@ -69,7 +71,7 @@
 | B3-30 | 패널을 메인 창 밖(두 번째 모니터)으로 떼기 | 자체 도킹은 떠 있는 패널도 메인 창 안이다. 2.2.13 Qt 도크와 남은 차이 | `apps/ugurugu/src/layout.rs`, `ui/dock.rs` | m5-plan 119행(M5-11) |
 | B3-31 | 축소 내보내기를 작게 그린 뒤 줄이기 | 작은 크기에서는 시간·메모리 대부분이 원래 크기 그리기다. 다만 2.2.13 NativeExact(원래 크기로 그린 뒤 면적 평균)와 화소가 달라져 하지 않았다. 차이를 받아들일 때만 | `apps/ugurugu/src/export.rs` | m5-plan 120행 |
 | B3-32 | 100% 이상으로 큰 문서를 재생할 때 보이는 영역만 그리기 | 프레임이 화면 크기로 줄어 예산이 모자란 PC의 재생이 빨라진다 | `apps/ugurugu/src/cache.rs` | m4-plan 652행 |
-| B3-33 | egui-wgpu 장치 손실 panic 우회 제거 | egui-wgpu가 손실된 장치에서 오류 대신 panic하므로 장치 손실 때만 `catch_unwind`로 흡수한다. 상류가 오류를 돌려주게 고쳐지면 지운다 | `apps/ugurugu/src/render.rs` 852행 근처 | m0-close 58행 |
+| B3-33 | egui-wgpu 장치 손실 panic 우회 제거 | egui-wgpu가 손실된 장치에서 오류 대신 panic하므로 장치 손실 때만 `catch_unwind`로 흡수한다. 상류가 오류를 돌려주게 고쳐지면 지운다 | `apps/ugurugu/src/render.rs` `RenderThread::frame`의 `catch_unwind` | m0-close 58행 |
 | B3-34 | egui TextEdit의 UIA `SetValue` | egui가 지원하지 않아 일부 보조 기술이 제한된다. 수용했고 egui를 올릴 때 다시 본다 | egui | m0-close 64행 |
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
 | B3-129 | 픽셀 모드의 확대율 안내 | 100% 아래에서는 화소가 섞여 픽셀 칸이 보이지 않는다. 이슈 #24 사용자는 이것을 브러시 모양 차이로 보았다(evidence 59). 후보: 픽셀 모드 문서를 정수 배율로 맞춰 열기, 100% 아래에서 상태 표시줄에 안내. 사용자 결정 전 | `crates/ugu-render/src/view.rs`, `apps/ugurugu/src/canvas/view.rs` | 이슈 #24, evidence 59 |
@@ -81,21 +83,21 @@
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-36 | 내보내기의 정적 레이어 재사용 | 내보내기 렌더는 revision에 `None`을 넘겨(`render_plan(..., None, ...)`) 정적 레이어를 다시 쓰지 않는다. 복잡한 정적 배경의 긴 애니메이션은 매 프레임 다시 그린다(비용 크기는 가설). 문서 식별자와 revision을 함께 넘겨야 하고 `None == None`으로 재사용하면 다른 문서가 섞인다 | `apps/ugurugu/src/cache.rs` 428행, `crates/ugu-render/src/document.rs` | 분석 3.3-3, 4절 11 |
+| B3-36 | 내보내기의 정적 레이어 재사용 | 내보내기 렌더는 revision에 `None`을 넘겨(`render_plan(..., None, ...)`) 정적 레이어를 다시 쓰지 않는다. 복잡한 정적 배경의 긴 애니메이션은 매 프레임 다시 그린다(비용 크기는 가설). 문서 식별자와 revision을 함께 넘겨야 하고 `None == None`으로 재사용하면 다른 문서가 섞인다 | `apps/ugurugu/src/cache.rs` `run`의 `Job::Export`, `crates/ugu-render/src/document.rs` | 분석 3.3-3, 4절 11 |
 | B3-37 | 2.2.13 fixture → 3.0 전체 프레임 비교를 CI에 | 지금 CI는 가져오기 대응·거절만 시험하고(`legacy/tests.rs`), 2.2.13 렌더와의 프레임 비교(`ugu-doc compare`)는 수동이었다(m0-evidence 22절). C++를 더 빌드하지 않으므로 2.2.13 생성기로 기준 프레임 PNG를 한 번 만들어 저장소에 두고 CI가 비교하는 방식이 맞다 | `tests/fixtures/ugu13`, `tools/ugu-doc`, `.github/workflows/ci.yml` | 분석 2.2 |
-| B3-38 | 프로세스 전체 메모리 예산과 저메모리·여러 창 측정 | 캐시 `Budget`은 최소 256MiB를 강제하고(가용 100MiB여도), 디코더·히스토리·GPU staging·내보내기·다른 창은 이 예약에 묶이지 않는다. 이미지 디코더 1GiB 한도도 고정값이다. 저메모리·여러 창·큰 내보내기 조합의 OOM·지연은 재현하지 않았다(가설). 잴 조건: 8·16GiB, 큰 문서 탭 1·4·8개, 저장·가져오기·내보내기 조합에서 peak private bytes, commit 여유, 탭 바꾸기 지연, 취소 p95. B3-80과 같이 예산을 한 곳에서 나누고 숨은 탭부터 회수하는 정책을 정하되, B3-101의 화소 일치 시험을 지킨 채로 한다 | `apps/ugurugu/src/budget.rs` 17행, `crates/ugu-io/src/import.rs` | 분석 3.3-1·3.3-5, 4절 12; 검토 8절 |
-| B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다. 정상 작업을 실패로 만드는 시간 초과보다, 취소가 대기 중 요청·진행 중 렌더·인코더·파일 정리까지 닿는지와 내보내기의 최소 진행 기회를 먼저 본다. 잴 것: 연속 편집·재생 중 내보내기 완료 시간, 취소→정리 p95(목표 100ms) | `apps/ugurugu/src/cache.rs` 300·315행 | 분석 3.3-4, 4절 11; 검토 8절 |
+| B3-38 | 프로세스 전체 메모리 예산과 저메모리·여러 창 측정 | 캐시 `Budget`은 최소 256MiB를 강제하고(가용 100MiB여도), 디코더·히스토리·GPU staging·내보내기·다른 창은 이 예약에 묶이지 않는다. 이미지 디코더 1GiB 한도도 고정값이다. 저메모리·여러 창·큰 내보내기 조합의 OOM·지연은 재현하지 않았다(가설). 잴 조건: 8·16GiB, 큰 문서 탭 1·4·8개, 저장·가져오기·내보내기 조합에서 peak private bytes, commit 여유, 탭 바꾸기 지연, 취소 p95. B3-80과 같이 예산을 한 곳에서 나누고 숨은 탭부터 회수하는 정책을 정하되, B3-101의 화소 일치 시험을 지킨 채로 한다 | `apps/ugurugu/src/budget.rs` `FLOOR`, `crates/ugu-io/src/import.rs` `ALLOCATION` | 분석 3.3-1·3.3-5, 4절 12; 검토 8절 |
+| B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다. 정상 작업을 실패로 만드는 시간 초과보다, 취소가 대기 중 요청·진행 중 렌더·인코더·파일 정리까지 닿는지와 내보내기의 최소 진행 기회를 먼저 본다. 잴 것: 연속 편집·재생 중 내보내기 완료 시간, 취소→정리 p95(목표 100ms) | `apps/ugurugu/src/cache.rs` `Renders::render`(`answer.recv()`)와 `Queue`의 `exports` | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
-| B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다. 안: 실패한 때만 "설정이 저장되지 않음 · 다시 시도 · 폴더 열기" 같은 상태를 두고, 조건이 회복되면 최근 설정을 쓴다. 복구 실패 안내도 경로 글자만 보이므로 보존한 폴더를 여는 동작을 같이 볼 수 있다 | `apps/ugurugu/src/settings.rs` 515·542행 근처 | 분석 3.2 |
-| B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml` 10행, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
-| B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` 67~83행 | 분석 3.2; 검토 9절 |
-| B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` 642·712·778·793행 근처 | 분석 3.4 |
+| B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다. 안: 실패한 때만 "설정이 저장되지 않음 · 다시 시도 · 폴더 열기" 같은 상태를 두고, 조건이 회복되면 최근 설정을 쓴다. 복구 실패 안내도 경로 글자만 보이므로 보존한 폴더를 여는 동작을 같이 볼 수 있다 | `apps/ugurugu/src/settings.rs` `write_changes`·`write_text` | 분석 3.2 |
+| B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml`의 `[advisories] ignore`, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
+| B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` `EguiState`의 `unsafe impl Send` | 분석 3.2; 검토 9절 |
+| B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 "skipped: no DX12 adapter"를 찍고 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` `tests::device`와 `render`·`render_grid`를 쓰는 시험(`at_whole_scales_each_screen_pixel_shows_one_document_pixel` 등) | 분석 3.4 |
 | B3-47 | 코드에 직접 넣은 사용자 문구 검사 | Fluent 키 일치 시험은 언어 파일끼리만 비교해 코드의 하드코딩 영어를 찾지 못한다. 지금 남은 하드코딩 문구가 있는지는 전수 확인하지 않았다(가설) | `apps/ugurugu/src/i18n.rs` | 분석 3.7; 검토 6절 |
-| B3-50 | 긴 텍스트의 윤곽을 UI 스레드에서 다시 만듦 | 배치한 텍스트가 바뀌면 render/UI 스레드에서 Parley 윤곽을 다시 만든다(같은 글이면 캐시). 긴 문장·대량 붙여넣기는 입력 지연 후보. 재고 길이 제한·지연 합치기·백그라운드 배치를 검토 | `apps/ugurugu/src/canvas/text.rs` 68행 | 검토 8절 |
+| B3-50 | 긴 텍스트의 윤곽을 UI 스레드에서 다시 만듦 | 배치한 텍스트가 바뀌면 render/UI 스레드에서 Parley 윤곽을 다시 만든다(같은 글이면 캐시). 긴 문장·대량 붙여넣기는 입력 지연 후보. 재고 길이 제한·지연 합치기·백그라운드 배치를 검토 | `apps/ugurugu/src/canvas/text.rs` `Typesetter::outline` | 검토 8절 |
 | B3-51 | 축소 재생 미리보기의 정확성 fixture | 재생 때 `preview_shrink`는 해상도·표본 간격을 줄인다. 픽셀 모드와 곡선의 축소 미리보기 비교 fixture가 있으면 좋다. 릴리스 노트 문구는 고쳤고 fixture는 더하지 않은 것으로 보인다(가설) | `apps/ugurugu/src/canvas.rs` | 검토 8절, 10절 |
 | B3-52 | 작업 흐름 안내 | 도움말에는 "시작하기"가 있지만 첫 실행에 띄우지 않는다. 문자 안내(`text-hint`)는 확정하면 윤곽이 되어 다시 편집할 수 없다는 말이 없다. 삽입한 이미지를 캔버스에 맞춰 줄여도 "삽입됨"만 알린다(`import::decode`의 `fit`). 메뉴의 "현재 프레임을 이미지로 내보내기"와 동작 이름 "이미지로 내보내기"가 다르다. 움직이는 GIF·WebP를 삽입하면 첫 프레임만 가져오지만(`import.rs`) 그렇다고 알리지 않는다. 확인 창을 늘리기보다 결과가 바뀌는 자리(문자 패널, 실제로 줄였을 때의 알림)에 짧게 둔다. 문구 예: "적용하면 글자가 선으로 바뀝니다", "이미지를 6000×4000에서 1024×683으로 줄여 넣었습니다"(숫자는 실제 값) | `apps/ugurugu/src/ui/`, `files.rs`, `i18n/strings.txt` | 검토 6절 "작업 흐름 개선 제안", 3.1.0 종합 검토 |
 | B3-53 | PNG 연속 프레임·sprite sheet 내보내기 | 게임 엔진·영상 편집으로 재사용, 픽셀 모드와 잘 맞는다 | `apps/ugurugu/src/export.rs` | 분석 3.8 |
-| B3-54 | 인접 포즈를 겹쳐 보는 미리보기(어니언 스킨) | 우글거림 진폭·끊김·연결을 정지 상태에서 비교. 키프레임 편집기 전체가 아니라 포즈 비교로 한정 | `apps/ugurugu/src/cache.rs` | 분석 3.8 |
+| B3-54 | 폴더 밖 레이어의 어니언 스킨 | 3.2.0의 어니언 스킨은 애니메이션 폴더와 그 셀에서만 켜진다(`Canvas::onion_wanted`는 `session.folder()`가 없으면 `None`). 보통 레이어에서 앞뒤 프레임을 겹쳐 우글거림 진폭·끊김·연결을 정지 상태에서 비교하는 것은 아직 없다. `RenderPlan::alone`은 레이어 id 하나를 그 프레임의 자세로 그리므로 폴더가 아닌 레이어에도 쓸 수 있어 보이나 확인하지 않았다(가설). 키프레임 편집기 전체가 아니라 포즈 비교로 한정 | `apps/ugurugu/src/canvas/onion.rs` `onion_wanted`, `crates/ugu-render/src/plan.rs` `RenderPlan::alone` | 분석 3.8, decisions.md 4절 |
 | B3-55 | 모션 seed 다시 뽑기·잠금, A/B 비교 | 같은 설정에서 다른 느낌을 찾고 고른 결과를 재현 | `crates/ugu-core/src/store.rs`, `apps/ugurugu/src/ui/mod.rs` | 분석 3.8 |
 | B3-136 | 내보내기 미리보기와 프리셋 | 애니메이션 창은 크기·인코딩 메모리·재생 길이·GIF 가장자리 안내를 보인다(3.3.0). 최종 인코딩과 같은 옵션으로 바꾼 한 프레임 미리보기와, 최근 설정이나 이름 있는 몇 개의 내보내기 프리셋은 없다 | `apps/ugurugu/src/files.rs` 애니메이션 창, `export.rs` | 분석 3.8, 3.1.0 종합 검토 |
 
@@ -105,11 +107,11 @@
 
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` 157행 | ANALYSIS_REPORT B-25 |
+| B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` `temporary_path` | ANALYSIS_REPORT B-25 |
 | B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
 | B3-67 | 릴리스 PDB를 보관하지 않음 | Release는 `debug = "line-tables-only"`로 PDB를 만들지만 패키지는 exe·LICENSE·고지 세 파일만 담고 `release-3.yml`도 PDB를 올리지 않는다. 네이티브 충돌 기록(모듈+오프셋)을 기호로 풀 수 없고, panic backtrace에도 함수 이름이 빠질 것으로 보인다(가설) | `Cargo.toml` `[profile.release]`, `tools/package_windows.ps1`, `.github/workflows/release-3.yml` | ANALYSIS_REPORT R-11 |
-| B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 링크와 Velopack 피드가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml` 176행 | ANALYSIS_REPORT R-12 |
+| B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 같은 링크가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). 앱의 업데이트 피드는 해당하지 않는다: 3.0.1부터 고정 사전 릴리스 `updates`에서 읽고 그 패키지는 이 단계보다 먼저 올라간다(decisions.md 10절). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml`의 `softprops/action-gh-release` 단계 | ANALYSIS_REPORT R-12 |
 
 ## 8. 측정·확인 공백
 
@@ -118,22 +120,22 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-69 | WARP 지연의 원인을 나누지 못함 | WARP에서 입력이 60~75ms 늦게 보이고 단계 20~32%가 합쳐진다. 렌더 시간인지 합성 대기인지 나누지 않았다 | `crates/ugu-render/src/gpu.rs` | evidence.md 장치 손실·TDR·WARP |
-| B3-70 | ② 8 작업자에서 30fps 미달 | 8스레드 프레임 42~49ms. 사용자가 받아들였지만 목표는 열려 있다. 다음 수단은 인코드·래스터 일 줄이기(가설) | `crates/ugu-render/src/document.rs` | evidence.md 작업자 수와 레이어 배분 |
+| B3-70 | ② 8 작업자에서 30fps 미달 | 8스레드 프레임 ② 42~49ms, ②p 35.4~35.6ms(evidence.md 13·14절). 사용자가 받아들였지만 목표는 열려 있다(decisions.md 1절). 다음 수단은 인코드·래스터 일 줄이기(가설) | `crates/ugu-render/src/document.rs` | evidence.md 작업자 수와 레이어 배분 |
 | B3-71 | CPU 제조사가 다를 때 픽셀 동일성 | SSE4.2 고정으로 같은 결과가 나온다는 것은 한 CPU에서 SIMD 단계를 바꿔 본 추론이다. 다른 제조사 CPU에서 비교한 적 없다. 또 `f64` `sin`·`cos`·`hypot`은 UCRT가 실행 중 FMA3 판을 고를 수 있어 FMA3 유무에 따라 1ulp 달라질 수 있다(가설, `dab.rs` 스프레이, `stroke.rs`, `motion.rs`). 한 PC 안의 미리보기·최종 동일성과는 무관 | `crates/ugu-render` | evidence.md 렌더러 |
 | B3-72 | `vello_cpu` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다 | `Cargo.toml` | evidence.md 렌더러 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-74 | main push CI 범위 중 건너뛰기의 실제 확인 | 취소된 실행의 변경을 다시 검사하는 경우는 실제 main push에서 확인했다(evidence.md 35절). 문서만 바뀐 push가 Rust 작업을 건너뛰는 경우는 아직 main에서 일어나지 않았다 | `.github/workflows/ci.yml` | evidence.md main push의 CI 범위 |
 | B3-119 | `strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas`가 한 번 실패 | 2026-10-14 `cargo test --workspace --locked`(debug, `UGU_WORKER_THREADS=8`) 전체 실행에서 `shows_the_document`의 "split 반올림 안 최대 3" 단언이 한 번 실패했다. 그 시험만 3번, 앱 crate 전체를 5번 다시 돌렸을 때는 모두 통과했다. 바뀐 값은 남기지 못했다. 원인 미확인(가설: 캔버스가 받은 split의 시점에 따라 비교 대상이 달라지거나, B3-101의 반올림 차이가 3을 넘는 경우). 실패할 때의 차이 값을 남기게 하고 원인을 찾는다 | `apps/ugurugu/src/files/end_to_end.rs` `shows_the_document` | 2026-10-14 레이어 복제 작업 중 |
+| B3-144 | 중국어 글꼴 `msyh.ttc`를 읽는 시작 비용과 그 파일이 있는지 | 인터페이스가 간체 중국어면 창을 보인 뒤 `theme::apply`가 `%WINDIR%\Fonts\msyh.ttc`를 통째로 읽는다(`chinese_font`, `std::fs::read`, 이 PC의 파일은 19,704,352바이트). 시작 시간에 얼마나 드는지는 재지 않았다(evidence.md 74절). 중국어가 아닌 언어판 Windows에 이 파일이 늘 있는지도 확인하지 않았다(가설: Windows 10·11 기본 글꼴, decisions.md 9절). 읽지 못하면 로그에 남기고 Pretendard JP로 보여, 그 글꼴에 없는 간체자는 네모가 된다 | `apps/ugurugu/src/theme.rs` `chinese_font` | 2026-10-16 간체 중국어, evidence.md 74절 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
-2026-10-13 영역별 코드 검토(읽기만, 일부는 시험 crate로 재현). 고친 것은 `rust/3.0.1-fixes`에 있다: 저장 중 원본 손실(`ReplaceFileW` 백업), 대기 변형·글자를 두고 한 레이어·선택·채우기 편집이 변형을 되돌림, 묻는 동안 보이는 탭이 바뀜(엉뚱한 탭 닫기·저장, 내보내기 창 panic), 다른 탭에 열린 파일로 다른 이름 저장, 렌더·내보내기 스레드 panic 뒤 멈춤, 프레임 수 변경 뒤 캐시된 포즈, egui 키보드 UI 확대, release publish 재실행·동시 실행. 아래는 남은 것이다.
+2026-10-13 영역별 코드 검토(읽기만, 일부는 시험 crate로 재현). 고친 것은 3.0.1(`v3.0.1`, 작업 브랜치는 지움)에 들어갔다: 저장 중 원본 손실(`ReplaceFileW` 백업), 대기 변형·글자를 두고 한 레이어·선택·채우기 편집이 변형을 되돌림, 묻는 동안 보이는 탭이 바뀜(엉뚱한 탭 닫기·저장, 내보내기 창 panic), 다른 탭에 열린 파일로 다른 이름 저장, 렌더·내보내기 스레드 panic 뒤 멈춤, 프레임 수 변경 뒤 캐시된 포즈, egui 키보드 UI 확대, release publish 재실행·동시 실행. 아래는 남은 것이다.
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-86 | 8192px보다 넓은 창 | wgpu 기본 한도(`max_texture_dimension_2d` 8192)로 장치를 연다. 여러 모니터를 하나로 묶은 넓은 화면에서 최대화하면 swap chain 설정이 실패하고 그려지지 않는다(가설, 그런 화면 없음). 어댑터 한도를 요청하고 크기를 한도로 자른다 | `crates/ugu-render/src/gpu.rs`, `present.rs` | 검토 |
-| B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
+| B3-87 | 2.x 가져오기의 clip 마스크 훑기 | 가져오기는 서로 다른 (선택 마스크, `visibilityClip`, 캔버스)마다 그 사각형을 한 번 훑는다. 연산 20,000개가 모두 다른 큰 사각형이면 훑는 화소가 수천억에 이르러 파일 스레드가 오래 막힐 수 있다(가설, 재지 않음). 게다가 clip이 빈 획(선택 마스크가 사각형 안에서 모두 128 미만인 경우 등)은 훑은 뒤 `Importer::op`이 `None`을 돌려줘 연산으로 세지 않는다(`paint`의 `self.operations += 1`은 `Some(op)`일 때만 돈다, 2026-10-16 코드로 확인). 그래서 20,000 상한이 훑는 횟수를 막지 못하고 그런 획의 수는 파일 길이(`FILE_BYTES` 128MiB)로만 제한된다(가설, 재지 않음). 만든 mask 바이트·연산 수·점 수·이미지는 쌓일 때 한도를 본다. 안: 마스크마다 128 이상인 화소의 경계를 한 번만 구해 두고 사각형과 겹치는지 먼저 보거나, 훑은 화소 수에 상한을 둔다 | `crates/ugu-io/src/legacy.rs` `masked`, `bits` | 검토 |
 | B3-92 | 펜 위치의 HIMETRIC 환산 | 펜·터치 위치를 `ptHimetricLocation`과 장치 사각형으로 환산하고 `ptPixelLocation`과 비교하지 않는다. 태블릿 영역 매핑·비율 유지·세로 화면에서 어긋날 수 있다(가설). B3-06 실기기 확인 때 본다 | `crates/ugu-win/src/pointer.rs` | 검토 |
 | B3-93 | 선택 윤곽 정점 버퍼 한도 | 윤곽 run이 약 1340만 개를 넘으면 `max_buffer_size`(256MiB)를 넘어 그 프레임 전체가 무효가 된다. 4096² 잡음 위 자동 선택 같은 극단만 | `crates/ugu-render/src/ants.rs` | 검토 |
 | B3-94 | 태그 커밋의 CI가 취소되면 릴리스 실패 | 태그 커밋의 main CI가 다음 main push로 취소되면 릴리스가 실패한다(CI를 다시 돌린 뒤 릴리스 재실행) | `ci.yml`, `release-3.yml` | 검토 |
@@ -157,10 +159,10 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-114 | 사용자 강조색에 따라 포커스 선·버튼 글자의 대비가 무너짐 | `ink_on`은 패널 휘도가 0.2 미만이면 대비를 보지 않고 그만두고, `accent_text`는 선형화하지 않은 RGB 가중합의 임계값(0.52, 2.2.13)으로 글자 색을 고른다. `theme.rs` 계산을 Python으로 옮겨 잰 값: 어두운 패널과 같은 `#24262B`이면 선/패널 1.000:1(포커스 선이 보이지 않음), `#808080`이면 글자/강조 3.786:1, 기본 `#FFC94A`는 어두운 테마 9.880:1·글자 11.572:1, 밝은 테마 선 3.036:1. 앱 화면으로 본 값은 아니다. 고치려면 고른 색은 두고 배경마다 밝게·어둡게 파생하고, 글자는 두 후보의 실제 대비로 고른다. 닫는 조건: 검정·흰색·중간 회색·패널과 같은 색·고채도 색을 두 테마에서 글자 4.5:1, 선 3:1로 시험 | `apps/ugurugu/src/theme.rs` `ink_on`·`accent_text`, `widgets.rs` `focus_ring` | 3.1.0 종합 검토 N01 |
-| B3-115 | debug 로그에 문자 도구 원문이 남음 | `tracing::debug!(content = ?content, "text tool content")`가 decisions.md 10절 "로그에 사용자 글을 남기지 않는다"와 어긋난다. 기본 필터는 info라 debug로 켰을 때만 남는다. `tools/ime_probe.py`가 이 원문을 읽어 IME 조합을 확인하므로, 줄만 지우면 그 시험도 깨진다. 진단 로그는 글자 수만 남기고 IME 확인은 시험용 계측으로 옮긴다 | `apps/ugurugu/src/ui/text.rs` 30행, `tools/ime_probe.py` `text_tool_content` | 3.1.0 종합 검토 N02 |
-| B3-116 | CI가 놓치는 검사 | (1) 라이선스 머리말 검사는 `*.rs`·`*.js`만 본다. CONTRIBUTING은 Python·PowerShell 도구에도 같은 줄을 요구한다(2026-10-14에 빠진 파일은 없음). (2) `.ftl`이 `strings.txt`에서 다시 만든 결과와 같은지 CI가 보지 않는다(2026-10-14 499개 메시지 일치). `strings_to_ftl.py --check` 같은 경로를 더한다. (3) CI는 debug 시험과 release 빌드만 돌리고 release 시험은 로컬에서만 돈다. release에서만 드러난 오류가 있었다(evidence.md 43절 캔버스 크기 대화상자). CI 시간(약 20분)을 보고 전체 또는 묶음을 더한다 | `.github/workflows/ci.yml`, `tools/strings_to_ftl.py` | 3.1.0 종합 검토 N03 |
+| B3-115 | debug 로그에 문자 도구 원문이 남음 | `tracing::debug!(content = ?content, "text tool content")`가 decisions.md 10절 "로그에 사용자 글을 남기지 않는다"와 어긋난다. 기본 필터는 info라 debug로 켰을 때만 남는다. `tools/ime_probe.py`가 이 원문을 읽어 IME 조합을 확인하므로, 줄만 지우면 그 시험도 깨진다. 진단 로그는 글자 수만 남기고 IME 확인은 시험용 계측으로 옮긴다 | `apps/ugurugu/src/ui/text.rs` `settings`의 `tracing::debug!`, `tools/ime_probe.py` `text_tool_content` | 3.1.0 종합 검토 N02 |
+| B3-116 | CI가 놓치는 검사 | (1) 라이선스 머리말 검사는 `*.rs`·`*.js`의 첫 3줄만 본다(`git ls-files -- '*.js' '*.rs'`). CONTRIBUTING은 Python·PowerShell 도구에도 같은 줄을 요구한다(2026-10-16에 추적하는 `.py`·`.ps1` 19개에는 모두 있다). 셸 스크립트 `.github/scripts/wait-for-main-ci.sh`에는 머리말이 없다. (2) `.ftl`이 `strings.txt`에서 다시 만든 결과와 같은지 CI가 보지 않는다(2026-10-16에 `strings_to_ftl.py`로 다시 만들어 589개 메시지 네 언어 모두 차이 없음을 확인). `strings_to_ftl.py --check` 같은 경로를 더한다. (3) CI는 debug 시험(`cargo test --workspace --locked`)과 release 빌드만 돌리고, `release-3.yml`도 시험을 돌리지 않으며, release 시험(`--release`)은 로컬에서만 돈다. release에서만 드러난 오류가 있었다(evidence.md 43절 캔버스 크기 대화상자). Rust Windows 작업은 중앙값 약 8분이다(evidence.md 75절). release 시험을 더하면 얼마나 늘지는 재지 않았다. 늘어나는 시간을 보고 전체 또는 묶음을 더한다 | `.github/workflows/ci.yml`, `tools/strings_to_ftl.py` | 3.1.0 종합 검토 N03 |
 | B3-117 | Cargo 의존성 갱신 주기 | Dependabot은 GitHub Actions만 매달 본다. Cargo 의존성은 정해진 검토 주기가 없다. 자동 major 갱신보다 호환 묶음을 native 목록·회귀 화소·성능 기준선과 함께 확인하는 주기를 정한다. B3-44·B3-45·B3-72를 그때 같이 본다 | `.github/dependabot.yml`, `Cargo.toml` | 3.1.0 종합 검토 9.3절 |
-| B3-118 | `files.rs`의 상태 전이 나누기 | `files.rs`(3,142행)에 파일 작업자, 저장 상태, 복구, 대화상자, 내보내기 질문이 모인다. 파일만 쪼개면 같은 가변 상태를 공유해 이해 비용이 줄지 않으므로, "질문 대기 → 특정 탭의 편집 확정 → 저장 요청 → 특정 상태의 응답 → 닫기·업데이트" 전이를 먼저 그리고 대화상자 표시·작업자 메시지·탭의 저장·복구 상태를 나눈다. 탭 id·저장 당시 상태·요청 id가 만나는 곳에는 타입 구분을 더한다. 닫는 조건: 늦은 저장 응답, 질문 중 탭 전환, 닫기 취소, 같은 경로로 저장, 내보내기 중 업데이트가 전과 같이 동작 | `apps/ugurugu/src/files.rs`, `canvas.rs` | 검토 4절, 3.1.0 종합 검토 6절 |
+| B3-118 | `files.rs`의 상태 전이 나누기 | `files.rs`(3,371행, 2026-10-16)에 파일 작업자, 저장 상태, 복구, 대화상자, 내보내기 질문이 모인다. 파일만 쪼개면 같은 가변 상태를 공유해 이해 비용이 줄지 않으므로, "질문 대기 → 특정 탭의 편집 확정 → 저장 요청 → 특정 상태의 응답 → 닫기·업데이트" 전이를 먼저 그리고 대화상자 표시·작업자 메시지·탭의 저장·복구 상태를 나눈다. 탭 id·저장 당시 상태·요청 id가 만나는 곳에는 타입 구분을 더한다. 닫는 조건: 늦은 저장 응답, 질문 중 탭 전환, 닫기 취소, 같은 경로로 저장, 내보내기 중 업데이트가 전과 같이 동작 | `apps/ugurugu/src/files.rs`, `canvas.rs` | 검토 4절, 3.1.0 종합 검토 6절 |
 
 ## 12. 3.2.0 애니메이션에서 뒤로 미룬 것
 

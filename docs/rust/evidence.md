@@ -731,7 +731,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 최종 회차 10단계 모두 통과: 비정상 종료 안내(crash 기록 → 모달 → `.seen.txt`), exe·창 아이콘(48×48), F1 도움말(창 가운데), 보기 회전·반전, 스포이드 십자 커서, 1000×520 창의 도크 휠 스크롤, 다른 확장자를 넣은 저장(`robe.png` → `robe.png.ugurugu`, 있으면 덮어쓰기 확인), 변형 상자 커서(귀퉁이 sizenwse/sizenesw, 변 sizens/sizewe, 안 sizeall, 밖 arrow), 재생 중 누르기(펜·마술봉 깜빡인 프레임 0, 놓은 뒤 재생 계속), 편집 메뉴 Pixel mode(Pixel Pencil 카드만, Airbrush 탭·Antialias fill edge 없음, 제목 `*`, 실행 취소로 되돌아감).
 
-재생 중 누르기: 지그재그 획 → P → 1.5초 → 획 둘레(문서 가운데 40%)를 `CopyFromScreen`으로 읽어 어두운 픽셀(RGB 합 < 288)을 누르기 전 30번, 누른 뒤 1초(약 30ms 간격) 셈. 고치기 전 빌드(`988a898^`)는 누른 직후 한 프레임이 거의 검었다(54,000 중 52,934). 펜 누르기·채우기·마술봉 클릭이 재생을 그냥 버려 분할이 올 때까지 빈 버퍼가 보였고, 세 곳이 P와 같은 `stop_playback`을 쓴다(`apps/ugurugu/src/canvas.rs`, 시험 `drawing_or_filling_stops_playback_on_the_frame_shown`). 30ms보다 짧은 깜빡임은 놓칠 수 있다.
+재생 중 누르기: 지그재그 획 → P → 1.5초 → 획 둘레(문서 가운데 40%)를 `CopyFromScreen`으로 읽어 어두운 픽셀(RGB 합 < 288)을 누르기 전 30번, 누른 뒤 1초(약 30ms 간격) 셈. 고치기 전 빌드(`988a898^`)는 누른 직후 한 프레임이 거의 검었다(54,000 중 52,934). 펜 누르기·채우기·마술봉 클릭이 재생을 그냥 버려 분할이 올 때까지 빈 버퍼가 보였고, 세 곳이 P와 같은 `stop_playback`을 쓴다(`apps/ugurugu/src/canvas.rs`). 그 뒤 `4a7fa63`에서 그리기를 끝내면 다시 재생하도록 `pause_playback`이 부르게 바뀌었고, 시험은 `drawing_or_filling_pauses_playback_on_the_frame_shown_and_plays_on`이다. 30ms보다 짧은 깜빡임은 놓칠 수 있다.
 
 커서: 3.0은 포인터 메시지를 winit보다 먼저 가져가므로 egui-winit이 커서 모양을 적용하지 않았다. 앱이 egui 커서 모양을 창에 직접 적용한다(`efbbac4`). 상자 밖 회전 자리의 화살표는 egui `Alias`를 winit이 화살표로 바꾸기 때문이다(2.2.13에는 회전 손잡이가 없음).
 
@@ -747,11 +747,13 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 | 가정한 push (로컬 시뮬레이션) | 찾은 기준 | 결과 |
 |---|---|---|
-| `70f9454` (문서) | `d04675f` | 작업 없음(static·translations 외 건너뜀) |
+| `70f9454` (문서) | `d04675f` | 작업 없음(static 외 건너뜀. 이 시뮬레이션 때 있던 translations 작업은 `4df2de2`에서 CI를 3.x Rust 앱만 보게 줄이며 없앴다) |
 | `d04675f` (코드) | `cbc8dcd` | rust만 |
 | 성공 기록 없는 브랜치 | 없음 | 전부 |
 
-**실제 main push (2026-10-13):** 실행 38346647863(`3aa43f3`, 문서)은 자기와 취소된 `4ec1ad6`(실행 38346368886, workflow 변경)을 건너뛰고 `c192dce`를 기준으로 잡았다. 차이에 `4ec1ad6`의 `.github/workflows/*`가 들어 Rust 작업이 돌았다. 취소된 실행의 변경을 다시 검사하는 경우가 실제로 맞다. 문서만 바뀐 push가 Rust 작업을 건너뛰는 경우는 아직 main에서 일어나지 않았다(backlog B3-74).
+**실제 main push (2026-10-13):** 실행 38346647863(`3aa43f3`, 문서)은 자기와 취소된 `4ec1ad6`(실행 38346368886, workflow 변경)을 건너뛰고 `c192dce`를 기준으로 잡았다. 차이에 `4ec1ad6`의 `.github/workflows/*`가 들어 Rust 작업이 돌았다. 취소된 실행의 변경을 다시 검사하는 경우가 실제로 맞다.
+
+**문서만 바뀐 main push (2026-10-16):** 실행 38848821927(`a8f9a3d`)은 마지막으로 성공한 main CI인 `49b7000`을 기준으로 잡았다(Detect changes 로그 "Last successful CI on main: 49b7000…"). 둘 사이의 차이는 `docs/rust/backlog.md`와 `docs/rust/evidence.md`뿐이라 `rust=false`가 되어 Rust Windows가 skipped이고, Format and release metadata·Detect changes·Quality gate는 success였다.
 
 ## 36. 도구를 세션 밖으로 옮긴 뒤 pen-up
 
@@ -875,7 +877,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **결과:**
 - 넘치거나 잘린 글 없음. 브러시 분류의 "エアブラシ"는 칸 테두리에 거의 닿는다.
-- **캔버스 크기 대화상자가 release에서 보이지 않았다**(세 언어, 150%도 같음). 원인: `3bc0283`에서 기준점 9칸(`egui::Grid`)을 오른쪽부터 채우는 행 컨트롤 칸에 넣어, 행 경계가 -inf가 되고 대화상자가 NaN에 배치됨. debug에서는 egui assert로 멈춘다. `8faaf6f`에서 9칸을 직접 놓고 행이 더 높은 컨트롤을 담게 고침(`widgets::tall_setting_row`), 다시 찍어 세 언어 모두 보임. 시험 `ui::keyboard::the_canvas_size_dialog_lays_out_inside_the_window`.
+- **캔버스 크기 대화상자가 release에서 보이지 않았다**(세 언어, 150%도 같음). 원인: `3bc0283`에서 기준점 9칸(`egui::Grid`)을 오른쪽부터 채우는 행 컨트롤 칸에 넣어, 행 경계가 -inf가 되고 대화상자가 NaN에 배치됨. debug에서는 egui assert로 멈춘다. `8faaf6f`에서 9칸을 직접 놓고 행이 더 높은 컨트롤을 담게 고침(`widgets::tall_setting_row`), 다시 찍어 세 언어 모두 보임. 시험은 `ui::keyboard::the_canvas_size_dialog_lays_out_inside_the_window`였고, 대화상자를 캔버스 위 창으로 바꾼 `c6a4e36`에서 `the_canvas_size_panel_lays_out_inside_the_window_and_enter_applies_it`가 되었다.
 - 일본어 줄바꿈에 금칙 처리가 없다("チ / ェック"처럼 작은 글자가 줄 머리에 옴, egui 한계, backlog B3-82).
 - 복구 안내의 날짜는 시스템 로캘로 쓴다(한국어 Windows에서 일본어 UI면 "오전"). backlog B3-83.
 - 앞선 Screen set의 설정 장면은 메뉴가 열린 채였다: 스크립트가 "Settings"로 시작하는 이름을 찾다가 위쪽 톱니 버튼을 눌렀기 때문(앱 문제 아님, Ctrl+,로 바꿈). 화면 읽기 프로그램의 Click으로 메뉴 항목을 누르면 메뉴가 닫히는지 시험을 더함.
@@ -1008,7 +1010,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 ## 54. 레이어 버튼 줄 (Windows Sandbox, 2026-10-14)
 
-**방법:** `rust/layer-buttons`의 release 빌드로 `gui.ps1`의 "Layer buttons" 단계(100% UI, 영어)를 돌렸다. 레이어 추가 → 복제 → 아래와 병합 → 삭제를 UI Automation 이름으로 누르고, 레이어 이름(`Layer 2 copy`, `Layer 2`)이 생기고 없어지는지 본 뒤 버튼 줄을 찍었다. 같은 날 "Screen set at 100%"(세 언어 96장)도 돌렸다.
+**방법:** `rust/layer-buttons` 브랜치(병합 뒤 지웠다. 이 절을 처음 적은 커밋은 `cccf6a7`)의 release 빌드로 `gui.ps1`의 "Layer buttons" 단계(100% UI, 영어)를 돌렸다. 레이어 추가 → 복제 → 아래와 병합 → 삭제를 UI Automation 이름으로 누르고, 레이어 이름(`Layer 2 copy`, `Layer 2`)이 생기고 없어지는지 본 뒤 버튼 줄을 찍었다. 같은 날 "Screen set at 100%"(세 언어 96장)도 돌렸다.
 
 **결과:**
 
@@ -1024,7 +1026,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **질문:** 키·셀이 없는 문서는 렌더 결과와 시간이 그대로인가. 키로 움직인 레이어와 셀은 프레임마다 얼마나 드나.
 
-**방법:** headless, release, 8 작업자. 기준선은 main `cccf6a7`의 `ugu-doc`(따로 빌드한 작업 트리), 새 빌드는 `rust/animation`이다. ①~⑤는 `ugu-doc fixture`로 한 번 만들어 두 빌드가 같은 파일을 읽는다. `ugu-doc render <file> 8`을 기준선과 새 빌드를 번갈아 2회 돌려 2회째 이후 60프레임 p50/p95를 보고, `ugu-doc digest <file> 8`(모든 프레임 1/1·1/2·1/4)을 비교했다. ④는 두 회 모두 새 빌드가 1.5ms 느려 보여 번갈아 5회씩 더 쟀다. 키·셀 문서는 `ugu-doc animate <in> <out> <keyed> <cels>`(앞 `keyed`개 페인트 레이어에 0프레임 제자리 → 15프레임 (64.3, −20.7) 이동·12° 회전·0.9배 키, Smooth; 첫 레이어를 셀 `cels`개짜리 폴더로)로 ③·②에서 만들고, `render`(다시 쓰지 않는 전체 렌더)와 `play`(재생처럼 레이어 revision으로 다시 쓰는 세 바퀴), `UGU_FRAME=7 render`의 편집 split·pen-up(레이어마다 획 하나를 도장 찍고 바뀐 곳만 합성)으로 쟀다.
+**방법:** headless, release, 8 작업자. 기준선은 main `cccf6a7`의 `ugu-doc`(따로 빌드한 작업 트리), 새 빌드는 `rust/animation` 브랜치(병합 뒤 지웠다. 이 절을 처음 적은 커밋은 `d0506ba`)다. ①~⑤는 `ugu-doc fixture`로 한 번 만들어 두 빌드가 같은 파일을 읽는다. `ugu-doc render <file> 8`을 기준선과 새 빌드를 번갈아 2회 돌려 2회째 이후 60프레임 p50/p95를 보고, `ugu-doc digest <file> 8`(모든 프레임 1/1·1/2·1/4)을 비교했다. ④는 두 회 모두 새 빌드가 1.5ms 느려 보여 번갈아 5회씩 더 쟀다. 키·셀 문서는 `ugu-doc animate <in> <out> <keyed> <cels>`(앞 `keyed`개 페인트 레이어에 0프레임 제자리 → 15프레임 (64.3, −20.7) 이동·12° 회전·0.9배 키, Smooth; 첫 레이어를 셀 `cels`개짜리 폴더로)로 ③·②에서 만들고, `render`(다시 쓰지 않는 전체 렌더)와 `play`(재생처럼 레이어 revision으로 다시 쓰는 세 바퀴), `UGU_FRAME=7 render`의 편집 split·pen-up(레이어마다 획 하나를 도장 찍고 바뀐 곳만 합성)으로 쟀다.
 
 **결과: 키·셀 없는 문서** (ms, 회차 1 / 2)
 
@@ -1074,7 +1076,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 ## 56. 애니메이션 GUI (Windows Sandbox, 2026-10-14)
 
-**방법:** `rust/animation-app`의 release 빌드로 `gui.ps1`의 "Keyframes"(이동 도구로 1·16프레임에 끌기, 잉크 가운데 x 비교), "Cels and onion skin"(폴더·새 셀·어니언 스킨의 붉은 화소 수), "Animation icons at 100%"(100% UI 화면에서 새 아이콘을 잘라 봄)와 기존 "Layer buttons", "Transform box cursors", "Tab moves the keyboard focus through the controls"를 돌렸다.
+**방법:** `rust/animation-app` 브랜치(병합 뒤 지웠다. 이 절을 처음 적은 커밋은 `f8aea81`)의 release 빌드로 `gui.ps1`의 "Keyframes"(이동 도구로 1·16프레임에 끌기, 잉크 가운데 x 비교), "Cels and onion skin"(폴더·새 셀·어니언 스킨의 붉은 화소 수), "Animation icons at 100%"(100% UI 화면에서 새 아이콘을 잘라 봄)와 기존 "Layer buttons", "Transform box cursors", "Tab moves the keyboard focus through the controls"를 돌렸다.
 
 **결과:**
 
@@ -1368,4 +1370,25 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 
 **방법:** 간체 중국어를 더한 release 빌드로 Windows Sandbox에서 `gui.ps1`의 "Screen set at 100%"(ko·en·ja·zh-Hans, 인터페이스 100%)를 돌렸다. 언어마다 메뉴·도구 설정·설정 창·대화상자·도움말 등 33장을 찍는다.
 
-**결과:** 중국어 33장을 모두 찍었고, 로그의 인터페이스 언어는 `zh-Hans`였으며 "cannot read the Chinese interface font"는 없었다. 메뉴, 설정 창, 도움말을 눈으로 보았고 네모로 깨진 글자나 넘친 글은 보지 못했다. 이 단계는 한국어 3장(글자·스포이드 도구 등)이 UI Automation `FromHandle` 시간 초과(B3-97)로 빠져 실패로 끝났다. Sandbox는 한국어 Windows라, 다른 언어판 Windows에 `msyh.ttc`가 있는지는 이 실행으로 알 수 없다. 글꼴을 읽는 시작 비용은 재지 않았다.
+**결과:** 중국어 33장을 모두 찍었고, 로그의 인터페이스 언어는 `zh-Hans`였으며 "cannot read the Chinese interface font"는 없었다. 메뉴, 설정 창, 도움말을 눈으로 보았고 네모로 깨진 글자나 넘친 글은 보지 못했다. 이 단계는 한국어 3장(글자·스포이드 도구 등)이 UI Automation `FromHandle` 시간 초과(B3-97)로 빠져 실패로 끝났다. Sandbox는 한국어 Windows라, 다른 언어판 Windows에 `msyh.ttc`가 있는지는 이 실행으로 알 수 없다. 글꼴을 읽는 시작 비용은 재지 않았다(B3-144).
+
+## 75. CI의 Rust Windows 작업 시간 (2026-10-16)
+
+**질문:** CLAUDE.md가 "약 20분"이라고 적은 `ci.yml`의 Rust Windows 작업은 실제로 얼마나 걸리나.
+
+**방법:** `gh api repos/nyabi-gh/Ugurugu/actions/workflows/ci.yml/runs`로 실행 437개(2026-07-30~2026-10-16)를 모으고, 실행마다 `actions/runs/<id>/jobs`의 "Rust Windows" 작업 `started_at`~`completed_at`을 쟀다. 지금의 작업 정의(단계 18개: 시험, release 빌드, 패키지, 설치 smoke까지)로 **성공한** 실행만 센다. 건너뛴 작업(문서만 바뀐 실행), 실패, 취소는 뺀다. 같은 실행의 재시도는 한 번만 셌다.
+
+**결과:** 2026-10-11부터 2026-10-16까지 119회.
+
+| 값 | 초 | 분 |
+|---|---|---|
+| 중앙값 | 500 | 8.3 |
+| p25 / p75 | 462 / 541 | 7.7 / 9.0 |
+| p90 | 616 | 10.3 |
+| 최대 | 1,269 | 21.1 |
+
+pull_request 71회는 중앙값 486·p90 609초, push 48회는 511.5·619초다. 600초를 넘은 것이 14회, 900초를 넘은 것이 7회다. 단계의 중앙값은 Test 123초, rust-cache 복원 96초, Release build 91초, Package 49초, Dependencies(`cargo deny`) 47초, Install Velopack 16초, Clippy 13초다.
+
+가장 오래 걸린 1,269초(실행 38663756503)는 로그에 "No cache found."가 있어 캐시 없이 모두 새로 빌드한 때다(Clippy 164, Test 366, Release build 542초). 900초를 넘은 7회 중 로그를 더 본 1,259초(실행 38142816529)와 1,092초(실행 38589963713)는 정확한 키가 없어 앞의 키(restore-key)로 캐시를 복원했고, 캐시를 다시 저장하는 단계가 190초와 504초였다. 나머지 4회의 로그는 보지 않았다. 캐시가 정확히 맞은 최신 push(실행 38860401617, 410초)는 같은 키 "Cache hit"로 1,325MB를 복원했다.
+
+이 값은 이 저장소의 GitHub 호스트 러너(windows-2025) 기록이고, 캐시 상태가 실행마다 다르다. "약 21분"은 캐시가 없던 1회의 값이라 표본 하나다.

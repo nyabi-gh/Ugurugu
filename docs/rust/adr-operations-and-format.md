@@ -118,23 +118,31 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | 문서 | `pixel` | M6-17 | 문서 단위 픽셀 모드(decisions.md 픽셀 모드). 꺼져 있으면 쓰지 않으므로 그 파일의 바이트는 전과 같다. render revision은 그대로 |
 | 문서 | `active_layer` | M6(2절 23) | 저장할 때 편집하던 페인트 레이어 id. 선택 필드이고, 열 때 페인트 레이어가 아니면 무시한다. 프레임은 저장하지 않는다(2.2.13과 같음). API는 `ugu_io::write_with`·`read_with`·`save_with` |
 
-그 밖의 검증 한도(`ugu_core::document::limits`): 레이어 256개, 그룹 깊이 9단계(2.2.13 파일을 받으려고 8에서 올림, ugu-import.md 2절 3), 연산 20,000개, section 깊이 16단계, 캔버스 한 변 1~4096, 프레임 2~60. 저장소(`ugu_core::store`): mask는 0~4096 안, 이미지 화소 합 4096²×64. 읽기(`ugu_io::read::limits`): 획 20,000개, mask 40,000개, 이미지 20,000개, 파일 길이 약 223MiB.
+그 밖의 검증 한도(`ugu_core::document::limits`): 레이어 256개, 그룹 깊이 9단계(2.2.13 파일을 받으려고 8에서 올림, ugu-import.md 2절 3), 연산 20,000개, section 깊이 16단계, 캔버스 한 변 1~4096, 프레임 2~240(`limits::FRAMES`, 3.3.0부터이고 3.2 이하는 60). 저장소(`ugu_core::store`): mask는 0~4096 안, 이미지 화소 합 4096²×64. 읽기(`ugu_io::read::limits`): 획 20,000개, mask 40,000개, 이미지 20,000개, 파일 길이 약 223MiB.
 
 `.ugurugu` 밖의 형식(앱, `apps/ugurugu/src`):
 
 | 파일 | 머리 | 내용 |
 |---|---|---|
 | 복구 설명 `recovery\<창 폴더>\tab-<n>\<0·1>.json` (M5-6, 탭마다는 문서 탭) | `format: "ugurugu.recovery"`, `version: 1` | `sequence`, `name`, `path`, `time`, `canvas`, `layer`(M6에 더함, 활성 레이어). 문서는 같은 칸의 `<0·1>.ugurugu`이고 두 세대를 번갈아 쓴다. 창 폴더는 실행하는 동안 `lock` 파일로 잠근다. 탭 전의 3.0이 창 폴더에 바로 쓴 `<0·1>`도 읽는다. 폴더는 `%LOCALAPPDATA%\Ugurugu Data\3\recovery`(`recovery.rs`) |
-| 설정 `%APPDATA%\Ugurugu\3\settings.json` (M5-3) | `format: "ugurugu.settings"`, `version: 1` | `language`, `accent`, `wobbleAnimation`, `pixelGrid`, `defaultSaveFolder`, `exportSize`, `checkForUpdates`, `tools`(도구 상태, 필압 켬·끔은 `tools.tablet.pressure`), `colorHistory`, `shortcuts`(기본과 다른 키만), `panels`(도크 배치), `window`(`left`·`top`·`right`·`bottom`·`maximized`, 닫을 때의 창, 작업 영역 픽셀). 기본값인 선택 키는 쓰지 않는다. 모르는 키는 지우지 않고 다시 쓴다. 여러 창은 `settings.json.lock`으로 차례를 지키고 바꾼 최상위 키만 덮어쓴다(decisions.md UI·단축키·번역). `settings.rs` |
+| 설정 `%APPDATA%\Ugurugu\3\settings.json` (M5-3) | `format: "ugurugu.settings"`, `version: 1` | `language`, `accent`, `theme`(`dark`·`light`·`system`, 기본인 `dark`이면 쓰지 않음), `wobbleAnimation`, `pixelGrid`, `defaultSaveFolder`, `exportSize`, `pixelExportScale`(픽셀 모드 내보내기의 정수 배, 1·2·4·8), `checkForUpdates`(끈 때만 씀), `tools`(도구 상태, 필압 켬·끔은 `tools.tablet.pressure`), `colorHistory`, `shortcuts`(기본과 다른 키만), `panels`(도크 배치), `window`(`left`·`top`·`right`·`bottom`·`maximized`, 닫을 때의 창, 작업 영역 픽셀). 기본값인 선택 키는 쓰지 않는다. 모르는 키는 지우지 않고 다시 쓴다. 여러 창은 `settings.json.lock`으로 차례를 지키고 바꾼 최상위 키만 덮어쓴다(decisions.md UI·단축키·번역). `settings.rs` |
 | 도구 프리셋 `*.ugurugu-tools` (M5-10) | `format: "ugurugu.tools"`, `version: 1` | `tools`(설정의 `tools`와 같은 글, `tablet` 제외)와 `motion`(`amount`, `style`, `poses`, `detail`, `linked`, `randomness`, `broken`, `breakAmount`, `breakRange`). 1MiB 상한, 모르는 키는 무시하고 있는 값만 덮어쓴다. 2.2.13 `.wwpreset`은 읽지 않는다. `settings/preset.rs` |
 
-## 8. 3.2.0 키프레임·애니메이션 폴더 (2026-10-14)
+## 8. 키프레임·애니메이션 폴더와 기능 이름 (3.2.0, 3.3.0)
 
 3.2.0은 schema 1에 선택 필드 둘을 더한다. 쓰지 않으면 생략해 3.1까지의 문서는 바이트가 그대로이고, 쓴 문서는 manifest `required`에 기능 이름을 넣어 3.1 이하가 "새 판에서 만든 파일"로 거절하게 한다(`deny_unknown_fields`만으로는 "손상된 파일"이 된다). 읽기는 `required`에 아는 이름(`ugu_io::format::FEATURES`)만 있을 때 연다. `render_revision`은 1 그대로다(키·셀 없는 문서의 화소는 바뀌지 않음). 필드 이름은 `crates/ugu-io/src/format.rs`, 의미는 `crates/ugu-core/src/keys.rs`와 decisions.md 4절 "키프레임과 애니메이션 폴더"다.
 
 | 위치 | 필드 | `required` | 내용 |
 |---|---|---|---|
-| `paint`·`group` | `keys` | `"keys"` | `pivot`(문서 px [x, y]), `keys`(프레임 순): `frame`(0 ≤ frame < 문서 프레임 수, 프레임마다 하나), `offset`(px, ±32767), `rotation`(도, 시계 방향, ±3600), `scale`(0.05~20), `flip`(켜졌을 때만 씀), `ease`(`linear`·`smooth`·`hold`, 이 키에서 다음 키까지) |
+| `paint`·`group` | `keys` | `"keys"` | `pivot`(문서 px [x, y]), `keys`(프레임 순): `frame`(0 ≤ frame < 문서 프레임 수, 프레임마다 하나), `offset`(px, ±32767), `rotation`(도, 시계 방향, ±3600), `scale`(0.05~20), `flip`(켜졌을 때만 씀), `opacity`(0~1, 레이어 불투명도에 곱함, 1이면 쓰지 않음, 3.3.0), `ease`(`linear`·`smooth`·`hold`, 이 키에서 다음 키까지) |
 | `group` | `cels` | `"cels"` | 애니메이션 폴더의 노출표(프레임 순): `frame`, `cel`(그 그룹의 바로 아래 자식 id, `null`은 빈 프레임). 다음 노출 전까지 유지, 첫 노출 전 프레임은 마지막 노출 |
+
+3.3.0은 같은 방식으로 기능 이름 셋을 더했다(`ugu_io::write`의 `required`가 쓰는 문서를 보고 넣는다). 지금 `FEATURES`는 `keys`·`cels`·`frames`·`key-opacity`·`fill-behind` 다섯이다.
+
+| `required` | 넣는 때 | 3.2 이하가 모르고 읽으면(`format.rs` 주석) |
+|---|---|---|
+| `"frames"` | 프레임 수가 60을 넘을 때(`limits::FRAMES_BEFORE_3_3`) | 3.2 이하가 읽는 것보다 프레임이 많다 |
+| `"key-opacity"` | 어떤 키의 `opacity`가 1이 아닐 때 | 레이어가 서서히 사라지는 것을 빼고 읽는다 |
+| `"fill-behind"` | `fill` 연산 하나라도 `behind: true`일 때(그룹·병합 section 안 포함) | 채우기를 선 뒤가 아니라 위에 덮어 그린다 |
 
 키가 있는 레이어의 화소는 그 프레임의 자세를 중심에 대해 크기·반전 → 회전 → 이동 순으로 적용한 위치에 그린다. 그룹의 키는 안의 레이어마다 자기 키 뒤에 곱한다(그룹 결과를 재샘플하지 않음). 검증 위반은 `DocumentError::Animation`이다.

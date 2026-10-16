@@ -30,8 +30,10 @@ Every tracked `.rs` and `.js` file starts with:
 ```
 
 Python and PowerShell tools start with the same two lines as `#` comments.
-New files need them too. CI fails the `Format and release metadata` job when a
-tracked source file is missing the SPDX identifier.
+New files need them too. CI fails the `Format and release metadata` job when
+a tracked `.rs` or `.js` file does not have the SPDX identifier in its first
+three lines. It does not look at Python and PowerShell tools, so check those
+yourself.
 
 ## Dependencies
 
