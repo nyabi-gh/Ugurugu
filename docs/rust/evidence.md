@@ -1318,3 +1318,19 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 **방법:** 단위 시험 `an_image_enlarged_four_times_makes_each_pixel_a_four_by_four_block`(PNG 4배의 화소가 원본 화소의 4×4 블록과 같은지), `pixel_art_is_offered_its_last_enlargement_or_its_own_size`. Windows Sandbox에서 `gui.ps1`의 "Pixel art exports at its own size"가 설정 없이 새 문서에 픽셀 모드를 켜고 현재 프레임 이미지 내보내기와 움직이는 GIF 내보내기 창의 크기 칸을 UI Automation으로 읽었다.
 
 **결과:** 두 시험 통과. Sandbox에서 두 창 모두 "Original size  (1024 × 768)"으로 시작했고, 이미지 창은 원본과 200·400%만 보였다(800%는 긴 변 4096을 넘음). 처음 두 번은 시험 스크립트가 실패했다(단계를 `Invoke-Word` 정의보다 앞에 둠, 애니메이션이 켜진 메뉴의 이름은 "Export current frame as image").
+
+## 70. 3.3.1 출시 (2026-10-16)
+
+**방법:** `7c9f67b`("Prepare the 3.3.1 release")의 release 빌드로 Windows Sandbox에서 `gui.ps1` 32단계, `accept.ps1` 10단계(3.3.1 설치 → 3.3.2 피드)를 돌렸다. 실패한 수용 실행은 같은 빌드로 전체를 다시 돌렸다.
+
+**결과:**
+
+| 실행 | 결과 |
+|---|---|
+| GUI 전체 | 32/32. "A dragged shape keeps up with the pointer"는 32, 32, 24ms. "Symmetry ruler"는 선 오른쪽 어두운 화소 0 → 210, "Pixel art exports at its own size"는 두 창 모두 원본 크기. "Round pixel dots at several zooms"의 첫 장은 이번에도 500%였다(B3-130) |
+| 수용 | 9/10. "Run"(설치 뒤 첫 실행, 호스트 GPU)이 `CloseMainWindow` 뒤 30초 안에 끝나지 않았다. 앱 로그는 업데이트 확인 실패(오프라인)에서 멈췄고, 이어진 "Run on WARP"는 정상으로 닫혔다(B3-141) |
+| 수용 다시 | 10/10 |
+
+**출시:** 태그 `v3.3.1`(annotated, `7c9f67b`) → `release-3.yml` 실행 38832910628 성공. `v3.3.1`에는 `Ugurugu-3.3.1-Windows-x64-Setup.exe`만, 본문 끝에 "What's Changed"(#84~#86)와 비교 링크가 붙었다. `updates`에 `Ugurugu3-3.3.1-win-x64-full.nupkg`가 더해지고 `releases.win-x64.json`이 3.3.1을 가리킨다. 다운로드 배지 workflow(38834183528)가 이어서 돌았다.
+
+**남은 것:** 3.3.0에서 3.3.1로의 실제 업데이트는 사용자 PC에서 보지 않았다.

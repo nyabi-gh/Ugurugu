@@ -73,7 +73,7 @@
 | B3-34 | egui TextEdit의 UIA `SetValue` | egui가 지원하지 않아 일부 보조 기술이 제한된다. 수용했고 egui를 올릴 때 다시 본다 | egui | m0-close 64행 |
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
 | B3-129 | 픽셀 모드의 확대율 안내 | 100% 아래에서는 화소가 섞여 픽셀 칸이 보이지 않는다. 이슈 #24 사용자는 이것을 브러시 모양 차이로 보았다(evidence 59). 후보: 픽셀 모드 문서를 정수 배율로 맞춰 열기, 100% 아래에서 상태 표시줄에 안내. 사용자 결정 전 | `crates/ugu-render/src/view.rs`, `apps/ugurugu/src/canvas/view.rs` | 이슈 #24, evidence 59 |
-| B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60 |
+| B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60, 70 |
 
 ## 6. 검토 보고서에서 남은 것
 
@@ -188,3 +188,8 @@
 | B3-140 | 대칭자의 남은 것 | 첫 판(decisions.md 4절)은 도구 설정의 숫자로만 중심·각도를 바꾸고, 파일에 저장하지 않고, 도형 도구는 따르지 않는다. 후보: 캔버스에서 중심·선 끌기(그리기와 부딪히지 않는 방법이 필요), 파일 저장(형식에 선택 필드), 도형과 채운 도형의 복사, 복사가 같이 우글거리는 선택지. 큰 획이 많으면 펜을 뗄 때가 길다: 2048²에서 문서 대부분을 덮는 획 24개는 약 40ms이고, 그 절반 가까이가 획 경계 사각형마다 coverage를 읽어 놓는 일이다(evidence.md 68절) | `crates/ugu-session/src/symmetry.rs`, `apps/ugurugu/src/canvas/symmetry.rs`, `crates/ugu-render/src/compose.rs` `stamp_strokes` | 2026-10-15 대칭자 |
 | B3-139 | 채우기 경계가 선과 같이 움직이지 않음 | 페인트통 채우기는 만든 프레임의 영역을 모든 프레임에 칠한다. 3.3.0부터 선 뒤에 깔고 선 가운데까지 넓혀 기본 우글거림에서는 경계가 보이지 않지만(evidence.md 66절), 우글거림이 선 굵기의 절반보다 크게 움직이면 경계가 드러난다. 우글거림은 선마다 길이 방향 위치로 정하는 변위라(`ugu_core::motion::Displacer`) 채우기 전체에 같은 변위를 줄 수 없다. 프레임마다 채우기 경계를 가까운 선의 변위만큼 옮기거나, 경계를 정한 선을 기억해 그 프레임의 선으로 다시 자르는 방법을 비용과 함께 재고 정한다 | `crates/ugu-render/src/document.rs` `Step::Fill`, `crates/ugu-core/src/selection.rs` `under_lines` | 2026-10-15 사용자 제보 |
 
+## 14. 3.3.1 출시에서 남은 것
+
+| ID | 항목 | 왜·영향 | 어디 | 출처 |
+|---|---|---|---|---|
+| B3-141 | 막 뜬 창이 닫기 요청에 30초 안에 끝나지 않음 | 3.3.1 수용 시험의 "Run"이 설치 뒤 첫 실행에서 `CloseMainWindow` 뒤 30초 안에 끝나지 않았다(evidence.md 70절). 로그는 업데이트 확인 실패(오프라인)에서 멈췄고 닫기는 로그에 남지 않는다. 같은 빌드로 다시 돌린 수용 10/10에서는 나오지 않았다. 시작 직후 창 스레드가 메시지를 돌리지 않는 B3-97과 같은 원인일 수 있다(가설). 닫기 요청을 받은 때와 끝난 때를 로그에 남겨야 다음에 원인을 가를 수 있다 | `apps/ugurugu/src/app.rs` 시작·닫기 순서 | evidence.md 70절 |
