@@ -25,7 +25,7 @@ pub struct Clip {
     pub canvas: [u32; 2],
     /// What the layer's operations use, by their ids in `layer`.
     pub store: Store,
-    /// The selection copied.
+    /// The selection copied, in the layer's own pixels.
     pub selection: Arc<Selection>,
 }
 
@@ -74,9 +74,11 @@ pub fn copy(document: &Document, layer: LayerId, selection: Arc<Selection>) -> O
 }
 
 /// A new paint layer at `index` in `parent` (`None` for the top level)
-/// drawing `clip`, and the selection it covers on this canvas (`None` when
-/// it falls outside). Stored data equal to what this document has under the
-/// same id is shared; the rest is added under new ids.
+/// drawing `clip`, and the selection it covers in its own pixels on this
+/// canvas (`None` when it falls outside). The layer moves with the keys
+/// copied, as far as this document's frames reach. Stored data equal to what
+/// this document has under the same id is shared; the rest is added under
+/// new ids.
 pub fn paste(
     document: &Document,
     clip: &Clip,
@@ -137,19 +139,21 @@ pub fn paste(
         clip.selection.cropped([0, 0], document.canvas)
     };
     let id = crate::command::next_layer_id(document);
+    let layer = Layer {
+        id,
+        name,
+        visible: true,
+        reference: false,
+        kind: LayerKind::Paint(PaintLayer {
+            ops,
+            ..clip.layer.clone()
+        }),
+    };
+    let layer = crate::keys::trimmed(&layer, document.frames).unwrap_or(layer);
     changes.push(Change::InsertLayer {
         parent,
         index,
-        layer: Layer {
-            id,
-            name,
-            visible: true,
-            reference: false,
-            kind: LayerKind::Paint(PaintLayer {
-                ops,
-                ..clip.layer.clone()
-            }),
-        },
+        layer,
     });
     (id, changes, selection)
 }

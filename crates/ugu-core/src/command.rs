@@ -246,7 +246,9 @@ pub fn move_layer(
     Ok(changes)
 }
 
-/// Puts `child` in a new, empty-styled group that takes its place.
+/// Puts `child` in a new, empty-styled group that takes its place. A
+/// clipped `child` would have no base inside it, so the group is clipped in
+/// its stead.
 pub fn wrap_in_group(
     document: &Document,
     child: LayerId,
@@ -256,6 +258,11 @@ pub fn wrap_in_group(
         .position(child)
         .ok_or(EditError::NoSuchLayer(child))?;
     let id = next_layer_id(document);
+    let mut inside = document.layer(child).expect("found above").clone();
+    let clip_to_below = std::mem::take(match &mut inside.kind {
+        LayerKind::Paint(paint) => &mut paint.clip_to_below,
+        LayerKind::Group(group) => &mut group.clip_to_below,
+    });
     let group = Layer {
         id,
         name,
@@ -264,8 +271,8 @@ pub fn wrap_in_group(
         kind: LayerKind::Group(Group {
             opacity: 1.0,
             blend: Blend::Normal,
-            clip_to_below: false,
-            children: vec![document.layer(child).expect("found above").clone()],
+            clip_to_below,
+            children: vec![inside],
             keys: Keys::default(),
             cels: None,
         }),
@@ -362,7 +369,9 @@ fn each_layer(layers: &[Layer], visit: &mut impl FnMut(&Layer) -> bool) {
 }
 
 /// Puts `group`'s children in its place, in the same order. The group's own
-/// opacity, blend mode, clipping, visibility and reference flag go with it.
+/// opacity, blend mode, visibility and reference flag go with it; the
+/// children of a clipped group come out clipped to its base, as
+/// `wrap_in_group` puts a clipped layer back.
 pub fn ungroup(document: &Document, group: LayerId) -> Result<Vec<Change>, EditError> {
     let (parent, index) = document
         .position(group)
@@ -373,10 +382,17 @@ pub fn ungroup(document: &Document, group: LayerId) -> Result<Vec<Change>, EditE
     let mut changes: Vec<Change> = unexpose(document, group, None).into_iter().collect();
     changes.push(Change::RemoveLayer(group));
     changes.extend(content.children.iter().enumerate().map(|(offset, child)| {
+        let mut layer = child.clone();
+        if content.clip_to_below {
+            match &mut layer.kind {
+                LayerKind::Paint(paint) => paint.clip_to_below = true,
+                LayerKind::Group(group) => group.clip_to_below = true,
+            }
+        }
         Change::InsertLayer {
             parent,
             index: index + offset,
-            layer: child.clone(),
+            layer,
         }
     }));
     Ok(changes)
@@ -894,6 +910,48 @@ mod tests {
             ungroup(&document, LayerId(1)),
             Err(EditError::NotGroup(LayerId(1)))
         );
+    }
+
+    #[test]
+    fn a_clipped_layer_put_in_a_group_or_folder_hands_its_clipping_to_it() {
+        let mut document = three_layers();
+        run(&mut document, |document| {
+            update_layer(document, LayerId(2), |layer| {
+                if let LayerKind::Paint(paint) = &mut layer.kind {
+                    paint.clip_to_below = true;
+                }
+            })
+            .unwrap()
+        })
+        .unwrap();
+        let before = document.clone();
+        let wrap = |document: &Document, folder: bool| {
+            let name = "G".to_owned();
+            if folder {
+                make_animation_folder(document, LayerId(2), name).unwrap()
+            } else {
+                wrap_in_group(document, LayerId(2), name).unwrap()
+            }
+        };
+        for folder in [false, true] {
+            let (group, changes) = wrap(&document, folder);
+            let outcome = commit(&mut document, changes).unwrap();
+            // Inside, the layer has no base below it and would not be drawn.
+            assert!(document.layer(group).unwrap().clip_to_below());
+            assert!(!document.layer(LayerId(2)).unwrap().clip_to_below());
+            undo(&mut document, outcome);
+            assert_eq!(document, before);
+        }
+        // Ungrouping hands it back, to every child.
+        let (group, changes) = wrap(&document, false);
+        commit(&mut document, changes).unwrap();
+        run(&mut document, |document| {
+            move_to_group(document, LayerId(1), Some(group)).unwrap()
+        })
+        .unwrap();
+        run(&mut document, |document| ungroup(document, group).unwrap()).unwrap();
+        assert_eq!(ids(&document.layers), [2, 1, 3]);
+        assert!(document.layers[..2].iter().all(Layer::clip_to_below));
     }
 
     #[test]

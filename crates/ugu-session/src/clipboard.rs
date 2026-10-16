@@ -48,6 +48,8 @@ impl Session {
         })
     }
 
+    /// Adds the layer `make` builds, selecting what it covers: `make` gives
+    /// that in the new layer's own pixels.
     fn add_selected(
         &mut self,
         label: &str,
@@ -68,6 +70,7 @@ impl Session {
                 (parent, index + 1)
             });
         let name = format!("Layer {}", command::next_layer_id(self.document()).0);
+        let cycle = self.cycle();
         let mut added = None;
         let outcome = self.history.group(label, |group| {
             let mut covered = None;
@@ -77,7 +80,13 @@ impl Session {
                 covered = selection;
                 changes
             })?;
-            group.select(covered);
+            // The layer's own pixels, where its keys show them on this frame.
+            let moved = added.and_then(|id| group.document().transform(id, cycle));
+            let shown = match moved {
+                Some(moved) => covered.and_then(|covered| covered.transformed(moved)),
+                None => covered,
+            };
+            group.select(shown);
             Ok(())
         })?;
         if let (Outcome::Committed(_), Some(id)) = (&outcome, added) {

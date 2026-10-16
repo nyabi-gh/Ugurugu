@@ -935,23 +935,24 @@ impl LayerDock {
             );
         }
 
+        let mut clip = clipped;
+        if widgets::checkbox(ui, &mut clip, tr("clip"))
+            .on_hover_text(tr("clip-tip"))
+            .changed()
+        {
+            report(
+                refusal,
+                canvas.edit(|session| {
+                    session.update_layer(current, "Change layer clipping", |layer| match &mut layer
+                        .kind
+                    {
+                        LayerKind::Paint(paint) => paint.clip_to_below = clip,
+                        LayerKind::Group(group) => group.clip_to_below = clip,
+                    })
+                }),
+            );
+        }
         if is_paint {
-            let mut clip = clipped;
-            if widgets::checkbox(ui, &mut clip, tr("clip"))
-                .on_hover_text(tr("clip-tip"))
-                .changed()
-            {
-                report(
-                    refusal,
-                    canvas.edit(|session| {
-                        session.update_layer(current, "Change layer clipping", |layer| {
-                            if let LayerKind::Paint(paint) = &mut layer.kind {
-                                paint.clip_to_below = clip;
-                            }
-                        })
-                    }),
-                );
-            }
             let mut marked = reference;
             if widgets::checkbox(ui, &mut marked, tr("reference"))
                 .on_hover_text(tr("reference-tip"))

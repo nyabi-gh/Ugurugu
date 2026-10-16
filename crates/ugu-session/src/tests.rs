@@ -2498,6 +2498,56 @@ fn drawing_on_a_moved_layer_goes_into_its_own_pixels() {
 }
 
 #[test]
+fn a_paste_from_a_moved_layer_is_selected_where_it_is_shown() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    // Moved 30 right on frame 0, back where it is drawn on frame 20.
+    session.set_pose(layer, moved_by(30.0), [0.0, 0.0]).unwrap();
+    session.set_frame(20).unwrap();
+    session.set_pose(layer, moved_by(0.0), [0.0, 0.0]).unwrap();
+    session.set_frame(0).unwrap();
+    let shown = Selection::of_shape(
+        &ugu_core::selection::Shape::Rectangle([40.0, 30.0], [90.0, 70.0]),
+        [200, 100],
+    );
+    session
+        .history_mut()
+        .unwrap()
+        .select("Select", shown.clone());
+    let clip = session.copy().unwrap();
+    session.paste(&clip).unwrap();
+    assert_eq!(
+        session.selection().map(|selection| &**selection),
+        shown.as_ref()
+    );
+    // Moving it cuts the pasted pixels the clip holds.
+    let pending = session.pending().unwrap();
+    let (cut, _) = pending.in_layer(session.layer_transform()).unwrap();
+    assert_eq!(cut, clip.selection);
+
+    // A document with fewer frames takes the keys that fit in it.
+    let mut short = Document::new([200, 100]);
+    short.frames = 10;
+    let mut other = Session::new(short, false);
+    assert!(matches!(other.paste(&clip), Ok(Outcome::Committed(_))));
+    let keys = other
+        .document()
+        .layer(other.current_layer())
+        .unwrap()
+        .keys();
+    assert_eq!(
+        keys.keys.iter().map(|key| key.frame).collect::<Vec<_>>(),
+        [0]
+    );
+    assert_eq!(
+        other.selection().map(|selection| &**selection),
+        shown.as_ref()
+    );
+}
+
+#[test]
 fn a_selection_cuts_a_moved_layer_where_it_is_shown() {
     let mut session = session();
     let tools = Tools::default();
