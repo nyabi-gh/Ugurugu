@@ -1348,3 +1348,18 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 **방법:** `accept.ps1`의 "An update is offered at every start"가 `updateChecked`를 지금으로 적은 설정과 로컬 피드(다음 patch 판)로 앱을 두 번 켜고, 매번 60초 안에 업데이트 창의 "Update" 단추를 찾는다. 고치기 전(`7ed7af2`)과 고친 뒤(`4f5b487`)의 release 빌드로 Windows Sandbox에서 돌렸다.
 
 **결과:** 고치기 전 빌드는 첫 시작에서 60초 동안 창이 뜨지 않아 실패, 고친 뒤 빌드는 두 시작 모두 창이 떴다. 고친 뒤 빌드의 수용 전체는 한 번 10/10, 다른 실행에서는 "Update that fails to download"가 UI Automation `FromHandle` 시간 초과(B3-97)로 실패했다.
+
+## 73. 3.3.2 출시 (2026-10-16)
+
+**방법:** `49b7000`("Prepare the 3.3.2 release")의 release 빌드로 Windows Sandbox에서 `gui.ps1` 33단계, `accept.ps1` 11단계(3.3.2 설치 → 3.3.3 피드)를 돌렸다.
+
+**결과:**
+
+| 실행 | 결과 |
+|---|---|
+| GUI 전체 | 33/33. "A dragged shape keeps up with the pointer"는 34, 33, 33ms. "Symmetry ruler"는 끌어 놓기·브러시 아래 스위치 없음·선 오른쪽 어두운 화소 0 → 206·중심 x 508 → 709.5, "The bucket fills where the symmetry ruler mirrors"는 두 상자 모두 0 → 1764. "Round pixel dots at several zooms"의 첫 장은 이번에도 500%였다(B3-130) |
+| 수용 | 11/11. "An update is offered at every start"는 두 시작 모두 업데이트 창 |
+
+**출시:** 태그 `v3.3.2`(annotated, `49b7000`) → `release-3.yml` 실행 38844964892 성공. `v3.3.2`에는 `Ugurugu-3.3.2-Windows-x64-Setup.exe`만, 본문 끝에 "What's Changed"(#87~#91)와 비교 링크가 붙었다. `updates`의 `releases.win-x64.json`이 3.3.2를 가리킨다. 다운로드 배지 workflow(38845653307)가 이어서 돌았다.
+
+**남은 것:** 3.3.1에서 3.3.2로의 실제 업데이트는 사용자 PC에서 보지 않았다.
