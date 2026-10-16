@@ -225,6 +225,28 @@ Step 'Update that fails to download' {
     "notice '$text'", "title '$caption' kept", "still $version"
 }
 
+# Up to 3.3.1 the automatic check ran only six hours after the last one
+# that finished, which the settings recorded as updateChecked.
+Step 'An update is offered at every start' {
+    $settings = Join-Path $env:TEMP 'every-start-settings.json'
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Set-Content -Path $settings -Encoding ascii -Value "{""format"": ""ugurugu.settings"", ""version"": 1, ""updateChecked"": $now}"
+    $env:UGURUGU_SETTINGS_PATH = $settings
+    $env:UGURUGU_UPDATE_FEED = Join-Path $in 'feed'
+    try {
+        $offered = foreach ($start in 1, 2) {
+            Start-Process -FilePath $app | Out-Null
+            $process = Wait-Window
+            [void](Find-Element $process { param($n) $n -eq 'Update' } 60 "the update offer at start $start")
+            Close-App $process
+            "start $start offered"
+        }
+    } finally {
+        Remove-Item Env:UGURUGU_UPDATE_FEED, Env:UGURUGU_SETTINGS_PATH
+    }
+    $offered
+}
+
 Step 'Update with unsaved changes' {
     $env:UGURUGU_UPDATE_FEED = Join-Path $in 'feed'
     try {

@@ -1340,3 +1340,11 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 **방법:** `7ed7af2`의 release 빌드로 Windows Sandbox에서 `gui.ps1`의 "The bucket fills where the symmetry ruler mirrors"를 돌렸다. 대칭자 도구로 가운데에 세로선을 놓고, 브러시로 왼쪽에 닫힌 상자를 그려(오른쪽에 대칭으로 그려짐) 왼쪽 상자 안만 페인트통으로 눌렀다. 두 상자 가운데와 상자 아래(종이 높이의 88%)의 정사각형(한 변이 종이 높이의 1/6) 안 어두운 화소를 셌다.
 
 **결과:** 누른 상자 0 → 1764, 대칭 상자 0 → 1764, 상자 아래 0. 스크린샷에서도 두 상자가 모두 채워졌다.
+
+## 72. 시작할 때마다 업데이트 확인 (2026-10-16)
+
+**질문:** 사용자가 앱을 켜도 새 판을 알리지 않는다고 했다. 3.3.1까지는 끝난 확인에서 6시간이 지난 시작에만 자동 확인을 했다(`updateChecked`).
+
+**방법:** `accept.ps1`의 "An update is offered at every start"가 `updateChecked`를 지금으로 적은 설정과 로컬 피드(다음 patch 판)로 앱을 두 번 켜고, 매번 60초 안에 업데이트 창의 "Update" 단추를 찾는다. 고치기 전(`7ed7af2`)과 고친 뒤(`4f5b487`)의 release 빌드로 Windows Sandbox에서 돌렸다.
+
+**결과:** 고치기 전 빌드는 첫 시작에서 60초 동안 창이 뜨지 않아 실패, 고친 뒤 빌드는 두 시작 모두 창이 떴다. 고친 뒤 빌드의 수용 전체는 한 번 10/10, 다른 실행에서는 "Update that fails to download"가 UI Automation `FromHandle` 시간 초과(B3-97)로 실패했다.
