@@ -1543,3 +1543,5 @@ GIF는 모두 두 색(흰 바탕과 획)이었다. 기본 메모리 Sandbox에�
 **방법:** 단위 시험 `a_picture_of_bigger_pixels_is_a_smaller_canvas_enlarged_on_export`(캔버스 크기와, 고를 수 있는 픽셀 크기마다 내보내기 창이 완성 그림 크기로 시작하는지), `pixel_art_of_bigger_pixels_is_a_smaller_canvas_exported_enlarged`(새 문서), `fitting_enlarges_pixel_art_of_any_size_by_whole_times`(고치기 전 300×200 픽셀 그림이 1배로 맞춰져 실패). Windows Sandbox에서 `gui.ps1`의 "Pixel size of a new pixel art document": 새 문서 창에 1000×1000, 픽셀 모드, 4×를 고르고 만든 뒤 확대율, 화면의 캔버스 너비, GIF 창의 크기 칸을 읽었다.
 
 **결과:** 시험 모두 통과. Sandbox(창 1600×1000, 화면 배율 150%)에서 캔버스는 250×250, 확대율 200%(그 창에 들어가는 정수 배율), 화면 너비 499px, GIF 창은 "1000 × 1000 (400%)"로 시작했다. 처음 화면에서는 픽셀 크기 설명이 왼쪽 좁은 칸에서 여섯 줄로 접혀, 설명을 선택 아래 카드 너비로 옮긴 뒤 다시 돌려 두 줄이 되었다.
+
+**사용자 확인:** 2026-10-17 사용자가 main(`d1af69a4`)의 release 빌드로 픽셀 크기가 있는 새 픽셀 그림을 그리고 내보내 보고 통과로 판정했다. 픽셀 모드를 직접 써 보는 일(3.0.1부터 열려 있던 사용자 확인)도 이것으로 닫았다.
