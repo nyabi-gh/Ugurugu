@@ -16,7 +16,8 @@ the save dialog's added extension, the transform box's cursors, no blank
 frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, a file opened from outside going to the open window as
-a tab, and the window opening where and as it closed.
+a tab, the window opening where and as it closed, and pixel art GIFs
+enlarged into blocks.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -993,6 +994,176 @@ Step 'Pixel art exports at its own size' {
     Stop-Apps
     $detail = ($sizes | ForEach-Object { "$($_.Menu): '$($_.Value)' $($_.Shot)" }) -join '; '
     if ($sizes | Where-Object { -not $_.Value.StartsWith($words['export-size-original']) }) {
+        throw $detail
+    }
+    $detail
+}
+
+# Types $Text into the number field named $Name and moves on with Tab, as
+# Enter would also press a dialog's OK.
+function Set-Number($Process, [string] $Name, [string] $Text) {
+    $element = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+        $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+        foreach ($found in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
+            $any = $null
+            if ($found.TryGetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern, [ref]$any) -or
+                $found.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$any)) {
+                return , $found
+            }
+        }
+    } 15 "a number field named '$Name'"
+    $box = $element.Current.BoundingRectangle
+    [Native]::Glide([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2))
+    [Native]::Down()
+    [Native]::Up()
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    [Windows.Forms.SendKeys]::SendWait($Text)
+    [Windows.Forms.SendKeys]::SendWait('{TAB}')
+    Start-Sleep -Milliseconds 500
+}
+
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+public static class Blocks
+{
+    // The first frame's size, its dark pixels, and how many times x times
+    // squares from the top left are not one colour.
+    public static int[] Count(string path, int times)
+    {
+        using (var bitmap = new Bitmap(path))
+        {
+            int w = bitmap.Width, h = bitmap.Height;
+            var data = bitmap.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            var pixels = new int[w * h];
+            for (int y = 0; y < h; y++)
+                Marshal.Copy(data.Scan0 + y * data.Stride, pixels, y * w, w);
+            bitmap.UnlockBits(data);
+            int dark = 0, broken = 0;
+            for (int by = 0; by < h; by += times)
+                for (int bx = 0; bx < w; bx += times)
+                {
+                    int first = pixels[by * w + bx];
+                    bool same = true;
+                    for (int y = by; y < by + times && y < h; y++)
+                        for (int x = bx; x < bx + times && x < w; x++)
+                        {
+                            int c = pixels[y * w + x];
+                            if (c != first) same = false;
+                            if (((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) < 200) dark++;
+                        }
+                    if (!same) broken++;
+                }
+            return new[] { w, h, dark, broken };
+        }
+    }
+}
+'@
+
+# Issue #24: pixel art on a canvas past 256, exported as a GIF enlarged 2
+# and 4 times. The file's first frame must be the chosen size, each pixel a
+# block. The window starts at a smaller enlargement than asked when the
+# asked one is over the export budget (1000 at 4 times in a Sandbox of the
+# default memory; prepare.ps1 -MemoryInMB 16384 fits it), which is noted.
+Step 'Enlarged pixel art GIFs of larger canvases' {
+    $words = Read-Words 'en'
+    $rows = foreach ($times in 2, 4) {
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+        # The GIF window starts at the enlargement last chosen.
+        Set-Content -Path (Join-Path $env:TEMP 'gui-settings.json') -Encoding ascii `
+            -Value "{`"format`": `"ugurugu.settings`", `"version`": 1, `"checkForUpdates`": false, `"pixelExportScale`": $times}"
+        $process = Start-App
+        $owner = [uint32]$process.Id
+        foreach ($edge in 512, 1000) {
+            Invoke-Word $process $words 'menu-file'
+            Invoke-Word $process $words 'file-new'
+            Set-Number $process $words['size-width'] "$edge"
+            Set-Number $process $words['size-height'] "$edge"
+            $switch = Find-Pattern $process $words['pixel-mode'] @([Windows.Automation.TogglePattern]::Pattern)
+            if ($switch.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+                $switch.Toggle()
+                Start-Sleep -Milliseconds 300
+            }
+            Invoke-Named $process $words['dialog-ok']
+            Start-Sleep -Seconds 1
+            [void](Draw-Stroke $process)
+            Invoke-Word $process $words 'menu-file'
+            Invoke-Word $process $words 'export-gif'
+            Start-Sleep -Milliseconds 500
+            $chosen = (Find-Pattern $process $words['export-size'] @([Windows.Automation.ValuePattern]::Pattern)).Current.Value
+            $shot = Save-Screen "gif-dialog-$edge-x$times"
+            # "2048 x 2048  (400%)", with a multiplication sign
+            $side = if ($chosen -match '^(\d+)') { [int]$Matches[1] } else { 0 }
+            $got = [int]($side / $edge)
+            $file = Join-Path $out "pixel-$edge-x$times.gif"
+            $state = 'exported'
+            try {
+                Invoke-Named $process $words['export-confirm']
+                # The first file dialog of a new Sandbox can take long.
+                $dialog = Wait-Until { $found = [Native]::Dialog($owner); if ($found -ne [IntPtr]::Zero) { $found } } 90 'the save dialog'
+                Start-Sleep -Seconds 2
+                # The dialog can lose the first letters of a typed name, so
+                # whatever new GIF lands in its folder is taken; a name it
+                # refuses is typed again. Unfinished exports end in .tmp.
+                $documents = [Environment]::GetFolderPath('MyDocuments')
+                $before = @(Get-ChildItem $documents -Filter '*.gif' | ForEach-Object FullName)
+                $new = { Get-ChildItem $documents -Filter '*.gif' | Where-Object { $before -notcontains $_.FullName } | Select-Object -First 1 }
+                for ($try = 1; -not (& $new); $try++) {
+                    $front = [Native]::Dialog($owner)
+                    if ($try -gt 3 -or $front -eq [IntPtr]::Zero) {
+                        $names = @(Get-ChildItem $documents | ForEach-Object Name) -join ', '
+                        throw "no new GIF in $documents after $($try - 1) tries; there: $names"
+                    }
+                    if ($front -ne $dialog) {
+                        # The message about the name, over the dialog.
+                        [Native]::Front($front)
+                        [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                        Start-Sleep -Milliseconds 800
+                    }
+                    [Native]::Front($dialog)
+                    Start-Sleep -Milliseconds 500
+                    [Windows.Forms.SendKeys]::SendWait('%n')
+                    Start-Sleep -Milliseconds 300
+                    [Windows.Forms.SendKeys]::SendWait('^a')
+                    Start-Sleep -Milliseconds 300
+                    [Windows.Forms.SendKeys]::SendWait((Split-Path -Leaf $file))
+                    Start-Sleep -Milliseconds 500
+                    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                    $deadline = (Get-Date).AddSeconds(90)
+                    while ((Get-Date) -lt $deadline -and -not (& $new) -and [Native]::Dialog($owner) -eq $dialog) {
+                        Start-Sleep -Milliseconds 500
+                    }
+                    if (-not (& $new) -and [Native]::Dialog($owner) -eq [IntPtr]::Zero) {
+                        # The export runs once the dialog is gone.
+                        [void](Wait-Until { & $new } 120 "a new GIF in $documents")
+                    }
+                }
+                Copy-Item (& $new).FullName $file
+                $w, $h, $dark, $broken = [Blocks]::Count($file, [Math]::Max($got, 1))
+                $state = "${w}x$h, $dark dark pixels, $broken squares of ${got}x$got not one colour"
+                if ($w -ne $side -or $h -ne $side -or $dark -eq 0 -or $broken -ne 0 -or $got -lt 2) {
+                    $state = "wrong: $state"
+                }
+            } catch {
+                $state = "not exported: $(Format-Error $_.Exception) $(Save-Screen "gif-failed-$edge-x$times")"
+                for ($i = 0; $i -lt 3 -and [Native]::Dialog($owner) -ne [IntPtr]::Zero; $i++) {
+                    [Native]::Front([Native]::Dialog($owner))
+                    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+                    Start-Sleep -Milliseconds 800
+                }
+                Send-Keys $process '{ESC}'
+            }
+            $smaller = if ($got -ne $times) { ' (over the export budget, smaller)' } else { '' }
+            [pscustomobject]@{ Ok = $state -notmatch '^(wrong|not exported)'; Text = "$edge at $($times)x: '$chosen'$smaller, $state, $shot" }
+        }
+        Stop-Apps
+    }
+    $detail = ($rows | ForEach-Object Text) -join '; '
+    if ($rows | Where-Object { -not $_.Ok }) {
         throw $detail
     }
     $detail

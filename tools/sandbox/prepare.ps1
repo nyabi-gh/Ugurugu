@@ -36,7 +36,9 @@ param(
     [string[]] $Only,
     [string] $Executable = 'target/release/ugurugu.exe',
     [string] $UguDoc = 'target/release/ugu-doc.exe',
-    [string] $Vpk = 'vpk'
+    [string] $Vpk = 'vpk',
+    # The Sandbox's memory; Windows' default when not given.
+    [int] $MemoryInMB
 )
 
 Set-StrictMode -Version Latest
@@ -98,8 +100,10 @@ if ($Scenario -in 'pointer', 'gui') {
 }
 Copy-Item (Join-Path $PSScriptRoot 'common.ps1'), (Join-Path $PSScriptRoot "$Scenario.ps1") $in
 
+$memory = if ($MemoryInMB) { "<MemoryInMB>$MemoryInMB</MemoryInMB>" } else { '' }
 $wsb = @"
 <Configuration>
+  $memory
   <VGpu>Disable</VGpu>
   <Networking>$networking</Networking>
   <MappedFolders>
