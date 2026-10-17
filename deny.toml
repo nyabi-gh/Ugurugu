@@ -8,6 +8,13 @@ ignore = [
     # Unmaintained, not a vulnerability: a derive macro Velopack uses at
     # build time, with no code in the app.
     { id = "RUSTSEC-2024-0388", reason = "build-time derive macro of velopack" },
+    # zip 8.6.0, fixed in 9: all three are in ZipArchive::extract and
+    # ZipStreamReader::extract, which ugu-io never calls and Velopack 1.2.161
+    # does not either (it copies entries from by_index). Velopack's zip 9
+    # change is not released yet (backlog B3-145).
+    { id = "RUSTSEC-2026-0367", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
+    { id = "RUSTSEC-2026-0368", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
+    { id = "RUSTSEC-2026-0369", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
 ]
 
 [licenses]

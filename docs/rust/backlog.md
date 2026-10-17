@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-10-16 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-10-17 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -89,7 +89,8 @@
 | B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다. 정상 작업을 실패로 만드는 시간 초과보다, 취소가 대기 중 요청·진행 중 렌더·인코더·파일 정리까지 닿는지와 내보내기의 최소 진행 기회를 먼저 본다. 잴 것: 연속 편집·재생 중 내보내기 완료 시간, 취소→정리 p95(목표 100ms) | `apps/ugurugu/src/cache.rs` `Renders::render`(`answer.recv()`)와 `Queue`의 `exports` | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
 | B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다. 안: 실패한 때만 "설정이 저장되지 않음 · 다시 시도 · 폴더 열기" 같은 상태를 두고, 조건이 회복되면 최근 설정을 쓴다. 복구 실패 안내도 경로 글자만 보이므로 보존한 폴더를 여는 동작을 같이 볼 수 있다 | `apps/ugurugu/src/settings.rs` `write_changes`·`write_text` | 분석 3.2 |
-| B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다 | `deny.toml`의 `[advisories] ignore`, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
+| B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다. Velopack main은 2026-10-16에 뺐고 아직 릴리스되지 않았다 | `deny.toml`의 `[advisories] ignore`, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
+| B3-145 | zip 9로 올리기 | zip 8.6.0에 RUSTSEC-2026-0367·0368·0369(9.0.0에서 고침)가 나와 `deny.toml`에서 허용한다. 셋 다 `ZipArchive::extract`·`ZipStreamReader::extract` 안의 결함인데 ugu-io는 그 함수를 부르지 않고, Velopack 1.2.161도 `by_index`로 읽어 직접 파일에 쓴다(2026-10-17 소스로 확인). Velopack 1.2.161이 zip `^8.6`을 요구해 ugu-io만 올리면 zip이 두 판 들어가고 8.6.0은 그대로 남는다. Velopack main은 2026-10-16에 zip 9.0.3으로 올렸다("all 8.x releases are yanked"). 그 Velopack이 나오면 둘을 함께 zip 9로 올리고 허용 세 줄을 지운다 | `Cargo.toml` `zip`, `deny.toml`, `crates/ugu-io` | 2026-10-17 `cargo deny` |
 | B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` `EguiState`의 `unsafe impl Send` | 분석 3.2; 검토 9절 |
 | B3-46 | GPU 시험이 어댑터가 없으면 조용히 통과 | `view.rs`의 GPU 시험은 렌더를 얻지 못하면 "skipped: no DX12 adapter"를 찍고 `return`한다. 전체 통과가 GPU 표시를 보증하지 않는다. CI에서 WARP로 0개 실행이면 실패로 하는 방법이 있다 | `crates/ugu-render/src/view.rs` `tests::device`와 `render`·`render_grid`를 쓰는 시험(`at_whole_scales_each_screen_pixel_shows_one_document_pixel` 등) | 분석 3.4 |
 | B3-47 | 코드에 직접 넣은 사용자 문구 검사 | Fluent 키 일치 시험은 언어 파일끼리만 비교해 코드의 하드코딩 영어를 찾지 못한다. 지금 남은 하드코딩 문구가 있는지는 전수 확인하지 않았다(가설) | `apps/ugurugu/src/i18n.rs` | 분석 3.7; 검토 6절 |
