@@ -14,11 +14,17 @@
 //! The checks and the download run on threads of their own, so the file
 //! thread's saves never wait for the network.
 
+use std::io::{Read, Seek, Write};
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use velopack::sources::{FileSource, HttpSource};
-use velopack::{HttpOptions, UpdateCheck, UpdateInfo, UpdateManager};
+use velopack::bundle::Manifest;
+use velopack::sources::{FileSource, HttpSource, UpdateSource};
+use velopack::{
+    HttpOptions, UpdateCheck, UpdateInfo, UpdateManager, VelopackAsset, VelopackAssetFeed,
+};
 
 use crate::i18n::{args, tr, tr_with};
 
@@ -32,9 +38,9 @@ const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// kilobytes. Without a limit Velopack waits on a stalled connection for
 /// ever, and every later check waits behind it.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
-/// How long a package download may take. The full package of 3.3.2 is
-/// 16.3 MB, so this gives up below about 220 kbit/s.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// How long one request of a package download may take; the next goes on
+/// from where it stopped, and only one that brings nothing gives up.
+const STALL: Duration = Duration::from_secs(2 * 60);
 
 pub enum Event {
     Checked(Result<Found, String>),
@@ -65,13 +71,131 @@ pub struct Updates {
     events: Arc<dyn Fn(Event) + Send + Sync>,
 }
 
-/// The updates release, whose requests each give up after `timeout`, or
-/// the folder of packages `UGURUGU_UPDATE_FEED` names, to try an update
-/// before it is published.
-fn manager(timeout: Duration) -> Result<UpdateManager, velopack::Error> {
+/// The updates release, or the folder of packages `UGURUGU_UPDATE_FEED`
+/// names, to try an update before it is published.
+fn manager() -> Result<UpdateManager, velopack::Error> {
     match std::env::var_os("UGURUGU_UPDATE_FEED") {
         Some(folder) => UpdateManager::new(FileSource::new(folder), None, None),
-        None => UpdateManager::new(feed(FEED, timeout), None, None),
+        None => UpdateManager::new(Packages::new(FEED, STALL), None, None),
+    }
+}
+
+/// Velopack's `HttpSource`, but packages come in requests that each stop
+/// after `stall`, the next asking (`Range`) for what is still missing.
+/// `HttpSource` has one time limit for all of a request, so a slow line
+/// never got a whole package in time, while with none a stalled connection
+/// would hold Velopack's update lock until the app ends. A request that
+/// brings nothing in its time ends the download.
+struct Packages {
+    url: String,
+    list: HttpSource,
+    stall: Duration,
+}
+
+impl Packages {
+    fn new(url: &str, stall: Duration) -> Self {
+        Self {
+            url: url.trim_end_matches('/').to_owned(),
+            list: feed(url, CHECK_TIMEOUT),
+            stall,
+        }
+    }
+}
+
+impl UpdateSource for Packages {
+    fn get_release_feed(
+        &self,
+        channel: &str,
+        app: &Manifest,
+        staged_user_id: &str,
+    ) -> Result<VelopackAssetFeed, velopack::Error> {
+        self.list.get_release_feed(channel, app, staged_user_id)
+    }
+
+    fn download_release_entry(
+        &self,
+        asset: &VelopackAsset,
+        local_file: &Path,
+        progress: Option<Sender<i16>>,
+    ) -> Result<(), velopack::Error> {
+        let url = format!("{}/{}", self.url, asset.FileName);
+        tracing::info!(url, "downloading the update");
+        download(&url, local_file, self.stall, |percent| {
+            if let Some(progress) = &progress {
+                let _ = progress.send(percent);
+            }
+        })
+    }
+}
+
+/// Downloads `url` to `path` as `Packages` does, telling `progress` each
+/// 5% once the size is known.
+fn download(
+    url: &str,
+    path: &Path,
+    stall: Duration,
+    mut progress: impl FnMut(i16),
+) -> Result<(), velopack::Error> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(stall))
+        .build()
+        .into();
+    let mut file = std::fs::File::create(path)?;
+    let mut buffer = vec![0; 256 * 1024];
+    let (mut got, mut shown) = (0_u64, 0);
+    let mut requests = 0;
+    loop {
+        requests += 1;
+        let mut request = agent.get(url);
+        if got > 0 {
+            request = request.header("Range", format!("bytes={got}-"));
+        }
+        let mut brought = 0;
+        let response = request.call();
+        let ended = match response {
+            Err(error) => Err(velopack::Error::from(error)),
+            Ok(response) => {
+                let (head, body) = response.into_parts();
+                if got > 0 && head.status != 206 {
+                    // The server sends all of it again.
+                    got = 0;
+                    file.set_len(0)?;
+                    file.rewind()?;
+                }
+                let total = head
+                    .headers
+                    .get("Content-Length")
+                    .and_then(|length| length.to_str().ok()?.parse::<u64>().ok())
+                    .map(|length| got + length);
+                let mut reader = body.into_reader();
+                loop {
+                    match reader.read(&mut buffer) {
+                        Ok(0) => break Ok(total.is_none_or(|total| got >= total)),
+                        Ok(read) => {
+                            file.write_all(&buffer[..read])?;
+                            got += read as u64;
+                            brought += read;
+                            if let Some(total) = total {
+                                let percent = (got * 20 / total.max(1)) as i16 * 5;
+                                if percent > shown {
+                                    shown = percent;
+                                    progress(percent);
+                                }
+                            }
+                        }
+                        Err(error) => break Err(velopack::Error::from(error)),
+                    }
+                }
+            }
+        };
+        match ended {
+            Ok(true) => {
+                tracing::info!(bytes = got, requests, "update downloaded");
+                return Ok(());
+            }
+            Err(error) if brought == 0 => return Err(error),
+            _ => tracing::info!(bytes = got, "update download goes on"),
+        }
     }
 }
 
@@ -104,7 +228,7 @@ fn spawn(
 }
 
 fn check() -> Result<Found, String> {
-    let manager = match manager(CHECK_TIMEOUT) {
+    let manager = match manager() {
         Ok(manager) => manager,
         Err(velopack::Error::NotInstalled(_)) => return Ok(Found::NotInstalled),
         Err(error) => return Err(error.to_string()),
@@ -260,7 +384,7 @@ impl Updates {
             "update download",
             self.events.clone(),
             move || {
-                let result = manager(DOWNLOAD_TIMEOUT)
+                let result = manager()
                     .and_then(|manager| manager.download_updates(&update, None))
                     .map(|()| update)
                     .map_err(|error| error.to_string());
@@ -282,7 +406,7 @@ impl Updates {
         let Some(update) = self.ready.as_deref() else {
             return Err("no update is downloaded".to_owned());
         };
-        manager(CHECK_TIMEOUT)
+        manager()
             .and_then(|manager| {
                 manager.wait_exit_then_apply_updates(update, false, true, Vec::<String>::new())
             })
@@ -475,12 +599,79 @@ mod tests {
                 ..Default::default()
             };
             let file = std::env::temp_dir().join(format!("ugurugu-stalled-{}", std::process::id()));
-            let result =
-                feed(&url, Duration::from_millis(500)).download_release_entry(&asset, &file, None);
+            let result = Packages::new(&url, Duration::from_millis(500))
+                .download_release_entry(&asset, &file, None);
             let _ = std::fs::remove_file(&file);
             let _ = sender.send(result.is_err());
         });
         assert_eq!(answer.recv_timeout(Duration::from_secs(20)), Ok(true));
+    }
+
+    /// Serves `bytes` from the byte a request's `Range` asks for, `chunk`
+    /// bytes each `pause`.
+    fn trickle(bytes: Vec<u8>, chunk: usize, pause: Duration) -> String {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let bytes = Arc::new(bytes);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let bytes = bytes.clone();
+                std::thread::spawn(move || {
+                    let mut stream = stream.unwrap();
+                    let mut from = 0;
+                    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        let line = line.trim().to_ascii_lowercase();
+                        if line.is_empty() {
+                            break;
+                        }
+                        if let Some(range) = line.strip_prefix("range: bytes=") {
+                            from = range.trim_end_matches('-').parse().unwrap();
+                        }
+                    }
+                    let status = if from == 0 {
+                        "200 OK"
+                    } else {
+                        "206 Partial Content"
+                    };
+                    let total = bytes.len();
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Range: bytes {from}-{}/{total}\r\nConnection: close\r\n\r\n",
+                        total - from,
+                        total - 1,
+                    );
+                    for part in bytes[from..].chunks(chunk) {
+                        if stream.write_all(part).is_err() {
+                            return;
+                        }
+                        std::thread::sleep(pause);
+                    }
+                });
+            }
+        });
+        url
+    }
+
+    #[test]
+    fn a_download_slower_than_the_stall_limit_still_finishes() {
+        let bytes: Vec<u8> = (0..24 * 1024).map(|at| (at % 251) as u8).collect();
+        let url = trickle(bytes.clone(), 1024, Duration::from_millis(40));
+        let asset = velopack::VelopackAsset {
+            FileName: "Ugurugu3-full.nupkg".to_owned(),
+            ..Default::default()
+        };
+        let file = std::env::temp_dir().join(format!("ugurugu-slow-{}", std::process::id()));
+        // About a second in all, with nothing still for more than 40 ms.
+        let result = Packages::new(&url, Duration::from_millis(300))
+            .download_release_entry(&asset, &file, None);
+        let read = std::fs::read(&file);
+        let _ = std::fs::remove_file(&file);
+        result.unwrap();
+        assert!(read.unwrap() == bytes);
     }
 
     #[test]

@@ -175,6 +175,10 @@ pub struct Pen {
     /// The layer's wobble amount times the brush's wobble scale.
     pub wobble: f64,
     pub motion: Mover,
+    /// Whether a stroke that ends where it starts blends its end into its
+    /// start's move. Not while it is drawn: what is drawn of it stays, so
+    /// its end would show once unblended and once blended.
+    pub closes: bool,
 }
 
 /// 2.2.13's `pressureScale`.
@@ -192,6 +196,7 @@ impl Pen {
             seed: stroke.seed,
             wobble: f64::from(wobble.amount) * f64::from(stroke.brush.wobble_scale),
             motion: Mover::new(wobble.motion, frames),
+            closes: true,
         }
     }
 
@@ -323,7 +328,7 @@ impl<'a> Moved<'a> {
             let away = samples
                 .iter()
                 .any(|sample| distance(first.position, sample.position) > 2.0 * near);
-            if !away || distance(first.position, last.position) > near {
+            if !pen.closes || !away || distance(first.position, last.position) > near {
                 return None;
             }
             // Moved apart from the walk along the stroke, which shares noise
@@ -1016,6 +1021,7 @@ mod tests {
             seed: 0x5eed,
             wobble,
             motion: Mover::new(Motion::DEFAULT, 30),
+            closes: true,
         }
     }
 

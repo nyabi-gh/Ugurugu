@@ -47,7 +47,10 @@ ugu-text = { path = "crates/ugu-text" }
 ugu-win = { path = "crates/ugu-win" }
 vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 # DX12 only: with Vulkan compiled in, wgpu would prefer a Vulkan adapter.
-velopack = { version = "=1.2.161", default-features = false }
+# public-utils makes the types an update source names public.
+velopack = { version = "=1.2.161", default-features = false, features = ["public-utils"] }
+# The version and features Velopack uses, for downloading its packages.
+ureq = "=3.4.2"
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "wgsl"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 # Same version as wgpu-hal so that its DXGI interfaces can be used directly.

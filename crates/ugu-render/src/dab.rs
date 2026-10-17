@@ -467,6 +467,7 @@ mod tests {
             seed: 0x1234_5678_9abc_def0,
             wobble,
             motion: Mover::new(Motion::DEFAULT, 30),
+            closes: true,
         }
     }
 

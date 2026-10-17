@@ -96,6 +96,12 @@ impl LiveStroke {
         let coverage = Some(coverage)
             .filter(|spare| [spare.width(), spare.height()] == size)
             .unwrap_or_else(|| Pixmap::new(size[0], size[1]));
+        // What is drawn of it stays as it comes in, so its end is not
+        // blended into its start's move once it closes (`Pen::closes`).
+        let pen = Pen {
+            closes: false,
+            ..pen
+        };
         let dabs = matches!(pen.brush.engine, BrushEngine::Airbrush | BrushEngine::Spray)
             .then(|| dab::look(&pen.brush));
         let spacing = match dabs {
@@ -134,6 +140,13 @@ impl LiveStroke {
     /// selection.
     pub fn with_clip(mut self, clip: Option<Mask>) -> Self {
         self.clip = clip;
+        self
+    }
+
+    /// For a stroke made again with all its points each time it changes,
+    /// as a shape being dragged is: closed, it ends as it is committed.
+    pub fn drawn_whole(mut self, whole: bool) -> Self {
+        self.pen.closes = whole;
         self
     }
 
@@ -618,6 +631,7 @@ mod tests {
             seed: 77,
             wobble: 3.0,
             motion: Mover::new(Motion::DEFAULT, 30),
+            closes: true,
         }
     }
 
@@ -726,6 +740,38 @@ mod tests {
                     assert!(x >= left && x < right && y >= top && y < bottom);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_stroke_that_closes_while_drawn_shows_no_seam() {
+        // Round once and on past the start: closed when it comes back.
+        let points: Vec<Point> = (0..=140)
+            .map(|index| {
+                let angle = f64::from(index) / 120.0 * std::f64::consts::TAU;
+                Point {
+                    x: (100.0 + 45.0 * angle.cos()) as f32,
+                    y: (60.0 + 45.0 * angle.sin()) as f32,
+                    pressure: 1.0,
+                }
+            })
+            .collect();
+        for end in [121, 141] {
+            let points = &points[..end];
+            let mut drawn = LiveStroke::new([200, 120], pen(true), 2, [0, 0, 0, 255], false, None);
+            for count in 1..=points.len() {
+                drawn.update(&points[..count]);
+            }
+            let mut at_once =
+                LiveStroke::new([200, 120], pen(true), 2, [0, 0, 0, 255], false, None);
+            at_once.update(points);
+            let (drawn, at_once) = (live_coverage(&drawn), live_coverage(&at_once));
+            let apart = drawn
+                .iter()
+                .zip(&at_once)
+                .filter(|(a, b)| a.abs_diff(**b) > 4)
+                .count();
+            assert_eq!(apart, 0, "{end} points");
         }
     }
 
@@ -877,6 +923,7 @@ mod tests {
                 seed: 77,
                 wobble: 3.0,
                 motion,
+                closes: true,
             };
             let points = points();
             let color = [30, 120, 200, 230];
