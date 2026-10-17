@@ -570,7 +570,8 @@ Step 'Save dialog with another extension typed' {
     Start-Sleep -Seconds 1
     [void](Save-Screen 'save-as-pressed')
     $owner = [uint32]$process.Id
-    $dialog = Wait-Until { $found = [Native]::Dialog($owner); if ($found -ne [IntPtr]::Zero) { $found } } 20 'the save dialog'
+    # The first file dialog of a new Sandbox has taken over 20 s.
+    $dialog = Wait-Until { $found = [Native]::Dialog($owner); if ($found -ne [IntPtr]::Zero) { $found } } 90 'the save dialog'
     $dialogName = Read-Automation { [Windows.Automation.AutomationElement]::FromHandle($dialog).Current.Name } 15 "the save dialog's name"
     Start-Sleep -Seconds 2
     [Native]::Front($dialog)
@@ -1106,8 +1107,8 @@ Step 'Pixel size of a new pixel art document' {
     $detail
 }
 
-# Issue #24: pixel art on a canvas past 256, exported as a GIF enlarged 2
-# and 4 times. The file's first frame must be the chosen size, each pixel a
+# Issue #24: pixel art on a canvas past 256 made at pixel size 2 and 4, so
+# that its GIF is enlarged as many times. The file's first frame must be the chosen size, each pixel a
 # block. The window starts at a smaller enlargement than asked when the
 # asked one is over the export budget (1000 at 4 times in a Sandbox of the
 # default memory; prepare.ps1 -MemoryInMB 16384 fits it), which is noted.
@@ -1115,21 +1116,23 @@ Step 'Enlarged pixel art GIFs of larger canvases' {
     $words = Read-Words 'en'
     $rows = foreach ($times in 2, 4) {
         Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
-        # The GIF window starts at the enlargement last chosen.
-        Set-Content -Path (Join-Path $env:TEMP 'gui-settings.json') -Encoding ascii `
-            -Value "{`"format`": `"ugurugu.settings`", `"version`": 1, `"checkForUpdates`": false, `"pixelExportScale`": $times}"
+        Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
         $process = Start-App
         $owner = [uint32]$process.Id
         foreach ($edge in 512, 1000) {
+            # A picture $times as large at pixel size $times: a canvas of
+            # $edge, whose GIF window starts at that enlargement.
             Invoke-Word $process $words 'menu-file'
             Invoke-Word $process $words 'file-new'
-            Set-Number $process $words['size-width'] "$edge"
-            Set-Number $process $words['size-height'] "$edge"
+            [void](Save-Screen "gif-new-$edge-x$times")
+            Set-Number $process $words['size-width'] "$($edge * $times)"
+            Set-Number $process $words['size-height'] "$($edge * $times)"
             $switch = Find-Pattern $process $words['pixel-mode'] @([Windows.Automation.TogglePattern]::Pattern)
             if ($switch.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
                 $switch.Toggle()
                 Start-Sleep -Milliseconds 300
             }
+            Invoke-Named $process "$times$([char]0x00D7)"
             Invoke-Named $process $words['dialog-ok']
             Start-Sleep -Seconds 1
             [void](Draw-Stroke $process)
