@@ -1282,4 +1282,61 @@ mod tests {
             }
         }
     }
+
+    /// B3-139: what flooding a fill again on every frame would cost, at
+    /// sizes from a small box to a fill across a large canvas.
+    #[test]
+    #[ignore]
+    fn measure_flood_per_frame() {
+        for (edge, radius, width) in [
+            (320u32, 80.0f64, 2.0f64),
+            (1024, 400.0, 3.0),
+            (2048, 900.0, 4.0),
+            (4096, 1900.0, 6.0),
+        ] {
+            let n = edge as usize;
+            let centre = n as f64 / 2.0;
+            // A wobbly ring of opaque line pixels.
+            let pixels: Vec<[u8; 4]> = (0..n * n)
+                .map(|i| {
+                    let (x, y) = ((i % n) as f64 + 0.5 - centre, (i / n) as f64 + 0.5 - centre);
+                    let angle = y.atan2(x);
+                    let r = radius * (1.0 + 0.03 * (angle * 7.0).sin());
+                    if ((x * x + y * y).sqrt() - r).abs() <= width / 2.0 {
+                        [0, 0, 0, 255]
+                    } else {
+                        [0; 4]
+                    }
+                })
+                .collect();
+            let mut flood = Vec::new();
+            let mut under = Vec::new();
+            for _ in 0..15 {
+                let started = std::time::Instant::now();
+                let area = Selection::flood(
+                    &pixels,
+                    [edge, edge],
+                    [edge / 2, edge / 2],
+                    Compare::AlphaBoundary,
+                )
+                .unwrap();
+                flood.push(started.elapsed().as_secs_f64() * 1000.0);
+                let started = std::time::Instant::now();
+                let grown = area.under_lines(&pixels, 16);
+                under.push(started.elapsed().as_secs_f64() * 1000.0);
+                std::hint::black_box(grown);
+            }
+            flood.sort_by(f64::total_cmp);
+            under.sort_by(f64::total_cmp);
+            let filled = std::f64::consts::PI * radius * radius;
+            eprintln!(
+                "{edge}x{edge}, fill about {:.0}k px: flood median {:.2} ms (min {:.2}), under_lines median {:.2} ms (min {:.2})",
+                filled / 1000.0,
+                flood[7],
+                flood[0],
+                under[7],
+                under[0]
+            );
+        }
+    }
 }
