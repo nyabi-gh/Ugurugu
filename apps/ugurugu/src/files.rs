@@ -854,6 +854,12 @@ impl Files {
             // Closing waits for it rather than being lost; one asked for
             // before the save under way already runs after it.
             if closes && !matches!(self.after_save, Some((_, Action::Close | Action::Update))) {
+                tracing::info!(
+                    saving = self.saving,
+                    dialog = self.busy_dialog,
+                    opening = self.opening,
+                    "closing waits"
+                );
                 self.closing = Some((action, false));
                 self.say(tr("close-waits").to_owned());
             }
@@ -866,6 +872,7 @@ impl Files {
             // Nothing open closes: what is made or read goes in a tab.
             Action::New | Action::Open | Action::Recover => self.proceed(action, canvas),
             Action::Close | Action::Update if self.exporting.is_some() => {
+                tracing::info!("closing asks about the export");
                 self.export_question = Some(action);
             }
             Action::Close | Action::Update => {
@@ -883,6 +890,7 @@ impl Files {
         if let Some(index) = canvas.dirty_tab(&self.discarded) {
             // The canvas says why it cannot be shown.
             if canvas.show_tab(index) {
+                tracing::info!("closing asks about unsaved changes");
                 self.confirm = Some(action);
             } else {
                 self.discarded.clear();

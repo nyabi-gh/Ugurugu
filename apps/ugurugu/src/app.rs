@@ -351,12 +351,18 @@ impl ApplicationHandler<UiEvent> for App {
 
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let Some(session) = self.session.as_ref() else {
+            if matches!(event, WindowEvent::CloseRequested) {
+                tracing::warn!("close requested before the window was ready; not taken");
+            }
             return;
         };
         session.forward_pointer_input();
         let message = match event {
             // Closing waits for the render thread to report back.
-            WindowEvent::CloseRequested => ToRender::CloseRequested,
+            WindowEvent::CloseRequested => {
+                tracing::info!("close requested");
+                ToRender::CloseRequested
+            }
             event => ToRender::Window(event),
         };
         let _ = session.to_render.send(message);
@@ -419,6 +425,7 @@ impl ApplicationHandler<UiEvent> for App {
         if error.is_some() {
             self.fatal_error = error;
         }
+        tracing::info!("the window closes");
         event_loop.exit();
     }
 

@@ -556,6 +556,7 @@ impl RenderThread {
                 }
                 // Only a normal close drops the work kept for recovery.
                 self.files.end();
+                tracing::info!("the render thread ends");
                 break;
             }
         }
