@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use ugu_core::document::{Document, LayerId, LayerKind};
-use ugu_core::ops::Blend;
 use vello_cpu::Pixmap;
 
 use crate::composite::{Kept, Put, Stream};
@@ -198,31 +197,16 @@ impl DocumentRenderer {
                 program.puts.push(Put::End(*composite));
             }
         }
-        // What comes after: anything clipped to the element on its own, runs
-        // of Normal siblings put together, and other blend modes on their
-        // own with what is clipped to them.
+        // What comes after, each on its own with what is clipped to it, and
+        // laid over in turn as a full render lays it: put together ahead of
+        // time, layers round differently (decisions.md section 2).
         let rest = &siblings[at + 1..];
         let mut index = self.each_clipped(run, rest, 0, program)?;
-        while index < rest.len() {
-            let node = &rest[index];
-            if node.composite().blend == Blend::Normal {
-                let start = index;
-                index += 1;
-                while rest
-                    .get(index)
-                    .is_some_and(|node| node.composite().blend == Blend::Normal)
-                {
-                    index += 1;
-                }
-                let together = self.stream(run, &rest[start..index], None)?;
-                program.puts.push(Put::Over(Composite::PLAIN));
-                program.sources.push(Held::Whole(Arc::new(together)));
-            } else {
-                let kept = self.alone(run, node)?;
-                program.puts.push(Put::Over(node.composite()));
-                program.sources.push(kept.into());
-                index = self.each_clipped(run, rest, index + 1, program)?;
-            }
+        while let Some(node) = rest.get(index) {
+            let kept = self.alone(run, node)?;
+            program.puts.push(Put::Over(node.composite()));
+            program.sources.push(kept.into());
+            index = self.each_clipped(run, rest, index + 1, program)?;
         }
         Some(())
     }

@@ -118,6 +118,19 @@ pub struct Split {
 }
 
 impl Split {
+    /// Bytes of the pixels it holds.
+    pub fn held_bytes(&self) -> usize {
+        self.sources
+            .iter()
+            .map(|held| match held {
+                Held::Tiles(surface) => surface.bytes(),
+                Held::Whole(pixmap) => {
+                    usize::from(pixmap.width()) * usize::from(pixmap.height()) * 4
+                }
+            })
+            .sum()
+    }
+
     /// Adds a committed stroke to the edited layer as drawing it again would:
     /// painted over, or erased from, what is there. Returns the pixels it
     /// changed.
@@ -375,10 +388,9 @@ impl DocumentRenderer {
     /// Draws `frame` into `display`, which must have the canvas size, and
     /// keeps what it was made from for editing `layer`. With `revisions`,
     /// layers drawn before are reused. When the layers' own surfaces would
-    /// take more than the budget, what does not depend on `layer` is put
-    /// together ahead of time instead; the display then differs from a full
-    /// render by the rounding of that, at most 2 levels. `None` when the stop
-    /// flag ended it.
+    /// take more than the budget, what is below `layer` is put together ahead
+    /// of time instead, and what is above it is kept apart, so the display
+    /// has the bytes of a full render. `None` when the stop flag ended it.
     pub fn split(
         &mut self,
         document: &Document,
@@ -1385,6 +1397,62 @@ mod tests {
         }
     }
 
+    /// Eight translucent fills of the whole canvas, one on each layer, which
+    /// layers put together ahead of time round differently from one by one.
+    fn translucent_fills() -> Document {
+        let mut document = Document::new([8, 8]);
+        let all = Selection::of_shape(&Shape::Rectangle([0.0, 0.0], [8.0, 8.0]), [8, 8]).unwrap();
+        let mask = ugu_core::ops::MaskId(1);
+        ugu_core::edit::commit(
+            &mut document,
+            vec![Change::InsertMask(mask, all.mask().clone())],
+        )
+        .unwrap();
+        for index in 1..8 {
+            let (_, changes) =
+                command::add_paint_layer(&document, None, index, format!("L{index}"));
+            ugu_core::edit::commit(&mut document, changes).unwrap();
+        }
+        let layers: Vec<LayerId> = document.layers.iter().map(|layer| layer.id).collect();
+        for (i, id) in layers.into_iter().enumerate() {
+            let i = i as u8;
+            let changes = command::update_layer(&document, id, |layer| {
+                if let LayerKind::Paint(paint) = &mut layer.kind {
+                    paint.opacity = 0.53 + 0.05 * f32::from(i);
+                }
+            })
+            .unwrap();
+            ugu_core::edit::commit(&mut document, changes).unwrap();
+            let color = Rgba8([30 + 20 * i, 130 - 5 * i, 57 + 14 * i, 100 + 11 * i]);
+            let changes = command::fill(&document, id, mask, color, true, None, false);
+            ugu_core::edit::commit(&mut document, changes).unwrap();
+        }
+        document
+    }
+
+    #[test]
+    fn over_the_budget_the_split_shows_the_bytes_of_a_full_render() {
+        let document = translucent_fills();
+        let layers: Vec<LayerId> = document.layers.iter().map(|layer| layer.id).collect();
+        let mut full = canvas(&document);
+        DocumentRenderer::new(8).render(&document, 0, Purpose::Display, &mut full);
+        for layer in layers {
+            for budget in [usize::MAX, 0] {
+                let mut renderer = DocumentRenderer::new(8);
+                renderer.set_surface_budget(budget);
+                let mut display = canvas(&document);
+                renderer
+                    .split(&document, layer, 0, None, &mut display)
+                    .expect("nothing stops it");
+                assert!(
+                    display.data_as_u8_slice() == full.data_as_u8_slice(),
+                    "{layer:?} at budget {budget}: differs by {}",
+                    max_difference(&display, &full)
+                );
+            }
+        }
+    }
+
     #[test]
     fn over_the_budget_the_split_keeps_every_layer_editable() {
         for history in histories().into_iter().chain(animated_histories()) {
@@ -1406,11 +1474,20 @@ mod tests {
             let mut split = renderer
                 .split(history.document(), layer, 4, None, &mut display)
                 .expect("nothing stops it");
-            // What does not depend on the layer is put together ahead of
-            // time, which rounds a little differently from one at a time.
+            // Put together ahead of time where nothing changes, and laid
+            // in the order a full render lays it: the same bytes, as are
+            // those drawn one step at a time over the budget.
             let full = render(history.document(), 4);
-            let most = max_difference(&display, &full);
-            assert!(most <= 2, "{layer:?}: differs by {most}");
+            assert!(
+                display.data_as_u8_slice() == full.data_as_u8_slice(),
+                "{layer:?}: differs by {}",
+                max_difference(&display, &full)
+            );
+            let plan = RenderPlan::new(history.document(), Purpose::Display, 4);
+            let cycle = ugu_core::motion::frame_in_cycle(4, history.document().frames);
+            let mut streamed = canvas(history.document());
+            assert!(renderer.render_streamed(history.document(), &plan, cycle, 1, &mut streamed));
+            assert!(streamed.data_as_u8_slice() == full.data_as_u8_slice());
             assert!(split.edited.is_some());
             assert!(split.sources.len() < 6);
 
@@ -1433,8 +1510,9 @@ mod tests {
                     command::draw(document, layer, new, false, None)
                 })
                 .unwrap();
+            // A stamped stroke is within a level, as within the budget.
             let most = max_difference(&shown, &render(history.document(), 4));
-            assert!(most <= 2, "{layer:?} after a stroke: differs by {most}");
+            assert!(most <= 1, "{layer:?} after a stroke: differs by {most}");
         }
     }
 

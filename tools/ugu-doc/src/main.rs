@@ -1489,6 +1489,7 @@ fn splits(document: &Document, threads: u16) {
     let first = started.elapsed().as_secs_f64() * 1000.0;
     let mut stamp = Stamp::default();
     let (mut later, mut pen_ups) = (Vec::new(), Vec::new());
+    let mut held: Vec<f64> = Vec::new();
     for layer in layers {
         let Some(LayerKind::Paint(paint)) =
             history.document().layer(layer).map(|layer| &layer.kind)
@@ -1517,6 +1518,7 @@ fn splits(document: &Document, threads: u16) {
             )
             .expect("nothing stops it");
         later.push(started.elapsed().as_secs_f64() * 1000.0);
+        held.push(split.held_bytes() as f64 / (1024.0 * 1024.0));
         let started = Instant::now();
         let frames = history.document().frames;
         if let Some(rect) = split
@@ -1535,6 +1537,12 @@ fn splits(document: &Document, threads: u16) {
     }
     println!("first split: {first:.1} ms");
     println!("split after a stroke: {}", percentiles(&mut later));
+    held.sort_by(f64::total_cmp);
+    println!(
+        "split pixels held: p50 {:.0} MiB, max {:.0} MiB",
+        held.get(held.len() / 2).copied().unwrap_or(0.0),
+        held.last().copied().unwrap_or(0.0)
+    );
     println!(
         "pen-up (stamp and composite): {}",
         percentiles(&mut pen_ups)
