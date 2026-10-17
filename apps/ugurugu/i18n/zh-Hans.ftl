@@ -301,6 +301,7 @@ layers = 图层
 layer-add = 添加图层
 layer-add-group = 添加包含所选图层的组
 layer-ungroup = 取消所选组的编组
+ungroup-nested-clipping = 此组已剪贴，且组内有剪贴图层，取消编组会改变画面
 layer-duplicate = 复制图层
 layer-copy-name = { $name } 副本
 layer-merge = 向下合并

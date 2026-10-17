@@ -4142,6 +4142,7 @@ dependencies = [
  "png",
  "pollster",
  "serde_json",
+ "skrifa",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

@@ -301,6 +301,7 @@ layers = Layers
 layer-add = Add layer
 layer-add-group = Add group containing the selected layer
 layer-ungroup = Ungroup the selected group
+ungroup-nested-clipping = This group is clipped and holds clipped layers, so ungrouping it would change the picture
 layer-duplicate = Duplicate layer
 layer-copy-name = { $name } copy
 layer-merge = Merge with layer below

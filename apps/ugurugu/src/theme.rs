@@ -287,23 +287,36 @@ pub mod space {
 }
 
 /// Windows' Microsoft YaHei, read once; `None`, logged, when it cannot be
-/// read, and the interface then shows what Pretendard JP has.
+/// used, and the interface then shows what Pretendard JP has.
 fn chinese_font() -> Option<Arc<egui::FontData>> {
     static FONT: std::sync::OnceLock<Option<Arc<egui::FontData>>> = std::sync::OnceLock::new();
     FONT.get_or_init(|| {
         let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
-        let path = std::path::Path::new(&windows)
-            .join("Fonts")
-            .join("msyh.ttc");
-        match std::fs::read(&path) {
-            Ok(bytes) => Some(Arc::new(egui::FontData::from_owned(bytes))),
-            Err(error) => {
-                tracing::warn!(?path, %error, "cannot read the Chinese interface font");
-                None
-            }
-        }
+        font_file(
+            &std::path::Path::new(&windows)
+                .join("Fonts")
+                .join("msyh.ttc"),
+        )
     })
     .clone()
+}
+
+/// The first font of the file at `path`, parsed as egui will parse it:
+/// egui panics on a font it cannot parse, and then the app could not start
+/// for as long as the language is set to Chinese.
+fn font_file(path: &std::path::Path) -> Option<Arc<egui::FontData>> {
+    let font = egui::FontData::from_owned(
+        std::fs::read(path)
+            .inspect_err(|error| {
+                tracing::warn!(?path, %error, "cannot read the Chinese interface font");
+            })
+            .ok()?,
+    );
+    if let Err(error) = skrifa::FontRef::from_index(&font.font, font.index) {
+        tracing::warn!(?path, %error, "cannot parse the Chinese interface font");
+        return None;
+    }
+    Some(Arc::new(font))
 }
 
 /// Sets the font, text sizes and widget style on `ctx`.
@@ -433,6 +446,26 @@ fn style_accent(style: &mut egui::Style, colors: &Palette) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_font_file_that_cannot_be_parsed_is_left_out() {
+        let dir = std::env::temp_dir().join(format!("ugurugu-font-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("msyh.ttc");
+        // A collection's header, cut off before its fonts.
+        std::fs::write(&path, b"ttcf\0\x01\0\0\0\0\0\x01").unwrap();
+        let font = font_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut fonts = egui::FontDefinitions::default();
+        if let Some(font) = font {
+            fonts.font_data.insert("Broken".to_owned(), font);
+        }
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts);
+        // Builds the fonts.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn the_default_accent_gives_2_2_13s_colours() {

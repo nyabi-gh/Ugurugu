@@ -17,6 +17,7 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+skrifa.workspace = true
 unic-langid.workspace = true
 ureq.workspace = true
 ugu-core.workspace = true

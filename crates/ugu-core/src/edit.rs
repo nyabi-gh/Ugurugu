@@ -66,6 +66,9 @@ pub enum EditError {
     /// no paint layer below.
     CannotMerge,
     Merge(crate::ops::MergeRefusal),
+    /// The group is clipped and a layer in it is clipped to another: flat
+    /// clipping has no way to keep that once the group is gone.
+    NestedClipping(LayerId),
     Store(StoreError),
     Document(DocumentError),
 }
@@ -81,6 +84,9 @@ impl std::fmt::Display for EditError {
             Self::NoSuchData => write!(f, "the stroke, mask or image is not stored"),
             Self::CannotMerge => write!(f, "the layer cannot be merged down"),
             Self::Merge(refusal) => write!(f, "the layer cannot be merged down: {refusal:?}"),
+            Self::NestedClipping(id) => {
+                write!(f, "clipped group {} holds clipped layers", id.0)
+            }
             Self::Store(error) => error.fmt(f),
             Self::Document(error) => error.fmt(f),
         }

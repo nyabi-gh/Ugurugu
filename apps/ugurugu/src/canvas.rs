@@ -2315,6 +2315,7 @@ pub(crate) fn edit_reason(error: &EditError) -> &'static str {
         ) => tr("merge-properties"),
         (EditError::Merge(MergeRefusal::CanvasChange), _) => tr("merge-canvas-change"),
         (EditError::Merge(MergeRefusal::CanvasEpoch), _) => tr("merge-epoch"),
+        (EditError::NestedClipping(_), _) => tr("ungroup-nested-clipping"),
         _ => tr("edit-internal"),
     }
 }
@@ -2626,6 +2627,10 @@ mod tests {
         let points = EditError::Store(StoreError::TooManyPoints(9));
         assert!(super::is_point_limit(&points));
         assert_eq!(super::edit_reason(&points), tr("edit-data-limit"));
+        assert_eq!(
+            super::edit_reason(&EditError::NestedClipping(LayerId(4))),
+            tr("ungroup-nested-clipping")
+        );
         assert_eq!(
             super::edit_reason(&EditError::Merge(MergeRefusal::CanvasEpoch)),
             tr("merge-epoch")

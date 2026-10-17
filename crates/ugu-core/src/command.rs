@@ -371,7 +371,9 @@ fn each_layer(layers: &[Layer], visit: &mut impl FnMut(&Layer) -> bool) {
 /// Puts `group`'s children in its place, in the same order. The group's own
 /// opacity, blend mode, visibility and reference flag go with it; the
 /// children of a clipped group come out clipped to its base, as
-/// `wrap_in_group` puts a clipped layer back.
+/// `wrap_in_group` puts a clipped layer back. A clipped group with a child
+/// clipped to another child is refused: out of the group, that child would
+/// be clipped to the group's base instead.
 pub fn ungroup(document: &Document, group: LayerId) -> Result<Vec<Change>, EditError> {
     let (parent, index) = document
         .position(group)
@@ -379,6 +381,9 @@ pub fn ungroup(document: &Document, group: LayerId) -> Result<Vec<Change>, EditE
     let Some(LayerKind::Group(content)) = document.layer(group).map(|layer| &layer.kind) else {
         return Err(EditError::NotGroup(group));
     };
+    if content.clip_to_below && content.children.iter().any(Layer::clip_to_below) {
+        return Err(EditError::NestedClipping(group));
+    }
     let mut changes: Vec<Change> = unexpose(document, group, None).into_iter().collect();
     changes.push(Change::RemoveLayer(group));
     changes.extend(content.children.iter().enumerate().map(|(offset, child)| {
@@ -952,6 +957,36 @@ mod tests {
         run(&mut document, |document| ungroup(document, group).unwrap()).unwrap();
         assert_eq!(ids(&document.layers), [2, 1, 3]);
         assert!(document.layers[..2].iter().all(Layer::clip_to_below));
+    }
+
+    #[test]
+    fn a_clipped_group_with_clipping_inside_is_not_ungrouped() {
+        let mut document = three_layers();
+        let clip = |document: &mut Document, id| {
+            run(document, |document| {
+                update_layer(document, id, |layer| {
+                    if let LayerKind::Paint(paint) = &mut layer.kind {
+                        paint.clip_to_below = true;
+                    }
+                })
+                .unwrap()
+            })
+            .unwrap();
+        };
+        clip(&mut document, LayerId(2));
+        let (group, changes) = wrap_in_group(&document, LayerId(2), "G".to_owned()).unwrap();
+        commit(&mut document, changes).unwrap();
+        run(&mut document, |document| {
+            move_to_group(document, LayerId(3), Some(group)).unwrap()
+        })
+        .unwrap();
+        // 3 is clipped to 2 in the group; out of it, both would be clipped
+        // to 1.
+        clip(&mut document, LayerId(3));
+        assert_eq!(
+            ungroup(&document, group),
+            Err(EditError::NestedClipping(group))
+        );
     }
 
     #[test]

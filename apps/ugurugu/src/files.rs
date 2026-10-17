@@ -458,6 +458,9 @@ pub struct Files {
     /// Pixel art's pixel size last chosen for a new document: each of its
     /// pixels is shown and exported as this many across.
     new_pixel_size: u32,
+    /// The pixel sizes of the new pixel art made, by its tab's generation:
+    /// a document keeps none of its own.
+    made_pixel_sizes: HashMap<u64, u32>,
     /// The animation export chosen, waiting for where it goes.
     animation_job: Option<ExportJob>,
     /// How many times the image export chosen is enlarged, waiting for
@@ -559,6 +562,7 @@ impl Files {
             new_document: None,
             new_pixel: false,
             new_pixel_size: 1,
+            made_pixel_sizes: HashMap::new(),
             animation_job: None,
             image_times: None,
             cancelled: Vec::new(),
@@ -937,9 +941,12 @@ impl Files {
             // As 2.2.13, the size is asked for after unsaved changes are,
             // starting from the document's.
             Action::New => {
-                // Pixel art is asked for as its finished picture.
+                // Pixel art is asked for as its finished picture, when
+                // made here with a pixel size; else from its canvas.
                 self.new_pixel = canvas.session().pixel_mode();
                 let pixel = if self.new_pixel {
+                    let made = self.made_pixel_sizes.get(&canvas.generation());
+                    self.new_pixel_size = made.copied().unwrap_or(1);
                     self.new_pixel_size
                 } else {
                     1
@@ -1320,18 +1327,22 @@ impl Files {
     /// as much.
     fn start_new_picture(&mut self, canvas: &mut Canvas, picture: [u32; 2]) {
         if !self.new_pixel {
-            return self.start_new(canvas, picture, false);
+            self.start_new(canvas, picture, false);
+            return;
         }
         let pixel = Some(self.new_pixel_size)
             .filter(|pixel| export::pixel_sizes(picture).contains(pixel))
             .unwrap_or(1);
-        self.start_new(canvas, export::pixel_canvas(picture, pixel), true);
-        self.pixel_export_times = Some(pixel);
-        self.chosen_pixel_export_times = Some(pixel);
+        if self.start_new(canvas, export::pixel_canvas(picture, pixel), true) {
+            self.made_pixel_sizes.insert(canvas.generation(), pixel);
+            self.pixel_export_times = Some(pixel);
+            self.chosen_pixel_export_times = Some(pixel);
+        }
     }
 
-    /// Starts a new document of `size`, in pixel mode or not.
-    fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
+    /// Starts a new document of `size`, in pixel mode or not; whether its
+    /// tab opened.
+    fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) -> bool {
         // Always beside the others, the empty one at start included: a new
         // document is asked for to have one more. Clean until edited.
         let document = Document {
@@ -1341,15 +1352,16 @@ impl Files {
         match canvas.open_tab(document, true) {
             Ok(true) => {}
             // Said by the canvas.
-            Ok(false) => return,
+            Ok(false) => return false,
             Err(error) => {
                 tracing::error!(%error, "cannot start a tab's canvas cache thread");
                 self.fail(tr("tab-failed").to_owned());
-                return;
+                return false;
             }
         }
         *canvas.file_mut() = DocumentFile::new();
         self.clear_message();
+        true
     }
 
     /// The new document's size, while it is asked for: any size from a pixel
@@ -2645,7 +2657,7 @@ mod tests {
         files.request(Action::New, &mut canvas);
         assert_eq!(files.confirm, None);
         assert_eq!(files.new_document, Some([1024, 768]));
-        files.start_new(&mut canvas, [64, 48], false);
+        assert!(files.start_new(&mut canvas, [64, 48], false));
         assert!(!canvas.session().is_dirty());
         assert_eq!(canvas.session().document().canvas, [64, 48]);
         assert_eq!(canvas.tab_count(), 2);
@@ -2678,6 +2690,57 @@ mod tests {
         files.start_new_picture(&mut canvas, [1000, 1000]);
         assert_eq!(canvas.session().document().canvas, [1000, 1000]);
         assert!(!canvas.session().document().pixel);
+    }
+
+    #[test]
+    fn a_new_pixel_document_that_does_not_open_leaves_the_export_size() {
+        use ugu_core::ops::{Affine, Op, PaintLayer};
+        let (mut files, mut canvas, _events) = setup();
+        // A transform that cannot be applied keeps the tab shown.
+        let mut full = Document::new([8, 8]);
+        if let LayerKind::Paint(PaintLayer { ops, .. }) = &mut full.layers[0].kind {
+            *ops = vec![
+                Op::Crop {
+                    offset: [0, 0],
+                    size: [8, 8]
+                };
+                ugu_core::document::limits::OPERATIONS
+            ];
+        }
+        assert!(canvas.open_tab(full, true).unwrap());
+        canvas.edit(Session::select_all).unwrap();
+        canvas.edit(Session::begin_transform).unwrap();
+        canvas.edit(|session| session.set_transform(Affine::translation(1.0, 0.0)));
+        files.new_pixel = true;
+        files.new_pixel_size = 4;
+        files.start_new_picture(&mut canvas, [1000, 1000]);
+        assert_eq!(canvas.tab_count(), 2, "not opened");
+        assert_eq!(files.pixel_export_times, None);
+        assert_eq!(files.take_chosen_pixel_export_times(), None);
+    }
+
+    #[test]
+    fn a_new_document_starts_from_the_pixel_size_its_tab_was_made_with() {
+        let (mut files, mut canvas, _events) = setup();
+        files.new_pixel = true;
+        files.new_pixel_size = 8;
+        files.start_new_picture(&mut canvas, [1000, 1000]);
+        let made = canvas.tab_position();
+        // Pixel art made elsewhere, as one opened: its pixel size is not
+        // known, so it starts from its canvas.
+        let opened = Document {
+            pixel: true,
+            ..Document::new([1024, 1024])
+        };
+        assert!(canvas.open_tab(opened, true).unwrap());
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.new_document, Some([1024, 1024]));
+        assert_eq!(files.new_pixel_size, 1);
+        files.new_document = None;
+        assert!(canvas.show_tab(made));
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.new_document, Some([1000, 1000]));
+        assert_eq!(files.new_pixel_size, 8);
     }
 
     fn next(events: &Receiver<FileEvent>) -> FileEvent {

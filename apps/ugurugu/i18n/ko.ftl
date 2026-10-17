@@ -301,6 +301,7 @@ layers = 레이어
 layer-add = 레이어 추가
 layer-add-group = 선택한 레이어를 포함하는 그룹 추가
 layer-ungroup = 선택한 그룹 해제
+ungroup-nested-clipping = 이 그룹은 클리핑되어 있고 안에 클리핑된 레이어가 있어, 그룹을 해제하면 그림이 달라집니다
 layer-duplicate = 레이어 복제
 layer-copy-name = { $name } 사본
 layer-merge = 아래 레이어와 병합

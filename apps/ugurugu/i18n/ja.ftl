@@ -301,6 +301,7 @@ layers = レイヤー
 layer-add = レイヤーを追加
 layer-add-group = 選択したレイヤーを含むグループを追加
 layer-ungroup = 選択したグループを解除
+ungroup-nested-clipping = このグループはクリッピングされていて、中にクリッピングされたレイヤーがあるため、グループを解除すると絵が変わります
 layer-duplicate = レイヤーを複製
 layer-copy-name = { $name }のコピー
 layer-merge = 下のレイヤーと結合

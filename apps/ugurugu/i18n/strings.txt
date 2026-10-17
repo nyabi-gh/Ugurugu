@@ -299,6 +299,7 @@ layers | Layers | 레이어 | レイヤー | 图层
 layer-add | Add layer | 레이어 추가 | レイヤーを追加 | 添加图层
 layer-add-group | Add group containing the selected layer | 선택한 레이어를 포함하는 그룹 추가 | 選択したレイヤーを含むグループを追加 | 添加包含所选图层的组
 layer-ungroup | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除 | 取消所选组的编组
+ungroup-nested-clipping | This group is clipped and holds clipped layers, so ungrouping it would change the picture | 이 그룹은 클리핑되어 있고 안에 클리핑된 레이어가 있어, 그룹을 해제하면 그림이 달라집니다 | このグループはクリッピングされていて、中にクリッピングされたレイヤーがあるため、グループを解除すると絵が変わります | 此组已剪贴，且组内有剪贴图层，取消编组会改变画面
 layer-duplicate | Duplicate layer | 레이어 복제 | レイヤーを複製 | 复制图层
 layer-copy-name | %1 copy | %1 사본 | %1のコピー | %1 副本 | args=name
 layer-merge | Merge with layer below | 아래 레이어와 병합 | 下のレイヤーと結合 | 向下合并
