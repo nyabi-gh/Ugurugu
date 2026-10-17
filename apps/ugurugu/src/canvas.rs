@@ -2963,8 +2963,9 @@ mod tests {
     #[test]
     fn a_bucket_fill_goes_behind_the_lines_on_every_wobbling_frame() {
         // Before, the fill took the soft inner edge of a line and showed on
-        // it, and past it where the line wobbled in.
-        for (width, antialias) in [(6.0, false), (6.0, true), (4.0, true)] {
+        // it, and past it where the line wobbled in. A wobbling aliased 1px
+        // line had holes it leaked through.
+        for (width, antialias) in [(6.0, false), (6.0, true), (4.0, true), (1.0, false)] {
             assert_eq!(
                 bucket_in_a_box(width, antialias),
                 (0, 0),

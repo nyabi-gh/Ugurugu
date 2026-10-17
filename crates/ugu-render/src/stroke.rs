@@ -199,11 +199,17 @@ impl Pen {
         pressure_scale(self.brush.size_dynamics, pressure)
     }
 
+    /// The least width a line is drawn. An aliased line thinner than a
+    /// pixel misses whole columns or rows of pixels (evidence.md section 80).
+    fn thinnest(&self) -> f64 {
+        if self.brush.antialias { 0.5 } else { 1.0 }
+    }
+
     /// No part of the stroke reaches further than this from its raw points.
     pub fn reach(&self) -> f64 {
         let width = f64::from(self.width);
         // `Mover::width` varies the width by at most 2.5%.
-        let widest = (width * 1.025).max(0.5);
+        let widest = (width * 1.025).max(self.thinnest());
         let brush = &self.brush;
         let square = brush.tip == TipShape::Square;
         let shape = match brush.engine {
@@ -787,7 +793,7 @@ fn left_by_band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2]) -> Option<Half> {
 }
 
 fn radius(base: f64, pen: &Pen, sample: &Sample) -> f64 {
-    (base * pen.pressure_scale(sample.pressure)).max(0.5) * 0.5
+    (base * pen.pressure_scale(sample.pressure)).max(pen.thinnest()) * 0.5
 }
 
 /// Appends the part of the circle at `center` inside each of `keep`, wound

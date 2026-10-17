@@ -2032,4 +2032,89 @@ mod tests {
         let plan = RenderPlan::new(document, Purpose::Display, 1);
         DocumentRenderer::new(0).render_plan(document, &plan, 2, None, &mut canvas(document));
     }
+
+    #[test]
+    fn an_aliased_line_a_pixel_wide_has_a_pixel_in_every_column() {
+        // Wobble draws a line up to 2.5% thinner and pressure can thin it
+        // more. An aliased line under a pixel wide missed whole columns, a
+        // hole the paint bucket leaked through, so it is drawn a pixel wide.
+        let mut history = History::new(
+            Document {
+                wobble: Wobble::classic(1.6),
+                ..Document::new([120, 80])
+            },
+            false,
+        );
+        // Slope over the line's length, and pressure with size dynamics.
+        let lines = [
+            (0.6f32, 1.0f32),
+            (1.3, 1.0),
+            (2.9, 1.0),
+            (4.6, 1.0),
+            (7.1, 1.0),
+            (2.0, 0.4),
+        ];
+        for (index, (slope, pressure)) in lines.into_iter().enumerate() {
+            let y = 8.3 + index as f32 * 12.0;
+            let stroke = Stroke {
+                points: Arc::from(
+                    (0..=40)
+                        .map(|step| {
+                            let t = step as f32 / 40.0;
+                            Point {
+                                x: 4.2 + 112.0 * t,
+                                y: y + slope * t,
+                                pressure,
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                color: Rgba8([0, 0, 0, 255]),
+                width: 1.0,
+                brush: Brush {
+                    engine: BrushEngine::Line,
+                    opacity: 1.0,
+                    hardness: 1.0,
+                    antialias: false,
+                    size_dynamics: 1.0,
+                    wobble_scale: 1.0,
+                    ..Brush::default()
+                },
+                seed: index as u64,
+            };
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, LayerId(1), stroke, false, None)
+                })
+                .unwrap();
+        }
+        for frame in 0..history.document().frames {
+            let pixmap = render(history.document(), i64::from(frame));
+            let pixels = pixmap.data_as_u8_slice();
+            for (index, (slope, _)) in lines.into_iter().enumerate() {
+                let top = 8 + index * 12;
+                let rows = top - 5..top + slope.ceil() as usize + 6;
+                let mut before: Option<Vec<usize>> = None;
+                for x in 8..112 {
+                    let inked: Vec<usize> = rows
+                        .clone()
+                        .filter(|&y| pixels[(y * 120 + x) * 4] < 128)
+                        .collect();
+                    assert!(
+                        !inked.is_empty(),
+                        "frame {frame}, line {index}: no pixel in column {x}"
+                    );
+                    if let Some(before) = &before {
+                        assert!(
+                            inked
+                                .iter()
+                                .any(|y| before.iter().any(|b| y.abs_diff(*b) <= 1)),
+                            "frame {frame}, line {index}: column {x} {inked:?} misses {before:?}"
+                        );
+                    }
+                    before = Some(inked);
+                }
+            }
+        }
+    }
 }
