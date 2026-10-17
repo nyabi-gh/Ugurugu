@@ -4,9 +4,9 @@
 //! Rendering when the surfaces of every layer would not fit in the memory
 //! budget. A whole frame is put together one step at a time, each layer
 //! drawn just before it is needed and let go after, as 2.2.13 did. For
-//! editing, what does not depend on the edited layer is put together ahead
-//! of time into a few surfaces the renderer keeps; the document's layers
-//! stay as they are.
+//! editing, what is below the edited layer is put together ahead of time,
+//! and what is above it is kept layer by layer, so the edit shows the bytes
+//! of a full render; the document's layers stay as they are.
 
 use std::sync::Arc;
 
