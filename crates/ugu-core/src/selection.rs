@@ -1283,7 +1283,8 @@ mod tests {
         }
     }
 
-    /// B3-139: what flooding a fill again on every frame would cost, at
+    /// What flooding a fill again on every frame would cost (evidence.md
+    /// section 81), at
     /// sizes from a small box to a fill across a large canvas.
     #[test]
     #[ignore]
