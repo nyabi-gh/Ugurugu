@@ -300,14 +300,48 @@ pub struct Moved<'a> {
     samples: &'a [Sample],
     /// `None` when nothing moves.
     displacer: Option<Displacer>,
+    /// For a stroke that ends where it starts: how far the start moves, and
+    /// the distance along the stroke from which its end blends into that
+    /// move, so that the shape stays closed on every frame.
+    closing: Option<([f64; 2], f64)>,
 }
+
+/// How far along its end a closed stroke blends into its start's move: a
+/// sway of classic wobble.
+const CLOSING: f64 = 26.0;
 
 impl<'a> Moved<'a> {
     pub fn new(samples: &'a [Sample], pen: &Pen, frame: u32) -> Self {
         let amplitude = classic::amplitude(f64::from(pen.width), pen.wobble);
+        let displacer =
+            (amplitude != 0.0).then(|| pen.motion.displacer(pen.seed, frame, amplitude));
+        let closing = displacer.as_ref().and_then(|displacer| {
+            let (first, last) = (samples.first()?, samples.last()?);
+            // Back where it started after going away from it, unlike the
+            // first samples of a stroke being drawn.
+            let near = f64::from(pen.width).max(1.0);
+            let away = samples
+                .iter()
+                .any(|sample| distance(first.position, sample.position) > 2.0 * near);
+            if !away || distance(first.position, last.position) > near {
+                return None;
+            }
+            // Moved apart from the walk along the stroke, which shares noise
+            // from one sample to the next.
+            let moved = displacer.clone().displace(
+                first.position,
+                first.pressure,
+                tangent(samples, 0),
+                first.arc,
+                0,
+            );
+            let start = [moved[0] - first.position[0], moved[1] - first.position[1]];
+            Some((start, last.arc - CLOSING.min(last.arc / 2.0)))
+        });
         Self {
             samples,
-            displacer: (amplitude != 0.0).then(|| pen.motion.displacer(pen.seed, frame, amplitude)),
+            displacer,
+            closing,
         }
     }
 
@@ -319,18 +353,39 @@ impl<'a> Moved<'a> {
         let Some(displacer) = &mut self.displacer else {
             return sample.position;
         };
-        let before = samples[index.saturating_sub(1)].position;
-        let after = samples[(index + 1).min(samples.len() - 1)].position;
-        let length = distance(before, after);
-        let tangent = if length > 1e-9 {
-            [
-                (after[0] - before[0]) / length,
-                (after[1] - before[1]) / length,
-            ]
-        } else {
-            [1.0, 0.0]
+        let moved = displacer.displace(
+            sample.position,
+            sample.pressure,
+            tangent(samples, index),
+            sample.arc,
+            index,
+        );
+        let Some((start, from)) = self.closing.filter(|&(_, from)| sample.arc > from) else {
+            return moved;
         };
-        displacer.displace(sample.position, sample.pressure, tangent, sample.arc, index)
+        let end = samples[samples.len() - 1].arc;
+        let t = ((sample.arc - from) / (end - from)).min(1.0);
+        let blend = t * t * (3.0 - 2.0 * t);
+        std::array::from_fn(|axis| {
+            let own = moved[axis] - sample.position[axis];
+            sample.position[axis] + own + (start[axis] - own) * blend
+        })
+    }
+}
+
+/// The unit direction of the stroke at sample `index`, from the samples on
+/// either side.
+fn tangent(samples: &[Sample], index: usize) -> [f64; 2] {
+    let before = samples[index.saturating_sub(1)].position;
+    let after = samples[(index + 1).min(samples.len() - 1)].position;
+    let length = distance(before, after);
+    if length > 1e-9 {
+        [
+            (after[0] - before[0]) / length,
+            (after[1] - before[1]) / length,
+        ]
+    } else {
+        [1.0, 0.0]
     }
 }
 
@@ -961,6 +1016,79 @@ mod tests {
             seed: 0x5eed,
             wobble,
             motion: Mover::new(Motion::DEFAULT, 30),
+        }
+    }
+
+    #[test]
+    fn a_stroke_that_ends_where_it_starts_stays_closed_on_every_frame() {
+        // Wobble moved a stroke's start and its end by different amounts,
+        // so a box drawn in one stroke opened at that corner on some frames
+        // and a one pixel line let a paint bucket out.
+        let corners = [
+            [60.0f32, 40.0],
+            [260.0, 40.0],
+            [260.0, 160.0],
+            [60.0, 160.0],
+        ];
+        let points: Vec<Point> = (0..=160)
+            .map(|step| {
+                let side = (step / 40) % 4;
+                let t = (step % 40) as f32 / 40.0;
+                let [a, b] = [corners[side], corners[(side + 1) % 4]];
+                Point {
+                    x: a[0] + (b[0] - a[0]) * t,
+                    y: a[1] + (b[1] - a[1]) * t,
+                    pressure: 1.0,
+                }
+            })
+            .collect();
+        let mut widest = 0.0f64;
+        for seed in 0..40 {
+            let pen = Pen {
+                width: 1.0,
+                seed,
+                wobble: 1.6,
+                ..pen(0.0, 1.6)
+            };
+            let samples = Resampler::whole(&points, spacing(pen.width));
+            for frame in 0..30 {
+                let moved = displaced(&samples, &pen, frame);
+                let gap = distance(moved[0], *moved.last().unwrap());
+                widest = widest.max(gap);
+            }
+        }
+        assert!(widest < 1e-9, "the ends part by up to {widest} px");
+        // A stroke being drawn has not come back yet: its first samples move
+        // as the open stroke's do.
+        let thin = Pen {
+            width: 1.0,
+            ..pen(0.0, 1.6)
+        };
+        let start = Resampler::whole(&points[..3], spacing(thin.width));
+        let whole = Resampler::whole(&points, spacing(thin.width));
+        let early = displaced(&start, &thin, 5);
+        let later = displaced(&whole, &thin, 5);
+        assert_eq!(early[..early.len() - 1], later[..early.len() - 1]);
+        // An open stroke still moves its end as before.
+        let open = wave(60, |_| 1.0);
+        let pen = pen(0.0, 1.6);
+        let samples = Resampler::whole(&open, spacing(pen.width));
+        let mut displacer = pen
+            .motion
+            .displacer(pen.seed, 3, classic::amplitude(12.0, 1.6));
+        let mut moved = Moved::new(&samples, &pen, 3);
+        for index in 0..samples.len() {
+            let before = samples[index.saturating_sub(1)].position;
+            let after = samples[(index + 1).min(samples.len() - 1)].position;
+            let length = distance(before, after);
+            let tangent = [
+                (after[0] - before[0]) / length,
+                (after[1] - before[1]) / length,
+            ];
+            let sample = &samples[index];
+            let expected =
+                displacer.displace(sample.position, sample.pressure, tangent, sample.arc, index);
+            assert_eq!(moved.at(index), expected, "sample {index}");
         }
     }
 
