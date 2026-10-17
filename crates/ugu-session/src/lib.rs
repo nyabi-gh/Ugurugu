@@ -37,7 +37,7 @@ pub use crate::animating::Posing;
 pub use crate::filling::{FillError, FillSettings, Reads};
 pub use crate::placing::{Placed, TextDrawing, TextSettings, TextStyle};
 pub use crate::selecting::{Lasso, ShapeKind};
-pub use crate::shaping::{Drag, Shape, ShapePaint, ShapeSettings, outline};
+pub use crate::shaping::{Drag, Shape, ShapeFill, ShapePaint, ShapeSettings, outline};
 use crate::stabilizer::Stabilizer;
 pub use crate::symmetry::Symmetry;
 pub use crate::tools::{Brushes, ColorHistory, Kept, Tools, is_pixel};

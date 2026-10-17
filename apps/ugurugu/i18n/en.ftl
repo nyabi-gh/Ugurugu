@@ -50,6 +50,7 @@ export-close-text = Closing now stops the export.
 export-close-wait = Close When Done
 export-close-stop = Stop and Close
 close-after-export = Closes when the export is done
+settings-not-written = The settings could not be saved ({ $error }); Ugurugu keeps trying
 settings-set-aside-title = Default settings
 settings-set-aside = The settings could not be read, so the defaults are used; the old file is kept as { $name }
 close-waits = Closes when saving or opening is done

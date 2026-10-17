@@ -112,6 +112,12 @@ pub struct EarlyInstance(Receiver<wgpu::Instance>);
 /// The GPU opened while the window was being made.
 pub struct EarlyGpu(std::thread::JoinHandle<Result<Gpu, String>>);
 
+/// Whether `UGURUGU_DIAGNOSTICS=1` turns on what only tests use.
+pub fn diagnostics() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"))
+}
+
 /// Starts opening the GPU on a thread of its own. Loading the drivers of
 /// every adapter wgpu looks at takes most of start-up (evidence.md section
 /// 7) and needs no window.
@@ -157,7 +163,7 @@ pub struct RenderThread {
     window_sink: WindowSink,
     adapter_choice: AdapterChoice,
     display: Display,
-    /// `UGURUGU_DIAGNOSTICS=1` enables test-only keys.
+    /// `diagnostics()`: test-only keys.
     diagnostics: bool,
     router: InputRouter,
     canvas: Canvas,
@@ -363,7 +369,7 @@ impl RenderThread {
             window_sink,
             adapter_choice,
             display,
-            diagnostics: std::env::var_os("UGURUGU_DIAGNOSTICS").is_some_and(|value| value == "1"),
+            diagnostics: diagnostics(),
             router: InputRouter::default(),
             canvas: Canvas::new(Files::new_canvas(), {
                 let to_self = to_self.clone();
@@ -810,6 +816,12 @@ impl RenderThread {
         if self.panels.layout != self.settings.get().layout {
             let layout = self.panels.layout.clone();
             self.settings.change(|settings| settings.layout = layout);
+        }
+        if let Some(error) = self.settings.write_failure() {
+            self.files.fail(crate::i18n::tr_with(
+                "settings-not-written",
+                &crate::i18n::args([("error", error)]),
+            ));
         }
         let laid_out = Instant::now();
         let mut platform_output = output.platform_output;

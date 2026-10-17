@@ -20,8 +20,11 @@ use ugu_core::store::{BrushEngine, Mask, Point};
 use vello_cpu::Pixmap;
 use vello_cpu::color::{AlphaColor, Srgb};
 
-use crate::compose::{Stamp, clamp, dest_out, erase, inside, paint, premultiplied, src_over};
+use crate::compose::{
+    Stamp, clamp, dest_out, dest_over, erase, inside, paint, premultiplied, src_over,
+};
 use crate::dab::{self, Dab, Look};
+use crate::mask::Runs;
 use crate::pixel;
 use crate::raster::PixelRect;
 use crate::stroke::{self, Pen, Resampler};
@@ -72,6 +75,17 @@ pub struct LiveStroke {
     /// longer change.
     shown: Vec<bool>,
     fixed_shown: usize,
+    /// A filled shape's fill, under the stroke.
+    filled: Option<Filled>,
+}
+
+/// A fill as `Split::stamp_fill` lays it: its pixels take the colour, and
+/// its fringe has it laid behind.
+struct Filled {
+    area: Runs,
+    fringe: Option<Runs>,
+    /// Premultiplied.
+    color: [u8; 4],
 }
 
 impl LiveStroke {
@@ -133,6 +147,7 @@ impl LiveStroke {
             walked: 0,
             shown: Vec::new(),
             fixed_shown: 0,
+            filled: None,
         }
     }
 
@@ -275,51 +290,23 @@ impl LiveStroke {
         self.line = premultiplied([r, g, b, alpha]);
     }
 
-    /// Fills the closed `outline` under what `update` draws, as a shape that
-    /// is filled shows while it is dragged; before any `update`. Returns the
-    /// pixels changed.
-    pub fn fill(&mut self, outline: &[[f64; 2]], antialias: bool) -> Option<PixelRect> {
-        let (first, rest) = outline.split_first()?;
-        if self.points == 0 {
-            self.begin_line(1.0);
-        }
-        let mut path = vello_cpu::kurbo::BezPath::new();
-        path.move_to((first[0], first[1]));
-        let mut bounds = [first[0], first[1], first[0], first[1]];
-        for point in rest {
-            path.line_to((point[0], point[1]));
-            bounds = [
-                bounds[0].min(point[0]),
-                bounds[1].min(point[1]),
-                bounds[2].max(point[0]),
-                bounds[3].max(point[1]),
-            ];
-        }
-        path.close_path();
-        let rect = clamp(bounds, self.size())?;
-        let piece = self.stamp.draw(rect, |context| {
-            context.set_aliasing_threshold((!antialias).then_some(ALIASING_THRESHOLD));
-            context.set_paint(AlphaColor::<Srgb>::WHITE);
-            context.fill_path(&path);
+    /// Fills `coverage` in straight `color` under what `update` draws, as a
+    /// filled shape is committed: an `Op::Fill` of it with the stroke over
+    /// it. Returns the pixels changed.
+    pub fn fill(&mut self, coverage: &Mask, antialias: bool, color: [u8; 4]) -> Option<PixelRect> {
+        let (area, fringe) = Runs::fill(coverage, self.clip.as_ref(), antialias);
+        let [left, top, right, bottom] = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
+            .into_iter()
+            .flatten()
+            .reduce(|[l, t, r, b], [l2, t2, r2, b2]| {
+                [l.min(l2), t.min(t2), r.max(r2), b.max(b2)]
+            })?;
+        let rect = clamp([left, top, right, bottom].map(f64::from), self.size())?;
+        self.filled = Some(Filled {
+            area,
+            fringe,
+            color: premultiplied(color),
         });
-        if self.dabs.is_some() {
-            // Dabs keep the colour they paint, so the fill does too.
-            let width = usize::from(self.coverage.width());
-            let piece_width = usize::from(piece.width());
-            let source = piece.data_as_u8_slice();
-            let target = self.coverage.data_as_u8_slice_mut();
-            for y in rect[1] as usize..rect[3] as usize {
-                for x in rect[0] as usize..rect[2] as usize {
-                    let at = ((y - rect[1] as usize) * piece_width + x - rect[0] as usize) * 4;
-                    let cover = source[at + 3];
-                    if cover != 0 {
-                        paint(&mut target[(y * width + x) * 4..][..4], self.line, cover);
-                    }
-                }
-            }
-        } else {
-            add_coverage(&mut self.coverage, piece, rect);
-        }
         self.written = union(self.written, Some(rect));
         Some(rect)
     }
@@ -451,6 +438,7 @@ impl LiveStroke {
             antialias: self.pen.brush.antialias,
             line: self.line,
             erase: self.erase,
+            filled: self.filled.as_ref(),
         }
     }
 
@@ -471,6 +459,7 @@ pub struct Painting<'a> {
     antialias: bool,
     line: [u8; 4],
     erase: bool,
+    filled: Option<&'a Filled>,
 }
 
 impl Painting<'_> {
@@ -512,6 +501,18 @@ impl Painting<'_> {
     pub fn apply(&self, x: usize, y: usize, layer: &mut [u8; 4]) {
         if !inside(self.clip, x, y) {
             return;
+        }
+        if let Some(filled) = self.filled {
+            let (x, y) = (x as i32, y as i32);
+            if filled.area.contains(x, y) {
+                *layer = filled.color;
+            } else if filled
+                .fringe
+                .as_ref()
+                .is_some_and(|fringe| fringe.contains(x, y))
+            {
+                dest_over(layer, filled.color);
+            }
         }
         if self.dabs {
             let pixel = self.pixel(x, y);

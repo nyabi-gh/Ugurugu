@@ -50,6 +50,7 @@ export-close-text = 现在关闭将停止导出。
 export-close-wait = 完成后关闭
 export-close-stop = 停止并关闭
 close-after-export = 导出完成后关闭
+settings-not-written = 无法保存设置（{ $error }），将继续重试
 settings-set-aside-title = 使用默认设置
 settings-set-aside = 无法读取设置，已使用默认值；旧文件保留为 { $name }
 close-waits = 保存或打开完成后关闭

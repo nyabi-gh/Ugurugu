@@ -788,15 +788,11 @@ impl Canvas {
         self.tab.session.mark_saved(state);
     }
 
-    /// Changes the session outside drawing. A stroke being drawn is dropped
-    /// first, as the change may move or remove what it is drawn on.
+    /// Changes the session outside drawing. A stroke or drag under way ends
+    /// first without its result, as Esc ends it, since the change may move
+    /// or remove what it works on.
     pub fn edit<R>(&mut self, change: impl FnOnce(&mut Session) -> R) -> R {
-        if let Interaction::Drawing { rect, .. } =
-            std::mem::replace(&mut self.interaction, Interaction::Idle)
-        {
-            self.tab.session.cancel_stroke();
-            self.recomposite(rect);
-        }
+        self.cancel_gesture();
         let before = self.tab.session.document().canvas;
         let key = self.key();
         self.tab.session.use_tools(&self.tools);
@@ -1856,12 +1852,12 @@ impl Canvas {
             unreachable!("dragging a shape");
         };
         let mut stroke = self.live_stroke(Some(old.into_spare())).drawn_whole(true);
+        let filled = self
+            .tab
+            .session
+            .shape_fill()
+            .and_then(|fill| stroke.fill(fill.area.mask(), fill.antialias, fill.color.0));
         let live = self.tab.session.live().expect("dragging");
-        let antialias = live.template.brush.antialias && !self.tab.session.pixel_mode();
-        let filled = live
-            .fill
-            .as_ref()
-            .and_then(|outline| stroke.fill(outline, antialias));
         let outlined = if live.outlined {
             stroke.update(&live.points)
         } else {
@@ -3669,6 +3665,65 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_filled_shape_shows_while_dragged_as_it_is_committed() {
+        use ugu_session::ShapePaint;
+        for (paint, opacity, pixel_mode) in [
+            (ShapePaint::Both, 0.5, false),
+            (ShapePaint::Fill, 1.0, false),
+            (ShapePaint::Both, 1.0, true),
+        ] {
+            let (to_test, renders) = std::sync::mpsc::channel();
+            let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+                let _ = to_test.send(rendered);
+            });
+            canvas.set_area([0, 0, 120, 90]);
+            if pixel_mode {
+                canvas.edit(|session| session.set_pixel_mode(true)).unwrap();
+            }
+            settle(&mut canvas, &renders);
+            canvas.set_tool(Tool::Shape).unwrap();
+            canvas.tools_mut().plain.pen.opacity = opacity;
+            canvas.tools_mut().plain.pen.antialias = true;
+            let shape = &mut canvas.tools_mut().shape;
+            shape.shape = ugu_session::Shape::Moon;
+            shape.paint = paint;
+            let at = |canvas: &super::Canvas, x: f64, y: f64| {
+                let [x, y] = canvas.to_client([x, y]);
+                press(x, y)
+            };
+            let begin = at(&canvas, 10.0, 10.0);
+            canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+            let end = at(&canvas, 90.3, 80.7);
+            canvas.apply(CanvasInput::Extend(end));
+            canvas.take_upload();
+            let dragged = canvas.display().clone();
+            canvas.apply(CanvasInput::End(end));
+            let mut full = Pixmap::new(120, 90);
+            ugu_render::document::DocumentRenderer::new(0).render(
+                canvas.session().document(),
+                canvas.session().frame(),
+                ugu_render::document::Purpose::Display,
+                &mut full,
+            );
+            // An outline shows as a live stroke does: its batches add up
+            // coverage a little apart from one fill (live.rs tests), and
+            // over pixels it rounds a level apart (`compose::paint`). The
+            // fill shows as it is committed.
+            let allowed = if paint == ShapePaint::Both { 2 } else { 0 };
+            let worst = dragged
+                .data_as_u8_slice()
+                .iter()
+                .zip(full.data_as_u8_slice())
+                .map(|(a, b)| a.abs_diff(*b))
+                .max();
+            assert!(
+                worst <= Some(allowed),
+                "{paint:?} at {opacity}, pixel mode {pixel_mode}: {worst:?} apart"
+            );
+        }
+    }
+
     fn pixel_of(pixmap: &Pixmap, (x, y): (usize, usize)) -> Vec<u8> {
         pixmap.data_as_u8_slice()[(y * usize::from(pixmap.width()) + x) * 4..][..4].to_vec()
     }
@@ -4081,6 +4136,37 @@ mod tests {
             .unwrap()
             .apply([f64::from(first.x), f64::from(first.y)]);
         assert!((shown[0] - 20.0).abs() < 0.01 && (shown[1] - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_edit_during_a_drag_ends_the_drag_without_its_result() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[30.0, 40.0], [60.0, 40.0]]);
+        settle(&mut canvas, &renders);
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        // A pose being dragged with the move tool.
+        canvas.set_tool(Tool::Move).unwrap();
+        let begin = at(&canvas, 60.0, 45.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        canvas.apply(CanvasInput::Extend(at(&canvas, 70.0, 50.0)));
+        assert!(canvas.session().posing().is_some());
+        canvas.edit(Session::add_layer).unwrap();
+        assert!(canvas.session().posing().is_none(), "the pose dragged");
+        assert!(matches!(canvas.interaction, Interaction::Idle));
+        // A selection being dragged out.
+        canvas.set_tool(Tool::Select).unwrap();
+        let begin = at(&canvas, 10.0, 10.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        canvas.apply(CanvasInput::Extend(at(&canvas, 50.0, 50.0)));
+        canvas.edit(Session::add_layer).unwrap();
+        assert!(matches!(canvas.interaction, Interaction::Idle));
+        let revision = canvas.session().revision();
+        canvas.apply(CanvasInput::End(at(&canvas, 60.0, 60.0)));
+        assert_eq!(canvas.session().selection(), None, "no selection made");
+        assert_eq!(canvas.session().revision(), revision);
     }
 
     #[test]

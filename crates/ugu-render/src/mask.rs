@@ -64,6 +64,13 @@ impl Runs {
             .map_or(&[], Vec::as_slice)
     }
 
+    /// Whether pixel `x`, `y` is in a run.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let row = self.row(y);
+        let at = row.partition_point(|&[_, right]| right <= x);
+        row.get(at).is_some_and(|&[left, _]| left <= x)
+    }
+
     fn span(&self) -> std::ops::Range<i32> {
         self.top..self.top + self.rows.len() as i32
     }

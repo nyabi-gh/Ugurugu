@@ -86,7 +86,6 @@
 | B3-38 | 프로세스 전체 메모리 예산과 저메모리·여러 창 측정 | 캐시 `Budget`은 최소 256MiB를 강제하고(가용 100MiB여도), 디코더·히스토리·GPU staging·내보내기·다른 창은 이 예약에 묶이지 않는다. 이미지 디코더 1GiB 한도도 고정값이다. 저메모리·여러 창·큰 내보내기 조합의 OOM·지연은 재현하지 않았다(가설). 잴 조건: 8·16GiB, 큰 문서 탭 1·4·8개, 저장·가져오기·내보내기 조합에서 peak private bytes, commit 여유, 탭 바꾸기 지연, 취소 p95. B3-80과 같이 예산을 한 곳에서 나누고 숨은 탭부터 회수하는 정책을 정하되, B3-101의 화소 일치 시험을 지킨 채로 한다 | `apps/ugurugu/src/budget.rs` `FLOOR`, `crates/ugu-io/src/import.rs` `ALLOCATION` | 분석 3.3-1·3.3-5, 4절 12; 검토 8절 |
 | B3-39 | 내보내기 대기 상한·공정성 | 캐시 작업자는 편집·재생을 내보내기보다 먼저 하고 내보내기는 `answer.recv()`로 기한 없이 기다린다. 계속 편집할 때 내보내기 완료·취소 정리가 얼마나 늦는지 재야 하고, 늦으면 시간 할당이나 대기 상한을 둔다. 편집 우선 자체는 결함이 아니다. 정상 작업을 실패로 만드는 시간 초과보다, 취소가 대기 중 요청·진행 중 렌더·인코더·파일 정리까지 닿는지와 내보내기의 최소 진행 기회를 먼저 본다. 잴 것: 연속 편집·재생 중 내보내기 완료 시간, 취소→정리 p95(목표 100ms) | `apps/ugurugu/src/cache.rs` `Renders::render`(`answer.recv()`)와 `Queue`의 `exports` | 분석 3.3-4, 4절 11; 검토 8절 |
 | B3-40 | 타일이 사용 영역의 경계 사각형 버퍼 | 두 모서리에 작은 표시만 있어도 큰 사각형이 필요하고, 커질 때 이전·새 버퍼가 겹친다. sparse tile map이 아니다(비용은 가설) | `crates/ugu-render/src/tile.rs` | 분석 3.3-2 |
-| B3-42 | 설정 저장 실패를 사용자에게 알리지 않음 | writer 시작·쓰기 오류는 로그(`the settings were not written`)만 남는다. 실패 뒤 더 바뀌지 않으면 디스크 설정은 이전 값으로 남는다. 안: 실패한 때만 "설정이 저장되지 않음 · 다시 시도 · 폴더 열기" 같은 상태를 두고, 조건이 회복되면 최근 설정을 쓴다. 복구 실패 안내도 경로 글자만 보이므로 보존한 폴더를 여는 동작을 같이 볼 수 있다 | `apps/ugurugu/src/settings.rs` `write_changes`·`write_text` | 분석 3.2 |
 | B3-44 | `derivative` 대체 추적 | Velopack이 끌고 오는 빌드 시점 매크로로, RUSTSEC-2024-0388(관리 중단 공지, 취약점 아님)을 `deny.toml`에서 허용한다. Velopack 쪽 교체를 지켜본다. Velopack main은 2026-10-16에 뺐고 아직 릴리스되지 않았다 | `deny.toml`의 `[advisories] ignore`, `Cargo.lock` | 분석 3.5; m6-plan 6절 M6-5 |
 | B3-145 | zip 9로 올리기 | zip 8.6.0에 RUSTSEC-2026-0367·0368·0369(9.0.0에서 고침)가 나와 `deny.toml`에서 허용한다. 셋 다 `ZipArchive::extract`·`ZipStreamReader::extract` 안의 결함인데 ugu-io는 그 함수를 부르지 않고, Velopack 1.2.161도 `by_index`로 읽어 직접 파일에 쓴다(2026-10-17 소스로 확인). Velopack 1.2.161이 zip `^8.6`을 요구해 ugu-io만 올리면 zip이 두 판 들어가고 8.6.0은 그대로 남는다. Velopack main은 2026-10-16에 zip 9.0.3으로 올렸다("all 8.x releases are yanked"). 그 Velopack이 나오면 둘을 함께 zip 9로 올리고 허용 세 줄을 지운다 | `Cargo.toml` `zip`, `deny.toml`, `crates/ugu-io` | 2026-10-17 `cargo deny` |
 | B3-45 | egui-winit을 올릴 때 `EguiState` 수동 `Send` 재검토 | "AccessKit adapter가 비어 있으면 옮겨도 된다"는 가정에 기댄다. 지금 판에서 문제를 재현한 것은 아니다 | `apps/ugurugu/src/render.rs` `EguiState`의 `unsafe impl Send` | 분석 3.2; 검토 9절 |
@@ -125,7 +124,6 @@
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
 | B3-119 | `strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas`가 한 번 실패 | 2026-10-14 `cargo test --workspace --locked`(debug, `UGU_WORKER_THREADS=8`) 전체 실행에서 `shows_the_document`의 "split 반올림 안 최대 3" 단언이 한 번 실패했다. 그 시험만 3번, 앱 crate 전체를 5번 다시 돌렸을 때는 모두 통과했다. 바뀐 값은 남기지 못했다. 원인 미확인(가설: 캔버스가 받은 split의 시점에 따라 비교 대상이 달라지거나, B3-101의 반올림 차이가 3을 넘는 경우). 실패할 때의 차이 값을 남기게 하고 원인을 찾는다 | `apps/ugurugu/src/files/end_to_end.rs` `shows_the_document` | 2026-10-14 레이어 복제 작업 중 |
-| B3-144 | 중국어 글꼴 `msyh.ttc`를 읽는 시작 비용과 그 파일이 있는지 | 인터페이스가 간체 중국어면 창을 보인 뒤 `theme::apply`가 `%WINDIR%\Fonts\msyh.ttc`를 통째로 읽는다(`chinese_font`, `std::fs::read`, 이 PC의 파일은 19,704,352바이트). 시작 시간에 얼마나 드는지는 재지 않았다(evidence.md 74절). 중국어가 아닌 언어판 Windows에 이 파일이 늘 있는지도 확인하지 않았다(가설: Windows 10·11 기본 글꼴, decisions.md 9절). 읽지 못하면 로그에 남기고 Pretendard JP로 보여, 그 글꼴에 없는 간체자는 네모가 된다 | `apps/ugurugu/src/theme.rs` `chinese_font` | 2026-10-16 간체 중국어, evidence.md 74절 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
@@ -152,12 +150,11 @@
 | B3-132 | render 스레드가 창 스레드를 기다리는 남은 길 | 세션이 끝나는 동안 창 스레드는 복구 쓰기를 4초 기다린다. 그때 render 스레드가 장치 손실 뒤 새 표면을 청하고 있으면(`UiEvent::NeedSurface`, 창 스레드만 만든다) 둘 다 4초를 쓴다. 창을 주인으로 하는 대화상자가 그 순간 열리는 경우도 주인 창을 동기 메시지로 끄는지는 보지 않았다(가설). 제목과 포인터는 2026-10-15에 창 스레드로 옮겼다 | `apps/ugurugu/src/app.rs` `ending`, `render.rs` `surface_source` | 3.1.0 출시 전 검토 |
 ## 11. 3.1.0 종합 검토에서 새로 확인한 것
 
-2026-10-14 3.1.0(`f96d785`) 종합 검토 보고서(저장소에 두지 않음)의 새 발견을 코드로 확인해 옮겼다. 그 보고서의 기존 항목 재평가는 B3-38·B3-39·B3-42·B3-52·B3-101 행에 합쳤다.
+2026-10-14 3.1.0(`f96d785`) 종합 검토 보고서(저장소에 두지 않음)의 새 발견을 코드로 확인해 옮겼다. 그 보고서의 기존 항목 재평가는 B3-38·B3-39·B3-52·B3-101 행에 합쳤다(설정 저장 실패 안내는 3.4.2에서 고쳤다).
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-114 | 사용자 강조색에 따라 포커스 선·버튼 글자의 대비가 무너짐 | `ink_on`은 패널 휘도가 0.2 미만이면 대비를 보지 않고 그만두고, `accent_text`는 선형화하지 않은 RGB 가중합의 임계값(0.52, 2.2.13)으로 글자 색을 고른다. `theme.rs` 계산을 Python으로 옮겨 잰 값: 어두운 패널과 같은 `#24262B`이면 선/패널 1.000:1(포커스 선이 보이지 않음), `#808080`이면 글자/강조 3.786:1, 기본 `#FFC94A`는 어두운 테마 9.880:1·글자 11.572:1, 밝은 테마 선 3.036:1. 앱 화면으로 본 값은 아니다. 고치려면 고른 색은 두고 배경마다 밝게·어둡게 파생하고, 글자는 두 후보의 실제 대비로 고른다. 닫는 조건: 검정·흰색·중간 회색·패널과 같은 색·고채도 색을 두 테마에서 글자 4.5:1, 선 3:1로 시험 | `apps/ugurugu/src/theme.rs` `ink_on`·`accent_text`, `widgets.rs` `focus_ring` | 3.1.0 종합 검토 N01 |
-| B3-115 | debug 로그에 문자 도구 원문이 남음 | `tracing::debug!(content = ?content, "text tool content")`가 decisions.md 10절 "로그에 사용자 글을 남기지 않는다"와 어긋난다. 기본 필터는 info라 debug로 켰을 때만 남는다. `tools/ime_probe.py`가 이 원문을 읽어 IME 조합을 확인하므로, 줄만 지우면 그 시험도 깨진다. 진단 로그는 글자 수만 남기고 IME 확인은 시험용 계측으로 옮긴다 | `apps/ugurugu/src/ui/text.rs` `settings`의 `tracing::debug!`, `tools/ime_probe.py` `text_tool_content` | 3.1.0 종합 검토 N02 |
 | B3-117 | Cargo 의존성 갱신 주기 | Dependabot은 GitHub Actions만 매달 본다. Cargo 의존성은 정해진 검토 주기가 없다. 자동 major 갱신보다 호환 묶음을 native 목록·회귀 화소·성능 기준선과 함께 확인하는 주기를 정한다. B3-44·B3-45·B3-72를 그때 같이 본다 | `.github/dependabot.yml`, `Cargo.toml` | 3.1.0 종합 검토 9.3절 |
 | B3-118 | `files.rs`의 상태 전이 나누기 | `files.rs`(3,371행, 2026-10-16)에 파일 작업자, 저장 상태, 복구, 대화상자, 내보내기 질문이 모인다. 파일만 쪼개면 같은 가변 상태를 공유해 이해 비용이 줄지 않으므로, "질문 대기 → 특정 탭의 편집 확정 → 저장 요청 → 특정 상태의 응답 → 닫기·업데이트" 전이를 먼저 그리고 대화상자 표시·작업자 메시지·탭의 저장·복구 상태를 나눈다. 탭 id·저장 당시 상태·요청 id가 만나는 곳에는 타입 구분을 더한다. 닫는 조건: 늦은 저장 응답, 질문 중 탭 전환, 닫기 취소, 같은 경로로 저장, 내보내기 중 업데이트가 전과 같이 동작 | `apps/ugurugu/src/files.rs`, `canvas.rs` | 검토 4절, 3.1.0 종합 검토 6절 |
 
@@ -173,7 +170,6 @@
 | B3-135 | 셀 복사로 노출 채우기 | 셀을 복사해 여러 프레임에 노출하는 편집(예: 같은 셀을 다음 빈 프레임들에 잇기). 무엇을 채울지(빈 프레임만, 범위) 정해야 한다 | `crates/ugu-session/src/animating.rs` | 3.2.0 계획 9절 |
 | B3-124 | 움직인 레이어의 브러시 커서 크기와 큰 선택 끌기 | 브러시 커서는 레이어 크기 키를 곱하지 않고 문서 크기로 보인다. 움직인 레이어에서 큰 선택을 끄는 동안은 화면 해상도 미리보기(`Glance`) 대신 원본으로 그린다 | `apps/ugurugu/src/canvas/cursor.rs`, `canvas/transform.rs` `refresh_preview` | 3.2.0 구현 |
 | B3-125 | 움직인 레이어에서 그릴 때의 입력→표시 | headless pen-up만 쟀다(evidence.md 55절). Sandbox는 합성 입력이라 앱의 입력→표시 지연(latency-probe)은 사용자 PC에서 잰다 | `tools/latency-probe` | 계획 7절 |
-| B3-126 | 끌기 도중의 다른 편집이 끌기를 취소하지 않고 끊음 | `Canvas::edit`는 진행 중인 상호작용을 무엇이든 `Idle`로 바꾸고 그리기만 취소한다. 그래서 끌기 도중 다른 곳에서 편집이 오면 캔버스는 끌기를 잊지만 세션에는 끌던 자세(`posing`)·선택이 남는다. 이동 도구 패널이 이 경로로 끌기를 끊은 것은 고쳤다(evidence.md 56절). 단축키가 끌기 도중 편집을 부를 수 있는지는 확인하지 않았다. `cancel_gesture`처럼 상호작용마다 되돌려 끝내되, 문자 도구처럼 제스처 안에서 `edit`를 부르는 곳이 깨지지 않는지 본다 | `apps/ugurugu/src/canvas.rs` `edit`, `cancel_gesture` | 3.2.0 Sandbox |
 | B3-127 | 키가 있는 레이어의 이미지 크기 바꾸기 | `resample_image`는 키의 이동값과 중심을 축마다 비율로 늘린다. 가로세로 비율이 다르게 바뀌면 회전한 키는 늘어난 화소와 어긋나고(자세는 한 가지 크기와 회전만 가짐), 늘린 값이 `limits::OFFSET`(32,767)을 넘으면 문서 검사에 걸려 크기 바꾸기 전체가 거절된다. 2026-10-14 재검토에서 코드로 확인했고 앱에서 재현하지는 않았다 | `crates/ugu-core/src/command.rs` `resample_image`, `rekeyed` | 3.2.0 재검토 |
 
 ## 13. 3.3.0 출시 전 재검토에서 남은 것
@@ -182,7 +178,6 @@
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-137 | 채운 모양을 끄는 동안의 미리보기가 놓은 뒤와 다름 | 끄는 동안의 채우기는 다각형을 vello로 칠해 외곽선과 한 coverage 버퍼에 더하고 선의 알파로 한 번 보인다. 놓으면 `Op::Fill`(픽셀 중심 마스크와 채우기의 가장자리 띠)과 그 위의 획으로 확정된다. 그래서 (1) 둘 다 + 불투명도·색 알파가 100% 미만이면 외곽선 띠가 끄는 동안 더 옅다(채우기와 선이 겹쳐 두 번 합성됨, 50%면 약 50% → 75%), (2) 채우기만인 부드러운 가장자리와 픽셀 모드의 대각선 가장자리가 놓을 때 반 픽셀까지 바뀐다(가설, 재지 않음). 놓은 뒤의 캔버스와 내보내기는 같다. 미리보기 채우기를 확정과 같은 마스크·가장자리 경로로 그리고 선을 따로 합성해야 한다 | `crates/ugu-render/src/live.rs` `fill`·`add_coverage`, `crates/ugu-session/src/shaping.rs` `commit_filled` | 3.3.0 재검토 |
 | B3-140 | 대칭자의 남은 것 | 대칭자(decisions.md 4절)는 파일에 저장하지 않고, 도형 도구는 따르지 않는다. 후보: 파일 저장(형식에 선택 필드), 도형과 채운 도형의 복사, 복사가 같이 우글거리는 선택지. 큰 획이 많으면 펜을 뗄 때가 길다: 2048²에서 문서 대부분을 덮는 획 24개는 약 40ms이고, 그 절반 가까이가 획 경계 사각형마다 coverage를 읽어 놓는 일이다(evidence.md 68절) | `crates/ugu-session/src/symmetry.rs`, `apps/ugurugu/src/canvas/symmetry.rs`, `crates/ugu-render/src/compose.rs` `stamp_strokes` | 2026-10-15 대칭자 |
 
 ## 14. 3.3.1 출시에서 남은 것

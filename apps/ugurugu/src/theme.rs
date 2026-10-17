@@ -286,6 +286,19 @@ pub mod space {
     pub const XXL: f32 = 24.0;
 }
 
+/// Starts reading the Chinese interface font on a thread of its own when the
+/// interface is in Chinese, while the window and the GPU are being opened:
+/// `apply` then finds it read, or waits for the rest.
+pub fn read_fonts_early() {
+    if crate::i18n::language() == "zh-Hans" {
+        let _ = std::thread::Builder::new()
+            .name("interface font".to_owned())
+            .spawn(|| {
+                chinese_font();
+            });
+    }
+}
+
 /// Windows' Microsoft YaHei, read once; `None`, logged, when it cannot be
 /// used, and the interface then shows what Pretendard JP has.
 fn chinese_font() -> Option<Arc<egui::FontData>> {
@@ -446,6 +459,26 @@ fn style_accent(style: &mut egui::Style, colors: &Palette) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How long the thread that sets the fonts waits for Microsoft YaHei,
+    /// with `UGURUGU_EARLY=1` after it was read early while the window
+    /// would open (300 ms, about the time the GPU takes): run once each
+    /// way, `cargo test --release -p ugurugu chinese_font_wait --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement"]
+    fn chinese_font_wait() {
+        let early = std::env::var_os("UGURUGU_EARLY").is_some();
+        if early {
+            std::thread::spawn(|| {
+                chinese_font();
+            });
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        let started = std::time::Instant::now();
+        assert!(chinese_font().is_some());
+        println!("early {early}: waited {:?}", started.elapsed());
+    }
 
     #[test]
     fn a_font_file_that_cannot_be_parsed_is_left_out() {

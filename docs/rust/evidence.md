@@ -1092,7 +1092,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **원인:**
 
-- Keyframes: 이동 도구 설정 패널이 매 프레임 현재 자세를 f32 숫자 칸으로 왕복시킨 값이 f64 자세와 다르면 `set_pose`를 불렀다. 캔버스로 끄는 자세는 문서 px 소수라 첫 표본에서 키가 들어갔고, `Canvas::edit`가 진행 중인 상호작용을 `Idle`로 바꿔 끌기가 거기서 끝났다. 앱 시험(`a_drag_on_the_canvas_keys_where_it_ends_while_the_settings_show`)이 고치기 전에 184.6px 끌기를 6.15px로 키했다. 패널은 바꾼 칸만 반영하고, 캔버스가 끄는 자세는 키하지 않는다. `edit`가 끌기를 끊는 것은 backlog B3-126.
+- Keyframes: 이동 도구 설정 패널이 매 프레임 현재 자세를 f32 숫자 칸으로 왕복시킨 값이 f64 자세와 다르면 `set_pose`를 불렀다. 캔버스로 끄는 자세는 문서 px 소수라 첫 표본에서 키가 들어갔고, `Canvas::edit`가 진행 중인 상호작용을 `Idle`로 바꿔 끌기가 거기서 끝났다. 앱 시험(`a_drag_on_the_canvas_keys_where_it_ends_while_the_settings_show`)이 고치기 전에 184.6px 끌기를 6.15px로 키했다. 패널은 바꾼 칸만 반영하고, 캔버스가 끄는 자세는 키하지 않는다. `edit`가 끌기를 끊던 것은 3.4.2에서 고쳤다(`edit`가 Esc처럼 끌기를 되돌려 끝낸다).
 - Cels and onion skin: 앞 단계에서 이동 도구를 고르자 settings 스레드가 패닉했다(설정 파일의 도구 이름 표에 이동 도구가 없음, `settings/tools.rs`). 다음 실행이 크래시 파일을 보고 띄운 "closed unexpectedly" 대화상자가 캔버스 가운데를 가렸다. 강제 종료는 원인이 아니었다.
 
 **결론:** 두 단계와 아이콘 확인이 통과했다. 합성 입력은 마우스이고 펜·터치로는 보지 않았다.
@@ -1370,7 +1370,7 @@ zip crate가 항목 수를 세기 전에 디렉터리 전체를 읽었다. 이�
 
 **방법:** 간체 중국어를 더한 release 빌드로 Windows Sandbox에서 `gui.ps1`의 "Screen set at 100%"(ko·en·ja·zh-Hans, 인터페이스 100%)를 돌렸다. 언어마다 메뉴·도구 설정·설정 창·대화상자·도움말 등 33장을 찍는다.
 
-**결과:** 중국어 33장을 모두 찍었고, 로그의 인터페이스 언어는 `zh-Hans`였으며 "cannot read the Chinese interface font"는 없었다. 메뉴, 설정 창, 도움말을 눈으로 보았고 네모로 깨진 글자나 넘친 글은 보지 못했다. 이 단계는 한국어 3장(글자·스포이드 도구 등)이 UI Automation `FromHandle` 시간 초과(B3-97)로 빠져 실패로 끝났다. Sandbox는 한국어 Windows라, 다른 언어판 Windows에 `msyh.ttc`가 있는지는 이 실행으로 알 수 없다. 글꼴을 읽는 시작 비용은 재지 않았다(B3-144).
+**결과:** 중국어 33장을 모두 찍었고, 로그의 인터페이스 언어는 `zh-Hans`였으며 "cannot read the Chinese interface font"는 없었다. 메뉴, 설정 창, 도움말을 눈으로 보았고 네모로 깨진 글자나 넘친 글은 보지 못했다. 이 단계는 한국어 3장(글자·스포이드 도구 등)이 UI Automation `FromHandle` 시간 초과(B3-97)로 빠져 실패로 끝났다. Sandbox는 한국어 Windows라, 다른 언어판 Windows에 `msyh.ttc`가 있는지는 이 실행으로 알 수 없다. 글꼴을 읽는 시작 비용은 86절.
 
 ## 75. CI의 Rust Windows 작업 시간 (2026-10-16)
 
@@ -1580,3 +1580,21 @@ GIF는 모두 두 색(흰 바탕과 획)이었다. 기본 메모리 Sandbox에�
 | 수용 | 11/11 |
 
 **출시:** 태그 `v3.4.1`(annotated, `df8f66f`) → `release-3.yml` 실행 39041444628 성공. `v3.4.1`에는 `Ugurugu-3.4.1-Windows-x64-Setup.exe`만, 본문 끝에 "What's Changed"(#110~#112)와 비교 링크가 붙었고 Latest다. `updates`의 `releases.win-x64.json`이 3.4.1을 가리키고, 다운로드 배지 실행도 성공했다.
+
+## 86. 중국어 인터페이스 글꼴을 읽는 시작 비용 (2026-10-18)
+
+**질문:** 인터페이스가 간체 중국어면 창을 보인 뒤 `theme::apply`가 `%WINDIR%\Fonts\msyh.ttc`(이 PC 19,704,352바이트)를 통째로 읽는다. 시작에서 얼마나 드나.
+
+**방법:** release 시험, 이 PC(파일이 이미 OS 캐시에 있는 상태). (1) 읽기·해석·egui 첫 프레임을 세 번 쟀다(커밋하지 않은 임시 시험). (2) 글꼴을 쓰는 스레드가 `chinese_font()`에서 기다린 시간을 `theme::tests::chinese_font_wait`로 쟀다: 그냥, 그리고 `UGURUGU_EARLY=1`로 따로 스레드가 먼저 읽기 시작하고 300ms(GPU를 여는 시간 정도) 뒤. 각 세 번.
+
+**결과:**
+
+| 잰 것 | 값 |
+|---|---|
+| `std::fs::read` | 9.2 / 4.7 / 4.6ms |
+| `skrifa::FontRef::from_index` | 11µs 이하 |
+| egui 첫 프레임(간체자 몇 글자) | YaHei 없이 0.4~1.3ms, 있으면 5.5~6.1ms |
+| 글꼴 스레드의 기다림, 그냥 | 5.7 / 5.7 / 6.3ms |
+| 글꼴 스레드의 기다림, 먼저 읽기 시작 | 0.4µs (세 번 모두) |
+
+**결론과 코드:** 언어를 고른 직후 `theme::read_fonts_early`가 따로 스레드에서 읽기 시작한다(`main.rs` `run`). 창 스레드는 다 읽힌 것을 받거나 남은 만큼만 기다린다(`OnceLock`). 첫 프레임에서 YaHei 글리프를 만드는 약 5ms는 그대로다. 캐시에 없는(첫 부팅 뒤) 읽기는 재지 않았다: 더 오래 걸리겠지만 그만큼 창·GPU를 여는 시간과 겹친다(가설).

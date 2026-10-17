@@ -48,6 +48,7 @@ export-close-text | Closing now stops the export. | 지금 닫으면 내보내�
 export-close-wait | Close When Done | 끝나면 닫기 | 終了後に閉じる | 完成后关闭
 export-close-stop | Stop and Close | 중지하고 닫기 | 中止して閉じる | 停止并关闭
 close-after-export | Closes when the export is done | 내보내기가 끝나면 닫습니다 | 書き出しが終わると閉じます | 导出完成后关闭
+settings-not-written | The settings could not be saved (%1); Ugurugu keeps trying | 설정을 저장하지 못했습니다(%1). 계속 다시 시도합니다 | 設定を保存できませんでした(%1)。再試行を続けます | 无法保存设置（%1），将继续重试 | args=error
 settings-set-aside-title | Default settings | 기본 설정으로 시작 | 既定の設定で開始 | 使用默认设置
 settings-set-aside | The settings could not be read, so the defaults are used; the old file is kept as %1 | 설정을 읽을 수 없어 기본값으로 시작했습니다. 이전 파일은 %1(으)로 남겨 두었습니다 | 設定を読み込めなかったため既定値で始めました。以前のファイルは%1として残してあります | 无法读取设置，已使用默认值；旧文件保留为 %1 | args=name
 close-waits | Closes when saving or opening is done | 저장이나 열기가 끝나면 닫습니다 | 保存または読み込みが終わると閉じます | 保存或打开完成后关闭

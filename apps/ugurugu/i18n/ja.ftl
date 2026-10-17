@@ -50,6 +50,7 @@ export-close-text = 今閉じると書き出しがキャンセルされます。
 export-close-wait = 終了後に閉じる
 export-close-stop = 中止して閉じる
 close-after-export = 書き出しが終わると閉じます
+settings-not-written = 設定を保存できませんでした({ $error })。再試行を続けます
 settings-set-aside-title = 既定の設定で開始
 settings-set-aside = 設定を読み込めなかったため既定値で始めました。以前のファイルは{ $name }として残してあります
 close-waits = 保存または読み込みが終わると閉じます

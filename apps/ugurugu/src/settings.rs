@@ -14,9 +14,9 @@
 //! does not put back what another changed.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -33,6 +33,8 @@ mod tools;
 
 /// How long settings must stay unchanged before they are written.
 const QUIET: Duration = Duration::from_millis(500);
+/// How long after a write that failed it is tried again.
+const RETRY: Duration = Duration::from_secs(2);
 /// Marks the file as this program's, as `.ugurugu` files carry a format.
 const FORMAT: &str = "ugurugu.settings";
 const VERSION: u64 = 1;
@@ -570,11 +572,15 @@ pub struct Store {
     writer: Option<Writer>,
     /// Where an unreadable settings file found at start was moved to.
     set_aside: Option<PathBuf>,
+    /// Whether the writes failing now were told of.
+    told_failure: bool,
 }
 
 struct Writer {
     to_thread: Sender<Settings>,
     thread: Option<JoinHandle<()>>,
+    /// Why the last write failed, until one is written.
+    failed: Arc<Mutex<Option<String>>>,
     /// Files written, for tests.
     #[cfg_attr(not(test), expect(dead_code, reason = "read by tests"))]
     writes: Arc<AtomicUsize>,
@@ -599,7 +605,19 @@ impl Store {
             settings,
             writer: path.map(|path| Writer::spawn(path, base)),
             set_aside,
+            told_failure: false,
         }
+    }
+
+    /// Why the settings could not be written, once each time writing them
+    /// starts failing; they are tried again until they are.
+    pub fn write_failure(&mut self) -> Option<String> {
+        let failed = self.writer.as_ref()?.failed.lock().ok()?.clone();
+        let Some(error) = failed else {
+            self.told_failure = false;
+            return None;
+        };
+        (!std::mem::replace(&mut self.told_failure, true)).then_some(error)
     }
 
     /// Where an unreadable settings file found at start was moved to, once.
@@ -649,51 +667,75 @@ impl Writer {
         let (to_thread, messages) = mpsc::channel();
         let writes = Arc::new(AtomicUsize::new(0));
         let counted = writes.clone();
+        let failed = Arc::new(Mutex::new(None));
+        let failing = failed.clone();
         let thread = std::thread::Builder::new()
             .name("settings".to_owned())
-            .spawn(move || write_changes(&path, base, &messages, &counted))
+            .spawn(move || write_changes(&path, base, &messages, &counted, &failing))
             .map_err(|error| tracing::error!(%error, "cannot start the settings thread"))
             .ok();
+        if thread.is_none() {
+            *failed.lock().expect("not yet shared") = Some("no settings thread".to_owned());
+        }
         Self {
             to_thread,
             thread,
+            failed,
             writes,
         }
     }
 }
 
-/// Writes each change once `QUIET` passes without another, until the
-/// channel closes.
+/// Writes each change once `QUIET` passes without another, and one that
+/// failed again each `RETRY` until it is written, until the channel closes;
+/// `failed` says why the last one failed.
 fn write_changes(
     path: &Path,
     mut base: Map<String, Value>,
     messages: &Receiver<Settings>,
     writes: &AtomicUsize,
+    failed: &Mutex<Option<String>>,
 ) {
     let mut waiting: Option<Settings> = None;
+    let mut retrying = false;
     let mut save = |settings: &Settings| {
         let started = std::time::Instant::now();
-        match write_changes_over(path, &base, settings) {
+        let written = match write_changes_over(path, &base, settings) {
             Ok(()) => {
                 base = settings.to_object();
                 tracing::debug!(elapsed = ?started.elapsed(), "settings written");
+                None
             }
-            // Written with the next change, still a change from `base`.
-            Err(error) => tracing::warn!(%error, ?path, "the settings were not written"),
+            Err(error) => {
+                tracing::warn!(%error, ?path, "the settings were not written");
+                Some(error.to_string())
+            }
+        };
+        let ok = written.is_none();
+        if let Ok(mut failed) = failed.lock() {
+            *failed = written;
         }
         writes.fetch_add(1, Ordering::Relaxed);
+        ok
     };
     loop {
         let message = if waiting.is_some() {
-            messages.recv_timeout(QUIET)
+            messages.recv_timeout(if retrying { RETRY } else { QUIET })
         } else {
             messages.recv().map_err(|_| RecvTimeoutError::Disconnected)
         };
         match message {
-            Ok(settings) => waiting = Some(settings),
+            Ok(settings) => {
+                waiting = Some(settings);
+                retrying = false;
+            }
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(settings) = waiting.take() {
-                    save(&settings);
+                    retrying = !save(&settings);
+                    // Still a change from `base`.
+                    if retrying {
+                        waiting = Some(settings);
+                    }
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -1032,6 +1074,37 @@ mod tests {
         );
         let leftovers = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
         assert_eq!(leftovers, 1, "the temporary file is removed");
+    }
+
+    #[test]
+    fn settings_not_written_are_written_once_the_file_can_be() {
+        let folder = Folder::new("retry");
+        let path = folder.settings();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, Settings::default().to_json()).unwrap();
+        let held = {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap()
+        };
+        let mut store = Store::open(Some(path.clone()));
+        store.change(|settings| settings.pixel_grid = false);
+        std::thread::sleep(QUIET * 3);
+        drop(held);
+        let failure = store.write_failure().expect("told");
+        assert!(!failure.is_empty());
+        assert_eq!(store.write_failure(), None, "told once");
+        // Nothing else changes: it is tried again by itself.
+        let started = std::time::Instant::now();
+        while Settings::parse(&std::fs::read_to_string(&path).unwrap()).pixel_grid {
+            assert!(started.elapsed() < RETRY * 3, "never written");
+            std::thread::sleep(QUIET);
+        }
+        std::thread::sleep(QUIET);
+        assert_eq!(store.write_failure(), None);
     }
 
     #[test]

@@ -38,6 +38,14 @@ impl Shape {
     }
 }
 
+/// The fill of a filled shape: the pixels inside it, its colour with the
+/// brush's opacity, and whether its edge is smoothed.
+pub struct ShapeFill {
+    pub area: Selection,
+    pub color: Rgba8,
+    pub antialias: bool,
+}
+
 /// What a closed shape draws: its outline, the area inside, or both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ShapePaint {
@@ -445,6 +453,7 @@ impl Session {
     /// small to draw anything.
     pub fn end_shape(&mut self, position: [f64; 2], drag: Drag) -> Result<Outcome, EditError> {
         self.drag_shape(position, drag);
+        let fill = self.shape_fill();
         let Some(live) = self.live.take() else {
             return Ok(Outcome::NoChange);
         };
@@ -452,17 +461,8 @@ impl Session {
             self.drop_cel();
             return Ok(Outcome::NoChange);
         }
-        let pixel = self.pixel_mode();
-        let area = live.fill.as_ref().and_then(|outline| {
-            let outline = if pixel {
-                with_edges(outline)
-            } else {
-                outline.clone()
-            };
-            Selection::of_shape(&selection::Shape::Freehand(outline), self.document().canvas)
-        });
-        match area {
-            Some(area) => self.commit_filled(live, &area),
+        match fill {
+            Some(fill) => self.commit_filled(live, &fill),
             None if live.outlined => self.commit(live),
             None => {
                 self.drop_cel();
@@ -471,14 +471,38 @@ impl Session {
         }
     }
 
-    /// Fills `area` in the stroke's colour and opacity and draws the stroke
-    /// over it when the shape is outlined, as one step.
-    fn commit_filled(&mut self, live: LiveStroke, area: &Selection) -> Result<Outcome, EditError> {
+    /// What the shape being dragged fills, if it is filled: as it is
+    /// committed, and shown while it is dragged.
+    pub fn shape_fill(&self) -> Option<ShapeFill> {
+        let live = self.live.as_ref()?;
+        let outline = live.fill.as_ref()?;
+        let pixel = self.pixel_mode();
+        let outline = if pixel {
+            with_edges(outline)
+        } else {
+            outline.clone()
+        };
+        let area =
+            Selection::of_shape(&selection::Shape::Freehand(outline), self.document().canvas)?;
         let brush = &live.template.brush;
-        let antialias = brush.antialias && !self.pixel_mode();
         let [red, green, blue, alpha] = live.template.color.0;
         let alpha = (f32::from(alpha) * brush.opacity.clamp(0.0, 1.0)).round() as u8;
-        let color = Rgba8([red, green, blue, alpha]);
+        Some(ShapeFill {
+            area,
+            color: Rgba8([red, green, blue, alpha]),
+            antialias: brush.antialias && !pixel,
+        })
+    }
+
+    /// Fills `fill` and draws the stroke over it when the shape is
+    /// outlined, as one step.
+    fn commit_filled(&mut self, live: LiveStroke, fill: &ShapeFill) -> Result<Outcome, EditError> {
+        let ShapeFill {
+            area,
+            color,
+            antialias,
+        } = fill;
+        let (color, antialias) = (*color, *antialias);
         let stroke = live.outlined.then(|| store::Stroke {
             points: std::sync::Arc::from(live.points.as_slice()),
             ..live.template.clone()
