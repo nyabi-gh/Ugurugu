@@ -132,6 +132,23 @@ pub fn pixel_choice(canvas: [u32; 2], sizes: &[[u32; 2]], times: Option<u32>) ->
         .unwrap_or_else(|| original(canvas, sizes))
 }
 
+/// The canvas of pixel art whose finished `picture` shows each of its pixels
+/// as `pixel` × `pixel`: the picture's size in whole pixels, at least one.
+pub fn pixel_canvas(picture: [u32; 2], pixel: u32) -> [u32; 2] {
+    picture.map(|side| ((side + pixel / 2) / pixel).max(1))
+}
+
+/// The pixel sizes a new pixel art `picture` can take: 1 and each whole
+/// enlargement its canvas is offered at, smallest first.
+pub fn pixel_sizes(picture: [u32; 2]) -> Vec<u32> {
+    std::iter::once(1)
+        .chain(ENLARGEMENTS.iter().rev().copied().filter(|&pixel| {
+            let canvas = pixel_canvas(picture, pixel);
+            canvas[0].max(canvas[1]) * pixel <= MOST_ENLARGED
+        }))
+        .collect()
+}
+
 /// How many times `size` enlarges `canvas`, 1 for its own; `None` when shrunk.
 pub fn times(canvas: [u32; 2], size: [u32; 2]) -> Option<u32> {
     (size[0] >= canvas[0]).then(|| size[0] / canvas[0])
@@ -894,6 +911,30 @@ mod tests {
         assert_eq!(large.dimensions(), (64, 48));
         for (x, y, pixel) in large.enumerate_pixels() {
             assert_eq!(*pixel, *small.get_pixel(x / 4, y / 4), "{x}, {y}");
+        }
+    }
+
+    #[test]
+    fn a_picture_of_bigger_pixels_is_a_smaller_canvas_enlarged_on_export() {
+        assert_eq!(pixel_canvas([1000, 1000], 4), [250, 250]);
+        assert_eq!(pixel_canvas([1000, 750], 8), [125, 94]);
+        assert_eq!(pixel_canvas([3, 2], 8), [1, 1]);
+        assert_eq!(pixel_canvas([640, 480], 1), [640, 480]);
+        assert_eq!(pixel_sizes([1000, 1000]), [1, 2, 4, 8]);
+        // A canvas of 2000 would be exported at 4000; one of 500 at 4096
+        // and more is not offered.
+        assert_eq!(pixel_sizes([4000, 2000]), [1, 2, 4, 8]);
+        assert_eq!(pixel_sizes([4100, 100]), [1]);
+        for picture in [[1000, 1000], [2000, 1500], [256, 256]] {
+            for pixel in pixel_sizes(picture) {
+                let canvas = pixel_canvas(picture, pixel);
+                let offered = sizes(canvas);
+                assert_eq!(
+                    offered[pixel_choice(canvas, &offered, Some(pixel))],
+                    canvas.map(|side| side * pixel),
+                    "{picture:?} at {pixel}"
+                );
+            }
         }
     }
 

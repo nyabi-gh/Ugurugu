@@ -17,7 +17,7 @@ frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, a file opened from outside going to the open window as
 a tab, the window opening where and as it closed, and pixel art GIFs
-enlarged into blocks.
+enlarged into blocks and the pixel size of new pixel art.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -1063,6 +1063,48 @@ public static class Blocks
     }
 }
 '@
+
+# Issue #24: a picture of 1000 x 1000 at pixel size 4 is drawn on a canvas
+# of 250 x 250, shown at a whole zoom, and its GIF starts at 1000 x 1000.
+Step 'Pixel size of a new pixel art document' {
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $words = Read-Words 'en'
+    $times = [char]0x00D7
+    Invoke-Word $process $words 'menu-file'
+    Invoke-Word $process $words 'file-new'
+    Set-Number $process $words['size-width'] '1000'
+    Set-Number $process $words['size-height'] '1000'
+    $switch = Find-Pattern $process $words['pixel-mode'] @([Windows.Automation.TogglePattern]::Pattern)
+    if ($switch.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+        $switch.Toggle()
+        Start-Sleep -Milliseconds 300
+    }
+    $one = Save-Screen 'new-pixel-size-1'
+    Invoke-Named $process "4$times"
+    $four = Save-Screen 'new-pixel-size-4'
+    Invoke-Named $process $words['dialog-ok']
+    Start-Sleep -Seconds 1
+    $zoom = Get-Value $process $words['canvas-zoom-percent']
+    $paper = Find-Paper $process
+    $shown = $paper.Right - $paper.Left
+    [void](Draw-Stroke $process)
+    $drawn = Save-Screen 'pixel-size-4-drawn'
+    Invoke-Word $process $words 'menu-file'
+    Invoke-Word $process $words 'export-gif'
+    Start-Sleep -Milliseconds 500
+    $gif = (Find-Pattern $process $words['export-size'] @([Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    $dialog = Save-Screen 'pixel-size-4-gif'
+    Send-Keys $process '{ESC}'
+    Stop-Apps
+    $detail = "zoom $zoom%, canvas shown $shown px wide, GIF '$gif'; $one; $four; $drawn; $dialog"
+    $whole = $zoom -ge 200 -and $zoom % 100 -eq 0
+    if (-not $whole -or [Math]::Abs($shown - 250 * $zoom / 100) -gt 3 -or -not $gif.StartsWith("1000 $times 1000")) {
+        throw $detail
+    }
+    $detail
+}
 
 # Issue #24: pixel art on a canvas past 256, exported as a GIF enlarged 2
 # and 4 times. The file's first frame must be the chosen size, each pixel a

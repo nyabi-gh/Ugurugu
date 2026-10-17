@@ -455,6 +455,9 @@ pub struct Files {
     new_document: Option<[i64; 2]>,
     /// Whether the new document asked for is in pixel mode.
     new_pixel: bool,
+    /// Pixel art's pixel size last chosen for a new document: each of its
+    /// pixels is shown and exported as this many across.
+    new_pixel_size: u32,
     /// The animation export chosen, waiting for where it goes.
     animation_job: Option<ExportJob>,
     /// How many times the image export chosen is enlarged, waiting for
@@ -555,6 +558,7 @@ impl Files {
             image_dialog: None,
             new_document: None,
             new_pixel: false,
+            new_pixel_size: 1,
             animation_job: None,
             image_times: None,
             cancelled: Vec::new(),
@@ -933,8 +937,20 @@ impl Files {
             // As 2.2.13, the size is asked for after unsaved changes are,
             // starting from the document's.
             Action::New => {
-                self.new_document = Some(canvas.session().document().canvas.map(i64::from));
+                // Pixel art is asked for as its finished picture.
                 self.new_pixel = canvas.session().pixel_mode();
+                let pixel = if self.new_pixel {
+                    self.new_pixel_size
+                } else {
+                    1
+                };
+                self.new_document = Some(
+                    canvas
+                        .session()
+                        .document()
+                        .canvas
+                        .map(|side| i64::from(side * pixel)),
+                );
             }
             Action::Open => self.pick(Purpose::Open, Dialog::Open(open_type())),
             // Asked about, saved or dropped: on to the next tab.
@@ -1299,6 +1315,21 @@ impl Files {
         });
     }
 
+    /// Starts a new document of the chosen mode for a finished `picture`:
+    /// pixel art of bigger pixels on a smaller canvas, exported enlarged by
+    /// as much.
+    fn start_new_picture(&mut self, canvas: &mut Canvas, picture: [u32; 2]) {
+        if !self.new_pixel {
+            return self.start_new(canvas, picture, false);
+        }
+        let pixel = Some(self.new_pixel_size)
+            .filter(|pixel| export::pixel_sizes(picture).contains(pixel))
+            .unwrap_or(1);
+        self.start_new(canvas, export::pixel_canvas(picture, pixel), true);
+        self.pixel_export_times = Some(pixel);
+        self.chosen_pixel_export_times = Some(pixel);
+    }
+
     /// Starts a new document of `size`, in pixel mode or not.
     fn start_new(&mut self, canvas: &mut Canvas, size: [u32; 2], pixel: bool) {
         // Always beside the others, the empty one at start included: a new
@@ -1322,7 +1353,9 @@ impl Files {
     }
 
     /// The new document's size, while it is asked for: any size from a pixel
-    /// (2.2.13: from 64), with pixel art's usual squares a press away.
+    /// (2.2.13: from 64), with pixel art's usual squares a press away. Pixel
+    /// art with pixels bigger than one is asked for as its finished picture
+    /// and drawn on a canvas that many times smaller.
     pub fn ask_new_document(&mut self, ctx: &egui::Context, canvas: &mut Canvas) {
         let Some(size) = self.new_document.as_mut() else {
             return;
@@ -1366,6 +1399,49 @@ impl Files {
                     &mut self.new_pixel,
                     true,
                 );
+                if self.new_pixel {
+                    let picture = size.map(|edge| edge.clamp(*edges.start(), *edges.end()) as u32);
+                    let offered = export::pixel_sizes(picture);
+                    if !offered.contains(&self.new_pixel_size) {
+                        self.new_pixel_size = 1;
+                    }
+                    let labels: Vec<(u32, String)> = offered
+                        .iter()
+                        .map(|&pixel| (pixel, format!("{pixel}×")))
+                        .collect();
+                    let options: Vec<(u32, &str)> = labels
+                        .iter()
+                        .map(|(pixel, text)| (*pixel, text.as_str()))
+                        .collect();
+                    let pixel = self.new_pixel_size;
+                    let description = if pixel == 1 {
+                        tr("new-pixel-size-one").to_owned()
+                    } else {
+                        let [width, height] = export::pixel_canvas(picture, pixel);
+                        tr_with(
+                            "new-pixel-size-canvas",
+                            &crate::i18n::args([
+                                ("width", width.to_string()),
+                                ("height", height.to_string()),
+                                ("pixel", pixel.to_string()),
+                            ]),
+                        )
+                    };
+                    widgets::setting_row(ui, false, tr("new-pixel-size"), None, |ui| {
+                        widgets::segmented(ui, &mut self.new_pixel_size, &options, 4);
+                    });
+                    // What the size makes, across the card: too long for
+                    // the column beside the choices.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(description)
+                                .size(theme::SMALL)
+                                .color(theme::muted()),
+                        )
+                        .wrap(),
+                    );
+                    widgets::space_after(ui, theme::space::L);
+                }
             });
             widgets::dialog_buttons(ui, |ui| {
                 let ok = widgets::button(ui, tr("dialog-ok"), widgets::Emphasis::Primary, true);
@@ -1382,9 +1458,9 @@ impl Files {
                 }
             });
         });
-        if let Some(size) = chosen {
+        if let Some(picture) = chosen {
             self.new_document = None;
-            self.start_new(canvas, size, self.new_pixel);
+            self.start_new_picture(canvas, picture);
         } else if cancel || modal.should_close() {
             self.new_document = None;
         }
@@ -2573,6 +2649,35 @@ mod tests {
         assert!(!canvas.session().is_dirty());
         assert_eq!(canvas.session().document().canvas, [64, 48]);
         assert_eq!(canvas.tab_count(), 2);
+    }
+
+    #[test]
+    fn pixel_art_of_bigger_pixels_is_a_smaller_canvas_exported_enlarged() {
+        // Issue #24: blocks that show at 100% and in a GIF of the size the
+        // picture is meant to be.
+        let (mut files, mut canvas, _events) = setup();
+        files.new_pixel = true;
+        files.new_pixel_size = 4;
+        files.start_new_picture(&mut canvas, [1000, 1000]);
+        let document = canvas.session().document();
+        assert!(document.pixel);
+        assert_eq!(document.canvas, [250, 250]);
+        assert_eq!(files.pixel_export_times, Some(4));
+        assert_eq!(files.take_chosen_pixel_export_times(), Some(4));
+        // The next new document starts from this one's picture.
+        files.request(Action::New, &mut canvas);
+        assert_eq!(files.new_document, Some([1000, 1000]));
+        // The largest picture at the largest pixel size is still exported
+        // at its size.
+        files.new_pixel_size = 8;
+        files.start_new_picture(&mut canvas, [4096, 100]);
+        assert_eq!(canvas.session().document().canvas, [512, 13]);
+        assert_eq!(files.pixel_export_times, Some(8));
+        // Not pixel art: the size is the canvas.
+        files.new_pixel = false;
+        files.start_new_picture(&mut canvas, [1000, 1000]);
+        assert_eq!(canvas.session().document().canvas, [1000, 1000]);
+        assert!(!canvas.session().document().pixel);
     }
 
     fn next(events: &Receiver<FileEvent>) -> FileEvent {

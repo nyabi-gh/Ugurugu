@@ -64,7 +64,7 @@ const ZOOM_STEP: f64 = 1.25;
 pub const ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.05..=64.0;
 /// Fitting enlarges a document no larger than this, by a whole number of
 /// times so each pixel stays square: pixel art. Larger ones fit at most at
-/// 100%, as in 2.2.13.
+/// 100%, as in 2.2.13, unless they are in pixel mode.
 const SMALL_EDGE: f64 = 256.0;
 
 /// Frames play in order, none skipped. A frame not rendered yet holds the
@@ -2012,7 +2012,9 @@ impl Canvas {
     /// 100% if the document fits, otherwise small enough to fit, centred.
     /// A turned view fits the turned document's bounds, as in 2.2.13.
     fn place(&mut self, area: [i32; 4]) {
-        let size = self.tab.session.document().canvas.map(f64::from);
+        let document = self.tab.session.document();
+        let pixel_art = document.pixel;
+        let size = document.canvas.map(f64::from);
         let room = [f64::from(area[2] - area[0]), f64::from(area[3] - area[1])];
         if room[0] <= 0.0 || room[1] <= 0.0 {
             return;
@@ -2020,7 +2022,7 @@ impl Canvas {
         let [cos, sin] = self.turn().map(f64::abs);
         let bounds = [size[0] * cos + size[1] * sin, size[0] * sin + size[1] * cos];
         let fits = (room[0] / bounds[0]).min(room[1] / bounds[1]);
-        self.tab.scale = if fits >= 2.0 && size[0].max(size[1]) <= SMALL_EDGE {
+        self.tab.scale = if fits >= 2.0 && (pixel_art || size[0].max(size[1]) <= SMALL_EDGE) {
             fits.floor().min(*ZOOM_RANGE.end())
         } else {
             fits.min(1.0)
@@ -2461,6 +2463,26 @@ mod tests {
         assert_eq!(scale([256, 200]), 3.0);
         assert_eq!(scale([300, 200]), 1.0, "a larger one at most at 100%");
         assert_eq!(scale([400, 300]), 1.0);
+        assert!(scale([2000, 1000]) < 1.0);
+    }
+
+    #[test]
+    fn fitting_enlarges_pixel_art_of_any_size_by_whole_times() {
+        // Before, pixel art past 256 fitted at 100% at most, where its
+        // pixels showed one screen pixel each.
+        let scale = |size: [u32; 2]| {
+            let document = Document {
+                pixel: true,
+                ..Document::new(size)
+            };
+            let mut canvas = super::Canvas::new(document, |_| {});
+            canvas.set_area([0, 0, 1000, 700]);
+            canvas.fit();
+            canvas.placement().scale
+        };
+        assert_eq!(scale([300, 200]), 3.0);
+        assert_eq!(scale([500, 300]), 2.0);
+        assert_eq!(scale([600, 400]), 1.0, "under twice, at 100%");
         assert!(scale([2000, 1000]) < 1.0);
     }
 

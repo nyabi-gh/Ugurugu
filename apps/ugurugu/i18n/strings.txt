@@ -557,6 +557,9 @@ edit-too-deep | Groups cannot be nested any deeper. | 그룹을 더 깊이 넣�
 edit-internal | Something went wrong inside Ugurugu. The log folder in Settings > About has the details. | Ugurugu 안에서 문제가 생겼습니다. 자세한 내용은 설정 > 정보의 로그 폴더에 있습니다. | Ugurugu の内部で問題が起きました。詳細は設定 > 情報のログフォルダーにあります。 | Ugurugu 内部出了问题。详情见“设置 > 关于”中的日志文件夹。
 pixel-mode | Pixel mode | 픽셀 모드 | ピクセルモード | 像素模式
 pixel-mode-tip | Draw pixel art: pixel brushes only, no blended edges, and transforms and image resizing by whole pixels. | 픽셀 그림을 그립니다. 픽셀 브러시만 쓰고, 가장자리를 섞지 않으며, 변형과 이미지 크기 변경을 픽셀 단위로 합니다. | ピクセルアートを描きます。ピクセルブラシだけを使い、縁をなじませず、変形と画像サイズの変更をピクセル単位で行います。 | 绘制像素画：只用像素画笔，不混合边缘，变换和调整图像大小都按整像素进行。
+new-pixel-size | Pixel size | 픽셀 크기 | ピクセルサイズ | 像素大小
+new-pixel-size-one | Width and height are the canvas: each pixel of the drawing is one pixel of the picture. | 너비와 높이가 캔버스 크기입니다. 그림의 한 픽셀이 완성 그림의 한 픽셀입니다. | 幅と高さがキャンバスの大きさです。絵の1ピクセルが仕上がりの1ピクセルになります。 | 宽度和高度就是画布大小：画中的每个像素就是成品图片的一个像素。
+new-pixel-size-canvas | Width and height are the finished picture. You draw on a %1 × %2 canvas, and each pixel is shown and exported as %3 × %3. | 너비와 높이는 완성 그림의 크기입니다. %1 × %2 캔버스에 그리고, 한 픽셀을 %3 × %3로 보여 주고 내보냅니다. | 幅と高さは仕上がりの絵の大きさです。%1 × %2 のキャンバスに描き、1ピクセルを %3 × %3 で表示して書き出します。 | 宽度和高度是成品图片的大小。你在 %1 × %2 的画布上绘制，每个像素以 %3 × %3 显示和导出。 | args=width,height,pixel
 type-document | Ugurugu projects (*.ugurugu) | Ugurugu 프로젝트 (*.ugurugu) | Uguruguプロジェクト (*.ugurugu) | Ugurugu 项目 (*.ugurugu)
 type-open | Ugurugu projects (*.ugurugu *.ugu) | Ugurugu 프로젝트 (*.ugurugu *.ugu) | Uguruguプロジェクト (*.ugurugu *.ugu) | Ugurugu 项目 (*.ugurugu *.ugu)
 type-png | PNG images (*.png) | PNG 이미지 (*.png) | PNG画像 (*.png) | PNG 图像 (*.png)

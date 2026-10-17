@@ -74,7 +74,6 @@
 | B3-33 | egui-wgpu 장치 손실 panic 우회 제거 | egui-wgpu가 손실된 장치에서 오류 대신 panic하므로 장치 손실 때만 `catch_unwind`로 흡수한다. 상류가 오류를 돌려주게 고쳐지면 지운다 | `apps/ugurugu/src/render.rs` `RenderThread::frame`의 `catch_unwind` | m0-close 58행 |
 | B3-34 | egui TextEdit의 UIA `SetValue` | egui가 지원하지 않아 일부 보조 기술이 제한된다. 수용했고 egui를 올릴 때 다시 본다 | egui | m0-close 64행 |
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
-| B3-129 | 픽셀 모드의 확대율 안내 | 100% 아래에서는 화소가 섞여 픽셀 칸이 보이지 않는다. 이슈 #24 사용자는 이것을 브러시 모양 차이로 보았다(evidence 59). 후보: 픽셀 모드 문서를 정수 배율로 맞춰 열기, 100% 아래에서 상태 표시줄에 안내. 사용자 결정 전 | `crates/ugu-render/src/view.rs`, `apps/ugurugu/src/canvas/view.rs` | 이슈 #24, evidence 59 |
 | B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60, 70, 73 |
 
 ## 6. 검토 보고서에서 남은 것
