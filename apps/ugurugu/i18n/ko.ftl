@@ -228,6 +228,7 @@ dock-expand-area = 패널 영역 펼치기
 dock-collapse-area = 패널 영역 접기
 dock-width-left = 왼쪽 패널 영역 너비
 dock-width-right = 오른쪽 패널 영역 너비
+dock-height = { $panel } 패널 높이
 dock-handle = { $panel } 패널 이동 손잡이
 dock-move-left = 왼쪽으로 옮기기
 dock-move-right = 오른쪽으로 옮기기

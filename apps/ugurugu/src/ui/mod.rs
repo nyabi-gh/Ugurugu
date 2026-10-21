@@ -381,8 +381,8 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         Tool::Shape => shape_settings(ui, canvas),
         Tool::Pen | Tool::Eraser => {}
     }
-    panels.presets.show(ui, canvas, tool);
-    // Read after the presets: choosing one sets its width and stabilizer.
+    // The size and the rows under it come before the presets, so that a
+    // short panel keeps them in view.
     let mut settings = *canvas.brushes().get(tool);
     let before = settings;
     ui.add_space(theme::space::XS);
@@ -458,6 +458,12 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     }
     if settings != before {
         *canvas.brushes_mut().get_mut(tool) = settings;
+    }
+    ui.add_space(theme::space::S);
+    panels.presets.show(ui, canvas, tool);
+    // A preset chosen sets the width and stabilizer shown above it.
+    if *canvas.brushes().get(tool) != settings {
+        ui.ctx().request_repaint();
     }
 }
 
@@ -1623,10 +1629,10 @@ fn wobble_preview(ui: &mut egui::Ui, amount: f32, time: f64) -> egui::Response {
     response
 }
 
-pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
+pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels, room: Option<f32>) {
     panels
         .color
-        .show(ui, canvas, &mut panels.layout.color_field);
+        .show(ui, canvas, &mut panels.layout.color_field, room);
 }
 
 pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas) {

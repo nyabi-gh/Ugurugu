@@ -228,6 +228,7 @@ dock-expand-area = 展开面板停靠区
 dock-collapse-area = 折叠面板停靠区
 dock-width-left = 左侧面板停靠区宽度
 dock-width-right = 右侧面板停靠区宽度
+dock-height = { $panel } 面板高度
 dock-handle = { $panel } 面板拖动手柄
 dock-move-left = 移到左侧
 dock-move-right = 移到右侧

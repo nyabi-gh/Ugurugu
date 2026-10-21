@@ -35,6 +35,10 @@ pub struct Docks {
     /// How far down each group in an area reached last frame, by the panel
     /// in front, and the extra at the end of the right area.
     heights: HashMap<Option<Panel>, f32>,
+    /// How tall each panel's group would be to show all of it, and the
+    /// least it can take, from the last frame it was in front.
+    naturals: HashMap<Panel, f32>,
+    leasts: HashMap<Panel, f32>,
 }
 
 impl Docks {
@@ -83,8 +87,22 @@ impl Target {
 const EDGE: f32 = 30.0;
 /// How tall a group's head is.
 const HEAD: f32 = 24.0;
-/// The layers' group is not squeezed below this.
+/// The layers' group is not squeezed below this in an area that scrolls.
 const LAYERS_LEAST: f32 = 280.0;
+/// The split between two groups of an area, which drags the height from
+/// one to the other, and how far Up or Down moves it.
+const SPLIT: f32 = 9.0;
+const SPLIT_STEP: f32 = 16.0;
+/// Tool settings when another group of its area takes what is left: as
+/// tall whatever the tool shows, which then scrolls.
+const TOOL_SETTINGS_HEIGHT: f32 = 300.0;
+/// Under its head, a panel that scrolls shows at least this: Tool
+/// settings its size, opacity, stabilization and antialiasing rows, the
+/// others a row or two.
+const TOOL_ROWS: f32 = 144.0;
+const ROWS_LEAST: f32 = 60.0;
+/// A panel's group before it was first measured.
+const GUESS: f32 = 200.0;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Holder {
@@ -102,10 +120,11 @@ fn title(panel: Panel) -> &'static str {
     })
 }
 
-fn body(ui: &mut Ui, panel: Panel, canvas: &mut Canvas, panels: &mut Panels) {
+/// The panel's content; `room` is the height it has, for the colour wheel.
+fn body(ui: &mut Ui, panel: Panel, canvas: &mut Canvas, panels: &mut Panels, room: Option<f32>) {
     match panel {
         Panel::ToolSettings => super::tool_settings(ui, canvas, panels),
-        Panel::Color => super::color(ui, canvas, panels),
+        Panel::Color => super::color(ui, canvas, panels, room),
         Panel::ColorHistory => super::color_history(ui, canvas),
         Panel::Wobble => super::wobble(ui, canvas, panels),
         Panel::Layers => super::layers(ui, canvas, panels),
@@ -192,48 +211,31 @@ fn area(
                 .inner_margin(Margin::same(theme::space::M as i8)),
         )
         .show(ui, |ui| {
-            // A window too low for the panels scrolls them, so none is out
-            // of reach; until then they are laid out as without it.
+            // A window too low for every panel's least height scrolls the
+            // whole area, so that none is out of reach.
             egui::ScrollArea::vertical()
                 .id_salt("dock scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    let groups: Vec<(Group, Panel)> = area
+                    let groups: Vec<Placed> = area
                         .groups
                         .iter()
-                        .filter_map(|group| Some((group.clone(), panels.layout.front(group)?)))
+                        .enumerate()
+                        .filter_map(|(index, group)| {
+                            Some((index, group.clone(), panels.layout.front(group)?))
+                        })
                         .collect();
                     let total = ui.available_height();
                     let below_extra = extra.is_some();
-                    for (index, (group, front)) in groups.iter().enumerate() {
-                        let top = ui.cursor().min.y;
-                        if index > 0 {
-                            ui.separator();
-                        }
-                        let holder = Holder::Area {
-                            side,
-                            first: index == 0,
-                        };
-                        let origin = ui.cursor().min;
-                        let last = index + 1 == groups.len() && !below_extra;
-                        if *front == Panel::Layers && !last {
-                            // The layer list takes the height left, so above other
-                            // groups it gets what they took last frame.
-                            let others: f32 = groups
-                                .iter()
-                                .map(|(_, other)| Some(*other))
-                                .chain(below_extra.then_some(None))
-                                .filter(|other| *other != Some(*front))
-                                .filter_map(|other| panels.docks.heights.get(&other))
-                                .sum();
-                            let height = (total - others - (origin.y - top)).max(LAYERS_LEAST);
-                            ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
-                                group_ui(ui, holder, origin, group, *front, canvas, panels);
-                            });
-                        } else {
-                            group_ui(ui, holder, origin, group, *front, canvas, panels);
-                        }
-                        reached(ui, &mut panels.docks.heights, Some(*front), top);
+                    let probe = if below_extra {
+                        panels.docks.heights.get(&None).copied().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                    let spacing = ui.spacing().item_spacing.y;
+                    match fit(panels, &groups, total - probe, spacing) {
+                        Some(fit) => stack(ui, side, &groups, &fit, canvas, panels),
+                        None => scroll(ui, side, &groups, total, below_extra, canvas, panels),
                     }
                     if let Some(extra) = extra {
                         let top = ui.cursor().min.y;
@@ -330,6 +332,327 @@ fn reached(ui: &Ui, heights: &mut HashMap<Option<Panel>, f32>, front: Option<Pan
     }
 }
 
+/// Keeps a height measured for `panel`, drawing again if it changed.
+fn remember(ui: &Ui, heights: &mut HashMap<Panel, f32>, panel: Panel, height: f32) {
+    let before = heights.insert(panel, height);
+    if before.is_none_or(|before| (before - height).abs() > 0.5) {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// A group shown in an area: its index there, the group and the panel in
+/// front.
+type Placed = (usize, Group, Panel);
+
+/// What a group asks of its area's height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Ask {
+    wanted: f32,
+    least: f32,
+    /// The least it may be dragged to.
+    floor: f32,
+}
+
+/// The heights of an area's groups, and what they came from.
+struct Fit {
+    heights: Vec<f32>,
+    asks: Vec<Ask>,
+    /// The group that takes what the others leave.
+    filler: Option<usize>,
+    /// The height the groups share, without the splits between them.
+    room: f32,
+}
+
+/// How tall `panel`'s group would be to show all of it.
+fn natural_of(panels: &Panels, panel: Panel) -> f32 {
+    match panel {
+        // Not what the tool shows, so that changing tools moves nothing.
+        Panel::ToolSettings => TOOL_SETTINGS_HEIGHT,
+        _ => panels.docks.naturals.get(&panel).copied().unwrap_or(GUESS),
+    }
+}
+
+/// The least `panel`'s group can take: a group of wobble's rows, which
+/// are used alike, scrolls only once the artist made it shorter.
+fn least_of(panels: &Panels, panel: Panel, set: bool) -> f32 {
+    let floor = panels
+        .docks
+        .leasts
+        .get(&panel)
+        .copied()
+        .unwrap_or(HEAD + ROWS_LEAST);
+    match panel {
+        Panel::Wobble if !set => natural_of(panels, panel).max(floor),
+        _ => floor,
+    }
+}
+
+/// The heights of `groups` in `total`, or None when even the least of
+/// each does not fit: the layer list takes what the others leave, else
+/// Tool settings, so that what is under it stays where it is.
+fn fit(panels: &Panels, groups: &[Placed], total: f32, spacing: f32) -> Option<Fit> {
+    let shown = |group: &Group| -> Vec<Panel> {
+        group
+            .panels
+            .iter()
+            .copied()
+            .filter(|panel| panels.layout.is_open(*panel))
+            .collect()
+    };
+    let holding = |panel: Panel| {
+        groups
+            .iter()
+            .position(|(_, group, _)| shown(group).contains(&panel))
+    };
+    let filler = holding(Panel::Layers).or_else(|| holding(Panel::ToolSettings));
+    let asks: Vec<Ask> = groups
+        .iter()
+        .enumerate()
+        .map(|(at, (_, group, _))| {
+            let panels_shown = shown(group);
+            let most = |each: &dyn Fn(Panel) -> f32| {
+                panels_shown
+                    .iter()
+                    .map(|panel| each(*panel))
+                    .fold(0.0, f32::max)
+            };
+            let set = group.height.is_some();
+            let least = most(&|panel| least_of(panels, panel, set));
+            let floor = most(&|panel| least_of(panels, panel, true));
+            let wanted = if Some(at) == filler {
+                least
+            } else {
+                group
+                    .height
+                    .unwrap_or_else(|| most(&|panel| natural_of(panels, panel)))
+            };
+            Ask {
+                wanted: wanted.max(least),
+                least,
+                floor,
+            }
+        })
+        .collect();
+    // Each group and each split is followed by the spacing.
+    let count = groups.len() as f32;
+    let room = total - count * spacing - (count - 1.0).max(0.0) * (SPLIT + spacing);
+    let heights = share(&asks, filler, room)?;
+    Some(Fit {
+        heights,
+        asks,
+        filler,
+        room,
+    })
+}
+
+/// Gives each group what it wants out of `room`, the filler taking what is
+/// left. When they want more, each gives up the same share of what it has
+/// over its least. None when even the least of each does not fit.
+fn share(asks: &[Ask], filler: Option<usize>, room: f32) -> Option<Vec<f32>> {
+    let least: f32 = asks.iter().map(|ask| ask.least).sum();
+    if least > room {
+        return None;
+    }
+    let mut heights: Vec<f32> = asks.iter().map(|ask| ask.wanted).collect();
+    let wanted: f32 = heights.iter().sum();
+    if wanted <= room {
+        if let Some(filler) = filler {
+            heights[filler] += room - wanted;
+        }
+    } else {
+        let over = wanted - room;
+        let slack = wanted - least;
+        for (height, ask) in heights.iter_mut().zip(asks) {
+            *height -= (*height - ask.least) * over / slack;
+        }
+    }
+    Some(heights)
+}
+
+/// The groups of an area at the heights `fit` gave them, each scrolling
+/// what it cannot show, with a split between two that moves the height.
+fn stack(
+    ui: &mut Ui,
+    side: Side,
+    groups: &[Placed],
+    fit: &Fit,
+    canvas: &mut Canvas,
+    panels: &mut Panels,
+) {
+    for (at, (_, group, front)) in groups.iter().enumerate() {
+        if at > 0 {
+            let (_, above, above_front) = &groups[at - 1];
+            let change = split(ui, side, above, *above_front, fit.heights[at - 1]);
+            if change != 0.0 {
+                resize(panels, side, groups, fit, at - 1, change);
+                ui.ctx().request_repaint();
+            }
+        }
+        let holder = Holder::Area {
+            side,
+            first: at == 0,
+        };
+        let origin = ui.cursor().min;
+        let height = fit.heights[at];
+        ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
+            ui.set_height(height);
+            group_ui(
+                ui,
+                holder,
+                origin,
+                group,
+                *front,
+                canvas,
+                panels,
+                Some(height),
+            );
+        });
+    }
+}
+
+/// The groups of an area too low for them, as tall as what they show; the
+/// layer list takes the height left, so above other groups it gets what
+/// they took last frame.
+fn scroll(
+    ui: &mut Ui,
+    side: Side,
+    groups: &[Placed],
+    total: f32,
+    below_extra: bool,
+    canvas: &mut Canvas,
+    panels: &mut Panels,
+) {
+    for (index, (_, group, front)) in groups.iter().enumerate() {
+        let top = ui.cursor().min.y;
+        if index > 0 {
+            ui.separator();
+        }
+        let holder = Holder::Area {
+            side,
+            first: index == 0,
+        };
+        let origin = ui.cursor().min;
+        let last = index + 1 == groups.len() && !below_extra;
+        if *front == Panel::Layers && !last {
+            let others: f32 = groups
+                .iter()
+                .map(|(_, _, other)| Some(*other))
+                .chain(below_extra.then_some(None))
+                .filter(|other| *other != Some(*front))
+                .filter_map(|other| panels.docks.heights.get(&other))
+                .sum();
+            let height = (total - others - (origin.y - top)).max(LAYERS_LEAST);
+            ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
+                group_ui(ui, holder, origin, group, *front, canvas, panels, None);
+            });
+        } else {
+            group_ui(ui, holder, origin, group, *front, canvas, panels, None);
+        }
+        reached(ui, &mut panels.docks.heights, Some(*front), top);
+    }
+}
+
+/// The split under `above`: dragged, or moved by Up and Down while it has
+/// the focus, it changes the height above it. Gives that change.
+fn split(ui: &mut Ui, side: Side, above: &Group, front: Panel, height: f32) -> f32 {
+    let id = Id::new(("dock split", side == Side::Left, above.panels[0]));
+    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), SPLIT));
+    // An open list keeps the arrow keys: egui moves the focus to the
+    // nearest widget it has seen in any layer, which a split under the list
+    // would be. Only drawn, the split drops out of what egui has seen.
+    if egui::Popup::is_any_open(ui.ctx()) {
+        ui.painter().hline(
+            rect.x_range(),
+            rect.center().y,
+            Stroke::new(1.0, theme::border()),
+        );
+        return 0.0;
+    }
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    let name = tr_with("dock-height", &args([("panel", title(front).to_owned())]));
+    response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(height.round()), &name));
+    let active = response.hovered() || response.dragged() || response.has_focus();
+    let ink = if active {
+        theme::muted()
+    } else {
+        theme::border()
+    };
+    ui.painter()
+        .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, ink));
+    focus_ring(ui, &response, rect);
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    let mut change = response.drag_delta().y;
+    if response.has_focus() {
+        change += split_keys(ui.ctx());
+    }
+    change
+}
+
+/// Takes Up and Down pressed for a focused split, as a change of height.
+fn split_keys(ctx: &egui::Context) -> f32 {
+    let mut change = 0.0;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let &egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            let step = match key {
+                egui::Key::ArrowUp => -SPLIT_STEP,
+                egui::Key::ArrowDown => SPLIT_STEP,
+                _ => return true,
+            };
+            if !modifiers.is_none() {
+                return true;
+            }
+            if pressed {
+                change += step;
+            }
+            false
+        });
+    });
+    if change != 0.0 {
+        // The arrow would move the focus too.
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    }
+    change
+}
+
+/// Moves the split under group `above` by `change`. The group that keeps
+/// the new height is the one above, or the one below when the one above
+/// takes what is left.
+fn resize(
+    panels: &mut Panels,
+    side: Side,
+    groups: &[Placed],
+    fit: &Fit,
+    above: usize,
+    change: f32,
+) {
+    let (at, change) = if fit.filler == Some(above) {
+        (above + 1, -change)
+    } else {
+        (above, change)
+    };
+    let others: f32 = fit
+        .asks
+        .iter()
+        .enumerate()
+        .filter(|(each, _)| *each != at)
+        .map(|(_, ask)| ask.least)
+        .sum();
+    let floor = fit.asks[at].floor;
+    let height = (fit.heights[at] + change).clamp(floor, (fit.room - others).max(floor));
+    panels.layout.area_mut(side).groups[groups[at].0].height = Some(height);
+}
+
 /// The floating panels, then what a drag or a menu chose. After the canvas.
 pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let screen = ui.ctx().content_rect();
@@ -382,6 +705,7 @@ pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
                     front,
                     canvas,
                     panels,
+                    None,
                 );
             });
         let following =
@@ -401,7 +725,10 @@ pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
 
 /// One group: its header with the handle, tabs or title and buttons, then
 /// the panel in front. A drag measures from `origin`: a floating group's
-/// corner, so that it follows the pointer from where it was grabbed.
+/// corner, so that it follows the pointer from where it was grabbed. Given
+/// the `room` it has, the panel scrolls what it cannot show, except the
+/// colour and the layers, which fit themselves to it.
+#[expect(clippy::too_many_arguments)]
 fn group_ui(
     ui: &mut Ui,
     holder: Holder,
@@ -410,6 +737,7 @@ fn group_ui(
     front: Panel,
     canvas: &mut Canvas,
     panels: &mut Panels,
+    room: Option<f32>,
 ) {
     let open: Vec<Panel> = group
         .panels
@@ -466,7 +794,57 @@ fn group_ui(
         })
         .response
         .rect;
-    let content = ui.scope(|ui| body(ui, front, canvas, panels)).response.rect;
+    let head = header.height() + ui.spacing().item_spacing.y;
+    let width = ui.available_width();
+    let fits = matches!(front, Panel::Color | Panel::Layers);
+    let content = match room {
+        Some(room) if !fits => {
+            let inner = (room - head).max(0.0);
+            let shown = egui::ScrollArea::vertical()
+                .id_salt(("dock panel", front))
+                .max_height(inner)
+                .min_scrolled_height(inner)
+                .auto_shrink([false, false])
+                .show(ui, |ui| body(ui, front, canvas, panels, None));
+            remember(
+                ui,
+                &mut panels.docks.naturals,
+                front,
+                head + shown.content_size.y,
+            );
+            shown.inner_rect
+        }
+        Some(room) => {
+            let inner = (room - head).max(0.0);
+            ui.allocate_ui(vec2(width, inner), |ui| {
+                ui.set_max_height(inner);
+                body(ui, front, canvas, panels, Some(inner));
+            })
+            .response
+            .rect
+        }
+        None => {
+            let rect = ui
+                .scope(|ui| body(ui, front, canvas, panels, None))
+                .response
+                .rect;
+            if !fits {
+                remember(ui, &mut panels.docks.naturals, front, head + rect.height());
+            }
+            rect
+        }
+    };
+    let least = match front {
+        Panel::ToolSettings => TOOL_ROWS,
+        Panel::Color => {
+            let natural = head + panels.color.natural_height(width);
+            remember(ui, &mut panels.docks.naturals, front, natural);
+            panels.color.least_height(width)
+        }
+        Panel::Layers => panels.layers.least_height(),
+        Panel::ColorHistory | Panel::Wobble => ROWS_LEAST,
+    };
+    remember(ui, &mut panels.docks.leasts, front, head + least);
     let whole_rect = header.union(content);
     let targets = &mut panels.docks.targets;
     targets.push(Target {
@@ -726,8 +1104,19 @@ mod tests {
                 panels: Panels::default(),
                 size: vec2(1600.0, 900.0),
             };
-            window.frame(Vec::new());
+            window.settle();
             window
+        }
+
+        /// Frames until the panels have measured themselves and nothing
+        /// asks for another.
+        fn settle(&mut self) {
+            for _ in 0..8 {
+                self.frame(Vec::new());
+                if !self.ctx.has_requested_repaint() {
+                    break;
+                }
+            }
         }
 
         fn frame(&mut self, events: Vec<Event>) {
@@ -802,8 +1191,8 @@ mod tests {
         assert_eq!(layout.left.groups[0].front, Panel::Layers);
         // The layer list above them leaves the other groups room.
         window.frame(Vec::new());
-        let history = window.target(Place::After(Panel::ColorHistory));
-        assert!(history.bottom() < 900.0, "{history:?}");
+        let colors = window.target(Place::After(Panel::Color));
+        assert!(colors.bottom() < 900.0, "{colors:?}");
 
         window.drag(window.handle(Panel::Wobble), pos2(800.0, 400.0));
         let layout = &window.panels.layout;
@@ -866,7 +1255,7 @@ mod tests {
             .panels
             .layout
             .move_to(Panel::Color, Place::With(Panel::ToolSettings));
-        window.frame(Vec::new());
+        window.settle();
         let header = window.target(Place::With(Panel::Color));
         // The tabs follow the handle: the first is Tool settings.
         let tab = pos2(header.left() + 40.0, header.center().y);
@@ -878,6 +1267,57 @@ mod tests {
             layout.right.groups.last().unwrap().panels,
             [Panel::ToolSettings]
         );
+    }
+
+    #[test]
+    fn the_filler_takes_what_is_left_and_the_others_give_up_alike() {
+        let ask = |wanted, least| Ask {
+            wanted,
+            least,
+            floor: least,
+        };
+        let asks = [ask(100.0, 100.0), ask(300.0, 200.0)];
+        assert_eq!(share(&asks, Some(0), 500.0), Some(vec![200.0, 300.0]));
+        assert_eq!(share(&asks, None, 500.0), Some(vec![100.0, 300.0]));
+        // Short of room, each gives up the same share of what it has over
+        // its least.
+        let asks = [ask(150.0, 100.0), ask(300.0, 200.0)];
+        assert_eq!(share(&asks, None, 375.0), Some(vec![125.0, 250.0]));
+        assert_eq!(share(&asks, None, 299.0), None);
+    }
+
+    #[test]
+    fn the_split_between_two_groups_moves_with_a_drag_and_the_arrow_keys() {
+        let mut window = Window::new();
+        let colors = |window: &Window| window.panels.layout.left.groups[1].height;
+        assert_eq!(colors(&window), None);
+        let header = window.target(Place::With(Panel::Color));
+        let spacing = window.ctx.global_style().spacing.item_spacing.y;
+        let split = pos2(header.center().x, header.top() - spacing - SPLIT / 2.0);
+        // Tool settings above takes what is left, so the colour keeps the
+        // height the drag leaves it.
+        window.drag(split, split + vec2(0.0, 60.0));
+        window.settle();
+        let dragged = colors(&window).expect("a height for the colour group");
+        let moved = window.target(Place::With(Panel::Color));
+        assert!(
+            moved.top() > header.top() + 40.0,
+            "{header:?} only went to {moved:?}"
+        );
+
+        let id = Id::new(("dock split", true, Panel::ToolSettings));
+        window.ctx.memory_mut(|memory| memory.request_focus(id));
+        window.frame(Vec::new());
+        let down = |pressed| Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        window.frame(vec![down(true), down(false)]);
+        window.settle();
+        assert_eq!(colors(&window), Some(dragged - SPLIT_STEP));
     }
 
     #[test]

@@ -228,6 +228,7 @@ dock-expand-area = パレットドックを展開
 dock-collapse-area = パレットドックを折りたたむ
 dock-width-left = 左パレットドックの幅
 dock-width-right = 右パレットドックの幅
+dock-height = { $panel }パネルの高さ
 dock-handle = { $panel }パネルの移動ハンドル
 dock-move-left = 左側へ移動
 dock-move-right = 右側へ移動

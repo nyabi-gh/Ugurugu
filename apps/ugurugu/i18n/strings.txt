@@ -226,6 +226,7 @@ dock-expand-area | Expand panel dock | 패널 영역 펼치기 | パレットド
 dock-collapse-area | Collapse panel dock | 패널 영역 접기 | パレットドックを折りたたむ | 折叠面板停靠区
 dock-width-left | Width of the left panel dock | 왼쪽 패널 영역 너비 | 左パレットドックの幅 | 左侧面板停靠区宽度
 dock-width-right | Width of the right panel dock | 오른쪽 패널 영역 너비 | 右パレットドックの幅 | 右侧面板停靠区宽度
+dock-height | Height of the %1 panel | %1 패널 높이 | %1パネルの高さ | %1 面板高度 | args=panel
 dock-handle | %1 panel drag handle | %1 패널 이동 손잡이 | %1パネルの移動ハンドル | %1 面板拖动手柄 | args=panel
 dock-move-left | Move to the left side | 왼쪽으로 옮기기 | 左側へ移動 | 移到左侧
 dock-move-right | Move to the right side | 오른쪽으로 옮기기 | 右側へ移動 | 移到右侧

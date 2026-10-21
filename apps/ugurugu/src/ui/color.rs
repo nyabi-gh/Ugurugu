@@ -21,6 +21,11 @@ use super::history::hex;
 const MARGIN: f32 = 4.0;
 const RING_GAP: f32 = 6.0;
 const MARKER: f32 = 6.0;
+/// The wheel's side at most, and the least a short dock makes it.
+const WHEEL_MOST: f32 = 240.0;
+const WHEEL_LEAST: f32 = 120.0;
+/// The panel apart from the wheel, until it has been drawn.
+const REST_GUESS: f32 = 140.0;
 
 #[derive(Default)]
 pub struct ColorDock {
@@ -35,6 +40,8 @@ pub struct ColorDock {
     seen: Option<Rgba8>,
     /// The colour being typed.
     pub typing: Option<String>,
+    /// How tall the panel was apart from the wheel, when last shown.
+    rest: Option<f32>,
 }
 
 /// A colour typed as `#AARRGGBB`, or `#RRGGBB` keeping `alpha`; the `#` may
@@ -157,7 +164,26 @@ impl ColorDock {
         self.seen = Some(color);
     }
 
-    pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, shape: &mut ColorField) {
+    /// How tall the panel is with the wheel as wide as `width` allows.
+    pub fn natural_height(&self, width: f32) -> f32 {
+        self.rest.unwrap_or(REST_GUESS) + width.min(WHEEL_MOST)
+    }
+
+    /// How tall the panel is with the wheel at its least.
+    pub fn least_height(&self, width: f32) -> f32 {
+        self.rest.unwrap_or(REST_GUESS) + width.min(WHEEL_LEAST)
+    }
+
+    /// Shows the panel; given the `room` it has, the wheel takes what the
+    /// rest of the panel leaves, down to its least.
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        canvas: &mut Canvas,
+        shape: &mut ColorField,
+        room: Option<f32>,
+    ) {
+        let top = ui.cursor().min.y;
         let color = canvas.tools().color;
         self.follow(color);
         let [r, g, b, alpha] = color.0.map(|channel| f32::from(channel) / 255.0);
@@ -173,7 +199,11 @@ impl ColorDock {
             }
         });
 
-        let side = ui.available_width().min(240.0);
+        let widest = ui.available_width().min(WHEEL_MOST);
+        let side = match (room, self.rest) {
+            (Some(room), Some(rest)) => (room - rest).clamp(widest.min(WHEEL_LEAST), widest),
+            _ => widest,
+        };
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(side), Sense::click_and_drag());
         let center = rect.center();
         let outer = side * 0.5 - MARGIN;
@@ -379,6 +409,11 @@ impl ColorDock {
                 }
             });
         });
+        let rest = ui.cursor().min.y - top - side;
+        if self.rest.is_none_or(|before| (before - rest).abs() > 0.5) {
+            self.rest = Some(rest);
+            ui.ctx().request_repaint();
+        }
     }
 
     /// The colour as text, which takes a typed colour when Enter or Tab
@@ -514,9 +549,9 @@ mod tests {
                 egui::CentralPanel::default().show(ui, |ui| {
                     *area = Rect::from_min_size(
                         ui.cursor().min,
-                        Vec2::splat(ui.available_width().min(240.0)),
+                        Vec2::splat(ui.available_width().min(WHEEL_MOST)),
                     );
-                    dock.show(ui, canvas, shape);
+                    dock.show(ui, canvas, shape, None);
                 });
             });
             output.textures_delta.clear();

@@ -309,6 +309,12 @@ impl LayerDock {
             .retain(|generation, _| open.contains(generation));
     }
 
+    /// The least height of the panel: two rows of the list, the buttons and
+    /// the properties under it.
+    pub fn least_height(&self) -> f32 {
+        ROW * 2.0 + self.below
+    }
+
     pub fn show(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {
         // Rows are drawn before what is done to them is applied, so a change
         // needs another frame to show, on screen and to screen readers.

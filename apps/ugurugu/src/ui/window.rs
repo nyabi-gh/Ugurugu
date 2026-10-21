@@ -340,7 +340,7 @@ mod tests {
         /// have measured their panels.
         fn frames(&mut self, [width, height]: [f32; 2]) -> egui::FullOutput {
             let mut last = None;
-            for _ in 0..4 {
+            for _ in 0..6 {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -465,5 +465,69 @@ mod tests {
             "add layer at {add:?}, the status bar from {}",
             status.top()
         );
+    }
+
+    const TOOLS: [ugu_session::Tool; 9] = [
+        ugu_session::Tool::Pen,
+        ugu_session::Tool::Eraser,
+        ugu_session::Tool::Select,
+        ugu_session::Tool::Wand,
+        ugu_session::Tool::Fill,
+        ugu_session::Tool::Text,
+        ugu_session::Tool::Shape,
+        ugu_session::Tool::Symmetry,
+        ugu_session::Tool::Eyedropper,
+    ];
+
+    #[test]
+    fn the_colour_wheel_stays_put_whatever_the_tool() {
+        use crate::i18n::tr;
+        for size in [[1600.0, 900.0], [1152.0, 576.0]] {
+            let mut shown = Shown::new();
+            let mut wheels = Vec::new();
+            for tool in TOOLS {
+                shown.canvas.choose_tool(tool);
+                let output = shown.frames(size);
+                let wheel = bounds(&output, tr("color-current")).expect("the colour wheel");
+                wheels.push((tool, wheel));
+            }
+            let (_, first) = wheels[0];
+            for (tool, wheel) in &wheels {
+                assert!(
+                    (wheel.y0 - first.y0).abs() < 0.5 && (wheel.y1 - first.y1).abs() < 0.5,
+                    "{size:?}: the wheel at {wheel:?} with {tool:?}, at {first:?} with the pen"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_windows_show_the_wheel_the_brush_size_and_the_layer_buttons() {
+        use crate::i18n::tr;
+        // 1920 by 1080 at 150%: the first window, and about it maximized.
+        for size in [[1152.0, 576.0], [1280.0, 656.0]] {
+            let mut shown = Shown::new();
+            let output = shown.frames(size);
+            let status =
+                egui::containers::panel::PanelState::load(&shown.ctx, egui::Id::new("status"))
+                    .expect("the status bar")
+                    .outer_rect;
+            let bottom = f64::from(status.top());
+            let wheel = bounds(&output, tr("color-current")).expect("the colour wheel");
+            let width = bounds(&output, tr("brush-size")).expect("the brush size");
+            let add = bounds(&output, tr("layer-add")).expect("the add layer button");
+            assert!(
+                wheel.y1 <= bottom,
+                "{size:?}: the wheel at {wheel:?}, the status bar from {bottom}"
+            );
+            assert!(
+                width.y1 <= wheel.y0,
+                "{size:?}: the brush size at {width:?}, the wheel at {wheel:?}"
+            );
+            assert!(
+                add.y1 <= bottom,
+                "{size:?}: add layer at {add:?}, the status bar from {bottom}"
+            );
+        }
     }
 }

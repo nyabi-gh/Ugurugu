@@ -77,6 +77,10 @@ pub struct Group {
     pub panels: Vec<Panel>,
     /// The panel in front.
     pub front: Panel,
+    /// In points, once the edge between it and the next group was dragged.
+    /// Without it a group is as tall as its panels need, or takes what its
+    /// side has left (`ui::dock`).
+    pub height: Option<f32>,
 }
 
 impl Group {
@@ -84,6 +88,7 @@ impl Group {
         Self {
             panels: vec![panel],
             front: panel,
+            height: None,
         }
     }
 }
@@ -123,6 +128,8 @@ pub enum Place {
 }
 
 pub const WIDTHS: std::ops::RangeInclusive<f32> = 150.0..=460.0;
+/// A group's height as read from the settings.
+pub const HEIGHTS: std::ops::RangeInclusive<f32> = 40.0..=4000.0;
 pub const FLOATING_SIZE: [f32; 2] = [280.0, 420.0];
 /// Floating panels are kept at least this size, so they can be found again.
 pub const FLOATING_MIN: [f32; 2] = [150.0, 80.0];
@@ -145,19 +152,25 @@ pub struct Layout {
 
 impl Default for Layout {
     /// 3.0's layout since M3-9: tools and colour on the left, wobble and
-    /// layers on the right, each panel in its own group.
+    /// layers on the right. The colour history is a tab behind the colour,
+    /// so that a short window has room for the wheel (evidence.md 91).
     fn default() -> Self {
-        let area = |panels: &[Panel], width| Area {
-            groups: panels.iter().copied().map(Group::of).collect(),
+        let area = |groups, width| Area {
+            groups,
             width,
             collapsed: false,
         };
+        let colors = Group {
+            panels: vec![Panel::Color, Panel::ColorHistory],
+            front: Panel::Color,
+            height: None,
+        };
         Self {
-            left: area(
-                &[Panel::ToolSettings, Panel::Color, Panel::ColorHistory],
-                260.0,
+            left: area(vec![Group::of(Panel::ToolSettings), colors], 260.0),
+            right: area(
+                vec![Group::of(Panel::Wobble), Group::of(Panel::Layers)],
+                300.0,
             ),
-            right: area(&[Panel::Wobble, Panel::Layers], 300.0),
             floating: Vec::new(),
             closed: Vec::new(),
             animation_bar: true,
@@ -390,10 +403,14 @@ fn remove(group: &mut Group, panel: Panel) {
 }
 
 fn group_json(group: &Group) -> Value {
-    json!({
+    let mut object = json!({
         "panels": group.panels.iter().map(|panel| panel.key()).collect::<Vec<_>>(),
         "front": group.front.key(),
-    })
+    });
+    if let Some(height) = group.height {
+        object["height"] = json!(height);
+    }
+    object
 }
 
 fn read(value: &Value) -> Option<Layout> {
@@ -417,7 +434,16 @@ fn read(value: &Value) -> Option<Layout> {
             .and_then(Panel::from_key)
             .filter(|front| panels.contains(front))
             .unwrap_or(panels[0]);
-        Some(Group { panels, front })
+        // Not in settings written before 3.4.3.
+        let height = object
+            .get("height")
+            .and_then(finite)
+            .map(|height| height.clamp(*HEIGHTS.start(), *HEIGHTS.end()));
+        Some(Group {
+            panels,
+            front,
+            height,
+        })
     };
     let mut area = |key: &str| -> Option<Area> {
         let object = object.get(key)?.as_object()?;
@@ -537,6 +563,7 @@ mod tests {
         layout.move_to(Panel::ColorHistory, Place::Float([40.0, 60.5]));
         layout.set_open(Panel::Color, false);
         layout.left.width = 222.0;
+        layout.left.groups[0].height = Some(321.5);
         layout.right.collapsed = true;
         layout.onion = crate::canvas::OnionSettings {
             before: 3,
@@ -590,12 +617,16 @@ mod tests {
     fn values_out_of_range_are_brought_into_it() {
         let mut value = Layout::default().to_json();
         value["left"]["width"] = json!(9000);
+        value["left"]["groups"][0]["height"] = json!(1);
         value["floating"] = json!([]);
         let mut layout = Layout::default();
         layout.move_to(Panel::Layers, Place::Float([0.0, 0.0]));
         let mut floating = layout.to_json();
         floating["floating"][0]["size"] = json!([1, -5]);
-        assert_eq!(Layout::parse(&value).left.width, *WIDTHS.end());
+        let read = Layout::parse(&value);
+        assert_eq!(read.left.width, *WIDTHS.end());
+        assert_eq!(read.left.groups[0].height, Some(*HEIGHTS.start()));
+        assert_eq!(read.left.groups[1].height, None);
         assert_eq!(Layout::parse(&floating).floating[0].size, FLOATING_MIN);
     }
 

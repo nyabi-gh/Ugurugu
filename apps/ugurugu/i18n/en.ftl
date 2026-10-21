@@ -228,6 +228,7 @@ dock-expand-area = Expand panel dock
 dock-collapse-area = Collapse panel dock
 dock-width-left = Width of the left panel dock
 dock-width-right = Width of the right panel dock
+dock-height = Height of the { $panel } panel
 dock-handle = { $panel } panel drag handle
 dock-move-left = Move to the left side
 dock-move-right = Move to the right side
