@@ -198,7 +198,6 @@ kneaded-eraser = Kneaded
 pixel-eraser = Pixel
 round-pixel-eraser = Round Pixel
 tools-rail = Tools
-quick-access = Quick access
 panels = Panels
 panels-tip = Open and close panels
 

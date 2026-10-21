@@ -198,7 +198,6 @@ kneaded-eraser = 반죽
 pixel-eraser = 픽셀
 round-pixel-eraser = 둥근 픽셀
 tools-rail = 도구
-quick-access = 빠른 도구
 panels = 패널
 panels-tip = 패널 열기 및 닫기
 

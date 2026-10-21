@@ -198,7 +198,6 @@ kneaded-eraser = 可塑橡皮
 pixel-eraser = 像素
 round-pixel-eraser = 圆形像素
 tools-rail = 工具
-quick-access = 快速访问
 panels = 面板
 panels-tip = 打开或关闭面板
 

@@ -126,17 +126,20 @@ impl App {
     }
 }
 
-/// The window's size before it has a place of its own: 1600 by 1000, made
-/// smaller on a screen of `monitor` (logical) to leave room for the taskbar
-/// and the title bar.
-fn first_size(monitor: Option<[f64; 2]>) -> winit::dpi::LogicalSize<f64> {
+/// The window's size before it has a place of its own, and whether it opens
+/// maximized: 1600 by 1000, made smaller on a screen of `monitor` (logical)
+/// to leave room for the taskbar and the title bar. A screen too small for
+/// 1600 by 1000 gets the window maximized, as the panels need all of it
+/// (evidence.md 91), with the smaller size to go back to.
+fn first_place(monitor: Option<[f64; 2]>) -> (winit::dpi::LogicalSize<f64>, bool) {
     let [width, height] = monitor.map_or([1600.0, 1000.0], |[width, height]| {
         [
             (width * 0.9).min(1600.0).round(),
             (height * 0.8).min(1000.0).round(),
         ]
     });
-    winit::dpi::LogicalSize::new(width, height)
+    let smaller = width < 1600.0 || height < 1000.0;
+    (winit::dpi::LogicalSize::new(width, height), smaller)
 }
 
 fn hwnd_of(window: &Window) -> Result<isize, String> {
@@ -160,15 +163,17 @@ impl Session {
         use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
         // Resource 1, put in by build.rs.
         let icon = winit::window::Icon::from_resource(1, None).ok();
+        let (first_size, first_maximized) =
+            first_place(event_loop.primary_monitor().map(|monitor| {
+                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                [size.width, size.height]
+            }));
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
             .with_class_name(WINDOW_CLASS)
             .with_window_icon(icon.clone())
             .with_taskbar_icon(icon)
-            .with_inner_size(first_size(event_loop.primary_monitor().map(|monitor| {
-                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-                [size.width, size.height]
-            })))
+            .with_inner_size(first_size)
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
         let window = Arc::new(
@@ -189,6 +194,8 @@ impl Session {
             if unsafe { ugu_win::placement::restore_to(hwnd_of(&window)?, &placement) } {
                 window.set_maximized(placement.maximized);
             }
+        } else if first_maximized {
+            window.set_maximized(true);
         }
         window.set_visible(true);
         tracing::debug!("window shown");
@@ -489,16 +496,17 @@ mod tests {
     }
 
     #[test]
-    fn the_first_window_fits_a_small_screen() {
-        let size = |monitor| {
-            let size = first_size(monitor);
-            [size.width, size.height]
+    fn the_first_window_fits_a_small_screen_and_fills_it() {
+        let place = |monitor| {
+            let (size, maximized) = first_place(monitor);
+            ([size.width, size.height], maximized)
         };
-        assert_eq!(size(None), [1600.0, 1000.0]);
-        assert_eq!(size(Some([2560.0, 1440.0])), [1600.0, 1000.0]);
-        // 1920 by 1080 at 150%, and 1366 by 768 at 100%.
-        assert_eq!(size(Some([1280.0, 720.0])), [1152.0, 576.0]);
-        assert_eq!(size(Some([1366.0, 768.0])), [1229.0, 614.0]);
+        assert_eq!(place(None), ([1600.0, 1000.0], false));
+        assert_eq!(place(Some([2560.0, 1440.0])), ([1600.0, 1000.0], false));
+        // 1920 by 1080 at 150% and at 100%, and 1366 by 768 at 100%.
+        assert_eq!(place(Some([1280.0, 720.0])), ([1152.0, 576.0], true));
+        assert_eq!(place(Some([1920.0, 1080.0])), ([1600.0, 864.0], true));
+        assert_eq!(place(Some([1366.0, 768.0])), ([1229.0, 614.0], true));
     }
 
     #[test]

@@ -288,6 +288,10 @@ function Start-App([int] $Width = 1600, [int] $Height = 1000, [string] $Language
     }
     Start-Process -FilePath $app | Out-Null
     $process = Wait-Window
+    # Without a place of its own the window opens maximized on a screen too
+    # small for 1600 x 1000, as the Sandbox's is; restored first, it takes the
+    # size given.
+    [void][Native]::ShowWindow($process.MainWindowHandle, 9)
     [void][Native]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 50, 50, $Width, $Height, 4)
     [Native]::Front($process.MainWindowHandle)
     # Read when the window is ready, by its name in $Language.

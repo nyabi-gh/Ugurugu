@@ -196,7 +196,6 @@ kneaded-eraser | Kneaded | 반죽 | 練り消し | 可塑橡皮
 pixel-eraser | Pixel | 픽셀 | ピクセル | 像素
 round-pixel-eraser | Round Pixel | 둥근 픽셀 | 丸ピクセル | 圆形像素
 tools-rail | Tools | 도구 | ツール | 工具
-quick-access | Quick access | 빠른 도구 | クイックアクセス | 快速访问
 panels | Panels | 패널 | パネル | 面板
 panels-tip | Open and close panels | 패널 열기 및 닫기 | パネルを開く・閉じる | 打开或关闭面板
 

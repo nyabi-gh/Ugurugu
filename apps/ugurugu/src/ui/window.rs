@@ -86,11 +86,6 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .show(ui, |ui| {
             super::menu_bar(ui, canvas, files, clipboard, panels)
         });
-    egui::Panel::top("quick access")
-        .frame(bar(theme::chrome(), 10, 5))
-        .show(ui, |ui| {
-            super::quick_access(ui, canvas, files, clipboard, panels)
-        });
     egui::Panel::bottom("status")
         .frame(bar(theme::status(), 8, 2))
         .show_separator_line(false)
@@ -314,5 +309,161 @@ mod tests {
             drop(frame);
             files.end();
         }
+    }
+
+    /// A whole window of the default panels, for looking at where they are.
+    struct Shown {
+        ctx: egui::Context,
+        canvas: Canvas,
+        files: Files,
+        clipboard: Clipboard,
+        settings: Store,
+        panels: Panels,
+    }
+
+    impl Shown {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            theme::apply(&ctx);
+            ctx.enable_accesskit();
+            Self {
+                ctx,
+                canvas: Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {}),
+                files: Files::new(0, |_| {}),
+                clipboard: Clipboard::new(|_| {}),
+                settings: Store::open(None),
+                panels: Panels::default(),
+            }
+        }
+
+        /// The output of the last of a few frames at `size`, once the docks
+        /// have measured their panels.
+        fn frames(&mut self, [width, height]: [f32; 2]) -> egui::FullOutput {
+            let mut last = None;
+            for _ in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, height),
+                    )),
+                    focused: true,
+                    ..Default::default()
+                };
+                let mut output = self.ctx.run_ui(input, |ui| {
+                    window(
+                        ui,
+                        Parts {
+                            canvas: &mut self.canvas,
+                            files: &mut self.files,
+                            clipboard: &mut self.clipboard,
+                            settings: &mut self.settings,
+                            panels: &mut self.panels,
+                            typed: &[],
+                            warning: None,
+                            diagnostics: None,
+                            probe: None,
+                        },
+                    );
+                });
+                output.textures_delta.clear();
+                last = Some(output);
+            }
+            last.expect("a frame")
+        }
+    }
+
+    impl Drop for Shown {
+        fn drop(&mut self) {
+            self.files.end();
+        }
+    }
+
+    /// Where the node named `label` is, if the frame has one.
+    fn bounds(output: &egui::FullOutput, label: &str) -> Option<Rect> {
+        let tree = output.platform_output.accesskit_update.as_ref()?;
+        tree.nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .and_then(|(_, node)| node.bounds())
+    }
+
+    #[test]
+    fn the_wobble_panel_shows_only_the_rows_its_motion_uses() {
+        use crate::i18n::tr;
+        use ugu_core::ops::MotionStyle;
+        let mut shown = Shown::new();
+        let output = shown.frames([1600.0, 900.0]);
+        let motion = shown.canvas.session().document().wobble.motion;
+        assert_eq!((motion.style, motion.broken), (MotionStyle::Classic, false));
+        let only_smooth_and_stepped = [
+            "motion-poses",
+            "motion-detail",
+            "motion-linked",
+            "motion-randomness",
+        ];
+        let only_broken = ["motion-break-amount", "motion-break-range"];
+        assert!(bounds(&output, tr("motion-style")).is_some());
+        for key in only_smooth_and_stepped.iter().chain(&only_broken) {
+            assert_eq!(
+                bounds(&output, tr(key)),
+                None,
+                "{key} with a classic whole line"
+            );
+        }
+
+        let document = shown.canvas.session().document();
+        let (frames, rate, mut wobble) =
+            (document.frames, document.frames_per_second, document.wobble);
+        wobble.motion.style = MotionStyle::Smooth;
+        wobble.motion.broken = true;
+        shown
+            .canvas
+            .edit(|session| session.set_animation(frames, rate, wobble))
+            .unwrap();
+        let output = shown.frames([1600.0, 900.0]);
+        for key in only_smooth_and_stepped.iter().chain(&only_broken) {
+            assert!(
+                bounds(&output, tr(key)).is_some(),
+                "{key} with a smooth broken line"
+            );
+        }
+    }
+
+    #[test]
+    fn panels_undo_and_redo_sit_at_the_end_of_the_menu_bar() {
+        use crate::i18n::tr;
+        let mut shown = Shown::new();
+        let output = shown.frames([1600.0, 900.0]);
+        let menu = bounds(&output, tr("menu-file")).expect("the File menu");
+        let mut lefts = Vec::new();
+        for key in ["panels-tip", "edit-undo", "edit-redo"] {
+            let button = bounds(&output, tr(key)).unwrap_or_else(|| panic!("no {key}"));
+            let middle = (button.y0 + button.y1) / 2.0;
+            assert!(
+                (menu.y0..=menu.y1).contains(&middle),
+                "{key} at {button:?}, the menus at {menu:?}"
+            );
+            lefts.push(button.x0);
+        }
+        assert!(lefts.is_sorted(), "left to right as Tab goes: {lefts:?}");
+        assert!(lefts[0] > 1600.0 / 2.0, "at the right end: {lefts:?}");
+    }
+
+    #[test]
+    fn a_small_first_window_shows_the_layer_buttons_without_scrolling() {
+        use crate::i18n::tr;
+        // 1920 by 1080 at 150%, before the window is maximized.
+        let size = [1152.0, 576.0];
+        let mut shown = Shown::new();
+        let output = shown.frames(size);
+        let status = egui::containers::panel::PanelState::load(&shown.ctx, egui::Id::new("status"))
+            .expect("the status bar")
+            .outer_rect;
+        let add = bounds(&output, tr("layer-add")).expect("the add layer button");
+        assert!(
+            add.y1 <= f64::from(status.top()),
+            "add layer at {add:?}, the status bar from {}",
+            status.top()
+        );
     }
 }

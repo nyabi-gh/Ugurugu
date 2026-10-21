@@ -93,6 +93,7 @@ public static class Synthetic
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int count);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int count);
@@ -262,6 +263,9 @@ function Start-Probe {
     $process = Wait-Window
     $script:window = $process.MainWindowHandle
     $script:owner = [uint32]$process.Id
+    # Without a place of its own the window opens maximized on a screen too
+    # small for 1600 x 1000; restored first, it takes the size given.
+    [void][Synthetic]::ShowWindow($script:window, 9)
     [void][Synthetic]::SetWindowPos($script:window, [IntPtr]::Zero, 50, 50, 1600, 1000, 4)
     [Synthetic]::Front($script:window)
     [void](Get-Value 'Canvas zoom percentage')

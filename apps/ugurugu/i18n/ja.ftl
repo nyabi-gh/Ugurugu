@@ -198,7 +198,6 @@ kneaded-eraser = 練り消し
 pixel-eraser = ピクセル
 round-pixel-eraser = 丸ピクセル
 tools-rail = ツール
-quick-access = クイックアクセス
 panels = パネル
 panels-tip = パネルを開く・閉じる
 

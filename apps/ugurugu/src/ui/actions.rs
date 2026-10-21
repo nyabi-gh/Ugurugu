@@ -110,7 +110,7 @@ pub const TOOLS: &[Entry] = &[
     Do(A::ExportTools),
 ];
 
-/// Also behind the quick access Panels button.
+/// Also behind the Panels button at the menu bar's right end.
 pub const WINDOW: &[Entry] = &[
     Do(A::NextTab),
     Do(A::PreviousTab),

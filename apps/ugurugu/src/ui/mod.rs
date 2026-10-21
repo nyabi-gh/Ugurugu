@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The window around the canvas, laid out as 2.2.13: menus and quick access
-//! on top, the tool rail and tool settings on the left, wobble, colour and
-//! layers on the right, the animation bar under the canvas and the status
-//! bar at the bottom. Only what 3.0 can already do is shown.
+//! The window around the canvas, laid out as 2.2.13: menus on top, with
+//! 2.2.13's quick access buttons at their right end, the tool rail and tool
+//! settings on the left, wobble, colour and layers on the right, the
+//! animation bar under the canvas and the status bar at the bottom. Only
+//! what 3.0 can already do is shown.
 
 mod actions;
 mod brushes;
@@ -134,10 +135,10 @@ fn report_bool(step: &'static str, result: Result<bool, EditError>) {
     }
 }
 
-/// The menus. From the keyboard, as in Windows: F10 or Alt alone goes to the
-/// first title and, from a title, back, Alt and a title's letter opens that
-/// menu, Down opens the focused one, and
-/// Left and Right go to the next menu while one is open.
+/// The menus, with Panels, undo and redo at the bar's right end. From the
+/// keyboard, as in Windows: F10 or Alt alone goes to the first title and,
+/// from a title, back, Alt and a title's letter opens that menu, Down opens
+/// the focused one, and Left and Right go to the next menu while one is open.
 pub fn menu_bar(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
@@ -166,6 +167,7 @@ pub fn menu_bar(
                 }
             }
         }
+        quick_buttons(ui, canvas, files, clipboard, panels);
     });
     if let Some(action) = chosen {
         actions::run(action, canvas, files, clipboard, panels);
@@ -269,38 +271,43 @@ pub fn apply_settings(
     settings::apply(ctx, store.get(), canvas, files, &mut panels.keys);
 }
 
-/// The quick access bar: panels on the left, undo and redo on the right.
-pub fn quick_access(
+/// Panels, undo and redo at the right end of the menu bar, which 2.2.13 put
+/// in a quick access bar of their own. Laid out left to right, so that Tab
+/// reaches them in the order they are seen.
+fn quick_buttons(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
     files: &mut Files,
     clipboard: &mut Clipboard,
     panels: &mut Panels,
 ) {
-    ui.horizontal(|ui| {
-        let button = widgets::icon_button(ui, Glyph::Panels, 22.0, tr("panels-tip"), true);
-        let chosen = egui::Popup::menu(&button)
-            .show(|ui| actions::items(ui, actions::WINDOW, canvas, panels))
-            .and_then(|shown| shown.inner);
-        if let Some(action) = chosen {
-            actions::run(action, canvas, files, clipboard, panels);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let session = canvas.session();
-            let (can_undo, can_redo) = (
-                session.undo_label().is_some(),
-                session.redo_label().is_some(),
-            );
-            let redo = actions::button_glyph(Action::Redo);
-            if widgets::icon_button(ui, redo, 22.0, tr("edit-redo"), can_redo).clicked() {
-                report_bool("redo", canvas.edit(Session::redo));
-            }
-            let undo = actions::button_glyph(Action::Undo);
-            if widgets::icon_button(ui, undo, 22.0, tr("edit-undo"), can_undo).clicked() {
-                report_bool("undo", canvas.edit(Session::undo));
-            }
-        });
-    });
+    // As tall as a menu title, so the bar keeps its height.
+    const GLYPH: f32 = 20.0;
+    const GROUP_GAP: f32 = 12.0;
+    let side = GLYPH + 8.0;
+    let width = 3.0 * side + 2.0 * ui.spacing().item_spacing.x + GROUP_GAP;
+    ui.add_space((ui.available_width() - width).max(0.0));
+    let button = widgets::icon_button(ui, Glyph::Panels, GLYPH, tr("panels-tip"), true);
+    let chosen = egui::Popup::menu(&button)
+        .show(|ui| actions::items(ui, actions::WINDOW, canvas, panels))
+        .and_then(|shown| shown.inner);
+    if let Some(action) = chosen {
+        actions::run(action, canvas, files, clipboard, panels);
+    }
+    ui.add_space(GROUP_GAP);
+    let session = canvas.session();
+    let (can_undo, can_redo) = (
+        session.undo_label().is_some(),
+        session.redo_label().is_some(),
+    );
+    let undo = actions::button_glyph(Action::Undo);
+    if widgets::icon_button(ui, undo, GLYPH, tr("edit-undo"), can_undo).clicked() {
+        report_bool("undo", canvas.edit(Session::undo));
+    }
+    let redo = actions::button_glyph(Action::Redo);
+    if widgets::icon_button(ui, redo, GLYPH, tr("edit-redo"), can_redo).clicked() {
+        report_bool("redo", canvas.edit(Session::redo));
+    }
 }
 
 /// The tool rail; the move layer tool only with the animation tools.
@@ -1479,8 +1486,9 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             });
     });
     let restyled = motion.style != before;
-    // Poses, detail, linking and randomness move Smooth and Stepped only.
-    ui.add_enabled_ui(motion.style != MotionStyle::Classic, |ui| {
+    // Poses, detail, linking and randomness move Smooth and Stepped only, so
+    // Classic leaves them out, as a whole line leaves out the break's rows.
+    if motion.style != MotionStyle::Classic {
         let mut poses = motion.poses.min(frames) as f32;
         let response = widgets::form_row(ui, tr("motion-poses"), |ui| {
             widgets::number(
@@ -1513,7 +1521,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             tr("motion-randomness"),
             &mut motion.randomness,
         ));
-    });
+    }
     if track(widgets::checkbox(
         ui,
         &mut motion.broken,
@@ -1521,7 +1529,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     )) {
         changed = true;
     }
-    ui.add_enabled_ui(motion.broken, |ui| {
+    if motion.broken {
         changed |= track(percent_row(
             ui,
             tr("motion-break-amount"),
@@ -1544,7 +1552,7 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
             changed = true;
             motion.break_range = (length * 10.0).round() / 10.0;
         }
-    });
+    }
 
     if restyled {
         changed = true;
