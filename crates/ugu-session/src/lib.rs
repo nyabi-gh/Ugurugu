@@ -47,6 +47,30 @@ use ugu_core::selection::Selection;
 /// Points closer than this to the last kept one are dropped, as in 2.2.13.
 const MIN_POINT_DISTANCE: f64 = 0.75;
 
+/// What an added layer is, for its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Named {
+    Layer,
+    Group,
+    AnimationFolder,
+    Cel,
+}
+
+/// Names an added layer, group, animation folder or cel by its number, in
+/// the window's language: 2.2.13 named them in the interface's.
+pub type Namer = fn(Named, u32) -> String;
+
+/// The English names, as "Layer 2", until the window gives its own.
+pub fn english(named: Named, number: u32) -> String {
+    let word = match named {
+        Named::Layer => "Layer",
+        Named::Group => "Group",
+        Named::AnimationFolder => "Animation",
+        Named::Cel => "Cel",
+    };
+    format!("{word} {number}")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Pen,
@@ -225,6 +249,7 @@ pub struct Session {
     /// The symmetry ruler, set for a canvas of `symmetry_canvas`.
     symmetry: Symmetry,
     symmetry_canvas: [u32; 2],
+    namer: Namer,
 }
 
 /// The window's tools as last handed in with `Session::use_tools`, for the
@@ -262,9 +287,27 @@ impl Session {
             made_cel: None,
             symmetry: Symmetry::new(canvas),
             symmetry_canvas: canvas,
+            namer: english,
         };
         session.use_tools(&Tools::default());
         session
+    }
+
+    /// Names what is added from now on with `namer`.
+    pub fn set_namer(&mut self, namer: Namer) {
+        self.namer = namer;
+    }
+
+    fn name_of(&self, kind: Named, number: u32) -> String {
+        (self.namer)(kind, number)
+    }
+
+    /// The name for `kind` with the lowest number no layer has.
+    fn first_free_name(&self, kind: Named) -> String {
+        (1..)
+            .map(|number| self.name_of(kind, number))
+            .find(|name| !named(&self.document().layers, name))
+            .expect("fewer layers than numbers")
     }
 
     /// The symmetry ruler. Its centre keeps its place on the canvas, as a
@@ -640,7 +683,7 @@ impl Session {
             .map_or((None, self.document().layers.len()), |(parent, index)| {
                 (parent, index + 1)
             });
-        let name = format!("Layer {}", command::next_layer_id(self.document()).0);
+        let name = self.name_of(Named::Layer, command::next_layer_id(self.document()).0);
         let mut added = None;
         let outcome = self.history_mut()?.edit("Add layer", |document| {
             let (id, changes) = command::add_paint_layer(document, parent, index, name);
@@ -740,10 +783,7 @@ impl Session {
     /// Puts the current layer in a new group in its place.
     pub fn add_group(&mut self) -> Result<Outcome, EditError> {
         self.settle()?;
-        let name = (1..)
-            .map(|number| format!("Group {number}"))
-            .find(|name| !named(&self.document().layers, name))
-            .expect("fewer layers than numbers");
+        let name = self.first_free_name(Named::Group);
         let (_, changes) = command::wrap_in_group(self.document(), self.layer, name)?;
         self.history_mut()?.edit("Add layer group", |_| changes)
     }

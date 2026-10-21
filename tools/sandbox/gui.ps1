@@ -566,7 +566,7 @@ Step 'Save dialog with another extension typed' {
     $process = Start-App
     Invoke-Named $process 'File'
     [void](Save-Screen 'file-menu')
-    Invoke-Named $process 'Save As' -Prefix
+    Invoke-Named $process 'Save as' -Prefix
     Start-Sleep -Seconds 1
     [void](Save-Screen 'save-as-pressed')
     $owner = [uint32]$process.Id
@@ -1261,10 +1261,10 @@ Step 'Symmetry ruler' {
     # From the centre, the ruler tool moves it.
     Send-Keys $process 'r'
     Start-Sleep -Milliseconds 300
-    $x = Get-Value $process 'Centre X'
+    $x = Get-Value $process 'Center X'
     [Native]::Drag(@($middle, ($middle + [int]($w * 0.2))), @($top, $top))
     Start-Sleep -Milliseconds 300
-    $moved = Get-Value $process 'Centre X'
+    $moved = Get-Value $process 'Center X'
     Set-Field $process 'Number of symmetry lines' '6'
     Send-Keys $process 'b'
     [Native]::Drag(@(($paper.Left + [int]($w * 0.45)), ($paper.Left + [int]($w * 0.48))),

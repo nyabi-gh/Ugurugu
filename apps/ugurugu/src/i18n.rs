@@ -13,6 +13,8 @@ use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource};
 use unic_langid::LanguageIdentifier;
 
+use ugu_session::Named;
+
 use crate::settings::Language;
 
 const LANGUAGES: [(&str, &str); 4] = [
@@ -166,12 +168,12 @@ fn format(
     })
 }
 
-/// The text of message `id`.
 /// The interface language's code, as "ko".
 pub fn language() -> &'static str {
     text().language
 }
 
+/// The text of message `id`.
 pub fn tr(id: &'static str) -> &'static str {
     text().plain.get(id).copied().unwrap_or_else(|| {
         tracing::warn!(id, "no interface text");
@@ -179,7 +181,6 @@ pub fn tr(id: &'static str) -> &'static str {
     })
 }
 
-/// The text of message `id` with `args` put in.
 /// Arguments for `tr_with`.
 pub fn args<const N: usize>(pairs: [(&'static str, String); N]) -> FluentArgs<'static> {
     let mut args = FluentArgs::new();
@@ -189,11 +190,28 @@ pub fn args<const N: usize>(pairs: [(&'static str, String); N]) -> FluentArgs<'s
     args
 }
 
+/// The text of message `id` with `args` put in.
 pub fn tr_with(id: &'static str, args: &FluentArgs) -> String {
     format(&text().bundles, id, Some(args)).unwrap_or_else(|| {
         tracing::warn!(id, "no interface text");
         id.to_owned()
     })
+}
+
+/// The message naming an added layer, group, animation folder or cel.
+fn name_message(kind: Named) -> &'static str {
+    match kind {
+        Named::Layer => "layer-name",
+        Named::Group => "group-name",
+        Named::AnimationFolder => "animation-folder-name",
+        Named::Cel => "cel-name",
+    }
+}
+
+/// Names what the sessions add in the interface's language (a
+/// `ugu_session::Namer`), as "레이어 2".
+pub fn new_name(kind: Named, number: u32) -> String {
+    tr_with(name_message(kind), &args([("number", number.to_string())]))
 }
 
 #[cfg(test)]
@@ -241,6 +259,27 @@ mod tests {
             );
         }
         assert_eq!(language_for(&[]), "en");
+    }
+
+    #[test]
+    fn every_language_numbers_what_is_added() {
+        let args = args([("number", "37".to_owned())]);
+        for code in ["en", "ko", "ja", "zh-Hans"] {
+            let bundles = [bundle(code).0];
+            for kind in [
+                Named::Layer,
+                Named::Group,
+                Named::AnimationFolder,
+                Named::Cel,
+            ] {
+                let name = format(&bundles, name_message(kind), Some(&args)).unwrap();
+                assert!(name.contains("37"), "{code} {kind:?}: {name}");
+            }
+        }
+        assert_eq!(
+            format(&[bundle("ko").0], name_message(Named::Layer), Some(&args)).unwrap(),
+            "레이어 37"
+        );
     }
 
     #[test]

@@ -211,7 +211,7 @@ Step 'Update that fails to download' {
             throw "The unsaved changes are gone: '$caption'"
         }
         [void]$process.CloseMainWindow()
-        Press $process "Don't Save (N)" 30
+        Press $process "Don't save (N)" 30
         if (-not $process.WaitForExit(30000)) {
             throw 'The app did not close'
         }
@@ -256,15 +256,15 @@ Step 'Update with unsaved changes' {
         # The automatic check runs two seconds after start.
         Press $process 'Update' 60
         [void](Find-Element $process { param($n) $n -eq 'Unsaved changes' } 120 'the question about unsaved changes')
-        Press $process 'Cancel (ESC)'
+        Press $process 'Cancel (Esc)'
         Start-Sleep -Seconds 3
         if ($process.HasExited) {
             throw 'The app closed although the question was cancelled'
         }
         Press $process 'Help'
-        $item = Find-Element $process { param($n) $n.StartsWith('Check for Updates') } 10 'Check for Updates'
+        $item = Find-Element $process { param($n) $n.StartsWith('Check for updates') } 10 'Check for updates'
         $item.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-        Press $process "Don't Save (N)" 30
+        Press $process "Don't save (N)" 30
         if (-not $process.WaitForExit(30000)) {
             throw 'The app did not close to update'
         }
@@ -277,14 +277,14 @@ Step 'Update with unsaved changes' {
     if ($version -ne $versions.update) {
         throw "Installed version after the update: $version"
     }
-    "asked about unsaved changes, cancelled, asked again from Check for Updates, updated to $version and started again"
+    "asked about unsaved changes, cancelled, asked again from Check for updates, updated to $version and started again"
 }
 
 Step 'Check for updates offline' {
     Start-Process -FilePath $app | Out-Null
     $process = Wait-Window
     Press $process 'Help'
-    $item = Find-Element $process { param($n) $n.StartsWith('Check for Updates') } 10 'Check for Updates'
+    $item = Find-Element $process { param($n) $n.StartsWith('Check for updates') } 10 'Check for updates'
     $item.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     $said = Find-Element $process { param($n) $n.StartsWith('Could not check for updates') } 60 'the failure notice'
     $text = $said.Current.Name -replace '\s+', ' '

@@ -10,6 +10,7 @@ use crate::clipboard::Clipboard;
 use crate::export::Animation;
 use crate::files::{self, Files};
 use crate::i18n::tr;
+use crate::icons::Glyph;
 use crate::shortcuts::{Action, Chord, Keymap};
 
 use super::{Panels, report_bool, resize, restyle, settings};
@@ -298,6 +299,53 @@ fn tip(action: Action) -> Option<&'static str> {
         A::AnimationTools => "view-animation-tools-tip",
         _ => return None,
     }))
+}
+
+/// The glyph of the button that runs `action` in a bar, the rail or the
+/// selection's buttons, one to each action: a glyph seen on two buttons
+/// reads as either action.
+pub fn glyph(action: Action) -> Option<Glyph> {
+    Some(match action {
+        A::Undo => Glyph::Undo,
+        A::Redo => Glyph::Redo,
+        A::TurnLeft => Glyph::TurnLeft,
+        A::TurnRight => Glyph::TurnRight,
+        A::ResetTurn => Glyph::Rotate,
+        A::Mirror => Glyph::MirrorView,
+        A::Fit => Glyph::FitView,
+        A::Transform => Glyph::Scale,
+        A::FlipHorizontal => Glyph::MirrorHorizontal,
+        A::FlipVertical => Glyph::MirrorVertical,
+        A::ApplyTransform => Glyph::Confirm,
+        A::CancelTransform => Glyph::Cancel,
+        A::Restyle => Glyph::Restyle,
+        A::DeleteSelected => Glyph::Delete,
+        A::Deselect => Glyph::Deselect,
+        A::Animate => Glyph::Play,
+        A::AnimationBar => Glyph::MoveDown,
+        A::OnionSkin => Glyph::OnionSkin,
+        A::ToggleKey => Glyph::Key,
+        A::PreviousKey => Glyph::KeyPrevious,
+        A::NextKey => Glyph::KeyNext,
+        A::AnimationFolder => Glyph::AnimationFolder,
+        A::NewCel => Glyph::NewCel,
+        A::Brush => Glyph::Brush,
+        A::Eraser => Glyph::Eraser,
+        A::Select => Glyph::Lasso,
+        A::Wand => Glyph::Wand,
+        A::Fill => Glyph::Bucket,
+        A::Text => Glyph::Text,
+        A::Shape => Glyph::Shape,
+        A::SymmetryRuler => Glyph::Symmetry,
+        A::MoveLayer => Glyph::MoveLayer,
+        A::Eyedropper => Glyph::Eyedropper,
+        _ => return None,
+    })
+}
+
+/// `glyph(action)` for an action that has a button.
+pub fn button_glyph(action: Action) -> Glyph {
+    glyph(action).unwrap_or_else(|| panic!("{action:?} has no button glyph"))
 }
 
 /// Shows `entries` as menu items. Returns the one chosen.
@@ -605,6 +653,22 @@ fn was_typing(ctx: &egui::Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_two_actions_show_the_same_glyph() {
+        let mut seen = std::collections::HashMap::new();
+        for &action in Action::ALL {
+            if let Some(glyph) = glyph(action)
+                && let Some(other) = seen.insert(glyph, action)
+            {
+                panic!("{action:?} and {other:?} both show {glyph:?}");
+            }
+        }
+        assert!(
+            seen.len() > 20,
+            "the bars, the rail and the selection's buttons"
+        );
+    }
 
     #[test]
     fn the_animation_tools_show_when_on_or_when_the_drawing_moves() {

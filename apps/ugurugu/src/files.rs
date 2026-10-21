@@ -135,6 +135,17 @@ fn image_type() -> FileType {
 
 /// 2.2.13's new document.
 const NEW_CANVAS: [u32; 2] = [1024, 768];
+
+/// A new document of `size` whose layer is named in the interface's
+/// language, as the layers added to it are.
+fn new_document(size: [u32; 2]) -> Document {
+    let mut document = Document::new(size);
+    for layer in &mut document.layers {
+        layer.name = crate::i18n::new_name(ugu_session::Named::Layer, layer.id.0);
+    }
+    document
+}
+
 /// How long a save or export runs before the status bar says it is running.
 const PROGRESS_DELAY: Duration = Duration::from_millis(300);
 
@@ -788,7 +799,7 @@ impl Files {
     }
 
     pub fn new_canvas() -> Document {
-        Document::new(NEW_CANVAS)
+        new_document(NEW_CANVAS)
     }
 
     /// Whether the window should close now.
@@ -1347,7 +1358,7 @@ impl Files {
         // document is asked for to have one more. Clean until edited.
         let document = Document {
             pixel,
-            ..Document::new(size)
+            ..new_document(size)
         };
         match canvas.open_tab(document, true) {
             Ok(true) => {}

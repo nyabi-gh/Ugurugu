@@ -600,11 +600,12 @@ impl LayerDock {
             text_right = mark.left() - 4.0;
         }
 
-        // "opacity %  blend" over the name, with badges before the name.
+        // "opacity%  blend" over the name, with badges before the name; the
+        // percent written as everywhere else, not 2.2.13's "100 %".
         let text_left = thumb.right() + 10.0;
         let percent = tr_with(
             "percent",
-            &super::args([("value", format!("{:.0} ", row.opacity * 100.0))]),
+            &super::args([("value", format!("{:.0}", row.opacity * 100.0))]),
         );
         let meta = one_line(
             &painter,

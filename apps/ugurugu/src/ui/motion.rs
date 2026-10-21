@@ -13,6 +13,8 @@ use crate::shortcuts::{Action, Keymap};
 use crate::theme;
 use crate::widgets;
 
+use super::actions::button_glyph;
+
 pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     let session = canvas.session();
     let layer = session.current_layer();
@@ -192,7 +194,7 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
         let (glyph, text) = if key.is_some() {
             (Glyph::Remove, tr("key-remove"))
         } else {
-            (Glyph::Key, tr("key-add"))
+            (button_glyph(Action::ToggleKey), tr("key-add"))
         };
         let tip = widgets::with_key(text, &keys.text(Action::ToggleKey));
         let others = [tr("key-add"), tr("key-remove")];
@@ -200,14 +202,13 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
             canvas.toggle_key();
         }
         let tip = widgets::with_key(tr("key-previous"), &keys.text(Action::PreviousKey));
-        if widgets::icon_button_tip(ui, Glyph::KeyPrevious, 22.0, tr("key-previous"), &tip, true)
-            .clicked()
-        {
+        let glyph = button_glyph(Action::PreviousKey);
+        if widgets::icon_button_tip(ui, glyph, 22.0, tr("key-previous"), &tip, true).clicked() {
             canvas.step_key(-1);
         }
         let tip = widgets::with_key(tr("key-next"), &keys.text(Action::NextKey));
-        if widgets::icon_button_tip(ui, Glyph::KeyNext, 22.0, tr("key-next"), &tip, true).clicked()
-        {
+        let glyph = button_glyph(Action::NextKey);
+        if widgets::icon_button_tip(ui, glyph, 22.0, tr("key-next"), &tip, true).clicked() {
             canvas.step_key(1);
         }
     });

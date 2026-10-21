@@ -291,10 +291,12 @@ pub fn quick_access(
                 session.undo_label().is_some(),
                 session.redo_label().is_some(),
             );
-            if widgets::icon_button(ui, Glyph::Redo, 22.0, tr("edit-redo"), can_redo).clicked() {
+            let redo = actions::button_glyph(Action::Redo);
+            if widgets::icon_button(ui, redo, 22.0, tr("edit-redo"), can_redo).clicked() {
                 report_bool("redo", canvas.edit(Session::redo));
             }
-            if widgets::icon_button(ui, Glyph::Undo, 22.0, tr("edit-undo"), can_undo).clicked() {
+            let undo = actions::button_glyph(Action::Undo);
+            if widgets::icon_button(ui, undo, 22.0, tr("edit-undo"), can_undo).clicked() {
                 report_bool("undo", canvas.edit(Session::undo));
             }
         });
@@ -305,37 +307,23 @@ pub fn quick_access(
 pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap, animation_tools: bool) {
     ui.spacing_mut().item_spacing.y = 2.0;
     let tool = canvas.tool();
-    for (each, action, glyph, key) in [
-        (Tool::Pen, Action::Brush, Glyph::Brush, "tool-brush"),
-        (Tool::Eraser, Action::Eraser, Glyph::Eraser, "tool-eraser"),
-        (Tool::Select, Action::Select, Glyph::Lasso, "tool-select"),
-        (Tool::Wand, Action::Wand, Glyph::Wand, "tool-wand"),
-        (Tool::Fill, Action::Fill, Glyph::Bucket, "tool-fill"),
-        (Tool::Text, Action::Text, Glyph::Text, "tool-text-rail"),
-        (Tool::Shape, Action::Shape, Glyph::Shape, "tool-shape-rail"),
-        (
-            Tool::Symmetry,
-            Action::SymmetryRuler,
-            Glyph::Symmetry,
-            "tool-symmetry-rail",
-        ),
-        (
-            Tool::Move,
-            Action::MoveLayer,
-            Glyph::MoveLayer,
-            "tool-move-rail",
-        ),
-        (
-            Tool::Eyedropper,
-            Action::Eyedropper,
-            Glyph::Eyedropper,
-            "tool-eyedropper-rail",
-        ),
+    for (each, action, key) in [
+        (Tool::Pen, Action::Brush, "tool-brush"),
+        (Tool::Eraser, Action::Eraser, "tool-eraser"),
+        (Tool::Select, Action::Select, "tool-select"),
+        (Tool::Wand, Action::Wand, "tool-wand"),
+        (Tool::Fill, Action::Fill, "tool-fill"),
+        (Tool::Text, Action::Text, "tool-text-rail"),
+        (Tool::Shape, Action::Shape, "tool-shape-rail"),
+        (Tool::Symmetry, Action::SymmetryRuler, "tool-symmetry-rail"),
+        (Tool::Move, Action::MoveLayer, "tool-move-rail"),
+        (Tool::Eyedropper, Action::Eyedropper, "tool-eyedropper-rail"),
     ] {
         if each == Tool::Move && !animation_tools {
             continue;
         }
         let shortcut = keys.text(action);
+        let glyph = actions::button_glyph(action);
         if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
             canvas.choose_tool(each);
         }
@@ -745,15 +733,30 @@ fn sampling_choice(ui: &mut egui::Ui, canvas: &mut Canvas) {
     }
 }
 
-/// A choice showing its name over a line saying what it does.
+/// A choice showing its name over what it does, both wrapped to the panel's
+/// width, which the card grows to hold.
 fn shape_option(
     ui: &mut egui::Ui,
     selected: bool,
     title: &str,
     description: &str,
 ) -> egui::Response {
-    let size = egui::vec2(ui.available_width(), 44.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    const SIDE: f32 = 10.0;
+    let width = ui.available_width();
+    let wrap = (width - 2.0 * SIDE).max(1.0);
+    let layout = |text: &str, size: f32, color| {
+        ui.painter().layout(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            color,
+            wrap,
+        )
+    };
+    let title_text = layout(title, theme::BODY, theme::text());
+    let description_text = layout(description, theme::SMALL, theme::muted());
+    let below_title = 6.0 + title_text.size().y + 4.0;
+    let height = (below_title + description_text.size().y + 5.0).max(44.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, title)
     });
@@ -770,22 +773,9 @@ fn shape_option(
         egui::Stroke::new(1.0, edge),
         egui::StrokeKind::Inside,
     );
-    let at = |y: f32| rect.left_top() + egui::vec2(10.0, y);
-    let font = |size: f32| egui::FontId::proportional(size);
-    painter.text(
-        at(6.0),
-        egui::Align2::LEFT_TOP,
-        title,
-        font(theme::BODY),
-        theme::text(),
-    );
-    painter.text(
-        at(25.0),
-        egui::Align2::LEFT_TOP,
-        description,
-        font(theme::SMALL),
-        theme::muted(),
-    );
+    let at = |y: f32| rect.left_top() + egui::vec2(SIDE, y);
+    painter.galley(at(6.0), title_text, theme::text());
+    painter.galley(at(below_title), description_text, theme::muted());
     if response.has_focus() {
         widgets::focus_ring(painter, rect, theme::radius::CONTROL);
     }
@@ -946,14 +936,18 @@ pub fn text_overlay(ui: &mut egui::Ui, canvas: &Canvas) {
 }
 
 /// As 2.2.13's status bar: turn left, the angle, turn right, reset and
-/// mirror, laid out right to left.
+/// mirror.
 fn view_turn(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     let named = |action: Action| {
         let name = tr(action.label());
-        (name, widgets::with_key(name, &keys.text(action)))
+        (
+            actions::button_glyph(action),
+            name,
+            widgets::with_key(name, &keys.text(action)),
+        )
     };
-    let (name, tip) = named(Action::TurnLeft);
-    if widgets::icon_button_tip(ui, Glyph::Undo, 16.0, name, &tip, true).clicked() {
+    let (glyph, name, tip) = named(Action::TurnLeft);
+    if widgets::icon_button_tip(ui, glyph, 16.0, name, &tip, true).clicked() {
         canvas.turn_by(-crate::canvas::TURN_STEP);
     }
     let mut degrees = canvas.angle() as f32;
@@ -970,25 +964,16 @@ fn view_turn(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
     if field.changed() {
         canvas.turn_to(f64::from(degrees));
     }
-    let (name, tip) = named(Action::TurnRight);
-    if widgets::icon_button_tip(ui, Glyph::Redo, 16.0, name, &tip, true).clicked() {
+    let (glyph, name, tip) = named(Action::TurnRight);
+    if widgets::icon_button_tip(ui, glyph, 16.0, name, &tip, true).clicked() {
         canvas.turn_by(crate::canvas::TURN_STEP);
     }
-    let (name, tip) = named(Action::ResetTurn);
-    if widgets::icon_button_tip(ui, Glyph::Rotate, 16.0, name, &tip, true).clicked() {
+    let (glyph, name, tip) = named(Action::ResetTurn);
+    if widgets::icon_button_tip(ui, glyph, 16.0, name, &tip, true).clicked() {
         canvas.turn_to(0.0);
     }
-    let (name, tip) = named(Action::Mirror);
-    if widgets::icon_toggle(
-        ui,
-        Glyph::MirrorHorizontal,
-        16.0,
-        name,
-        &tip,
-        canvas.is_mirrored(),
-    )
-    .clicked()
-    {
+    let (glyph, name, tip) = named(Action::Mirror);
+    if widgets::icon_toggle(ui, glyph, 16.0, name, &tip, canvas.is_mirrored()).clicked() {
         canvas.set_mirrored(!canvas.is_mirrored());
     }
 }
@@ -1033,7 +1018,12 @@ fn view_controls(ui: &mut egui::Ui, canvas: &mut Canvas, pointer: Option<[f64; 2
         canvas.zoom_to(f64::from(percent) / 100.0);
     }
     view_turn(ui, canvas, keys);
-    let fit = widgets::text_icon_button(ui, Glyph::FitView, tr("fit"), tr("fit-tip"));
+    let fit = widgets::text_icon_button(
+        ui,
+        actions::button_glyph(Action::Fit),
+        tr("fit"),
+        tr("fit-tip"),
+    );
     if fit.clicked() {
         canvas.fit();
     }
@@ -1240,53 +1230,47 @@ fn action_buttons(
 ) {
     ui.spacing_mut().item_spacing.x = 2.0;
     let keys = &panels.keys;
-    let button = |ui: &mut egui::Ui, glyph, name, tip, action| {
-        let tip = widgets::with_key(tr(tip), &keys.text(action));
+    // `key` is the action whose key the tip names.
+    let keyed = |ui: &mut egui::Ui, action, name, tip, key| {
+        let tip = widgets::with_key(tr(tip), &keys.text(key));
+        let glyph = actions::button_glyph(action);
         widgets::icon_button_tip(ui, glyph, 18.0, tr(name), &tip, true).clicked()
     };
+    let button = |ui: &mut egui::Ui, action, name, tip| keyed(ui, action, name, tip, action);
     if pending.is_none()
         && button(
             ui,
-            Glyph::Scale,
+            Action::Transform,
             "transform-selection",
             "transform-selection-tip",
-            Action::Transform,
         )
     {
         canvas.begin_transform();
     }
     if button(
         ui,
-        Glyph::MirrorHorizontal,
-        "flip-horizontal",
-        "flip-horizontal",
         Action::FlipHorizontal,
+        "flip-horizontal",
+        "flip-horizontal",
     ) {
         canvas.flip(true);
     }
-    if button(
-        ui,
-        Glyph::MirrorVertical,
-        "flip-vertical",
-        "flip-vertical",
-        Action::FlipVertical,
-    ) {
+    if button(ui, Action::FlipVertical, "flip-vertical", "flip-vertical") {
         canvas.flip(false);
     }
     if pending.is_some() {
         ui.separator();
         if button(
             ui,
-            Glyph::Confirm,
+            Action::ApplyTransform,
             "transform-apply",
             "transform-apply-tip",
-            Action::ApplyTransform,
         ) {
             canvas.apply_transform();
         }
-        if button(
+        if keyed(
             ui,
-            Glyph::Cancel,
+            Action::CancelTransform,
             "transform-cancel",
             "transform-cancel-tip",
             // Escape cancels it when it has no key of its own.
@@ -1315,28 +1299,20 @@ fn action_buttons(
     let restyle = restyle::available(canvas)
         && button(
             ui,
-            Glyph::Brush,
+            Action::Restyle,
             "restyle-selected",
             "restyle-selected-tip",
-            Action::Restyle,
         );
     if button(
         ui,
-        Glyph::Delete,
-        "delete-selected",
-        "delete-selected",
         Action::DeleteSelected,
+        "delete-selected",
+        "delete-selected",
     ) {
         canvas.delete_selected();
     }
     ui.separator();
-    if button(
-        ui,
-        Glyph::Deselect,
-        "edit-deselect",
-        "edit-deselect",
-        Action::Deselect,
-    ) {
+    if button(ui, Action::Deselect, "edit-deselect", "edit-deselect") {
         canvas.edit_settled(Session::deselect);
     }
     if restyle {
@@ -1686,7 +1662,7 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
         let (glyph, ink) = if playing {
             (Glyph::Pause, theme::accent_text())
         } else {
-            (Glyph::Play, theme::text())
+            (actions::button_glyph(Action::Animate), theme::text())
         };
         icons::paint(
             ui.painter(),
@@ -1769,7 +1745,8 @@ fn animation_controls(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panel
             panels.report(result);
         }
         let tip = widgets::with_key(tr("bar-hide-tip"), &panels.keys.text(Action::AnimationBar));
-        let hide = widgets::text_icon_button(ui, Glyph::MoveDown, tr("bar-hide"), &tip);
+        let glyph = actions::button_glyph(Action::AnimationBar);
+        let hide = widgets::text_icon_button(ui, glyph, tr("bar-hide"), &tip);
         if hide.clicked() {
             panels.layout.animation_bar = false;
         }
@@ -1783,8 +1760,8 @@ fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     let keys = &panels.keys;
     let onion = canvas.onion_skin();
     let tip = widgets::with_key(tr("onion-skin-tip"), &keys.text(Action::OnionSkin));
-    let response =
-        widgets::icon_button_tip(ui, Glyph::OnionSkin, 20.0, tr("onion-skin"), &tip, true);
+    let glyph = actions::button_glyph(Action::OnionSkin);
+    let response = widgets::icon_button_tip(ui, glyph, 20.0, tr("onion-skin"), &tip, true);
     egui::Popup::context_menu(&response).show(|ui| {
         ui.set_min_width(240.0);
         ui.set_max_width(280.0);
@@ -1835,7 +1812,8 @@ fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         tr("key-add")
     };
     let tip = widgets::with_key(text, &keys.text(Action::ToggleKey));
-    if widgets::icon_button_tip(ui, Glyph::Key, 20.0, text, &tip, true).clicked() {
+    let glyph = actions::button_glyph(Action::ToggleKey);
+    if widgets::icon_button_tip(ui, glyph, 20.0, text, &tip, true).clicked() {
         canvas.toggle_key();
     }
     let tip = widgets::with_key(
@@ -1844,7 +1822,7 @@ fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     );
     let folder = widgets::icon_button_tip(
         ui,
-        Glyph::AnimationFolder,
+        actions::button_glyph(Action::AnimationFolder),
         20.0,
         tr("animation-folder-make"),
         &tip,
@@ -1856,7 +1834,8 @@ fn animation_buttons(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
     }
     let in_folder = canvas.session().folder().is_some();
     let tip = widgets::with_key(tr("cel-new"), &panels.keys.text(Action::NewCel));
-    if widgets::icon_button_tip(ui, Glyph::NewCel, 20.0, tr("cel-new"), &tip, in_folder).clicked() {
+    let glyph = actions::button_glyph(Action::NewCel);
+    if widgets::icon_button_tip(ui, glyph, 20.0, tr("cel-new"), &tip, in_folder).clicked() {
         let result = canvas.edit(Session::new_cel);
         panels.report(result);
     }
@@ -2014,4 +1993,50 @@ pub fn status_bar(
         });
     });
     cancel
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the text in `shape` shows.
+    fn text_bounds(shape: &egui::Shape, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Text(text) => found.push(text.visual_bounding_rect()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    text_bounds(shape, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn an_options_text_wraps_inside_its_card() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let mut card = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.allocate_ui(egui::vec2(180.0, 400.0), |ui| {
+                card = shape_option(
+                    ui,
+                    false,
+                    "Pixel-based",
+                    "Skip interpolation without removing existing transparency; edges may look stepped",
+                )
+                .rect;
+            });
+        });
+        output.textures_delta.clear();
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            text_bounds(&clipped.shape, &mut found);
+        }
+        assert_eq!(found.len(), 2, "the name and what it does");
+        assert!(card.width() <= 180.0, "{card:?}");
+        for text in found {
+            assert!(card.contains_rect(text), "{text:?} outside {card:?}");
+        }
+    }
 }

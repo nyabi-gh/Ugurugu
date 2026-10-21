@@ -311,10 +311,7 @@ impl Session {
     /// from the first frame.
     pub fn make_animation_folder(&mut self) -> Result<Outcome, EditError> {
         self.settle()?;
-        let name = (1..)
-            .map(|number| format!("Animation {number}"))
-            .find(|name| !crate::named(&self.document().layers, name))
-            .expect("fewer layers than numbers");
+        let name = self.first_free_name(crate::Named::AnimationFolder);
         let (_, changes) = command::make_animation_folder(self.document(), self.layer, name)?;
         self.history_mut()?
             .edit("Make animation folder", |_| changes)
@@ -327,7 +324,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         };
         self.settle()?;
-        let name = format!("Cel {}", command::next_layer_id(self.document()).0);
+        let name = self.name_of(crate::Named::Cel, command::next_layer_id(self.document()).0);
         let (id, changes) = command::new_cel(self.document(), folder, self.cycle(), name)?;
         let outcome = self.history_mut()?.edit("New cel", |_| changes)?;
         if let Outcome::Committed(_) = outcome {

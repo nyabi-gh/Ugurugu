@@ -67,6 +67,9 @@ pub struct Dialog {
     icon: Option<egui::TextureHandle>,
     /// When the diagnostic info was last copied.
     copied: Option<std::time::Instant>,
+    /// Whether restoring the defaults waits for a yes: it takes back every
+    /// shortcut set, on whichever tab it is pressed.
+    confirming_restore: bool,
 }
 
 fn theme_name(mode: theme::Mode) -> &'static str {
@@ -157,6 +160,8 @@ pub fn show(
     let Some(dialog) = panels.settings.as_mut() else {
         return;
     };
+    // Escape or a click outside answers the question over the settings.
+    let asking = dialog.confirming_restore;
     let before = store.get().clone();
     let mut settings = before.clone();
     let mut close = false;
@@ -246,10 +251,7 @@ pub fn show(
                     true,
                 );
                 if restore.clicked() {
-                    settings = settings.restored();
-                    dialog.picking_accent = false;
-                    dialog.capturing = None;
-                    dialog.refusal = None;
+                    dialog.confirming_restore = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if widgets::button(ui, tr("settings-close"), widgets::Emphasis::Primary, true)
@@ -260,13 +262,44 @@ pub fn show(
                 });
             });
         });
+    if dialog.confirming_restore && confirm_restore(ctx, dialog) {
+        settings = settings.restored();
+        dialog.picking_accent = false;
+        dialog.capturing = None;
+        dialog.refusal = None;
+    }
     if settings != before {
         store.change(|kept| *kept = settings);
         apply(ctx, store.get(), canvas, files, &mut panels.keys);
     }
-    if close || modal.should_close() {
+    if close || (modal.should_close() && !asking) {
         panels.settings = None;
     }
+}
+
+/// Asks over the settings whether to restore the defaults; whether to now.
+fn confirm_restore(ctx: &egui::Context, dialog: &mut Dialog) -> bool {
+    let mut restore = false;
+    let mut cancel = false;
+    let asked = widgets::dialog(
+        ctx,
+        "restore the default settings",
+        420.0,
+        tr("settings-restore-title"),
+        Some(tr("settings-restore-text")),
+        |ui| {
+            widgets::dialog_buttons(ui, |ui| {
+                use widgets::{Emphasis, button};
+                restore =
+                    button(ui, tr("settings-restore-defaults"), Emphasis::Primary, true).clicked();
+                cancel = button(ui, tr("dialog-cancel"), Emphasis::Secondary, true).clicked();
+            });
+        },
+    );
+    if restore || cancel || asked.should_close() {
+        dialog.confirming_restore = false;
+    }
+    restore
 }
 
 /// A tab in the list on the left: a bar in the accent and a raised fill
@@ -408,11 +441,13 @@ fn accent_swatch(ui: &mut egui::Ui, dialog: &mut Dialog, settings: &Settings) {
 
 fn drawing(ui: &mut egui::Ui, settings: &mut Settings) {
     widgets::card(ui, |ui| {
+        // Off also takes away what plays the wobble: the preview and the
+        // animated exports, as in 2.2.13, which did not say so.
         widgets::switch_row(
             ui,
             true,
             tr("settings-wobble-animation"),
-            None,
+            Some(tr("settings-wobble-animation-tip")),
             &mut settings.wobble_animation,
             true,
         );

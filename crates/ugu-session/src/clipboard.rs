@@ -69,7 +69,10 @@ impl Session {
             .map_or((None, self.document().layers.len()), |(parent, index)| {
                 (parent, index + 1)
             });
-        let name = format!("Layer {}", command::next_layer_id(self.document()).0);
+        let name = self.name_of(
+            crate::Named::Layer,
+            command::next_layer_id(self.document()).0,
+        );
         let cycle = self.cycle();
         let mut added = None;
         let outcome = self.history.group(label, |group| {

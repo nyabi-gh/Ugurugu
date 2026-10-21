@@ -243,7 +243,7 @@ impl Tab {
     fn new(document: Document, saved: bool, cache: CacheWorker, generation: u64) -> Self {
         let [width, height] = document.canvas.map(|edge| edge as u16);
         Self {
-            session: Session::new(document, saved),
+            session: open_session(document, saved),
             file: crate::files::DocumentFile::new(),
             cache,
             split: None,
@@ -276,7 +276,7 @@ impl Tab {
     /// and the view's turn.
     fn reset(&mut self, document: Document, saved: bool, generation: u64) {
         let [width, height] = document.canvas.map(|edge| edge as u16);
-        self.session = Session::new(document, saved);
+        self.session = open_session(document, saved);
         self.generation = generation;
         self.split = None;
         self.preview = None;
@@ -355,6 +355,14 @@ pub struct Canvas {
     copied_key: Option<ugu_core::keys::Key>,
     /// The canvas size being changed on the canvas, if it is.
     sizing: Option<sizing::Sizing>,
+}
+
+/// A session for a tab, naming the layers it adds in the interface's
+/// language.
+fn open_session(document: Document, saved: bool) -> Session {
+    let mut session = Session::new(document, saved);
+    session.set_namer(crate::i18n::new_name);
+    session
 }
 
 /// A cache worker handing its renders to `done`.

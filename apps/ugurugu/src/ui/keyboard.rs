@@ -272,6 +272,30 @@ fn a_dialog_from_a_menu_closes_on_escape_and_gives_the_focus_back() {
 }
 
 #[test]
+fn restoring_the_default_settings_asks_first() {
+    use crate::theme::Mode;
+    let mut window = Window::new();
+    window
+        .settings
+        .change(|settings| settings.theme = Mode::Light);
+    window.key(Modifiers::COMMAND, Key::Comma);
+    window.tab_to_label(tr("settings-restore-defaults"));
+    window.key(NONE, Key::Space);
+    assert_eq!(window.settings.get().theme, Mode::Light, "not before a yes");
+    // Escape takes back the question, not the settings.
+    window.key(NONE, Key::Escape);
+    assert!(window.dialog(), "the settings stay open");
+    assert_eq!(window.settings.get().theme, Mode::Light);
+    window.tab_to_label(tr("settings-restore-defaults"));
+    window.key(NONE, Key::Space);
+    // The question takes the focus, on its own button of the same name.
+    assert_eq!(window.label(), tr("settings-restore-defaults"));
+    window.key(NONE, Key::Space);
+    assert_eq!(window.settings.get().theme, Mode::default());
+    assert!(window.dialog(), "the settings stay open");
+}
+
+#[test]
 fn a_menu_item_pressed_by_a_screen_reader_closes_the_menu() {
     let mut window = Window::new();
     window.click_named(tr("menu-edit"));

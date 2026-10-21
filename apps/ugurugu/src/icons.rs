@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 
 use egui::{Color32, Pos2, Rect, Shape, Stroke};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Glyph {
     Brush = 0,
     Eraser = 1,
@@ -54,6 +54,13 @@ pub enum Glyph {
     NewCel = 40,
     /// The symmetry ruler tool.
     Symmetry = 41,
+    /// Turning the view, not undoing.
+    TurnLeft = 42,
+    TurnRight = 43,
+    /// Mirroring the view, not the selection.
+    MirrorView = 44,
+    /// Changing the strokes in the selection, not the brush tool.
+    Restyle = 45,
 }
 
 /// A diamond, as a key is drawn on a timeline.
@@ -109,6 +116,38 @@ fn arrow_head(shapes: &mut Shapes, tip: [f64; 2], travel: f64, length: f64) {
     let at = |side: [f64; 2]| [tip[0] + side[0] * length, tip[1] + side[1] * length];
     shapes.lines.push(vec![at(left), tip]);
     shapes.lines.push(vec![tip, at(right)]);
+}
+
+/// A page tilted the way an arrow over it turns it: left, or mirrored for
+/// right.
+fn turned_page(shapes: &mut Shapes, left: bool) {
+    let side = |[x, y]: [f64; 2]| if left { [x, y] } else { [24.0 - x, y] };
+    let (cos, sin) = (
+        (-18.0_f64).to_radians().cos(),
+        (-18.0_f64).to_radians().sin(),
+    );
+    let corner =
+        |[dx, dy]: [f64; 2]| side([13.4 + dx * cos - dy * sin, 14.6 + dx * sin + dy * cos]);
+    shapes.lines.push(
+        [
+            [-4.0, -5.0],
+            [4.0, -5.0],
+            [4.0, 5.0],
+            [-4.0, 5.0],
+            [-4.0, -5.0],
+        ]
+        .map(corner)
+        .to_vec(),
+    );
+    let arc: Points = (0..=20)
+        .map(|step| {
+            let radians = (-25.0 - 125.0 * f64::from(step) / 20.0).to_radians();
+            side([12.6 + 8.4 * radians.cos(), 11.4 + 8.4 * radians.sin()])
+        })
+        .collect();
+    let tip = arc[arc.len() - 1];
+    shapes.lines.push(arc);
+    arrow_head(shapes, tip, if left { 245.0 } else { 295.0 }, 4.0);
 }
 
 fn shapes(glyph: Glyph) -> Shapes {
@@ -389,6 +428,29 @@ fn shapes(glyph: Glyph) -> Shapes {
             }
             lines.push(vec![[8.6, 6.4], [3.6, 12.0], [8.6, 17.6]]);
             lines.push(vec![[15.4, 6.4], [20.4, 12.0], [15.4, 17.6]]);
+        }
+        Glyph::TurnLeft => turned_page(&mut shapes, true),
+        Glyph::TurnRight => turned_page(&mut shapes, false),
+        Glyph::MirrorView => {
+            // The view's corners, as fitting it, round a small mirrored pair.
+            lines.push(vec![[4.6, 8.6], [4.6, 4.6], [8.6, 4.6]]);
+            lines.push(vec![[15.4, 4.6], [19.4, 4.6], [19.4, 8.6]]);
+            lines.push(vec![[19.4, 15.4], [19.4, 19.4], [15.4, 19.4]]);
+            lines.push(vec![[8.6, 19.4], [4.6, 19.4], [4.6, 15.4]]);
+            lines.push(vec![[12.0, 7.6], [12.0, 16.4]]);
+            shapes
+                .fills
+                .push(vec![[10.2, 9.0], [7.0, 12.0], [10.2, 15.0]]);
+            lines.push(vec![[13.8, 9.0], [17.0, 12.0], [13.8, 15.0], [13.8, 9.0]]);
+        }
+        Glyph::Restyle => {
+            // A drawn line over two settings, its colour and width.
+            lines.push(quad([4.4, 9.4], [9.0, 2.6], [12.0, 7.4], 12));
+            lines.push(quad([12.0, 7.4], [15.0, 12.2], [19.6, 5.4], 12));
+            for (y, knob) in [(14.2, 8.4), (19.6, 15.6)] {
+                lines.push(vec![[4.4, y], [19.6, y]]);
+                shapes.fills.push(circle([knob, y], 2.2, 12));
+            }
         }
         Glyph::Shape => {
             // A square, and a circle over its corner.

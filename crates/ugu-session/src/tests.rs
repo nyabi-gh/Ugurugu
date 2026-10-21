@@ -400,6 +400,45 @@ fn a_duplicates_name_is_cut_to_the_limit() {
 }
 
 #[test]
+fn whatever_adds_a_layer_names_it_with_the_windows_namer() {
+    use crate::Named as Kind;
+    fn namer(kind: Kind, number: u32) -> String {
+        format!("{kind:?} no. {number}")
+    }
+    let mut session = session();
+    session.set_namer(namer);
+    let name = |session: &Session, id: LayerId| session.document().layer(id).unwrap().name.clone();
+    session.add_layer().unwrap();
+    let layer = session.current_layer();
+    assert_eq!(name(&session, layer), namer(Kind::Layer, layer.0));
+    session.add_group().unwrap();
+    let group = session.document().position(layer).unwrap().0.unwrap();
+    assert_eq!(name(&session, group), "Group no. 1");
+    session.make_animation_folder().unwrap();
+    let folder = session.folder().unwrap();
+    assert_eq!(name(&session, folder), "AnimationFolder no. 1");
+    session.set_frame(6).unwrap();
+    session.new_cel().unwrap();
+    let cel = session.current_layer();
+    assert_eq!(name(&session, cel), namer(Kind::Cel, cel.0));
+
+    let mut session = Session::new(Document::new([200, 100]), false);
+    session.set_namer(namer);
+    draw(&mut session, &Tools::default(), 10.0, 150.0);
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [20.0, 30.0],
+        [80.0, 70.0],
+        Combine::Replace,
+    );
+    let clip = session.copy().unwrap();
+    session.paste(&clip).unwrap();
+    let pasted = session.current_layer();
+    assert_eq!(name(&session, pasted), namer(Kind::Layer, pasted.0));
+}
+
+#[test]
 fn an_unchanged_property_is_no_edit() {
     let mut session = session();
     let layer = session.current_layer();
