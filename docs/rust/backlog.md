@@ -123,7 +123,7 @@
 | B3-72 | `vello_cpu` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다 | `Cargo.toml` | evidence.md 렌더러 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-119 | `strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas`가 한 번 실패 | 2026-10-14 `cargo test --workspace --locked`(debug, `UGU_WORKER_THREADS=8`) 전체 실행에서 `shows_the_document`의 "split 반올림 안 최대 3" 단언이 한 번 실패했다. 그 시험만 3번, 앱 crate 전체를 5번 다시 돌렸을 때는 모두 통과했다. 바뀐 값은 남기지 못했다. 원인 미확인(가설: 캔버스가 받은 split의 시점에 따라 비교 대상이 달라지거나, 예산 초과 split의 반올림 차이(3.4.2에서 없앰)가 3을 넘은 경우). 실패할 때의 차이 값을 남기게 하고 원인을 찾는다 | `apps/ugurugu/src/files/end_to_end.rs` `shows_the_document` | 2026-10-14 레이어 복제 작업 중 |
+| B3-119 | `strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas`가 가끔 실패 | `shows_the_document`의 "split 반올림 안 최대 3" 단언이 2026-10-14 로컬 debug 전체 실행(`UGU_WORKER_THREADS=8`), 2026-10-15 main CI(`c6a4e36`, 실행 38691779083), 2026-10-21 PR #120 CI(debug, 실행 39608805791)에서 실패했고, 다시 돌리면 통과했다. 값이 남은 두 번은 모두 차이 255(한 화소가 완전히 다름)라 반올림 차이는 원인이 아니다. 원인 미확인(가설: 캔버스가 보인 split이 비교하는 문서와 다른 판, 곧 자르기 전이나 마지막 획 전의 것). 사용자가 자르기·크기 바꾸기 뒤 잠깐 틀린 그림을 보는지도 모른다. 원인을 찾는다 | `apps/ugurugu/src/files/end_to_end.rs` `shows_the_document` | 2026-10-14 레이어 복제 작업 중 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
