@@ -102,8 +102,9 @@ document from a Korean path through the file association, the taskbar's
 recent documents, an update that fails to download, an update offered at
 every start, updating with unsaved changes, checking for updates offline,
 uninstalling, and installing and running as a standard user. The results are
-in `<folder>\out\results.md`. The app looks for updates in the folder
-`UGURUGU_UPDATE_FEED` names instead of GitHub.
+in `<folder>\out\results.md`. With `-ShutDown` the Sandbox shuts itself down
+when the script ends, so the next run needs no `wsb stop`. The app looks for
+updates in the folder `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
 commit and no advisory is open; the release workflow runs no tests of its own.

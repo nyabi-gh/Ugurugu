@@ -522,6 +522,12 @@ pub(crate) mod tests {
 
     const WORKSPACE: [u8; 4] = [60, 62, 66, 255];
 
+    /// Held while a test has a device, so there is one at a time as in the
+    /// app: WARP, the adapter on CI, sometimes reads freed memory on a
+    /// worker thread of its own while devices on other threads are in use
+    /// (evidence.md 90).
+    static ONE_DEVICE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12,
@@ -562,6 +568,10 @@ pub(crate) mod tests {
         target: [u32; 2],
         prepare: impl FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat) -> D,
     ) -> Option<Vec<u8>> {
+        // Declared first, so released after everything made with the device.
+        let _alone = ONE_DEVICE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (device, queue) = device()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let draw = prepare(&device, &queue, format);

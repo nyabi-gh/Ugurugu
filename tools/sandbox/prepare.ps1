@@ -38,7 +38,10 @@ param(
     [string] $UguDoc = 'target/release/ugu-doc.exe',
     [string] $Vpk = 'vpk',
     # The Sandbox's memory; Windows' default when not given.
-    [int] $MemoryInMB
+    [int] $MemoryInMB,
+    # Shuts the Sandbox down when the script ends, for a Windows Sandbox
+    # without the wsb command to stop it.
+    [switch] $ShutDown
 )
 
 Set-StrictMode -Version Latest
@@ -101,6 +104,14 @@ if ($Scenario -in 'pointer', 'gui') {
 Copy-Item (Join-Path $PSScriptRoot 'common.ps1'), (Join-Path $PSScriptRoot "$Scenario.ps1") $in
 
 $memory = if ($MemoryInMB) { "<MemoryInMB>$MemoryInMB</MemoryInMB>" } else { '' }
+$script = "C:\ugu\in\$Scenario.ps1"
+$command = if ($ShutDown) {
+    # Also when the script stops on an error. The call operator & is
+    # escaped for the XML.
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"try { &amp; '$script' } finally { shutdown.exe /s /t 0 }`""
+} else {
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script"
+}
 $wsb = @"
 <Configuration>
   $memory
@@ -119,7 +130,7 @@ $wsb = @"
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ugu\in\$Scenario.ps1</Command>
+    <Command>$command</Command>
   </LogonCommand>
 </Configuration>
 "@

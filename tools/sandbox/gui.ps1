@@ -1461,6 +1461,9 @@ Step 'Animation icons at 100%' {
 
 Step 'Canvas size by dragging the frame' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    # The animation steps leave the move tool chosen, and its handles on the
+    # middle of the paper's edges shorten what Find-Paper measures there.
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
     $process = Start-App
     $words = Read-Words 'en'
     Invoke-Word $process $words 'menu-edit'
