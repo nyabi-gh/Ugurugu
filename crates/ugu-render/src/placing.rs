@@ -18,6 +18,8 @@ use crate::tile::TiledSurface;
 
 pub struct Placing {
     original: Arc<TiledSurface>,
+    /// The split's `reached` and `redraw` with `original`.
+    reached: (Option<[u32; 4]>, bool),
     /// What differs from `original` now.
     shown: Option<PixelRect>,
 }
@@ -47,6 +49,7 @@ impl Split {
         };
         Some(Placing {
             original: surface.clone(),
+            reached: (self.reached, self.redraw),
             shown: None,
         })
     }
@@ -68,6 +71,7 @@ impl Split {
         if let Some(rect) = before {
             self.restore(&placing.original, rect);
         }
+        (self.reached, self.redraw) = placing.reached;
         let mut now = None;
         if let Some((coverage, antialias, color)) = fill {
             now = union(
@@ -90,6 +94,7 @@ impl Split {
         }
         let edited = self.edited?;
         self.sources[edited] = Held::Tiles(placing.original);
+        (self.reached, self.redraw) = placing.reached;
         placing.shown
     }
 

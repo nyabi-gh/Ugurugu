@@ -16,13 +16,18 @@ use ugu_core::document::{Document, LayerId};
 use ugu_core::history::LayerRevisions;
 use ugu_core::ops::Wobble;
 use ugu_core::store::{BrushEngine, Mask, Stroke};
+use vello_common::geometry::RectU16;
+use vello_common::strip::{StripFillSegment, visit_strip_fill_segments};
+use vello_common::strip_generator::{StripGenerator, StripStorage};
+use vello_common::tile::Tile;
 use vello_cpu::color::AlphaColor;
 use vello_cpu::kurbo::Affine;
+use vello_cpu::peniko::Fill;
 use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
 use crate::composite::{self, Overlay, Put, Source};
 use crate::dab::{self, Dab};
-use crate::document::{DocumentRenderer, Purpose};
+use crate::document::{DocumentRenderer, Purpose, drawn_from, tiles_reached};
 use crate::live::LiveStroke;
 use crate::mask::Runs;
 use crate::pixel;
@@ -90,6 +95,9 @@ pub fn inside(clip: Option<&Mask>, x: usize, y: usize) -> bool {
 }
 
 /// Vello's premultiplied bytes for a straight colour.
+// Called for every pixel of a decoded image, which took 70% longer to decode
+// without the hint once this module grew (evidence.md section 92).
+#[inline]
 pub fn premultiplied([r, g, b, a]: [u8; 4]) -> [u8; 4] {
     let color = AlphaColor::<vello_cpu::color::Srgb>::from_rgba8(r, g, b, a)
         .premultiply()
@@ -115,6 +123,16 @@ pub struct Split {
     /// Where the edited layer's pixels are shown on this frame; `None`
     /// where they are drawn.
     pub moved: Option<Moved>,
+    /// The tiles a full render draws the edited layer's pixels on (left,
+    /// top, right, bottom); `None` while nothing of it is drawn. Lines are
+    /// stamped as drawn from their corner, as Vello rounds a line's edge by
+    /// where it is drawn from, and at the aliasing threshold that turns a
+    /// whole pixel.
+    pub reached: Option<[u32; 4]>,
+    /// Something stamped reached tiles left of or above `reached`, so a
+    /// full render now draws what was there before from elsewhere, which
+    /// can round apart: the split is to be drawn again.
+    pub redraw: bool,
 }
 
 impl Split {
@@ -143,12 +161,54 @@ impl Split {
         frames: u32,
         clip: Option<&Mask>,
     ) -> Option<PixelRect> {
+        let pen = Pen::new(stroke, wobble, frames);
+        if !erase {
+            self.reaches(stroke::bounds(&stroke.points, &pen));
+        }
+        let drawn = self.drawn()?;
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
         };
-        let pen = Pen::new(stroke, wobble, frames);
         let surface = Arc::make_mut(surface);
-        stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip)
+        stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip, drawn)
+    }
+
+    /// Takes note that a full render of the edited layer draws what lies in
+    /// `bounds` (document pixels).
+    pub(crate) fn reaches(&mut self, bounds: [f64; 4]) {
+        let Some(Held::Tiles(surface)) = self.edited.map(|at| &self.sources[at]) else {
+            return;
+        };
+        let Some([left, top, right, bottom]) = tiles_reached(bounds, 1, surface) else {
+            return;
+        };
+        self.reached = Some(match self.reached {
+            Some(was) => {
+                self.redraw |= left < was[0] || top < was[1];
+                [
+                    was[0].min(left),
+                    was[1].min(top),
+                    was[2].max(right),
+                    was[3].max(bottom),
+                ]
+            }
+            None => [left, top, right, bottom],
+        });
+    }
+
+    /// The pixels a full render draws the edited layer in; `None` while it
+    /// draws none, so an eraser has nothing to take away.
+    fn drawn(&self) -> Option<PixelRect> {
+        let Held::Tiles(surface) = &self.sources[self.edited?] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        let (origin, extent) = surface.area(self.reached?);
+        Some([
+            origin[0],
+            origin[1],
+            origin[0] + u32::from(extent[0]),
+            origin[1] + u32::from(extent[1]),
+        ])
     }
 
     /// `stamp` for `strokes` in order, each with whether it erases and its
@@ -165,16 +225,24 @@ impl Split {
         frames: u32,
         threads: usize,
     ) -> Option<PixelRect> {
+        let pens: Vec<Pen> = strokes
+            .iter()
+            .map(|(stroke, ..)| Pen::new(stroke, wobble, frames))
+            .collect();
+        // A full render draws them all from where the last one leaves the
+        // layer's pixels.
+        for ((stroke, erase, _), pen) in strokes.iter().zip(&pens) {
+            if !erase {
+                self.reaches(stroke::bounds(&stroke.points, pen));
+            }
+        }
+        let area = self.drawn()?;
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
         };
         let surface = Arc::make_mut(surface);
         let size = surface.size();
         let frame = self.frame;
-        let pens: Vec<Pen> = strokes
-            .iter()
-            .map(|(stroke, ..)| Pen::new(stroke, wobble, frames))
-            .collect();
         let lines: Vec<usize> = (0..strokes.len())
             .filter(|&index| strokes[index].0.brush.engine == BrushEngine::Line)
             .collect();
@@ -201,6 +269,7 @@ impl Split {
                                         &pens[index],
                                         frame,
                                         size,
+                                        area,
                                     )?;
                                     let coverage =
                                         std::mem::replace(&mut stamp.piece, Pixmap::new(0, 0));
@@ -238,7 +307,7 @@ impl Split {
             } else {
                 lay_lines(surface, &run, threads);
                 run.clear();
-                stamp.apply_stroke(surface, stroke, erase, &pens[index], frame, clip)
+                stamp.apply_stroke(surface, stroke, erase, &pens[index], frame, clip, area)
             };
             changed = match (changed, rect) {
                 (Some(a), Some(b)) => Some([
@@ -271,11 +340,12 @@ impl Split {
 
     /// Puts `plan`'s layers (`RenderPlan::reference`) together into `out`,
     /// which must have the canvas size, from the surfaces held: what a full
-    /// render of the plan gives. `false` when the plan has no layers or this
+    /// render of the plan gives. `false` when the plan has no layers, this
     /// split does not hold one of them apart (a hidden layer, or sources put
-    /// together ahead of time); the caller then renders the plan.
+    /// together ahead of time) or is to be drawn again; the caller then
+    /// renders the plan.
     pub fn reference(&self, plan: &RenderPlan, out: &mut Pixmap, threads: usize) -> bool {
-        let Some(layers) = &self.layers else {
+        let Some(layers) = self.layers.as_ref().filter(|_| !self.redraw) else {
             return false;
         };
         let sources = self.sources();
@@ -316,18 +386,20 @@ impl Split {
         color: [u8; 4],
         behind: bool,
     ) -> Option<PixelRect> {
-        let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
-            unreachable!("a paint layer's pixels are tiles");
-        };
-        let surface = Arc::make_mut(surface);
         let (area, fringe) = Runs::fill(coverage, clip, antialias);
-        let size = surface.size().map(|edge| edge as i32);
-        let [left, top, right, bottom] = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
+        let bounds = [area.bounds(), fringe.as_ref().and_then(Runs::bounds)]
             .into_iter()
             .flatten()
             .reduce(|[l, t, r, b], [l2, t2, r2, b2]| {
                 [l.min(l2), t.min(t2), r.max(r2), b.max(b2)]
             })?;
+        self.reaches(bounds.map(f64::from));
+        let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        let surface = Arc::make_mut(surface);
+        let size = surface.size().map(|edge| edge as i32);
+        let [left, top, right, bottom] = bounds;
         let rect = [
             left.max(0),
             top.max(0),
@@ -413,9 +485,11 @@ impl DocumentRenderer {
                 frame: cycle,
                 puts: program.puts,
                 background: None,
+                reached: reached(&program.sources, program.edited),
                 sources: program.sources,
                 edited: program.edited,
                 layers: None,
+                redraw: false,
             };
             let rect = [
                 0,
@@ -437,7 +511,7 @@ impl DocumentRenderer {
         if !self.render_plan(document, &plan, frame, revisions, display) {
             return None;
         }
-        let sources = plan
+        let sources: Vec<Held> = plan
             .layers
             .iter()
             .map(|(id, _)| Held::Tiles(self.surface(*id).expect("just drawn")))
@@ -445,16 +519,27 @@ impl DocumentRenderer {
         // The edited layer's pixels change in place from now on, so this
         // renderer does not keep a share of them.
         self.forget(layer);
+        let edited = plan.layers.iter().position(|(id, _)| *id == layer);
         Some(Split {
             moved,
             layer,
             frame: cycle,
-            edited: plan.layers.iter().position(|(id, _)| *id == layer),
+            edited,
             puts: composite::program(&plan),
             background: Some(plan.background(document)),
+            reached: reached(&sources, edited),
             sources,
             layers: Some(plan.layers.iter().map(|(id, _)| *id).collect()),
+            redraw: false,
         })
+    }
+}
+
+/// The tiles the `edited` one of `sources`, just drawn, covers.
+fn reached(sources: &[Held], edited: Option<usize>) -> Option<[u32; 4]> {
+    match &sources[edited?] {
+        Held::Tiles(surface) => surface.span(),
+        Held::Whole(_) => unreachable!("a paint layer's pixels are tiles"),
     }
 }
 
@@ -516,6 +601,9 @@ pub fn composite(split: &Split, live: &[&LiveStroke], rect: PixelRect, out: &mut
 pub struct Stamp {
     context: RenderContext,
     resources: Resources,
+    /// Vello's own strips of a line, as its renderer makes them.
+    strips: StripGenerator,
+    storage: StripStorage,
     painter: dab::Painter,
     dabs: Vec<Dab>,
     /// A dab stroke's pixels, premultiplied.
@@ -537,6 +625,8 @@ impl Default for Stamp {
                 },
             ),
             resources: Resources::new(),
+            strips: StripGenerator::new(0, 0, document_level()),
+            storage: StripStorage::default(),
             painter: dab::Painter::default(),
             dabs: Vec::new(),
             buffer: Vec::new(),
@@ -546,9 +636,11 @@ impl Default for Stamp {
 }
 
 impl Stamp {
-    /// Adds a committed stroke to `surface` as drawing the layer again would:
-    /// painted over, or erased from, what is there, only inside `clip` when
-    /// there is one. Returns the pixels it may have changed.
+    /// Adds a committed stroke to `surface`, of which a full render draws
+    /// the pixels in `drawn`, as drawing the layer again would: painted
+    /// over, or erased from, what is there, only inside `clip` when there is
+    /// one. Returns the pixels it may have changed.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_stroke(
         &mut self,
         surface: &mut TiledSurface,
@@ -557,6 +649,7 @@ impl Stamp {
         pen: &Pen,
         frame: u32,
         clip: Option<&Mask>,
+        drawn: PixelRect,
     ) -> Option<PixelRect> {
         match stroke.brush.engine {
             BrushEngine::Line => {}
@@ -565,12 +658,13 @@ impl Stamp {
                 return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
             }
         }
-        let rect = self.line_coverage(stroke, pen, frame, surface.size())?;
+        let rect = self.line_coverage(stroke, pen, frame, surface.size(), drawn)?;
         lay_line(surface, rect, &self.piece, stroke, erase, clip);
         Some(rect)
     }
 
-    /// A line stroke's coverage, drawn into `self.piece`; returns where it
+    /// A line stroke's coverage as a full render drawing the pixels in
+    /// `drawn` gives it, into the alpha of `self.piece`; returns where it
     /// lies.
     fn line_coverage(
         &mut self,
@@ -578,15 +672,68 @@ impl Stamp {
         pen: &Pen,
         frame: u32,
         size: [u32; 2],
+        drawn: PixelRect,
     ) -> Option<PixelRect> {
         let rect = clamp(stroke::bounds(&stroke.points, pen), size)?;
         let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
         let path = stroke::outline(&samples, pen, frame)?;
-        self.draw(rect, |context| {
-            context.set_aliasing_threshold((!stroke.brush.antialias).then_some(128));
-            context.set_paint(AlphaColor::<vello_cpu::color::Srgb>::WHITE);
-            context.fill_path(&path);
-        });
+        let [left, top, right, bottom] = rect;
+        let width = (right - left) as usize;
+        self.piece.resize(width as u16, (bottom - top) as u16);
+        let mut piece = self.piece.data_as_u8_slice_mut();
+        piece.fill(0);
+        // An eraser can reach past what is drawn, where it has nothing to
+        // take away.
+        let [from_x, from_y] = [left.max(drawn[0]), top.max(drawn[1])];
+        let [to_x, to_y] = [right.min(drawn[2]), bottom.min(drawn[3])];
+        if from_x >= to_x || from_y >= to_y {
+            return Some(rect);
+        }
+        // The strips Vello's renderer makes of the outline as it draws the
+        // layer from the corner of `drawn`, laid as its coarse pass lays
+        // them: alphas a column at a time where the outline's edges are,
+        // the whole pixel between them.
+        let [x0, y0] = [drawn[0], drawn[1]];
+        self.strips
+            .reset((drawn[2] - x0) as u16, (drawn[3] - y0) as u16);
+        self.storage.clear();
+        self.strips.generate_filled_path(
+            &path,
+            Fill::NonZero,
+            drawn_from([x0, y0], 1),
+            (!stroke.brush.antialias).then_some(128),
+            &mut self.storage,
+            None,
+        );
+        let [tile_width, tile_height] = [Tile::WIDTH, Tile::HEIGHT].map(u32::from);
+        let tiles = RectU16::new(
+            ((from_x - x0) / tile_width) as u16,
+            ((from_y - y0) / tile_height) as u16,
+            (to_x - x0).div_ceil(tile_width) as u16,
+            (to_y - y0).div_ceil(tile_height) as u16,
+        );
+        let alphas = &self.storage.alphas;
+        let lay = |piece: &mut [u8], segment: StripFillSegment, alpha_idx: Option<u32>| {
+            let [x, y] = [segment.x0(), segment.y()].map(u32::from);
+            let columns = (x + x0).max(from_x)..(u32::from(segment.x1()) + x0).min(to_x);
+            for row in (y + y0).max(from_y)..(y + y0 + tile_height).min(to_y) {
+                let line = (row - top) as usize * width;
+                for column in columns.clone() {
+                    piece[(line + (column - left) as usize) * 4 + 3] =
+                        alpha_idx.map_or(255, |at| {
+                            let offset = (column - x0 - x) * tile_height + row - y0 - y;
+                            alphas[(at + offset) as usize]
+                        });
+                }
+            }
+        };
+        visit_strip_fill_segments(
+            &self.storage.strips,
+            tiles,
+            &mut piece,
+            |piece, segment| lay(piece, segment.fill, Some(segment.alpha_idx)),
+            |piece, segment| lay(piece, segment, None),
+        );
         Some(rect)
     }
 
@@ -1316,6 +1463,117 @@ mod tests {
                     );
                     assert!(rect[2] > rect[0]);
                 }
+            }
+        }
+    }
+
+    /// The pen of a fresh install, aliased and 6 wide, in a wave across a
+    /// 390×300 canvas as `files::end_to_end` draws it.
+    fn ink(seed: u64) -> Stroke {
+        Stroke {
+            points: Arc::from(
+                (0..=40)
+                    .map(|step| Point {
+                        x: 20.0 + step as f32 * 7.0,
+                        y: 200.0 + (step as f32 * 0.3 + 2.0).sin() * 25.0,
+                        pressure: 1.0,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            color: Rgba8([0, 0, 0, 255]),
+            width: 6.0,
+            brush: Brush {
+                antialias: false,
+                ..ugu_core::brush::BRUSHES[0].brush
+            },
+            seed,
+        }
+    }
+
+    #[test]
+    fn an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws() {
+        let draw = |history: &mut History, stroke| {
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, LayerId(1), stroke, false, None)
+                })
+                .unwrap();
+        };
+        let empty = || History::new(Document::new([390, 300]), false);
+        // Drawn from the canvas's corner.
+        let covered = || {
+            let mut history = empty();
+            let mut across = stroke([2.0, 3.0], [388.0, 296.0], [200, 40, 40, 255], 7);
+            across.width = 2.0;
+            draw(&mut history, across);
+            history
+        };
+        // Drawn in runs, the last from the corner.
+        let resampled = || {
+            let mut history = History::new(Document::new([320, 200]), false);
+            draw(
+                &mut history,
+                stroke([20.0, 60.0], [300.0, 100.0], [0, 0, 0, 255], 8),
+            );
+            history
+                .edit("Crop", |document| {
+                    command::crop_canvas(document, [-30, 20], [260, 240])
+                })
+                .unwrap();
+            draw(
+                &mut history,
+                stroke([20.0, 210.0], [250.0, 190.0], [0, 0, 0, 255], 9),
+            );
+            history
+                .edit("Resample", |document| {
+                    command::resample_image(document, [390, 300], ugu_core::ops::Sampling::Smooth)
+                })
+                .unwrap();
+            history
+        };
+        // Stamped from the corner of their own pixels, these rounded a
+        // pixel at the aliasing threshold apart from a full render.
+        for seed in [
+            0xae07_639b_28ff_77c5,
+            0x25cc_0505_34bf_eed6,
+            0x7276_51ff_a42c_c2cc,
+            0x9023_5386_c91a_06c7,
+        ] {
+            for (name, mut history) in [
+                ("empty", empty()),
+                ("covered", covered()),
+                ("resampled", resampled()),
+            ] {
+                let layer = LayerId(1);
+                let (mut split, _) = split(&history, layer, 0);
+                let document = history.document();
+                split.stamp(
+                    &mut Stamp::default(),
+                    &ink(seed),
+                    false,
+                    layer_wobble(document, layer),
+                    document.frames,
+                    None,
+                );
+                let mut shown = canvas(document);
+                composite(&split, &[], whole(document), &mut shown);
+                draw(&mut history, ink(seed));
+                let mut renderer = DocumentRenderer::new(0);
+                let mut full = canvas(history.document());
+                let plan = RenderPlan::new(history.document(), Purpose::Display, 0);
+                renderer.render_plan(history.document(), &plan, 0, None, &mut full);
+                let Held::Tiles(stamped) = &split.sources[split.edited.unwrap()] else {
+                    unreachable!("a paint layer's pixels are tiles");
+                };
+                let drawn = renderer.surface(layer).unwrap().to_pixmap();
+                assert!(
+                    stamped.to_pixmap().data_as_u8_slice() == drawn.data_as_u8_slice(),
+                    "{name} layer, seed {seed:#x}"
+                );
+                assert!(
+                    shown.data_as_u8_slice() == full.data_as_u8_slice(),
+                    "{name} canvas, seed {seed:#x}"
+                );
             }
         }
     }

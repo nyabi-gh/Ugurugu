@@ -1417,9 +1417,15 @@ struct Area {
 impl Area {
     /// From document pixels to this area's pixels.
     fn base(self, shrink: u32) -> Affine {
-        Affine::translate((-f64::from(self.origin[0]), -f64::from(self.origin[1])))
-            * Affine::scale(1.0 / f64::from(shrink))
+        drawn_from(self.origin, shrink)
     }
+}
+
+/// From document pixels to those of pixels drawn from `origin` at
+/// 1/`shrink`.
+pub(crate) fn drawn_from(origin: [u32; 2], shrink: u32) -> Affine {
+    Affine::translate((-f64::from(origin[0]), -f64::from(origin[1])))
+        * Affine::scale(1.0 / f64::from(shrink))
 }
 
 /// A buffer of `size` from `free`, or from those `cache` kept, or a new one.
@@ -1672,24 +1678,13 @@ fn reach(
     surface: &TiledSurface,
 ) -> ([u32; 4], Vec<bool>) {
     let [columns, rows] = surface.grid();
-    let edge = f64::from(surface.edge());
-    let size = surface.size().map(f64::from);
     let mut reached = vec![false; (columns * rows) as usize];
     for bounds in bounds {
-        // One more pixel each way for antialiasing.
-        let [left, top, right, bottom] = bounds.map(|value| value / f64::from(shrink));
-        let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
-        let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
-        if from[0] >= to[0] || from[1] >= to[1] {
+        let Some([left, top, right, bottom]) = tiles_reached(bounds, shrink, surface) else {
             continue;
-        }
-        let first = from.map(|value| (value / edge) as u32);
-        let last = [
-            ((to[0] / edge).ceil() as u32).min(columns),
-            ((to[1] / edge).ceil() as u32).min(rows),
-        ];
-        for row in first[1]..last[1] {
-            for column in first[0]..last[0] {
+        };
+        for row in top..bottom {
+            for column in left..right {
                 reached[(row * columns + column) as usize] = true;
             }
         }
@@ -1705,6 +1700,33 @@ fn reach(
         ];
     }
     (span, reached)
+}
+
+/// The tiles of `surface` around what lies in `bounds` (document pixels)
+/// drawn at 1/`shrink`, as `reach` takes them: left, top, right and bottom
+/// column and row; `None` when it is off the surface.
+pub(crate) fn tiles_reached(
+    bounds: [f64; 4],
+    shrink: u32,
+    surface: &TiledSurface,
+) -> Option<[u32; 4]> {
+    let [columns, rows] = surface.grid();
+    let edge = f64::from(surface.edge());
+    let size = surface.size().map(f64::from);
+    // One more pixel each way for antialiasing.
+    let [left, top, right, bottom] = bounds.map(|value| value / f64::from(shrink));
+    let from = [(left - 1.0).max(0.0), (top - 1.0).max(0.0)];
+    let to = [(right + 1.0).min(size[0]), (bottom + 1.0).min(size[1])];
+    if from[0] >= to[0] || from[1] >= to[1] {
+        return None;
+    }
+    let [first_column, first_row] = from.map(|value| (value / edge) as u32);
+    Some([
+        first_column,
+        first_row,
+        ((to[0] / edge).ceil() as u32).min(columns),
+        ((to[1] / edge).ceil() as u32).min(rows),
+    ])
 }
 
 /// Bytes the surfaces of `plan`'s layers take at most when drawn at

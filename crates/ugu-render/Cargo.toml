@@ -11,6 +11,7 @@ png.workspace = true
 pollster.workspace = true
 tracing.workspace = true
 ugu-core.workspace = true
+vello_common.workspace = true
 vello_cpu.workspace = true
 wgpu.workspace = true
 windows.workspace = true

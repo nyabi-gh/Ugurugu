@@ -987,9 +987,15 @@ impl Canvas {
         if self.tab.playback.is_some() {
             return;
         }
-        if self.tab.split.as_ref().map(|(shown, _)| *shown) != Some(key)
-            && self.tab.requested != Some(key)
-        {
+        // A split stamped where a full render now draws its layer from
+        // elsewhere still shows, and takes strokes, until it is drawn again.
+        let shown = self
+            .tab
+            .split
+            .as_ref()
+            .filter(|(_, split)| !split.redraw)
+            .map(|(shown, _)| *shown);
+        if shown != Some(key) && self.tab.requested != Some(key) {
             let budget = Budget::now(self.tab.cache.surface_bytes() as u64);
             self.tab.cache.set_surface_budget(budget.surfaces);
             let snapshot = self.snapshot();
@@ -4144,6 +4150,36 @@ mod tests {
             .unwrap()
             .apply([f64::from(first.x), f64::from(first.y)]);
         assert!((shown[0] - 20.0).abs() < 0.01 && (shown[1] - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_stroke_reaching_tiles_before_its_layers_has_the_split_drawn_again() {
+        // A full render draws a layer from the top left tile its strokes
+        // reach, and an aliased line's edge rounds by where it is drawn
+        // from: a stroke left of or above them moves where every stroke on
+        // the layer is drawn from.
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([400, 300]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        settle(&mut canvas, &renders);
+        let asks_again = |canvas: &mut super::Canvas| {
+            canvas.sync();
+            canvas.tab.requested == Some(canvas.key())
+        };
+        stroke_through(
+            &mut canvas,
+            &[[300.0, 200.0], [340.0, 260.0], [390.0, 220.0]],
+        );
+        assert!(!asks_again(&mut canvas), "the layer's first stroke");
+        stroke_through(&mut canvas, &[[320.0, 210.0], [370.0, 280.0]]);
+        assert!(!asks_again(&mut canvas), "a stroke within its tiles");
+        stroke_through(&mut canvas, &[[20.0, 30.0], [90.0, 70.0], [140.0, 40.0]]);
+        assert!(asks_again(&mut canvas), "a stroke left of and above them");
+        render_until(&mut canvas, &renders, |canvas| {
+            canvas.tab.requested.is_none()
+        });
+        assert!(canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
     }
 
     #[test]

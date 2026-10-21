@@ -112,6 +112,12 @@ impl TiledSurface {
         self.grid
     }
 
+    /// The rectangle of tiles its pixels cover (left, top, right, bottom);
+    /// `None` when nothing is drawn.
+    pub fn span(&self) -> Option<[u32; 4]> {
+        self.pixmap.as_ref().map(|_| self.span)
+    }
+
     /// Bytes of pixels held.
     pub fn bytes(&self) -> usize {
         self.pixmap.as_ref().map_or(0, |pixmap| {

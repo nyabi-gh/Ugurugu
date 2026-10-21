@@ -4096,6 +4096,7 @@ dependencies = [
  "ugu-core",
  "ugu-io",
  "ugu-session",
+ "vello_common 0.3.0",
  "vello_cpu 0.3.0",
  "wgpu",
  "windows",

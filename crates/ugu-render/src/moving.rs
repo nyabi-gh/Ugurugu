@@ -39,6 +39,8 @@ pub struct Moving {
     cover: Pixmap,
     /// What differs from `original` now.
     shown: Option<PixelRect>,
+    /// The transform shown, unless it moves nothing.
+    transform: Option<Affine>,
     threads: u16,
     context: RenderContext,
     resources: Resources,
@@ -168,6 +170,7 @@ impl Split {
             moved: Pixmap::new(1, 1),
             cover: Pixmap::new(1, 1),
             shown: None,
+            transform: None,
             context: crate::raster::context(document_level(), threads),
             threads,
             resources: Resources::new(),
@@ -258,6 +261,7 @@ impl Split {
         keep_source: bool,
     ) -> Option<PixelRect> {
         let size = moving.original.size();
+        moving.transform = (transform != ops::Affine::IDENTITY).then(|| affine(transform));
         let moved = (transform != ops::Affine::IDENTITY)
             .then(|| {
                 let kurbo = affine(transform);
@@ -337,6 +341,9 @@ impl Split {
     /// otherwise the layer as it was comes back. Returns the pixels changed.
     pub fn end_move(&mut self, moving: Moving, applied: bool) -> Option<PixelRect> {
         if applied {
+            if let Some(transform) = moving.transform {
+                self.reaches(moved_bounds(moving.bounds, transform));
+            }
             return None;
         }
         let edited = self.edited?;

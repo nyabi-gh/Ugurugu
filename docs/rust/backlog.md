@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-10-21 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-10-22 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -120,10 +120,9 @@
 | B3-69 | WARP 지연의 원인을 나누지 못함 | WARP에서 입력이 60~75ms 늦게 보이고 단계 20~32%가 합쳐진다. 렌더 시간인지 합성 대기인지 나누지 않았다 | `crates/ugu-render/src/gpu.rs` | evidence.md 장치 손실·TDR·WARP |
 | B3-70 | ② 8 작업자에서 30fps 미달 | 8스레드 프레임 ② 42~49ms, ②p 35.4~35.6ms(evidence.md 13·14절). 사용자가 받아들였지만 목표는 열려 있다(decisions.md 1절). 다음 수단은 인코드·래스터 일 줄이기(가설) | `crates/ugu-render/src/document.rs` | evidence.md 작업자 수와 레이어 배분 |
 | B3-71 | CPU 제조사가 다를 때 픽셀 동일성 | SSE4.2 고정으로 같은 결과가 나온다는 것은 한 CPU에서 SIMD 단계를 바꿔 본 추론이다. 다른 제조사 CPU에서 비교한 적 없다. 또 `f64` `sin`·`cos`·`hypot`은 UCRT가 실행 중 FMA3 판을 고를 수 있어 FMA3 유무에 따라 1ulp 달라질 수 있다(가설, `dab.rs` 스프레이, `stroke.rs`, `motion.rs`). 한 PC 안의 미리보기·최종 동일성과는 무관 | `crates/ugu-render` | evidence.md 렌더러 |
-| B3-72 | `vello_cpu` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다 | `Cargo.toml` | evidence.md 렌더러 |
+| B3-72 | `vello_cpu`·`vello_common` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다. 펜을 뗄 때 찍는 선은 Vello의 strip 생성기를 직접 돌리고 coarse 단계의 채우기 규칙을 따라 하므로(decisions.md 2절), 판을 올리면 `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`가 전체 렌더와 바이트가 같은지 본다 | `Cargo.toml`, `crates/ugu-render/src/compose.rs` `Stamp::line_coverage` | evidence.md 렌더러·92절 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-119 | `strokes_after_a_crop_or_a_resample_draw_on_the_new_canvas`가 가끔 실패 | `shows_the_document`의 "split 반올림 안 최대 3" 단언이 2026-10-14 로컬 debug 전체 실행(`UGU_WORKER_THREADS=8`), 2026-10-15 main CI(`c6a4e36`, 실행 38691779083), 2026-10-21 PR #120 CI(debug, 실행 39608805791)에서 실패했고, 다시 돌리면 통과했다. 값이 남은 두 번은 모두 차이 255(한 화소가 완전히 다름)라 반올림 차이는 원인이 아니다. 원인 미확인(가설: 캔버스가 보인 split이 비교하는 문서와 다른 판, 곧 자르기 전이나 마지막 획 전의 것). 사용자가 자르기·크기 바꾸기 뒤 잠깐 틀린 그림을 보는지도 모른다. 원인을 찾는다 | `apps/ugurugu/src/files/end_to_end.rs` `shows_the_document` | 2026-10-14 레이어 복제 작업 중 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
