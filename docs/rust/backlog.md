@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-10-18 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-10-21 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -11,6 +11,7 @@
 | ID | 할 일 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-142 | 간체 중국어 번역을 읽어 본다 | 2.2.13 번역이 없어 새로 옮겼고 중국어를 읽는 사람의 검토를 받지 않았다(decisions.md 9절). 용어와 어색한 문장을 고친다 | `apps/ugurugu/i18n/strings.txt`의 다섯째 열 | 2026-10-16 간체 중국어 |
+| B3-163 | 이 PC에 Windows Sandbox를 켠다 | 2026-10-20에 새로 설치한 이 PC에는 Windows Sandbox가 없다(`WindowsSandbox.exe`·`wsb` 없음, 2026-10-21 확인). 그래서 CLAUDE.md의 GUI 확인과 출시 전 Sandbox GUI·수용 시험(`tools/sandbox/`)을 돌릴 수 없고, 3.4.2 출시가 여기서 멈춘다. 관리자 권한으로 Windows 기능에서 "Windows 샌드박스"를 켜고 다시 시작한다(시스템 설정이라 사용자가 한다) | Windows 기능 | 2026-10-21 |
 
 ## 2. 열린 gate
 
@@ -106,7 +107,7 @@
 | ID | 항목 | 왜 3.0에도 해당하나 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-60 | 임시 파일을 만들 수 없는 폴더에는 저장할 수 없음 | 저장은 같은 폴더의 `.<이름>.<pid>-<n>.tmp`를 거쳐 교체한다. 직접 쓰기 fallback이 없다. 그런 폴더(ACL·일부 공유)가 실제로 문제인지는 가설이고, fallback은 원자성을 잃으므로 하려면 사용자에게 묻는 편이 맞다 | `crates/ugu-io/src/save.rs` `temporary_path` | ANALYSIS_REPORT B-25 |
-| B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정 | `apps/ugurugu/src/theme.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
+| B3-62 | 고대비·글자 크기 설정 없음 | 테마는 어둡게·밝게·Windows 설정과 같게 중에서 고르지만(decisions.md 9절) Windows 고대비 색은 따르지 않는다. 본문 12·작은 글자 11포인트 고정. 시험용 `UGURUGU_UI_SCALE`(egui zoom, decisions.md 7절)이 이미 있어 UI 크기를 설정으로 내기는 쉽다(2026-10-21 UI 검토) | `apps/ugurugu/src/theme.rs`, `app.rs` | ANALYSIS_REPORT U-08; 검토 6절 |
 | B3-63 | 필압 곡선·최소값과 입력 장치 상태 표시가 없음 | 필압은 켬·끔(`tools.tablet.pressure`)뿐이다. 필압이 먹지 않을 때 UI에서 펜 감지·압력 지원 여부를 볼 수 없다(로그·진단 정보는 있음). B3-06 실기기 확인 때 함께 본다 | `apps/ugurugu/src/settings/tools.rs`, `crates/ugu-win/src/pointer.rs` | ANALYSIS_REPORT U-09 |
 | B3-67 | 릴리스 PDB를 보관하지 않음 | Release는 `debug = "line-tables-only"`로 PDB를 만들지만 패키지는 exe·LICENSE·고지 세 파일만 담고 `release-3.yml`도 PDB를 올리지 않는다. 네이티브 충돌 기록(모듈+오프셋)을 기호로 풀 수 없고, panic backtrace에도 함수 이름이 빠질 것으로 보인다(가설) | `Cargo.toml` `[profile.release]`, `tools/package_windows.ps1`, `.github/workflows/release-3.yml` | ANALYSIS_REPORT R-11 |
 | B3-68 | 릴리스를 초안 없이 만든 뒤 자산을 올림 | `softprops/action-gh-release`가 곧바로 공개 릴리스를 만들고 파일을 올린다. 그 사이 `releases/latest/download/…` 같은 링크가 자산 없는 릴리스를 볼 수 있다(창의 길이·영향은 가설). 앱의 업데이트 피드는 해당하지 않는다: 3.0.1부터 고정 사전 릴리스 `updates`에서 읽고 그 패키지는 이 단계보다 먼저 올라간다(decisions.md 10절). `draft: true`로 만들고 올린 뒤 공개 | `.github/workflows/release-3.yml`의 `softprops/action-gh-release` 단계 | ANALYSIS_REPORT R-12 |
@@ -184,3 +185,20 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-141 | 막 뜬 창이 닫기 요청에 30초 안에 끝나지 않음 | 3.3.1 수용 시험의 "Run"이 설치 뒤 첫 실행에서 `CloseMainWindow` 뒤 30초 안에 끝나지 않았다(evidence.md 70절). 로그는 업데이트 확인 실패(오프라인)에서 멈췄고 닫기는 로그에 남지 않는다. 같은 빌드로 다시 돌린 수용 10/10에서는 나오지 않았다. 시작 직후 창 스레드가 메시지를 돌리지 않는 B3-97과 같은 원인일 수 있다(가설). 2026-10-17부터 닫기 경로가 로그에 남는다: 창 스레드가 받음(`close requested`, 창이 준비되기 전이면 `not taken` 경고), 기다림(`closing waits`와 저장·대화상자·열기 수)·내보내기 질문·저장 안 한 변경 질문, render 스레드 끝(`the render thread ends`), 창 닫힘(`the window closes`). 다음에 나오면 어느 줄까지 남았는지로 창 스레드가 메시지를 받지 못했는지, 질문이나 기다림에 걸렸는지 가른다 | `apps/ugurugu/src/app.rs` 시작·닫기 순서 | evidence.md 70절 |
+
+## 15. 2026-10-21 UI/UX 검토에서 남은 것
+
+헤드리스로 그린 화면 65장과 UI 코드로 본 검토(evidence.md 88절). 선택 카드 설명 잘림, 아이콘 재사용, 영어로 고정된 새 레이어 이름, 기본값 복원 확인, 우글거림 애니메이션 설명, 문구 통일은 PR #117에서 고쳤다(decisions.md 9절). 아래는 남은 것이다. B3-153은 3.4.2 출시 전에 한다.
+
+| ID | 항목 | 왜·영향 | 어디 | 출처 |
+|---|---|---|---|---|
+| B3-153 | 새 RustSec 권고 두 건(3.4.2 출시 전) | RUSTSEC-2026-0381(`webpki-roots` 1.0.9, 1.0.10에서 고침)과 RUSTSEC-2026-0382(`rustls-webpki`, 0.103.16에서 고침). 둘 다 ureq → rustls, 곧 업데이트 확인·내려받기의 TLS 경로다. 2026-10-19 주간 점검 뒤에 나와 `cargo deny --locked check`의 advisories가 실패한다(bans·licenses·sources는 통과). PR CI는 권고를 보지 않아 막히지 않지만 다음 주간 점검(`advisories.yml`)과 릴리스 `verify`가 실패한다. `cargo update -p webpki-roots -p rustls-webpki`로 Cargo.lock만 바꾸는 PR로 하고, Cargo.lock이 바뀐 첫 main push는 캐시 없이 빌드된다 | `Cargo.lock` | 2026-10-21 `cargo deny` |
+| B3-154 | 작은 화면에서 색상과 레이어가 화면 밖 | 1920×1080·150% 노트북의 첫 실행 창(논리 1152×576)에서 색상 휠·색상 기록·레이어 버튼이 모두 도크를 스크롤해야 보이고, 1600×900에서도 색상 기록이 잘리고 레이어 목록은 2~3줄이다(evidence.md 88절). 원인: 패널이 세로로만 쌓이고 패널 사이 높이 조절이 없음(decisions.md 9절), 우글거림 패널이 클래식에서 쓰지 않는 비활성 행 6개를 보임, 아이콘 3개뿐인 빠른 도구 막대가 한 줄을 차지, 첫 창이 최대화가 아님. 후보: 우글거림의 고급 항목(포즈 수·디테일·연결·무작위성·끊김)을 쓰는 스타일에서만 보이거나 접기, 빠른 도구 막대를 메뉴 줄 오른쪽으로, 저장된 배치가 없으면 최대화로 시작, 도크 패널 사이 높이 조절, 낮은 창의 기본 배치에서 패널을 탭으로 묶기. 지금 디자인 안의 다듬기다(사용자 결정 2026-10-12). 닫는 조건: 그 두 창 크기에서 색상 휠과 레이어 추가 버튼이 스크롤 없이 보임을 시험으로 고정(`ui/window.rs`의 낮은 창 시험은 스크롤로 닿는지만 본다) | `apps/ugurugu/src/app.rs` `first_size`, `layout.rs`, `ui/dock.rs`, `ui/mod.rs` `wobble`·`quick_access` | 2026-10-21 UI 검토 |
+| B3-155 | 도구를 바꾸면 색상 패널이 움직임 | 도구 설정 높이가 도구마다 달라 같은 도크에서 그 아래 색상 휠이 수백 px 오르내리고, 도형 도구에서는 화면 밖이다(evidence.md 88절). 색을 고르는 자리를 손에 익힐 수 없다. 후보: 도구 설정에 최대 높이와 내부 스크롤, 또는 색상을 도구 설정 위로. B3-154와 같이 본다 | `apps/ugurugu/src/ui/dock.rs`, `layout.rs`, `ui/mod.rs` `tool_settings` | 2026-10-21 UI 검토 |
+| B3-156 | 캔버스 배경(투명 포함)을 정할 수 없음 | 2.2.13은 편집 > "캔버스 배경…"(알파를 고르는 색 대화상자, `git show v2.2.13:src/ui/MainWindowActions.cpp` 306·1003행)이 있었는데 3.0에서 결정 기록 없이 빠졌다. `Document.background`와 `Op::SetSettings`는 있다. 그래서 3.x에서 만든 그림은 늘 흰 배경이고, GIF·WebP 창의 "투명한 부분 유지"가 늘 꺼진 채 이유만 말한다(2.x에서 가져온 투명 배경 문서만 켜짐). 되살리면 편집 메뉴 항목, 알파를 고르는 색 선택, 실행 취소 한 단계, 그리고 내보내기 안내가 그 메뉴를 가리키게 한다 | `apps/ugurugu/src/ui/actions.rs` `EDIT`, `crates/ugu-core/src/edit.rs` `SetSettings`, `strings.txt` `export-opaque-background` | 2026-10-21 UI 검토 |
+| B3-157 | 레이어 동작과 브러시 크기에 단축키·메뉴가 없음 | 동작 표(74개)에 레이어 동작이 없어 새 레이어·복제·아래와 병합·삭제·숨기기·위아래 이동은 레이어 패널 버튼으로만 된다(레이어 메뉴도 없고, B3-154 때문에 작은 화면에서는 그 버튼도 스크롤 밖). 브러시 크기 `[`·`]`와 현재·이전 색 바꾸기 `X`도 없다. 기본 키를 정할 때 지금의 Ctrl+E(GIF 내보내기)·Ctrl+Shift+N(새 셀)과 포토샵·클립 스튜디오 관례(아래와 병합 Ctrl+E, 새 레이어 Ctrl+Shift+N)를 맞춰 봐야 한다. 새 기본 키는 전 판에서 고른 키를 가져가지 않는다(decisions.md 9절) | `apps/ugurugu/src/shortcuts.rs` `actions!`, `ui/actions.rs`, `ui/layers.rs` | 2026-10-21 UI 검토 |
+| B3-158 | 메뉴 구성 | 편집 메뉴가 20항목이다(2.2.13은 선택 하위 메뉴). 보기 메뉴는 애니메이션 도구를 켜면 19항목이고, 그중 키 추가/삭제·애니메이션 폴더 만들기·새 셀은 문서를 바꾸는 편집이다. 선택·레이어(B3-157)·애니메이션 메뉴로 나누는 안 | `apps/ugurugu/src/ui/actions.rs` `MENUS` | 2026-10-21 UI 검토 |
+| B3-159 | 강조색이 많은 곳에 칠해짐 | 모든 슬라이더의 채운 부분(`theme.rs`의 `slider_trailing_fill`과 `selection.bg_fill`)과 레이어 줄마다의 우글거림 아이콘이 앰버라 decisions.md 9절의 "강조색 채움은 지금 켜진 것 하나" 원칙과 어긋나고 현재 도구 표시가 약해진다. 경고·거절 안내도 같은 앰버로 상태 표시줄 왼쪽 아래에 나와(`ui/mod.rs` `status_bar`) 펜 근처에서 거절당한 사용자가 놓치기 쉽다(가설, 사용자 시험 없음) | `apps/ugurugu/src/theme.rs`, `ui/layers.rs`, `ui/mod.rs` | 2026-10-21 UI 검토 |
+| B3-160 | 새 문서 크기 버튼이 픽셀 그림용뿐 | 16·32·64·128만 있다(`files.rs` `ask_new_document`). 512², 1080², 1920×1080처럼 움직이는 그림에 흔한 크기가 없다 | `apps/ugurugu/src/files.rs` | 2026-10-21 UI 검토 |
+| B3-161 | 작은 안내·표시 | 저장 확인(`unsaved-text`)이 어느 문서인지 이름을 말하지 않는다(창 닫기는 탭을 차례로 보여 주며 묻는다). 단축키 페이지가 74개를 메뉴별 묶음 없이 한 목록(줄 약 52pt)으로 보인다. 도구 설정 머리가 늘 "도구 설정"이라 지금 도구 이름이 없다(도구 막대는 아이콘만). 색 칸의 `#AARRGGBB`(2.2.13)는 웹·디자인 도구가 `#RRGGBBAA`로 읽어 복사하면 다른 색이 된다 | `apps/ugurugu/i18n/strings.txt`, `ui/settings.rs`, `ui/dock.rs`, `ui/color.rs` | 2026-10-21 UI 검토 |
+| B3-162 | 정밀 터치패드의 두 손가락 스크롤 | 캔버스 위 세로 휠은 늘 확대·축소이고 가로 휠은 캔버스가 받지 않는다(`input.rs` `PointerEvent::Wheel`). 그래서 터치패드의 두 손가락 끌기가 이동이 아니라 확대·축소가 될 것이다(가설, 장치 없음) | `apps/ugurugu/src/input.rs` | 2026-10-21 UI 검토 |
