@@ -1512,6 +1512,29 @@ Step 'Key opacity, pivot and onion settings' {
     Send-Keys $process 'v'
     Send-Keys $process 'k'
     $pivot = Test-Named $process 'Pivot X'
+    # Tool settings keep the height the layout gives them, so in this window
+    # the key's rows below rotation are out of sight until scrolled to. A
+    # field out of sight keeps the place it is laid out at, over the panel
+    # below, so it is in sight once above the split under Tool settings.
+    $rect = Get-Rect $process
+    [Native]::MoveTo($rect.Left + 250, $rect.Top + 250)
+    Start-Sleep -Milliseconds 300
+    $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, 'Key opacity')
+    $split = Find-Element $process { param($n) $n -eq 'Height of the Tool settings panel' } 15 'the split under Tool settings'
+    $bottom = $split.Current.BoundingRectangle.Top
+    $inView = {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+        $field = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $match)
+        $box = if ($field) { $field.Current.BoundingRectangle }
+        $box -and -not $box.IsEmpty -and $box.Top -gt $rect.Top + 100 -and $box.Bottom -lt $bottom
+    }
+    for ($notch = 0; $notch -lt 12 -and -not (& $inView); $notch++) {
+        [Native]::Wheel(-1)
+        Start-Sleep -Milliseconds 400
+    }
+    if (-not (& $inView)) {
+        throw "Key opacity not in view after $notch notches; $(Save-Screen 'key-opacity-out-of-view')"
+    }
     Set-Field $process 'Key opacity' '30'
     $faded = Get-Ink $process $paper
     $shot = Save-Screen 'key-opacity-pivot'
