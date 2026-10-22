@@ -190,7 +190,6 @@
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-156 | 캔버스 배경(투명 포함)을 정할 수 없음 | 2.2.13은 편집 > "캔버스 배경…"(알파를 고르는 색 대화상자, `git show v2.2.13:src/ui/MainWindowActions.cpp` 306·1003행)이 있었는데 3.0에서 결정 기록 없이 빠졌다. `Document.background`와 `Op::SetSettings`는 있다. 그래서 3.x에서 만든 그림은 늘 흰 배경이고, GIF·WebP 창의 "투명한 부분 유지"가 늘 꺼진 채 이유만 말한다(2.x에서 가져온 투명 배경 문서만 켜짐). 되살리면 편집 메뉴 항목, 알파를 고르는 색 선택, 실행 취소 한 단계, 그리고 내보내기 안내가 그 메뉴를 가리키게 한다 | `apps/ugurugu/src/ui/actions.rs` `EDIT`, `crates/ugu-core/src/edit.rs` `SetSettings`, `strings.txt` `export-opaque-background` | 2026-10-21 UI 검토 |
 | B3-157 | 레이어 동작과 브러시 크기에 단축키·메뉴가 없음 | 동작 표(74개)에 레이어 동작이 없어 새 레이어·복제·아래와 병합·삭제·숨기기·위아래 이동은 레이어 패널 버튼으로만 된다(레이어 메뉴도 없다). 브러시 크기 `[`·`]`와 현재·이전 색 바꾸기 `X`도 없다. 기본 키를 정할 때 지금의 Ctrl+E(GIF 내보내기)·Ctrl+Shift+N(새 셀)과 포토샵·클립 스튜디오 관례(아래와 병합 Ctrl+E, 새 레이어 Ctrl+Shift+N)를 맞춰 봐야 한다. 새 기본 키는 전 판에서 고른 키를 가져가지 않는다(decisions.md 9절) | `apps/ugurugu/src/shortcuts.rs` `actions!`, `ui/actions.rs`, `ui/layers.rs` | 2026-10-21 UI 검토 |
 | B3-158 | 메뉴 구성 | 편집 메뉴가 20항목이다(2.2.13은 선택 하위 메뉴). 보기 메뉴는 애니메이션 도구를 켜면 19항목이고, 그중 키 추가/삭제·애니메이션 폴더 만들기·새 셀은 문서를 바꾸는 편집이다. 선택·레이어(B3-157)·애니메이션 메뉴로 나누는 안 | `apps/ugurugu/src/ui/actions.rs` `MENUS` | 2026-10-21 UI 검토 |
 | B3-159 | 강조색이 많은 곳에 칠해짐 | 모든 슬라이더의 채운 부분(`theme.rs`의 `slider_trailing_fill`과 `selection.bg_fill`)과 레이어 줄마다의 우글거림 아이콘이 앰버라 decisions.md 9절의 "강조색 채움은 지금 켜진 것 하나" 원칙과 어긋나고 현재 도구 표시가 약해진다. 경고·거절 안내도 같은 앰버로 상태 표시줄 왼쪽 아래에 나와(`ui/mod.rs` `status_bar`) 펜 근처에서 거절당한 사용자가 놓치기 쉽다(가설, 사용자 시험 없음) | `apps/ugurugu/src/theme.rs`, `ui/layers.rs`, `ui/mod.rs` | 2026-10-21 UI 검토 |

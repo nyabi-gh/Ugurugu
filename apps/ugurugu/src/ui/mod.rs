@@ -8,6 +8,7 @@
 //! what 3.0 can already do is shown.
 
 mod actions;
+mod background;
 mod brushes;
 mod color;
 mod dock;
@@ -74,6 +75,8 @@ pub struct Panels {
     resize: Option<resize::ImageSize>,
     /// The stroke properties dialog, while open.
     restyle: Option<restyle::Dialog>,
+    /// The canvas background dialog, while open.
+    background: Option<background::Dialog>,
     /// The settings dialog, while open.
     settings: Option<settings::Dialog>,
     /// Whether the help window is open.
@@ -240,8 +243,8 @@ fn menu_keys(
     found
 }
 
-/// The canvas or image size, stroke properties or settings dialog and the
-/// help window, while one is open.
+/// The canvas or image size, stroke properties, canvas background or
+/// settings dialog and the help window, while one is open.
 /// `typed`: chords egui turns into clipboard events, for a shortcut being
 /// set in the settings.
 pub fn dialogs(
@@ -254,6 +257,7 @@ pub fn dialogs(
 ) {
     resize::show(ctx, canvas, panels);
     restyle::show(ctx, canvas, panels);
+    background::show(ctx, canvas, panels);
     settings::show(ctx, canvas, files, store, panels, typed);
     help::show(ctx, &mut panels.help);
 }

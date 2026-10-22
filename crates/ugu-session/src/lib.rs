@@ -917,6 +917,19 @@ impl Session {
         })
     }
 
+    /// Changes the paper under the layers as one step; a background with
+    /// alpha below 255 is transparent there.
+    pub fn set_background(&mut self, background: Rgba8) -> Result<Outcome, EditError> {
+        let mut settings = self.document().settings();
+        if settings.background == background {
+            return Ok(Outcome::NoChange);
+        }
+        settings.background = background;
+        self.history_mut()?.edit("Canvas background", |_| {
+            vec![ugu_core::edit::Change::SetSettings(settings)]
+        })
+    }
+
     /// How a transform resamples: whole pixels in pixel mode, otherwise as
     /// `chosen`.
     pub fn sampling(&self, chosen: Sampling) -> Sampling {

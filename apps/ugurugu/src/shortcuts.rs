@@ -290,6 +290,7 @@ actions! {
     Paste "paste" "edit-paste" [ctrl(Key::V)] [shift(Key::Insert)];
     ImageSize "resizeImage" "edit-image-size" [] [];
     CanvasSize "resizeCanvas" "edit-canvas-size" [] [];
+    Background "background" "edit-background" [] [];
     PixelMode "pixelMode" "pixel-mode" [] [];
     SelectAll "selectAll" "edit-select-all" [ctrl(Key::A)] [];
     InvertSelection "invertSelection" "edit-invert-selection" [ctrl_shift(Key::I)] [];

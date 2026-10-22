@@ -13,7 +13,7 @@ use crate::i18n::tr;
 use crate::icons::Glyph;
 use crate::shortcuts::{Action, Chord, Keymap};
 
-use super::{Panels, report_bool, resize, restyle, settings};
+use super::{Panels, background, report_bool, resize, restyle, settings};
 use crate::layout::{Layout, Panel};
 
 pub enum Entry {
@@ -50,6 +50,7 @@ pub const EDIT: &[Entry] = &[
     Gap,
     Do(A::ImageSize),
     Do(A::CanvasSize),
+    Do(A::Background),
     Do(A::PixelMode),
     Gap,
     Do(A::SelectAll),
@@ -465,6 +466,7 @@ pub fn run(
         A::CanvasSize => {
             canvas.begin_sizing();
         }
+        A::Background => background::open(canvas, panels),
         A::PixelMode => {
             let on = !canvas.session().pixel_mode();
             let result = canvas.edit(|session| session.set_pixel_mode(on));

@@ -296,6 +296,22 @@ fn restoring_the_default_settings_asks_first() {
 }
 
 #[test]
+fn the_edit_menu_sets_a_transparent_background_as_one_step() {
+    let mut window = Window::new();
+    window.click_named(tr("menu-edit"));
+    window.click_named(tr("edit-background"));
+    assert!(window.dialog());
+    let dialog = window.panels.background.as_mut().expect("the dialog");
+    assert_eq!(dialog.color, [255; 4], "it starts from the white paper");
+    dialog.color = [0, 0, 0, 0];
+    window.key(NONE, Key::Enter);
+    assert!(window.panels.background.is_none());
+    let session = window.canvas.session();
+    assert_eq!(session.document().background, Rgba8([0, 0, 0, 0]));
+    assert_eq!(session.undo_label(), Some("Canvas background"));
+}
+
+#[test]
 fn a_menu_item_pressed_by_a_screen_reader_closes_the_menu() {
     let mut window = Window::new();
     window.click_named(tr("menu-edit"));

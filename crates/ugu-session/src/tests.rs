@@ -2308,6 +2308,19 @@ fn documents_in_and_out_of_pixel_mode_keep_their_own_brushes() {
 }
 
 #[test]
+fn the_background_changes_as_one_step_and_can_be_transparent() {
+    let mut session = session();
+    let white = session.document().background;
+    let clear = Rgba8([0, 0, 0, 0]);
+    session.set_background(clear).unwrap();
+    assert_eq!(session.document().background, clear);
+    assert_eq!(session.set_background(clear).unwrap(), Outcome::NoChange);
+    assert_eq!(session.undo_label(), Some("Canvas background"));
+    assert!(session.undo().unwrap());
+    assert_eq!(session.document().background, white);
+}
+
+#[test]
 fn pixel_mode_stays_through_animation_changes() {
     let mut session = session();
     session.set_pixel_mode(true).unwrap();
