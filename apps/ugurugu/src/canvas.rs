@@ -3273,6 +3273,68 @@ mod tests {
     }
 
     #[test]
+    fn strokes_after_a_selection_moved_left_and_up_end_as_a_full_render_draws_them() {
+        // Moved past the tiles the layer reached, the layer is drawn from
+        // further left and up, and an aliased line's edge rounds by that.
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([400, 300]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.brushes_mut().pen.antialias = false;
+        canvas.brushes_mut().pen.width = 8.0;
+        stroke_through(
+            &mut canvas,
+            &[[300.0, 200.0], [340.0, 260.0], [390.0, 220.0]],
+        );
+        let tools = canvas.tools().clone();
+        canvas.edit(|session| {
+            session.begin_selection(
+                ugu_session::ShapeKind::Rectangle,
+                [280.0, 180.0],
+                Combine::Replace,
+            );
+            session.extend_selection([400.0, 300.0]);
+            session.end_selection(&tools, [400.0, 300.0]).unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let at = |canvas: &super::Canvas, x: f64, y: f64| canvas.to_client([x, y]);
+        canvas.begin_transform();
+        canvas.begin_transform_drag(at(&canvas, 340.0, 240.0));
+        canvas.drag_transform(at(&canvas, 90.0, 60.0));
+        canvas.sync();
+        canvas.interaction = Interaction::Idle;
+        canvas.apply_transform();
+        assert!(canvas.session().pending().is_none());
+        canvas.sync();
+        assert_eq!(canvas.tab.requested, Some(canvas.key()), "drawn again");
+        render_until(&mut canvas, &renders, |canvas| {
+            canvas.tab.requested.is_none()
+        });
+        assert!(
+            canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice(),
+            "applied: {} apart",
+            max_difference(canvas.display(), &full_render(&canvas))
+        );
+        canvas.edit(Session::deselect).unwrap();
+        // Within the tiles reached before, and then out to the left and up.
+        for points in [
+            [[262.5, 171.25], [330.0, 290.0], [398.0, 205.5]],
+            [[20.5, 30.25], [60.0, 80.0], [110.0, 40.0]],
+            [[5.0, 290.0], [200.0, 10.5], [395.0, 150.0]],
+        ] {
+            stroke_through(&mut canvas, &points);
+            render_until(&mut canvas, &renders, |canvas| {
+                canvas.tab.requested.is_none()
+            });
+            assert!(
+                canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice(),
+                "a stroke after: {} apart",
+                max_difference(canvas.display(), &full_render(&canvas))
+            );
+        }
+    }
+
+    #[test]
     fn a_canvas_change_during_a_shown_transform_applies_it_and_shows_the_new_canvas() {
         let (to_test, renders) = std::sync::mpsc::channel();
         let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
