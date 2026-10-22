@@ -268,7 +268,9 @@ function Start-Probe {
     [void][Synthetic]::ShowWindow($script:window, 9)
     [void][Synthetic]::SetWindowPos($script:window, [IntPtr]::Zero, 50, 50, 1600, 1000, 4)
     [Synthetic]::Front($script:window)
-    [void](Get-Value 'Canvas zoom percentage')
+    # The first start in a Sandbox just logged on has answered UI
+    # Automation only after more than ten seconds.
+    [void](Get-Value 'Canvas zoom percentage' 60)
     Start-Sleep -Seconds 1
     $rect = New-Object Synthetic+RECT
     [void][Synthetic]::GetWindowRect($script:window, [ref]$rect)
@@ -343,7 +345,7 @@ function Get-Strokes([switch] $Changed) {
     @(& $uguDoc strokes $file.FullName | Where-Object { $_.Trim() })
 }
 
-function Get-Value([string] $Name) {
+function Get-Value([string] $Name, [int] $Seconds = 10) {
     $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
     $value = Wait-Until {
         $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
@@ -356,7 +358,7 @@ function Get-Value([string] $Name) {
                 return $pattern.Current.Value -replace '[^0-9.\-]', ''
             }
         }
-    } 10 "the value of '$Name'"
+    } $Seconds "the value of '$Name'"
     [double]$value
 }
 
@@ -377,6 +379,48 @@ function Set-Toggle([string] $Name, [bool] $On) {
         Start-Sleep -Milliseconds 500
     }
     $pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On
+}
+
+# Presses the control named $Name, a button or a tab.
+function Press-Named([string] $Name) {
+    $match = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $pattern = Wait-Until {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($script:window)
+        foreach ($element in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $match)) {
+            foreach ($kind in @([Windows.Automation.InvokePattern]::Pattern,
+                    [Windows.Automation.TogglePattern]::Pattern, [Windows.Automation.SelectionItemPattern]::Pattern)) {
+                $found = $null
+                if ($element.TryGetCurrentPattern($kind, [ref]$found)) {
+                    return , $found
+                }
+            }
+        }
+    } 10 "a control named '$Name'"
+    if ($pattern -is [Windows.Automation.InvokePattern]) {
+        $pattern.Invoke()
+    } elseif ($pattern -is [Windows.Automation.TogglePattern]) {
+        $pattern.Toggle()
+    } else {
+        $pattern.Select()
+    }
+    Start-Sleep -Milliseconds 500
+}
+
+# Use tablet pressure is a setting for every tool, on the settings' Drawing
+# tab; returns whether it is now on. The settings close again whatever
+# happens, as they would take the pen from the canvas.
+function Set-Pressure([bool] $On) {
+    [Synthetic]::Front($script:window)
+    Start-Sleep -Milliseconds 200
+    [Windows.Forms.SendKeys]::SendWait('^,')
+    Start-Sleep -Milliseconds 800
+    try {
+        Press-Named 'Drawing'
+        Set-Toggle 'Use tablet pressure' $On
+    } finally {
+        [Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 function Get-Field([string] $Line, [string] $Name) {
@@ -404,8 +448,15 @@ function Pen-Stroke($Points, [uint32] $PenFlags = 0, [int] $Contact = ($INCONTAC
     }
 }
 
-$process = Start-Probe
-$cx = [int](($script:rect.Left + $script:rect.Right) / 2)
+try {
+    $process = Start-Probe
+} catch {
+    # Before the first step, so the run says why it ended.
+    [void]$results.Add([pscustomobject]@{ Step = 'Start the app'; Result = 'FAIL'; Detail = (Format-Error $_.Exception) })
+    Save-Results
+    throw
+}
+$cx =[int](($script:rect.Left + $script:rect.Right) / 2)
 $cy = [int](($script:rect.Top + $script:rect.Bottom) / 2)
 $script:device = [Synthetic]::CreateSyntheticPointerDevice(3, 1, 1)
 $script:before = 0
@@ -451,12 +502,12 @@ Step 'Pressure from 64 to 1024 of 1024' {
 }
 
 Step 'Pen pressure off draws at full pressure' {
-    if (Set-Toggle 'Use tablet pressure' $false) {
-        throw 'The check box stayed on'
+    if (Set-Pressure $false) {
+        throw 'The switch stayed on'
     }
     $points = @(0..60 | ForEach-Object { , @(($cx - 300 + $_ * 10), ($cy - 150), (64 + $_ * 16)) })
     Pen-Stroke $points
-    $on = Set-Toggle 'Use tablet pressure' $true
+    $on = Set-Pressure $true
     $lines = @(Get-Strokes -Changed)
     $new = @($lines | Select-Object -Skip $script:before)
     $script:before = $lines.Count
