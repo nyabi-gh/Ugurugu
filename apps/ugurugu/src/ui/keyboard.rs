@@ -312,6 +312,43 @@ fn the_edit_menu_sets_a_transparent_background_as_one_step() {
 }
 
 #[test]
+fn the_layer_brush_size_and_colour_keys_act() {
+    let mut window = Window::new();
+    let layers = |window: &Window| window.canvas.session().document().layers.len();
+    let ctrl = Modifiers::COMMAND;
+    window.key(ctrl | Modifiers::SHIFT, Key::N);
+    assert_eq!(layers(&window), 2, "Ctrl+Shift+N adds a layer");
+    window.key(ctrl, Key::J);
+    assert_eq!(layers(&window), 3, "Ctrl+J duplicates it");
+    window.key(ctrl, Key::E);
+    assert_eq!(layers(&window), 2, "Ctrl+E merges it down");
+    assert!(
+        window.panels.refusal.is_none(),
+        "{:?}",
+        window.panels.refusal
+    );
+    assert_eq!(window.canvas.session().undo_label(), Some("Merge down"));
+
+    let width = |window: &Window| window.canvas.brushes().pen.width;
+    let before = width(&window);
+    window.key(NONE, Key::CloseBracket);
+    let larger = width(&window);
+    assert!(larger > before, "{before} -> {larger}");
+    window.key(NONE, Key::OpenBracket);
+    assert_eq!(width(&window), before);
+
+    let black = window.canvas.tools().color;
+    window.key(NONE, Key::X);
+    assert_eq!(
+        window.canvas.tools().color,
+        Rgba8([255; 4]),
+        "white before any other"
+    );
+    window.key(NONE, Key::X);
+    assert_eq!(window.canvas.tools().color, black);
+}
+
+#[test]
 fn a_menu_item_pressed_by_a_screen_reader_closes_the_menu() {
     let mut window = Window::new();
     window.click_named(tr("menu-edit"));

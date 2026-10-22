@@ -358,6 +358,32 @@ fn slider_row(
     })
 }
 
+/// The sizes `[` and `]` step through, closer together where a pixel more
+/// shows; the size slider's range.
+const BRUSH_SIZES: [f32; 24] = [
+    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 28.0, 32.0, 40.0,
+    48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0,
+];
+
+/// Whether the tool has a size for `[` and `]` to change.
+fn sized(canvas: &Canvas) -> bool {
+    matches!(canvas.tool(), Tool::Pen | Tool::Eraser | Tool::Shape)
+}
+
+/// Sets the tool's size to the next of `BRUSH_SIZES` up or down from it.
+fn step_brush_size(canvas: &mut Canvas, larger: bool) {
+    let tool = canvas.tool();
+    let width = canvas.brushes().get(tool).width;
+    let next = if larger {
+        BRUSH_SIZES.iter().copied().find(|&size| size > width)
+    } else {
+        BRUSH_SIZES.iter().rev().copied().find(|&size| size < width)
+    };
+    if let Some(next) = next {
+        canvas.brushes_mut().get_mut(tool).width = next;
+    }
+}
+
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     let tool = canvas.tool();
     ui.add_space(theme::space::XS);
@@ -402,7 +428,7 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         | Tool::Move
         | Tool::Symmetry => tr("brush-size"),
     };
-    let range = 1.0..=128.0;
+    let range = BRUSH_SIZES[0]..=BRUSH_SIZES[BRUSH_SIZES.len() - 1];
     slider_row(
         ui,
         tr("size"),

@@ -4,7 +4,10 @@
 # Menus
 menu-file | &File | 파일(&F) | ファイル(&F) | 文件(&F) | access
 menu-edit | &Edit | 편집(&E) | 編集(&E) | 编辑(&E) | access
+menu-select | &Select | 선택(&S) | 選択(&S) | 选择(&S) | access
+menu-layer | &Layer | 레이어(&L) | レイヤー(&L) | 图层(&L) | access
 menu-view | &View | 보기(&V) | 表示(&V) | 视图(&V) | access
+menu-animation | &Animation | 애니메이션(&A) | アニメーション(&A) | 动画(&A) | access
 menu-tools | &Tools | 도구(&T) | ツール(&T) | 工具(&T) | access
 menu-window | &Window | 창(&W) | ウィンドウ(&W) | 窗口(&W) | access
 menu-help | &Help | 도움말(&H) | ヘルプ(&H) | 帮助(&H) | access
@@ -309,6 +312,10 @@ animation-folder-name | Animation %1 | 애니메이션 %1 | アニメーショ�
 cel-name | Cel %1 | 셀 %1 | セル %1 | 单元格 %1 | args=number
 layer-merge | Merge with layer below | 아래 레이어와 병합 | 下のレイヤーと結合 | 向下合并
 layer-delete | Delete layer | 레이어 삭제 | レイヤーを削除 | 删除图层
+layer-show-hide | Show or hide layer | 레이어 표시 또는 숨기기 | レイヤーの表示・非表示 | 显示或隐藏图层
+brush-smaller | Smaller brush | 브러시 작게 | ブラシを小さく | 缩小画笔
+brush-larger | Larger brush | 브러시 크게 | ブラシを大きく | 放大画笔
+color-swap | Swap current and previous color | 현재 색상과 이전 색상 바꾸기 | 現在の色と前の色を入れ替え | 交换当前颜色和上一个颜色
 layer-up | Move layer up | 레이어 위로 이동 | レイヤーを上へ移動 | 上移图层
 layer-down | Move layer down | 레이어 아래로 이동 | レイヤーを下へ移動 | 下移图层
 layer-move | Move layer | 레이어 이동 | レイヤーの移動 | 移动图层
@@ -632,7 +639,7 @@ timeline-cels-name | Cels of %1, %2 on this frame | %1의 셀, 이 프레임은 
 help-animate | Moving drawings | 움직이게 하기 | 動かす | 让画动起来
 help-animate-tools | Keys, animation folders and the onion skin are off at first: turn them on with View → Animation tools. A drawing that has them shows them by itself. | 키, 애니메이션 폴더, 어니언 스킨은 처음에 꺼져 있습니다. 보기 → 애니메이션 도구로 켜세요. 이미 그것을 쓴 그림에서는 저절로 보입니다. | キー、アニメーションフォルダー、オニオンスキンは最初はオフです。表示 → アニメーションツールでオンにしてください。それらを使った絵では自動で表示されます。 | 关键帧、动画文件夹和洋葱皮默认关闭：请在“视图 → 动画工具”中打开。使用了它们的画作会自动显示它们。
 help-animate-keys | To move a drawing back and forth, choose Move layer (V) and drag the layer on frame 1, go to a later frame and drag it again: each drag keys that frame, and the frames between follow, looping back to the first key. | 그림을 오가게 하려면 레이어 이동(V)을 고르고 1프레임에서 레이어를 끈 뒤, 뒤의 프레임으로 가서 다시 끄세요. 끌 때마다 그 프레임에 키가 생기고 사이 프레임은 따라 움직이며 끝에서 첫 키로 돌아옵니다. | 絵を行き来させるには、レイヤー移動（V）を選んで1フレーム目でレイヤーをドラッグし、後のフレームに移ってもう一度ドラッグします。ドラッグするたびにそのフレームにキーができ、間のフレームはそれに沿って動き、最後は最初のキーに戻ります。 | 要让画来回移动，请选择“移动图层”(V)，在第 1 帧拖动图层，再转到后面的帧再次拖动：每次拖动都会在该帧添加关键帧，中间的帧随之变化，最后回到第一个关键帧。
-help-animate-cels | To draw each frame anew, make an animation folder from the layer (View menu). Drawing on a frame without a cel adds one; the timeline under the animation bar shows which cel each frame shows. | 프레임마다 새로 그리려면 레이어로 애니메이션 폴더를 만드세요(보기 메뉴). 셀이 없는 프레임에 그리면 셀이 생기고, 애니메이션 바 아래 타임라인에 프레임마다 보이는 셀이 나옵니다. | フレームごとに描き直すには、レイヤーからアニメーションフォルダーを作ります（表示メニュー）。セルのないフレームに描くとセルができ、アニメーションバーの下のタイムラインに各フレームのセルが表示されます。 | 要逐帧重画，请从图层创建动画文件夹（视图菜单）。在没有单元格的帧上绘画会添加单元格；动画栏下方的时间轴会显示每一帧显示的单元格。
+help-animate-cels | To draw each frame anew, make an animation folder from the layer (Animation menu). Drawing on a frame without a cel adds one; the timeline under the animation bar shows which cel each frame shows. | 프레임마다 새로 그리려면 레이어로 애니메이션 폴더를 만드세요(애니메이션 메뉴). 셀이 없는 프레임에 그리면 셀이 생기고, 애니메이션 바 아래 타임라인에 프레임마다 보이는 셀이 나옵니다. | フレームごとに描き直すには、レイヤーからアニメーションフォルダーを作ります（アニメーションメニュー）。セルのないフレームに描くとセルができ、アニメーションバーの下のタイムラインに各フレームのセルが表示されます。 | 要逐帧重画，请从图层创建动画文件夹（动画菜单）。在没有单元格的帧上绘画会添加单元格；动画栏下方的时间轴会显示每一帧显示的单元格。
 help-animate-onion | Onion skin (O) shows the frames before and after faintly, red before and blue after, to draw the next pose against. | 어니언 스킨(O)은 앞뒤 프레임을 흐리게, 앞은 붉게 뒤는 푸르게 보여 줍니다. 다음 동작을 그릴 때 참고하세요. | オニオンスキン（O）は前後のフレームを薄く、前を赤く後ろを青く表示します。次のポーズを描くときの目安にします。 | 洋葱皮 (O) 会淡淡地显示前后的帧，之前为红色，之后为蓝色，方便对照着画下一个姿态。
 layer-keyed | Moved by keys | 키로 움직임 | キーで動く | 由关键帧移动
 layer-animation-folder | Animation folder | 애니메이션 폴더 | アニメーションフォルダー | 动画文件夹

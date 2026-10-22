@@ -13,6 +13,7 @@ use crate::i18n::tr;
 use crate::icons::Glyph;
 use crate::shortcuts::{Action, Chord, Keymap};
 
+use super::layers::{self, LayerAction};
 use super::{Panels, background, report_bool, resize, restyle, settings};
 use crate::layout::{Layout, Panel};
 
@@ -53,9 +54,15 @@ pub const EDIT: &[Entry] = &[
     Do(A::Background),
     Do(A::PixelMode),
     Gap,
+    Do(A::Settings),
+];
+
+/// 2.2.13's Edit > Selection submenu, as a menu of its own.
+pub const SELECT: &[Entry] = &[
     Do(A::SelectAll),
     Do(A::InvertSelection),
     Do(A::Deselect),
+    Gap,
     Do(A::FillSelection),
     Do(A::Restyle),
     Do(A::DeleteSelected),
@@ -65,8 +72,22 @@ pub const EDIT: &[Entry] = &[
     Do(A::FlipVertical),
     Do(A::ApplyTransform),
     Do(A::CancelTransform),
+];
+
+/// The layer panel's buttons.
+pub const LAYER: &[Entry] = &[
+    Do(A::AddLayer),
+    Do(A::AddGroup),
+    Do(A::Ungroup),
     Gap,
-    Do(A::Settings),
+    Do(A::DuplicateLayer),
+    Do(A::MergeDown),
+    Gap,
+    Do(A::LayerUp),
+    Do(A::LayerDown),
+    Gap,
+    Do(A::ShowLayer),
+    Do(A::DeleteLayer),
 ];
 
 pub const VIEW: &[Entry] = &[
@@ -80,7 +101,9 @@ pub const VIEW: &[Entry] = &[
     Do(A::ResetTurn),
     Do(A::Mirror),
     Do(A::Symmetry),
-    Gap,
+];
+
+pub const ANIMATION: &[Entry] = &[
     Do(A::Animate),
     Do(A::PreviousFrame),
     Do(A::NextFrame),
@@ -107,6 +130,10 @@ pub const TOOLS: &[Entry] = &[
     Do(A::SymmetryRuler),
     Do(A::MoveLayer),
     Gap,
+    Do(A::SmallerBrush),
+    Do(A::LargerBrush),
+    Do(A::SwapColors),
+    Gap,
     Do(A::ImportTools),
     Do(A::ExportTools),
 ];
@@ -131,10 +158,13 @@ pub const HELP: &[Entry] = &[Do(A::Help), Gap, Do(A::CheckUpdates), Gap, Do(A::A
 
 /// Each menu's title, the letter that opens it with Alt (2.2.13's "&File"
 /// and "파일(&F)"), and its entries.
-pub const MENUS: [(&str, egui::Key, &[Entry]); 6] = [
+pub const MENUS: [(&str, egui::Key, &[Entry]); 9] = [
     ("menu-file", egui::Key::F, FILE),
     ("menu-edit", egui::Key::E, EDIT),
+    ("menu-select", egui::Key::S, SELECT),
+    ("menu-layer", egui::Key::L, LAYER),
     ("menu-view", egui::Key::V, VIEW),
+    ("menu-animation", egui::Key::A, ANIMATION),
     ("menu-tools", egui::Key::T, TOOLS),
     ("menu-window", egui::Key::W, WINDOW),
     ("menu-help", egui::Key::H, HELP),
@@ -152,6 +182,21 @@ pub fn tool(action: Action) -> Option<Tool> {
         A::Shape => Tool::Shape,
         A::SymmetryRuler => Tool::Symmetry,
         A::MoveLayer => Tool::Move,
+        _ => return None,
+    })
+}
+
+fn layer_action(action: Action) -> Option<LayerAction> {
+    Some(match action {
+        A::AddLayer => LayerAction::Add,
+        A::AddGroup => LayerAction::AddGroup,
+        A::Ungroup => LayerAction::Ungroup,
+        A::DuplicateLayer => LayerAction::Duplicate,
+        A::MergeDown => LayerAction::MergeDown,
+        A::LayerUp => LayerAction::Up,
+        A::LayerDown => LayerAction::Down,
+        A::ShowLayer => LayerAction::ShowOrHide,
+        A::DeleteLayer => LayerAction::Delete,
         _ => return None,
     })
 }
@@ -195,10 +240,14 @@ fn enabled(action: Action, canvas: &Canvas, layout: &Layout) -> bool {
     if !shown(action, layout) {
         return false;
     }
+    if let Some(layer) = layer_action(action) {
+        return layers::can(layer, canvas);
+    }
     let session = canvas.session();
     let selected = session.selection().is_some();
     let pending = session.pending().is_some();
     match action {
+        A::SmallerBrush | A::LargerBrush => super::sized(canvas),
         A::Undo => session.undo_label().is_some(),
         A::Redo => session.redo_label().is_some(),
         A::Cut
@@ -426,6 +475,10 @@ pub fn run(
         canvas.choose_tool(tool);
         return;
     }
+    if let Some(layer) = layer_action(action) {
+        layers::run(layer, canvas, &mut panels.refusal);
+        return;
+    }
     if let Some(panel) = panel(action) {
         let open = !is_open(&panels.layout, panel);
         match panel {
@@ -529,6 +582,9 @@ pub fn run(
             let result = canvas.edit(Session::new_cel);
             panels.report(result);
         }
+        A::SmallerBrush => super::step_brush_size(canvas, false),
+        A::LargerBrush => super::step_brush_size(canvas, true),
+        A::SwapColors => panels.color.swap(canvas),
         A::ResetLayout => panels.set_layout(Layout::default()),
         A::AnimationTools => {
             panels.layout.animation_tools = !panels.layout.animation_tools;
@@ -549,7 +605,16 @@ pub fn run(
         | A::WobbleDock
         | A::ColorDock
         | A::ColorHistory
-        | A::Layers => unreachable!("handled above"),
+        | A::Layers
+        | A::AddLayer
+        | A::AddGroup
+        | A::Ungroup
+        | A::DuplicateLayer
+        | A::MergeDown
+        | A::LayerUp
+        | A::LayerDown
+        | A::ShowLayer
+        | A::DeleteLayer => unreachable!("handled above"),
     }
 }
 

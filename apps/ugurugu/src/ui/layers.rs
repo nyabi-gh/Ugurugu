@@ -214,6 +214,76 @@ fn report(refusal: &mut Option<String>, result: Result<Outcome, EditError>) {
     }
 }
 
+/// What the layer buttons, the Layer menu and their keys do to the current
+/// layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerAction {
+    Add,
+    AddGroup,
+    Ungroup,
+    Duplicate,
+    MergeDown,
+    Up,
+    Down,
+    ShowOrHide,
+    Delete,
+}
+
+/// Whether `action` can be done to the current layer now.
+pub fn can(action: LayerAction, canvas: &Canvas) -> bool {
+    let session = canvas.session();
+    let document = session.document();
+    let current = session.current_layer();
+    let Some(layer) = document.layer(current) else {
+        return matches!(action, LayerAction::Add | LayerAction::AddGroup);
+    };
+    let (count, index) = document
+        .position(current)
+        .and_then(|(parent, index)| Some((command::siblings(document, parent)?.len(), index)))
+        .unwrap_or((0, 0));
+    match action {
+        LayerAction::Add | LayerAction::AddGroup | LayerAction::ShowOrHide => true,
+        LayerAction::Ungroup => matches!(layer.kind, LayerKind::Group(_)),
+        LayerAction::Duplicate => session.can_duplicate_layer(),
+        LayerAction::MergeDown => merge_refusal(document, current).is_none(),
+        LayerAction::Up => index + 1 < count,
+        LayerAction::Down => index > 0,
+        LayerAction::Delete => session.can_remove_layer(),
+    }
+}
+
+/// Does `action` to the current layer as one step, or says why not.
+pub fn run(action: LayerAction, canvas: &mut Canvas, refusal: &mut Option<String>) {
+    let result = match action {
+        LayerAction::Add => {
+            tracing::info!("layer added");
+            canvas.edit(Session::add_layer)
+        }
+        LayerAction::AddGroup => canvas.edit(Session::add_group),
+        LayerAction::Ungroup => canvas.edit(Session::ungroup),
+        LayerAction::Duplicate => canvas.edit(|session| session.duplicate_layer(copy_name)),
+        LayerAction::MergeDown => canvas.edit(Session::merge_down),
+        LayerAction::Up => canvas.edit(|session| session.move_layer(1)),
+        LayerAction::Down => canvas.edit(|session| session.move_layer(-1)),
+        LayerAction::ShowOrHide => {
+            let id = canvas.session().current_layer();
+            let Some(shown) = canvas
+                .session()
+                .document()
+                .layer(id)
+                .map(|layer| !layer.visible)
+            else {
+                return;
+            };
+            canvas.edit(|session| {
+                session.update_layer(id, "Show or hide layer", |layer| layer.visible = shown)
+            })
+        }
+        LayerAction::Delete => canvas.edit(Session::remove_layer),
+    };
+    report(refusal, result);
+}
+
 impl LayerDock {
     /// Drops the thumbnail textures, which a new GPU device does not have;
     /// they are made again from the canvas's thumbnails.
@@ -774,46 +844,34 @@ impl LayerDock {
 
     fn buttons(&mut self, ui: &mut Ui, canvas: &mut Canvas, refusal: &mut Option<String>) {
         let document = canvas.session().document();
-        let current = canvas.session().current_layer();
-        let is_group = matches!(
-            document.layer(current).map(|layer| &layer.kind),
-            Some(LayerKind::Group(_))
+        let merge_refused = merge_refusal(document, canvas.session().current_layer());
+        let able = |action| can(action, canvas);
+        let (ungroup, duplicate, up, down, remove) = (
+            able(LayerAction::Ungroup),
+            able(LayerAction::Duplicate),
+            able(LayerAction::Up),
+            able(LayerAction::Down),
+            able(LayerAction::Delete),
         );
-        let (count, index) = document
-            .position(current)
-            .and_then(|(parent, index)| Some((command::siblings(document, parent)?.len(), index)))
-            .unwrap_or((0, 0));
-        let merge_refused = merge_refusal(document, current);
-        let removable = canvas.session().can_remove_layer();
-        let duplicable = canvas.session().can_duplicate_layer();
+        let mut chosen = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.add_space(theme::space::XS);
             if widgets::icon_button(ui, Glyph::Add, 16.0, tr("layer-add"), true).clicked() {
-                report(refusal, canvas.edit(Session::add_layer));
-                tracing::info!("layer added");
+                chosen = Some(LayerAction::Add);
             }
             if text_button(ui, Glyph::Add, "G", tr("layer-add-group"), true).clicked() {
-                report(refusal, canvas.edit(Session::add_group));
+                chosen = Some(LayerAction::AddGroup);
             }
-            if text_button(ui, Glyph::Remove, "G", tr("layer-ungroup"), is_group).clicked() {
-                report(refusal, canvas.edit(Session::ungroup));
+            if text_button(ui, Glyph::Remove, "G", tr("layer-ungroup"), ungroup).clicked() {
+                chosen = Some(LayerAction::Ungroup);
             }
             // Making layers, then what a layer holds, then the order.
             ui.add_space(theme::space::M);
-            if widgets::icon_button(
-                ui,
-                Glyph::Duplicate,
-                16.0,
-                tr("layer-duplicate"),
-                duplicable,
-            )
-            .clicked()
+            if widgets::icon_button(ui, Glyph::Duplicate, 16.0, tr("layer-duplicate"), duplicate)
+                .clicked()
             {
-                report(
-                    refusal,
-                    canvas.edit(|session| session.duplicate_layer(copy_name)),
-                );
+                chosen = Some(LayerAction::Duplicate);
             }
             let merge = widgets::icon_button_tip(
                 ui,
@@ -824,25 +882,21 @@ impl LayerDock {
                 merge_refused.is_none(),
             );
             if merge.clicked() {
-                report(refusal, canvas.edit(Session::merge_down));
+                chosen = Some(LayerAction::MergeDown);
             }
             ui.add_space(theme::space::M);
-            if widgets::icon_button(ui, Glyph::MoveUp, 16.0, tr("layer-up"), index + 1 < count)
-                .clicked()
-            {
-                report(refusal, canvas.edit(|session| session.move_layer(1)));
+            if widgets::icon_button(ui, Glyph::MoveUp, 16.0, tr("layer-up"), up).clicked() {
+                chosen = Some(LayerAction::Up);
             }
-            if widgets::icon_button(ui, Glyph::MoveDown, 16.0, tr("layer-down"), index > 0)
-                .clicked()
-            {
-                report(refusal, canvas.edit(|session| session.move_layer(-1)));
+            if widgets::icon_button(ui, Glyph::MoveDown, 16.0, tr("layer-down"), down).clicked() {
+                chosen = Some(LayerAction::Down);
             }
             // Apart from the rest at the far end, so it is not hit by mistake.
             // A right-to-left layout with no room left starts at the cursor
             // and grows back over the buttons before it, so it is used only
             // when the button fits; otherwise the button follows the rest.
             let delete = |ui: &mut Ui| {
-                widgets::icon_button(ui, Glyph::Delete, 16.0, tr("layer-delete"), removable)
+                widgets::icon_button(ui, Glyph::Delete, 16.0, tr("layer-delete"), remove)
             };
             let fits = ui.available_width() >= theme::space::M + DELETE_SIDE + theme::space::XS;
             let deleted = if fits {
@@ -856,9 +910,12 @@ impl LayerDock {
                 delete(ui)
             };
             if deleted.clicked() {
-                report(refusal, canvas.edit(Session::remove_layer));
+                chosen = Some(LayerAction::Delete);
             }
         });
+        if let Some(action) = chosen {
+            run(action, canvas, refusal);
+        }
     }
 
     fn properties(

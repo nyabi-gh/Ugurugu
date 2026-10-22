@@ -164,6 +164,17 @@ impl ColorDock {
         self.seen = Some(color);
     }
 
+    /// Swaps the pen colour and the previous one, as clicking the rear
+    /// swatch does; white is the previous colour before there is one.
+    pub fn swap(&mut self, canvas: &mut Canvas) {
+        let picked = canvas.tools().color;
+        self.follow(picked);
+        let previous = self.previous.unwrap_or(Rgba8([255, 255, 255, 255]));
+        self.previous = Some(picked);
+        self.seen = Some(previous);
+        canvas.tools_mut().color = previous;
+    }
+
     /// How tall the panel is with the wheel as wide as `width` allows.
     pub fn natural_height(&self, width: f32) -> f32 {
         self.rest.unwrap_or(REST_GUESS) + width.min(WHEEL_MOST)
@@ -390,9 +401,7 @@ impl ColorDock {
                 crate::widgets::focus_ring(painter, back, theme::radius::CONTROL);
             }
             if back_response.clicked() {
-                self.previous = Some(picked);
-                self.seen = Some(previous);
-                canvas.tools_mut().color = previous;
+                self.swap(canvas);
             }
             ui.vertical(|ui| {
                 let label = ui.label(

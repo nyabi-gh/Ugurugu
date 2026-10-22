@@ -43,6 +43,13 @@ const fn ctrl_shift(key: Key) -> Chord {
     }
 }
 
+const fn ctrl_alt(key: Key) -> Chord {
+    Chord {
+        alt: true,
+        ..ctrl(key)
+    }
+}
+
 const fn alt(key: Key) -> Chord {
     Chord {
         alt: true,
@@ -122,6 +129,8 @@ impl Chord {
             Key::Comma => ",",
             Key::Period => ".",
             Key::Equals => "=",
+            Key::OpenBracket => "[",
+            Key::CloseBracket => "]",
             Key::Escape => "Esc",
             key => key.name(),
         });
@@ -271,7 +280,10 @@ macro_rules! actions {
 
 // 2.2.13's keys with Windows's standard ones as aliases, except where 3.0
 // already differs: Save As, Quit and exporting have keys, transforming is
-// Ctrl+T and so the animation bar Ctrl+Shift+T.
+// Ctrl+T and so the animation bar Ctrl+Shift+T. The layer keys, the brush
+// size and swapping colours, which 2.2.13 had none for, follow Photoshop
+// and Clip Studio Paint, so exporting a GIF moved to Ctrl+Alt+E and a new
+// cel has no key (decisions.md section 9).
 actions! {
     New "new" "file-new" [ctrl(Key::N)] [];
     Open "open" "file-open" [ctrl(Key::O)] [];
@@ -279,7 +291,7 @@ actions! {
     SaveAs "saveAs" "file-save-as" [ctrl_shift(Key::S)] [];
     InsertImage "insertImage" "file-insert-image" [] [];
     Export "exportPng" "file-export-frame" [ctrl_shift(Key::E)] [];
-    ExportGif "exportGif" "export-gif" [ctrl(Key::E)] [];
+    ExportGif "exportGif" "export-gif" [ctrl_alt(Key::E)] [];
     ExportWebP "exportWebP" "export-webp" [] [];
     CloseTab "closeTab" "file-close-tab" [ctrl(Key::W)] [ctrl(Key::F4)];
     Quit "quit" "file-quit" [ctrl(Key::Q)] [];
@@ -303,6 +315,15 @@ actions! {
     FlipVertical "flipSelectionVertical" "flip-vertical" [] [];
     ApplyTransform "applySelectionTransform" "transform-apply" [plain(Key::Enter)] [];
     CancelTransform "cancelSelectionTransform" "transform-cancel" [] [];
+    AddLayer "addLayer" "layer-add" [ctrl_shift(Key::N)] [];
+    AddGroup "addGroup" "layer-add-group" [] [];
+    Ungroup "ungroup" "layer-ungroup" [] [];
+    DuplicateLayer "duplicateLayer" "layer-duplicate" [ctrl(Key::J)] [];
+    MergeDown "mergeDown" "layer-merge" [ctrl(Key::E)] [];
+    LayerUp "moveLayerUp" "layer-up" [] [];
+    LayerDown "moveLayerDown" "layer-down" [] [];
+    ShowLayer "showLayer" "layer-show-hide" [] [];
+    DeleteLayer "deleteLayer" "layer-delete" [] [];
     Escape "escapeCanvas" "escape-canvas" [plain(Key::Escape)] [];
     Settings "settings" "edit-settings" [ctrl(Key::Comma)] [];
     ZoomIn "zoomIn" "view-zoom-in" [ctrl(Key::Plus)] [ctrl(Key::Equals)];
@@ -325,7 +346,7 @@ actions! {
     ToggleKey "toggleKey" "key-toggle" [plain(Key::K)] [];
     OnionSkin "onionSkin" "onion-skin" [plain(Key::O)] [];
     AnimationFolder "animationFolder" "animation-folder-make" [] [];
-    NewCel "newCel" "cel-new" [ctrl_shift(Key::N)] [];
+    NewCel "newCel" "cel-new" [] [];
     Brush "brush" "tool-brush" [plain(Key::B)] [];
     Eraser "eraser" "tool-eraser" [plain(Key::E)] [];
     Select "lasso" "tool-select" [plain(Key::L)] [];
@@ -336,6 +357,9 @@ actions! {
     Shape "shape" "tool-shape" [plain(Key::U)] [];
     SymmetryRuler "symmetryRulerTool" "tool-symmetry" [plain(Key::R)] [];
     MoveLayer "moveLayer" "tool-move" [plain(Key::V)] [];
+    SmallerBrush "smallerBrush" "brush-smaller" [plain(Key::OpenBracket)] [];
+    LargerBrush "largerBrush" "brush-larger" [plain(Key::CloseBracket)] [];
+    SwapColors "swapColors" "color-swap" [plain(Key::X)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];
     NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];
@@ -569,6 +593,9 @@ mod tests {
             (ctrl(Key::Num1), "Ctrl+1"),
             (plain(Key::F5), "F5"),
             (alt(Key::Backspace), "Alt+Backspace"),
+            (plain(Key::OpenBracket), "["),
+            (plain(Key::CloseBracket), "]"),
+            (ctrl_alt(Key::E), "Ctrl+Alt+E"),
         ] {
             assert_eq!(chord.text(), text);
             assert_eq!(Chord::parse(text), Some(chord), "{text}");

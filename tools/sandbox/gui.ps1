@@ -1018,11 +1018,11 @@ function Invoke-Word($Process, $Words, [string] $Key) {
     Invoke-Named $Process ($Words[$Key].TrimEnd([char]0x2026)) -Prefix
 }
 
-# Turns on View > Animation tools, which start off; the settings file a
+# Turns on Animation > Animation tools, which start off; the settings file a
 # step before saved may have them on already.
 function Enable-AnimationTools($Process, [string] $Language = 'en') {
     $words = Read-Words $Language
-    Invoke-Word $Process $words 'menu-view'
+    Invoke-Word $Process $words 'menu-animation'
     $name = $words['view-animation-tools']
     $item = Find-Pattern $Process $name @([Windows.Automation.SelectionItemPattern]::Pattern,
         [Windows.Automation.TogglePattern]::Pattern)
@@ -1480,7 +1480,9 @@ Step 'Cels and onion skin' {
     $h = $paper.Bottom - $paper.Top
     Invoke-Named $process 'Make animation folder'
     for ($i = 0; $i -lt 3; $i++) { Send-Keys $process '.' }
-    Send-Keys $process '^+n'
+    $words = Read-Words 'en'
+    Invoke-Word $process $words 'menu-animation'
+    Invoke-Word $process $words 'cel-new'
     Send-Keys $process 'b'
     [Native]::Drag(@(($paper.Left + [int]($w * 0.2)), ($paper.Left + [int]($w * 0.8))),
         @(($paper.Top + [int]($h * 0.2)), ($paper.Top + [int]($h * 0.25))))
@@ -1624,7 +1626,10 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'main' = { param($p) }
             'menu-file' = { param($p) Invoke-Word $p $words 'menu-file' }
             'menu-edit' = { param($p) Invoke-Word $p $words 'menu-edit' }
+            'menu-select' = { param($p) Invoke-Word $p $words 'menu-select' }
+            'menu-layer' = { param($p) Invoke-Word $p $words 'menu-layer' }
             'menu-view' = { param($p) Invoke-Word $p $words 'menu-view' }
+            'menu-animation' = { param($p) Invoke-Word $p $words 'menu-animation' }
             'menu-tools' = { param($p) Invoke-Word $p $words 'menu-tools' }
             'menu-window' = { param($p) Invoke-Word $p $words 'menu-window' }
             'menu-help' = { param($p) Invoke-Word $p $words 'menu-help' }
@@ -1644,7 +1649,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
                 $x = [int](($paper.Left + $paper.Right) / 2)
                 $y = [int](($paper.Top + $paper.Bottom) / 2)
                 [Native]::Drag(@($x, ($x + 60)), @($y, ($y + 20)))
-                Invoke-Word $p $words 'menu-view'
+                Invoke-Word $p $words 'menu-animation'
                 Invoke-Word $p $words 'animation-folder-make'
                 Send-Keys $p 'o'
             }
@@ -1663,7 +1668,7 @@ function Invoke-ScreenSet([string[]] $Languages, [string] $Tag = '') {
             'help' = { param($p) Send-Keys $p '{F1}'; Start-Sleep -Seconds 1 }
             'unsaved-changes' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^w' }
             'transform-box' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^a'; Send-Keys $p '^t' }
-            'restyle' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^a'; Invoke-Word $p $words 'menu-edit'; Invoke-Word $p $words 'restyle-selected' }
+            'restyle' = { param($p) [void](Draw-Stroke $p); Send-Keys $p '^a'; Invoke-Word $p $words 'menu-select'; Invoke-Word $p $words 'restyle-selected' }
             'text-placed' = {
                 param($p)
                 $paper = Find-Paper $p
