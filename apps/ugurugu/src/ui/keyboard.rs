@@ -367,6 +367,21 @@ fn x_swaps_with_the_colour_before_while_the_colour_panel_is_closed() {
 }
 
 #[test]
+fn a_key_pressed_while_restoring_is_asked_about_is_no_shortcut() {
+    use crate::shortcuts::Action;
+    let mut window = Window::new();
+    window.panels.settings = Some(super::settings::Dialog::capturing(Action::Fit));
+    window.frame(Vec::new());
+    window.click_named(tr("settings-restore-defaults"));
+    assert!(window.dialog());
+    window.key(NONE, Key::Q);
+    assert_eq!(
+        window.settings.get().shortcuts.key(Action::Fit),
+        Action::Fit.default_key()
+    );
+}
+
+#[test]
 fn a_menu_item_pressed_by_a_screen_reader_closes_the_menu() {
     let mut window = Window::new();
     window.click_named(tr("menu-edit"));

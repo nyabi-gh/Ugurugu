@@ -107,6 +107,16 @@ impl Dialog {
             ..Self::default()
         }
     }
+
+    /// On the shortcuts tab, waiting for `action`'s new key.
+    #[cfg(test)]
+    pub(super) fn capturing(action: Action) -> Self {
+        Self {
+            tab: Tab::Shortcuts,
+            capturing: Some(action),
+            ..Self::default()
+        }
+    }
 }
 
 pub fn apply(
@@ -252,6 +262,10 @@ pub fn show(
                 );
                 if restore.clicked() {
                     dialog.confirming_restore = true;
+                    // The settings keep running under the question, and a
+                    // key awaited would take the keys meant for it.
+                    dialog.picking_accent = false;
+                    dialog.capturing = None;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if widgets::button(ui, tr("settings-close"), widgets::Emphasis::Primary, true)

@@ -20,6 +20,8 @@ pub struct Placing {
     original: Arc<TiledSurface>,
     /// The split's `reached` and `redraw` with `original`.
     reached: (Option<[u32; 4]>, bool),
+    /// And with the text shown now, which they become once it is applied.
+    with_text: (Option<[u32; 4]>, bool),
     /// What differs from `original` now.
     shown: Option<PixelRect>,
 }
@@ -50,6 +52,7 @@ impl Split {
         Some(Placing {
             original: surface.clone(),
             reached: (self.reached, self.redraw),
+            with_text: (self.reached, self.redraw),
             shown: None,
         })
     }
@@ -83,9 +86,9 @@ impl Split {
             now = union(now, self.stamp(stamp, stroke, false, wobble, frames, clip));
         }
         // Placed text is not in the document, so a split drawn again would
-        // come back without it and be marked again: it does not widen what
-        // the layer reaches. Applied, it changes the document, and with it
-        // the split.
+        // come back without it and be marked again: it widens what the
+        // layer reaches only once applied.
+        placing.with_text = (self.reached, self.redraw);
         (self.reached, self.redraw) = placing.reached;
         placing.shown = now;
         union(before, now)
@@ -95,6 +98,7 @@ impl Split {
     /// otherwise the layer as it was comes back. Returns the pixels changed.
     pub fn end_place(&mut self, placing: Placing, applied: bool) -> Option<PixelRect> {
         if applied {
+            (self.reached, self.redraw) = placing.with_text;
             return None;
         }
         let edited = self.edited?;

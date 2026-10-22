@@ -43,7 +43,7 @@ Press `F1` any time for help.
 ## What you can do
 
 - **Wobble** — choose how strongly and how your drawing moves, and let each layer move or stay still.
-- **Animation** — key a layer to move, turn and scale it between frames, or draw each frame anew in an animation folder (View → Animation tools).
+- **Animation** — key a layer to move, turn and scale it between frames, or draw each frame anew in an animation folder (Animation → Animation tools).
 - **Drawing** — pen, marker, airbrush and spray brushes with pen pressure, lines and shapes, selections and transforms, and text.
 - **Pixel art** — draw crisp pixel art in pixel mode and export it enlarged.
 - **Tabs** — work on several drawings in one window.

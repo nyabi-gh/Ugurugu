@@ -4216,6 +4216,15 @@ mod tests {
         }
         assert!(canvas.tab.text_preview.is_some());
         assert!(asked <= 1, "asked {asked} times for the same split");
+        // Applied, the text is in the document and moves where a full render
+        // draws the layer from, as a stroke there would.
+        assert!(canvas.apply_text());
+        canvas.sync();
+        assert_eq!(canvas.tab.requested, Some(canvas.key()), "drawn again");
+        render_until(&mut canvas, &renders, |canvas| {
+            canvas.tab.requested.is_none()
+        });
+        assert!(canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
     }
 
     #[test]
