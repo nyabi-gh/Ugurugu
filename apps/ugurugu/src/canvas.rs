@@ -1872,10 +1872,14 @@ impl Canvas {
             .shape_fill()
             .and_then(|fill| stroke.fill(fill.area.mask(), fill.antialias, fill.color.0));
         let live = self.tab.session.live().expect("dragging");
-        let outlined = if live.outlined {
-            stroke.update(&live.points)
-        } else {
+        let split = self.tab.split.as_ref().map(|(_, split)| split);
+        let document = self.tab.session.document();
+        let outlined = if !live.outlined {
             None
+        } else if let Some((rect, piece)) = committed_line(split, &mut self.stamp, document, live) {
+            stroke.line(&live.points, rect, piece)
+        } else {
+            stroke.update(&live.points)
         };
         let rect = union(filled, outlined);
         self.interaction = Interaction::Drawing {
@@ -2180,6 +2184,32 @@ fn preview_shrink(scale: f64) -> u32 {
         shrink *= 2;
     }
     shrink
+}
+
+/// The coverage the line of shape `live` will have once committed on
+/// `split`, which knows where a full render draws its layer from: in the
+/// alpha of the pixmap, with where it lies. `None` for a stroke that is not
+/// a plain line, or without a split of its layer.
+fn committed_line<'a>(
+    split: Option<&Split>,
+    stamp: &'a mut Stamp,
+    document: &Document,
+    live: &ugu_session::LiveStroke,
+) -> Option<(PixelRect, &'a Pixmap)> {
+    let split = split.filter(|split| split.layer == live.layer)?;
+    if live.template.brush.engine != ugu_core::store::BrushEngine::Line {
+        return None;
+    }
+    let stroke = ugu_core::store::Stroke {
+        points: live.points.clone().into(),
+        ..live.template.clone()
+    };
+    split.line_shown(
+        stamp,
+        &stroke,
+        wobble_of(document, live.layer),
+        document.frames,
+    )
 }
 
 /// The wobble of strokes on `layer`.
@@ -3682,10 +3712,13 @@ mod tests {
     #[test]
     fn a_filled_shape_shows_while_dragged_as_it_is_committed() {
         use ugu_session::ShapePaint;
-        for (paint, opacity, pixel_mode) in [
-            (ShapePaint::Both, 0.5, false),
-            (ShapePaint::Fill, 1.0, false),
-            (ShapePaint::Both, 1.0, true),
+        for (paint, opacity, pixel_mode, antialias) in [
+            (ShapePaint::Both, 0.5, false, true),
+            (ShapePaint::Fill, 1.0, false, true),
+            (ShapePaint::Both, 1.0, true, true),
+            (ShapePaint::Both, 0.5, false, false),
+            (ShapePaint::Both, 1.0, false, false),
+            (ShapePaint::Fill, 0.5, false, false),
         ] {
             let (to_test, renders) = std::sync::mpsc::channel();
             let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
@@ -3698,7 +3731,7 @@ mod tests {
             settle(&mut canvas, &renders);
             canvas.set_tool(Tool::Shape).unwrap();
             canvas.tools_mut().plain.pen.opacity = opacity;
-            canvas.tools_mut().plain.pen.antialias = true;
+            canvas.tools_mut().plain.pen.antialias = antialias;
             let shape = &mut canvas.tools_mut().shape;
             shape.shape = ugu_session::Shape::Moon;
             shape.paint = paint;
@@ -3720,22 +3753,56 @@ mod tests {
                 ugu_render::document::Purpose::Display,
                 &mut full,
             );
-            // An outline shows as a live stroke does: its batches add up
-            // coverage a little apart from one fill (live.rs tests), and
-            // over pixels it rounds a level apart (`compose::paint`). The
-            // fill shows as it is committed.
-            let allowed = if paint == ShapePaint::Both { 2 } else { 0 };
+            // The outline shows with the coverage it is committed with, but
+            // painted over pixels it rounds a level apart (`compose::paint`).
+            // The fill shows as it is committed.
+            let allowed = if paint == ShapePaint::Both { 1 } else { 0 };
             let worst = dragged
                 .data_as_u8_slice()
                 .iter()
                 .zip(full.data_as_u8_slice())
                 .map(|(a, b)| a.abs_diff(*b))
                 .max();
+            let apart = dragged
+                .data_as_u8_slice()
+                .chunks(4)
+                .zip(full.data_as_u8_slice().chunks(4))
+                .filter(|(a, b)| a != b)
+                .count();
             assert!(
                 worst <= Some(allowed),
-                "{paint:?} at {opacity}, pixel mode {pixel_mode}: {worst:?} apart"
+                "{paint:?} at {opacity}, pixel mode {pixel_mode}, antialias {antialias}: \
+                 {worst:?} apart on {apart} pixels"
             );
         }
+    }
+
+    #[test]
+    fn an_aliased_eraser_ends_as_a_full_render_draws_it() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([400, 300]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.brushes_mut().pen.antialias = false;
+        canvas.brushes_mut().pen.width = 12.0;
+        stroke_through(
+            &mut canvas,
+            &[[200.0, 150.0], [260.0, 200.0], [330.0, 160.0]],
+        );
+        settle(&mut canvas, &renders);
+        canvas.set_tool(Tool::Eraser).unwrap();
+        canvas.brushes_mut().eraser.antialias = false;
+        canvas.brushes_mut().eraser.width = 9.0;
+        // Across the stroke and out to tiles the layer does not reach.
+        stroke_through(
+            &mut canvas,
+            &[[20.5, 30.25], [230.0, 175.0], [390.0, 290.0]],
+        );
+        canvas.sync();
+        render_until(&mut canvas, &renders, |canvas| {
+            canvas.tab.requested.is_none()
+        });
+        assert!(canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
     }
 
     fn pixel_of(pixmap: &Pixmap, (x, y): (usize, usize)) -> Vec<u8> {

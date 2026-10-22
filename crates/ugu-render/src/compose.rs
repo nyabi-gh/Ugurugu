@@ -199,16 +199,42 @@ impl Split {
     /// The pixels a full render draws the edited layer in; `None` while it
     /// draws none, so an eraser has nothing to take away.
     fn drawn(&self) -> Option<PixelRect> {
+        Some(drawn_in(self.edited_tiles()?, self.reached?))
+    }
+
+    fn edited_tiles(&self) -> Option<&TiledSurface> {
         let Held::Tiles(surface) = &self.sources[self.edited?] else {
             unreachable!("a paint layer's pixels are tiles");
         };
-        let (origin, extent) = surface.area(self.reached?);
-        Some([
-            origin[0],
-            origin[1],
-            origin[0] + u32::from(extent[0]),
-            origin[1] + u32::from(extent[1]),
-        ])
+        Some(surface)
+    }
+
+    /// The coverage of line `stroke` as `stamp` would lay it once committed
+    /// on the edited layer, in the alpha of the pixmap given back with where
+    /// it lies. Changes nothing: for a line shown before it is committed,
+    /// whose aliased edge rounds by where a full render draws the layer from.
+    pub fn line_shown<'a>(
+        &self,
+        stamp: &'a mut Stamp,
+        stroke: &Stroke,
+        wobble: Wobble,
+        frames: u32,
+    ) -> Option<(PixelRect, &'a Pixmap)> {
+        let surface = self.edited_tiles()?;
+        let pen = Pen::new(stroke, wobble, frames);
+        let with = tiles_reached(stroke::bounds(&stroke.points, &pen), 1, surface);
+        let reached = match (self.reached, with) {
+            (Some(was), Some(new)) => [
+                was[0].min(new[0]),
+                was[1].min(new[1]),
+                was[2].max(new[2]),
+                was[3].max(new[3]),
+            ],
+            (was, new) => was.or(new)?,
+        };
+        let drawn = drawn_in(surface, reached);
+        let rect = stamp.line_coverage(stroke, &pen, self.frame, surface.size(), drawn)?;
+        Some((rect, &stamp.piece))
     }
 
     /// `stamp` for `strokes` in order, each with whether it erases and its
@@ -595,6 +621,18 @@ pub fn composite(split: &Split, live: &[&LiveStroke], rect: PixelRect, out: &mut
             );
         }
     }
+}
+
+/// The pixels a full render draws a layer of `surface` in, when its
+/// strokes reach the tiles `reached`.
+fn drawn_in(surface: &TiledSurface, reached: [u32; 4]) -> PixelRect {
+    let (origin, extent) = surface.area(reached);
+    [
+        origin[0],
+        origin[1],
+        origin[0] + u32::from(extent[0]),
+        origin[1] + u32::from(extent[1]),
+    ]
 }
 
 /// Draws one stroke into a pixel rectangle on the calling thread.

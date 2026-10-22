@@ -77,6 +77,9 @@ pub struct LiveStroke {
     fixed_shown: usize,
     /// A filled shape's fill, under the stroke.
     filled: Option<Filled>,
+    /// `coverage` is what the committed line covers (`line`), taken as it
+    /// is rather than cut at the aliasing threshold.
+    exact: bool,
 }
 
 /// A fill as `Split::stamp_fill` lays it: its pixels take the colour, and
@@ -148,6 +151,7 @@ impl LiveStroke {
             shown: Vec::new(),
             fixed_shown: 0,
             filled: None,
+            exact: false,
         }
     }
 
@@ -281,6 +285,21 @@ impl LiveStroke {
             dirty = union(dirty, Some(rect));
         }
         union(dirty, old_tail)
+    }
+
+    /// Shows the whole stroke of `points` with the coverage the committed
+    /// line will have, `piece`'s alpha over `rect`, from
+    /// `compose::Split::line_shown`: an aliased edge rounds by where a full
+    /// render draws the layer from, which cutting antialiased coverage at
+    /// the threshold does not know. Instead of `update`.
+    pub fn line(&mut self, points: &[Point], rect: PixelRect, piece: &Pixmap) -> Option<PixelRect> {
+        let first = points.first()?;
+        self.begin_line(first.pressure);
+        self.points = points.len();
+        self.exact = true;
+        add_coverage(&mut self.coverage, piece, rect);
+        self.written = union(self.written, Some(rect));
+        Some(rect)
     }
 
     /// The colour drawn at full coverage, from the first point's pressure.
@@ -435,7 +454,7 @@ impl LiveStroke {
             tail: self.tail.as_ref(),
             clip: self.clip.as_ref(),
             dabs: self.dabs.is_some(),
-            antialias: self.pen.brush.antialias,
+            antialias: self.pen.brush.antialias || self.exact,
             line: self.line,
             erase: self.erase,
             filled: self.filled.as_ref(),
