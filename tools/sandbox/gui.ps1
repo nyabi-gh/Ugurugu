@@ -12,6 +12,7 @@ mapped. Keys and the mouse go to the front window, so this runs only in the
 Sandbox, where the app is the only window. Checks: the notice about an
 unexpected close, the exe and window icons, the help window, turning and
 flipping the view, the eyedropper's cursor, the docks of a short window,
+the splits and menu bar of a small window,
 the save dialog's added extension, the transform box's cursors, no blank
 frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
@@ -60,6 +61,7 @@ public static class Native
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
@@ -561,6 +563,96 @@ Step 'Docks of a short window' {
     $right = Save-Screen 'short-window-right-dock-scrolled'
     Close-App $process
     "window 1000x520; $before, $after, $right"
+}
+
+# The small-window layout: the first window maximized on a screen that does
+# not hold 1600 x 1000 points with room to spare, the splits between dock groups dragged with the mouse
+# and moved with Up and Down, an open list keeping the arrows, and Panels,
+# Undo and Redo at the menu bar's right end.
+Step 'Splits and the menu bar of a small window' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $words = Read-Words 'en'
+    $env:UGURUGU_LANGUAGE = 'en'
+    $env:UGURUGU_SETTINGS_PATH = Join-Path $env:TEMP 'gui-settings.json'
+    $env:UGURUGU_RECOVERY_PATH = Join-Path $env:TEMP 'gui-recovery'
+    $env:UGURUGU_LOG_PATH = $logs
+    Set-Content -Path $env:UGURUGU_SETTINGS_PATH -Encoding ascii -Value '{"format": "ugurugu.settings", "version": 1, "checkForUpdates": false}'
+    Start-Process -FilePath $app | Out-Null
+    $process = Wait-Window
+    [void](Get-Value $process $words['canvas-zoom-percent'])
+    Start-Sleep -Seconds 1
+    $scale = [Native]::GetDpiForWindow($process.MainWindowHandle) / 96.0
+    $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    # As the app's first_place: 1600 x 1000 within 90% by 80% of the screen.
+    $small = $screen.Width / $scale * 0.9 -lt 1600 -or $screen.Height / $scale * 0.8 -lt 1000
+    $maximized = [Native]::IsZoomed($process.MainWindowHandle)
+    $first = Save-Screen 'small-first-window'
+    Close-App $process
+
+    $process = Start-App 1600 1000
+    $rect = Get-Rect $process
+    $middle = ($rect.Left + $rect.Right) / 2
+    # The Panels button is named by its tip.
+    $ends = @('panels-tip', 'edit-undo', 'edit-redo') | ForEach-Object {
+        $name = $words[$_]
+        $element = Find-Element $process { param($n) $n -eq $name } 15 "'$name'"
+        [pscustomobject]@{ Name = $name; X = [int]$element.Current.BoundingRectangle.X }
+    }
+    $left = @($ends | Where-Object { $_.X -lt $middle })
+
+    $prefix = $words['dock-height'].Substring(0, $words['dock-height'].IndexOf('{'))
+    $split = Find-Element $process { param($n) $n.StartsWith($prefix) } 15 'a split'
+    $name = $split.Current.Name
+    $height = { $split.GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern).Current.Value }
+    $box = $split.Current.BoundingRectangle
+    $x = [int]($box.X + $box.Width / 2)
+    $y = [int]($box.Y + $box.Height / 2)
+    $start = & $height
+    [Native]::Glide($x, $y)
+    Start-Sleep -Milliseconds 500
+    $cursor = [Native]::CursorName()
+    [Native]::Drag(@($x, $x), @($y, ($y + 60)))
+    Start-Sleep -Milliseconds 500
+    $split = Find-Element $process { param($n) $n -eq $name } 15 "'$name'"
+    $dragged = & $height
+    $shot = Save-Screen 'small-split-dragged'
+    $split.SetFocus()
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait('{DOWN}')
+    Start-Sleep -Milliseconds 500
+    $split = Find-Element $process { param($n) $n -eq $name } 15 "'$name'"
+    $keyed = & $height
+
+    $blend = Find-Element $process { param($n) $n -eq $words['blend-mode-name'] } 15 'the blend mode list'
+    $box = $blend.Current.BoundingRectangle
+    [Native]::Glide([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2))
+    [Native]::Down()
+    [Native]::Up()
+    Start-Sleep -Milliseconds 500
+    [Windows.Forms.SendKeys]::SendWait('{DOWN}')
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait('{DOWN}')
+    Start-Sleep -Milliseconds 500
+    $focused = [string][Windows.Automation.AutomationElement]::FocusedElement.Current.Name
+    $listed = Save-Screen 'small-open-list-arrows'
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Start-Sleep -Milliseconds 500
+    $split = Find-Element $process { param($n) $n -eq $name } 15 "'$name'"
+    $after = & $height
+    Close-App $process
+
+    $ends = ($ends | ForEach-Object { "$($_.Name) at $($_.X)" }) -join ', '
+    $detail = "screen $($screen.Width)x$($screen.Height) at $($scale * 100)%, first window maximized: $maximized ($first); " +
+        "$ends (window middle $middle); '$name' $start -> dragged 60 px $dragged -> Down $keyed, cursor $cursor ($shot); " +
+        "Down twice in the open list: focus on '$focused', split $after ($listed)"
+    $drag = $dragged - $start
+    if ($maximized -ne $small -or $left -or $cursor -ne 'sizens' -or [Math]::Abs($drag - 60 / $scale) -gt 2 -or
+        $keyed - $dragged -ne 16 -or $after -ne $keyed -or $focused.StartsWith($prefix)) {
+        throw $detail
+    }
+    $detail
 }
 
 Step 'Save dialog with another extension typed' {

@@ -1743,3 +1743,23 @@ GIF는 모두 두 색(흰 바탕과 획)이었다. 기본 메모리 Sandbox에�
 pen-up은 레이어마다 획 하나를 찍고 바뀐 곳을 합성한 시간이다. 차이는 회차 사이 흔들림 안이다.
 
 시험: `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`(빈·덮은·리샘플한 레이어에 seed 넷, 고치기 전 빈 레이어 seed 0xae07639b28ff77c5에서 실패), `canvas::tests::a_stroke_reaching_tiles_before_its_layers_has_the_split_drawn_again`(고치기 전에는 split을 다시 요청하지 않아 실패).
+
+## 93. 작은 창 배치의 Sandbox 확인 (2026-10-22)
+
+**질문:** #121·#122의 작은 창 배치가 실제 창과 실제 마우스에서도 헤드리스 시험(91절)대로 움직이나. 창을 복원한 뒤 크기를 정하게 바뀐 `gui.ps1`에서 기존 단계가 그대로 통과하나.
+
+**방법:** Windows Sandbox(화면 3050×1668, 150%, 논리 2033×1112)에서 `gui.ps1` 새 단계 "Splits and the menu bar of a small window"와 기존 단계 셋을 main `dedaf8a`의 release 빌드로 돌렸다. 새 단계는 새 설정으로 첫 창을 열고, 1600×1000 물리 창에서 메뉴 줄 오른쪽 버튼의 위치를 읽고, 왼쪽 도크의 첫 경계("Height of the Tool settings panel", AccessKit slider)를 `mouse_event`로 4px씩 60px 끌고, UI Automation으로 포커스를 준 뒤 ↓, 레이어 혼합 모드 목록을 연 채 ↓ 두 번을 보낸다.
+
+**결과:**
+
+| 볼 것 | 결과 |
+|---|---|
+| 첫 실행 | 최대화. 2033×1112의 80%인 890pt가 1000pt보다 작으니 `app.rs` `first_place`대로다 |
+| 메뉴 줄 오른쪽 | 패널 1468, 실행 취소 1537, 다시 실행 1588(창 가운데 850) |
+| 경계 위 커서 | `sizens` |
+| 60px(40pt) 끌기 | 고치기 전 178 → 213(35pt), 고친 뒤 178 → 218(40pt) |
+| 포커스 뒤 ↓ | +16pt(`SPLIT_STEP`) |
+| 목록이 열린 동안 ↓ 두 번 | 목록이 열린 채이고 경계 높이가 그대로다. 목록 안 강조가 옮겨 갔는지는 스크린샷으로 보이지 않아 확인하지 못했다 |
+| 기존 단계 | "Docks of a short window", "Canvas size by dragging the frame", "The window opens where it closed" 통과 |
+
+경계는 egui가 끌기로 보기 전에 움직인 거리(누른 곳에서 약 6pt)를 `drag_delta`에 넣지 않아 포인터보다 그만큼 뒤처졌다. `ui/dock.rs` `split`이 끌기가 시작된 프레임에 누른 곳부터의 거리를 쓰게 고쳤다. 시험 `dock::tests::the_split_between_two_groups_moves_with_a_drag_and_the_arrow_keys`는 2pt씩 끌고 60pt를 기대하며, 고치기 전에는 54pt로 실패한다.

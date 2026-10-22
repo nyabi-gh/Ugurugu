@@ -583,7 +583,19 @@ fn split(ui: &mut Ui, side: Side, above: &Group, front: Panel, height: f32) -> f
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
-    let mut change = response.drag_delta().y;
+    // egui starts a drag some way from the press and leaves that way out of
+    // the first delta, so the first frame takes all of it from the press.
+    let mut change = if response.drag_started() {
+        ui.input(|input| {
+            input
+                .pointer
+                .interact_pos()
+                .zip(input.pointer.press_origin())
+                .map_or(0.0, |(at, origin)| at.y - origin.y)
+        })
+    } else {
+        response.drag_delta().y
+    };
     if response.has_focus() {
         change += split_keys(ui.ctx());
     }
@@ -1295,14 +1307,22 @@ mod tests {
         let spacing = window.ctx.global_style().spacing.item_spacing.y;
         let split = pos2(header.center().x, header.top() - spacing - SPLIT / 2.0);
         // Tool settings above takes what is left, so the colour keeps the
-        // height the drag leaves it.
-        window.drag(split, split + vec2(0.0, 60.0));
+        // height the drag leaves it. In steps of 2 points, as a mouse moves,
+        // so egui sees a drag only some way from the press.
+        window.frame(vec![Event::PointerMoved(split)]);
+        window.frame(vec![Window::button(split, true)]);
+        for step in 1..=30 {
+            window.frame(vec![Event::PointerMoved(
+                split + vec2(0.0, 2.0 * step as f32),
+            )]);
+        }
+        window.frame(vec![Window::button(split + vec2(0.0, 60.0), false)]);
         window.settle();
         let dragged = colors(&window).expect("a height for the colour group");
         let moved = window.target(Place::With(Panel::Color));
         assert!(
-            moved.top() > header.top() + 40.0,
-            "{header:?} only went to {moved:?}"
+            (moved.top() - (header.top() + 60.0)).abs() < 0.5,
+            "{header:?} went to {moved:?}, not with the pointer"
         );
 
         let id = Id::new(("dock split", true, Panel::ToolSettings));
