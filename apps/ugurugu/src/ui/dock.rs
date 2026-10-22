@@ -638,8 +638,10 @@ fn split_keys(ctx: &egui::Context) -> f32 {
 }
 
 /// Moves the split under group `above` by `change`. The group that keeps
-/// the new height is the one above, or the one below when the one above
-/// takes what is left.
+/// the new height is the one above, or the one below when the group that
+/// takes what is left is above the split: that group would take back a
+/// height given to any group between it and the split, and the split would
+/// stay put.
 fn resize(
     panels: &mut Panels,
     side: Side,
@@ -648,7 +650,7 @@ fn resize(
     above: usize,
     change: f32,
 ) {
-    let (at, change) = if fit.filler == Some(above) {
+    let (at, change) = if fit.filler.is_some_and(|filler| filler <= above) {
         (above + 1, -change)
     } else {
         (above, change)
@@ -1338,6 +1340,40 @@ mod tests {
         window.frame(vec![down(true), down(false)]);
         window.settle();
         assert_eq!(colors(&window), Some(dragged - SPLIT_STEP));
+    }
+
+    #[test]
+    fn a_split_below_the_filler_s_neighbour_moves_its_own_edge() {
+        // 3.4.1's left side: Tool settings, which takes what is left, over
+        // two groups of its own.
+        let mut window = Window::new();
+        window.size = vec2(1600.0, 1400.0);
+        let mut layout = crate::layout::Layout::default();
+        layout.left.groups = [Panel::ToolSettings, Panel::Color, Panel::ColorHistory]
+            .into_iter()
+            .map(|panel| crate::layout::Group {
+                panels: vec![panel],
+                front: panel,
+                height: None,
+            })
+            .collect();
+        window.panels.set_layout(layout);
+        window.settle();
+        let edge = |window: &Window| window.target(Place::With(Panel::ColorHistory)).top();
+        let before = edge(&window);
+        let id = Id::new(("dock split", true, Panel::Color));
+        window.ctx.memory_mut(|memory| memory.request_focus(id));
+        window.frame(Vec::new());
+        let up = |pressed| Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        window.frame(vec![up(true), up(false)]);
+        window.settle();
+        assert_eq!(edge(&window), before - SPLIT_STEP);
     }
 
     #[test]

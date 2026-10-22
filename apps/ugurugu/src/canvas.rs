@@ -4183,6 +4183,42 @@ mod tests {
     }
 
     #[test]
+    fn text_placed_left_of_and_above_a_layer_s_tiles_asks_for_one_split_at_most() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([400, 300]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        stroke_through(
+            &mut canvas,
+            &[[300.0, 200.0], [340.0, 260.0], [390.0, 220.0]],
+        );
+        settle(&mut canvas, &renders);
+        canvas.set_tool(Tool::Text).unwrap();
+        canvas.set_text(|text, settings| {
+            *text = "Ug".to_owned();
+            settings.size = 48.0;
+        });
+        canvas.press_text([20.0, 20.0]);
+        canvas.interaction = Interaction::Idle;
+        // Text is not in the document, so a split drawn again shows it as
+        // the one before did; asking again would never end.
+        let mut asked = 0;
+        for _ in 0..4 {
+            canvas.sync();
+            if canvas.tab.requested.is_none() {
+                break;
+            }
+            asked += 1;
+            let rendered = renders
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the split renders");
+            canvas.adopt(rendered);
+        }
+        assert!(canvas.tab.text_preview.is_some());
+        assert!(asked <= 1, "asked {asked} times for the same split");
+    }
+
+    #[test]
     fn an_edit_during_a_drag_ends_the_drag_without_its_result() {
         let (mut canvas, renders) = animated_canvas();
         stroke_through(&mut canvas, &[[30.0, 40.0], [60.0, 40.0]]);

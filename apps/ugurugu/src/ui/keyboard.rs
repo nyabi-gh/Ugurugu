@@ -302,12 +302,12 @@ fn the_edit_menu_sets_a_transparent_background_as_one_step() {
     window.click_named(tr("edit-background"));
     assert!(window.dialog());
     let dialog = window.panels.background.as_mut().expect("the dialog");
-    assert_eq!(dialog.color, [255; 4], "it starts from the white paper");
-    dialog.color = [0, 0, 0, 0];
+    assert_eq!(dialog.color(), [255; 4], "it starts from the white paper");
+    dialog.set_alpha(0.0);
     window.key(NONE, Key::Enter);
     assert!(window.panels.background.is_none());
     let session = window.canvas.session();
-    assert_eq!(session.document().background, Rgba8([0, 0, 0, 0]));
+    assert_eq!(session.document().background, Rgba8([255, 255, 255, 0]));
     assert_eq!(session.undo_label(), Some("Canvas background"));
 }
 
@@ -346,6 +346,24 @@ fn the_layer_brush_size_and_colour_keys_act() {
     );
     window.key(NONE, Key::X);
     assert_eq!(window.canvas.tools().color, black);
+}
+
+#[test]
+fn x_swaps_with_the_colour_before_while_the_colour_panel_is_closed() {
+    let mut window = Window::new();
+    window
+        .panels
+        .layout
+        .set_open(crate::layout::Panel::Color, false);
+    window.frame(Vec::new());
+    let red = Rgba8([255, 0, 0, 255]);
+    let blue = Rgba8([0, 0, 255, 255]);
+    window.canvas.tools_mut().color = red;
+    window.frame(Vec::new());
+    window.canvas.tools_mut().color = blue;
+    window.frame(Vec::new());
+    window.key(NONE, Key::X);
+    assert_eq!(window.canvas.tools().color, red);
 }
 
 #[test]

@@ -153,8 +153,9 @@ fn blend(corners: [Pos2; 3], weights: [f32; 3]) -> Pos2 {
 impl ColorDock {
     /// Makes the colour shown last the previous one when the pen colour was
     /// changed elsewhere: by the eyedropper, the history or a restore, as
-    /// 2.2.13's pair follows every change of colour.
-    fn follow(&mut self, color: Rgba8) {
+    /// 2.2.13's pair follows every change of colour. Every frame, so that X
+    /// swaps with the colour before also while the panel is hidden.
+    pub fn follow(&mut self, color: Rgba8) {
         if let Some(seen) = self.seen
             && seen != color
             && self.dragged_from.is_none()

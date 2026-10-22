@@ -82,6 +82,11 @@ impl Split {
         for stroke in strokes {
             now = union(now, self.stamp(stamp, stroke, false, wobble, frames, clip));
         }
+        // Placed text is not in the document, so a split drawn again would
+        // come back without it and be marked again: it does not widen what
+        // the layer reaches. Applied, it changes the document, and with it
+        // the split.
+        (self.reached, self.redraw) = placing.reached;
         placing.shown = now;
         union(before, now)
     }
