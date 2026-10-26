@@ -302,6 +302,8 @@ color-history-swatch = History color { $color }
 
 # Layers
 layers = Layers
+navigator = Navigator
+navigator-picture = The whole canvas. Click or drag to move the canvas view.
 layer-add = Add layer
 layer-add-group = Add group containing the selected layer
 layer-ungroup = Ungroup the selected group

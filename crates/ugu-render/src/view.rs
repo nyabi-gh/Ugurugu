@@ -348,6 +348,11 @@ impl DocumentView {
         })
     }
 
+    /// The pixels uploaded, premultiplied RGBA8.
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+
     /// Uploads `rect` of `document` (premultiplied RGBA8); a new size
     /// replaces the texture and uploads everything.
     pub fn update(
@@ -568,27 +573,68 @@ pub(crate) mod tests {
         target: [u32; 2],
         prepare: impl FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat) -> D,
     ) -> Option<Vec<u8>> {
+        with_device(|device, queue| {
+            let format = wgpu::TextureFormat::Rgba8Unorm;
+            let draw = prepare(device, queue, format);
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: target[0],
+                    height: target[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let target_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                draw(queue, &mut pass);
+            }
+            queue.submit([encoder.finish()]);
+            read(device, queue, &texture)
+        })
+        .flatten()
+    }
+
+    /// Runs `work` with the one test device; `None` without a DX12 adapter.
+    pub(crate) fn with_device<R>(work: impl FnOnce(&wgpu::Device, &wgpu::Queue) -> R) -> Option<R> {
         // Declared first, so released after everything made with the device.
         let _alone = ONE_DEVICE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (device, queue) = device()?;
-        let format = wgpu::TextureFormat::Rgba8Unorm;
-        let draw = prepare(&device, &queue, format);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: target[0],
-                height: target[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        Some(work(&device, &queue))
+    }
+
+    /// The RGBA8 pixels of `texture`, after the work submitted so far.
+    pub(crate) fn read(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+    ) -> Option<Vec<u8>> {
+        let target = [texture.width(), texture.height()];
         let row = (target[0] * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -597,26 +643,6 @@ pub(crate) mod tests {
             mapped_at_creation: false,
         });
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        {
-            let target_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            draw(&queue, &mut pass);
-        }
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {

@@ -302,6 +302,8 @@ color-history-swatch = 历史颜色 { $color }
 
 # Layers
 layers = 图层
+navigator = 导航器
+navigator-picture = 整个画布。点击或拖动以移动画布视图。
 layer-add = 添加图层
 layer-add-group = 添加包含所选图层的组
 layer-ungroup = 取消所选组的编组

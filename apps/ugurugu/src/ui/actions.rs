@@ -150,6 +150,7 @@ pub const WINDOW: &[Entry] = &[
     Do(A::ColorDock),
     Do(A::ColorHistory),
     Do(A::Layers),
+    Do(A::Navigator),
     Gap,
     Do(A::ResetLayout),
 ];
@@ -211,6 +212,7 @@ fn panel(action: Action) -> Option<Option<Panel>> {
         A::ColorDock => Some(Panel::Color),
         A::ColorHistory => Some(Panel::ColorHistory),
         A::Layers => Some(Panel::Layers),
+        A::Navigator => Some(Panel::Navigator),
         _ => return None,
     })
 }
@@ -606,6 +608,7 @@ pub fn run(
         | A::ColorDock
         | A::ColorHistory
         | A::Layers
+        | A::Navigator
         | A::AddLayer
         | A::AddGroup
         | A::Ungroup

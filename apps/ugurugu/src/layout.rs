@@ -39,15 +39,17 @@ pub enum Panel {
     ColorHistory,
     Wobble,
     Layers,
+    Navigator,
 }
 
 impl Panel {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ToolSettings,
         Self::Color,
         Self::ColorHistory,
         Self::Wobble,
         Self::Layers,
+        Self::Navigator,
     ];
 
     fn key(self) -> &'static str {
@@ -57,6 +59,7 @@ impl Panel {
             Self::ColorHistory => "colorHistory",
             Self::Wobble => "wobble",
             Self::Layers => "layers",
+            Self::Navigator => "navigator",
         }
     }
 
@@ -153,7 +156,8 @@ pub struct Layout {
 impl Default for Layout {
     /// 3.0's layout since M3-9: tools and colour on the left, wobble and
     /// layers on the right. The colour history is a tab behind the colour,
-    /// so that a short window has room for the wheel (evidence.md 91).
+    /// so that a short window has room for the wheel (evidence.md 91), and
+    /// the navigator one behind the wobble for the same reason.
     fn default() -> Self {
         let area = |groups, width| Area {
             groups,
@@ -165,12 +169,14 @@ impl Default for Layout {
             front: Panel::Color,
             height: None,
         };
+        let wobble = Group {
+            panels: vec![Panel::Wobble, Panel::Navigator],
+            front: Panel::Wobble,
+            height: None,
+        };
         Self {
             left: area(vec![Group::of(Panel::ToolSettings), colors], 260.0),
-            right: area(
-                vec![Group::of(Panel::Wobble), Group::of(Panel::Layers)],
-                300.0,
-            ),
+            right: area(vec![wobble, Group::of(Panel::Layers)], 300.0),
             floating: Vec::new(),
             closed: Vec::new(),
             animation_bar: true,
@@ -481,7 +487,9 @@ fn read(value: &Value) -> Option<Layout> {
             })
         })
         .collect::<Option<Vec<_>>>()?;
-    if seen.len() != Panel::ALL.len() {
+    // Not in settings written before the navigator came.
+    let navigator_missing = !seen.contains(&Panel::Navigator);
+    if seen.len() + usize::from(navigator_missing) != Panel::ALL.len() {
         return None;
     }
     let closed = object
@@ -490,7 +498,7 @@ fn read(value: &Value) -> Option<Layout> {
         .iter()
         .map(|key| Panel::from_key(key.as_str()?))
         .collect::<Option<Vec<_>>>()?;
-    Some(Layout {
+    let mut layout = Layout {
         left,
         right,
         floating,
@@ -509,7 +517,16 @@ fn read(value: &Value) -> Option<Layout> {
             .and_then(Value::as_str)
             .and_then(ColorField::from_key)
             .unwrap_or_default(),
-    })
+    };
+    if navigator_missing {
+        // Behind the wobble, wherever it was moved, as by default.
+        layout
+            .group_mut(Panel::Wobble)
+            .expect("each panel is in a group")
+            .panels
+            .push(Panel::Navigator);
+    }
+    Some(layout)
 }
 
 fn finite(value: &Value) -> Option<f32> {
@@ -598,6 +615,22 @@ mod tests {
     }
 
     #[test]
+    fn settings_from_before_the_navigator_put_it_behind_the_wobble() {
+        let mut value = Layout::default().to_json();
+        value["right"]["groups"] = json!([
+            {"panels": ["layers", "wobble"], "front": "wobble"}
+        ]);
+        let layout = Layout::parse(&value);
+        assert_ne!(layout, Layout::default());
+        assert_eq!(
+            layout.right.groups[0].panels,
+            [Panel::Layers, Panel::Wobble, Panel::Navigator]
+        );
+        assert_eq!(layout.right.groups[0].front, Panel::Wobble);
+        assert!(every_panel_once(&layout));
+    }
+
+    #[test]
     fn a_broken_layout_is_the_default() {
         let good = Layout::default().to_json();
         let mut twice = good.clone();
@@ -633,6 +666,7 @@ mod tests {
     #[test]
     fn panels_move_between_sides_tabs_and_floating() {
         let mut layout = Layout::default();
+        layout.move_to(Panel::Navigator, Place::With(Panel::ToolSettings));
         layout.move_to(Panel::Layers, Place::Before(Panel::ToolSettings));
         assert_eq!(layout.left.groups[0].panels, [Panel::Layers]);
         assert_eq!(layout.right.groups.len(), 1);
@@ -672,6 +706,7 @@ mod tests {
     #[test]
     fn closed_panels_keep_their_place_and_open_in_front() {
         let mut layout = Layout::default();
+        layout.move_to(Panel::Navigator, Place::With(Panel::ToolSettings));
         layout.move_to(Panel::Wobble, Place::With(Panel::Layers));
         layout.set_open(Panel::Wobble, false);
         let group = layout.right.groups[0].clone();

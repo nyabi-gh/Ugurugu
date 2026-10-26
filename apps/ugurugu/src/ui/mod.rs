@@ -19,6 +19,7 @@ mod history;
 mod keyboard;
 mod layers;
 mod motion;
+mod navigator;
 mod resize;
 mod restyle;
 mod settings;
@@ -55,6 +56,7 @@ use crate::widgets;
 pub struct Panels {
     pub layers: layers::LayerDock,
     pub color: color::ColorDock,
+    pub navigator: navigator::Navigator,
     presets: brushes::Presets,
     /// Where the panels are, and whether they and the animation bar are
     /// open.
@@ -1034,6 +1036,21 @@ fn view_controls(ui: &mut egui::Ui, canvas: &mut Canvas, pointer: Option<[f64; 2
         [150.0, 20.0],
         egui::Label::new(egui::RichText::new(text).color(theme::muted())),
     );
+    zoom_controls(ui, canvas, 96.0);
+    view_turn(ui, canvas, keys);
+    let fit = widgets::text_icon_button(
+        ui,
+        actions::button_glyph(Action::Fit),
+        tr("fit"),
+        tr("fit-tip"),
+    );
+    if fit.clicked() {
+        canvas.fit();
+    }
+}
+
+/// The zoom as a slider and a percentage field.
+fn zoom_controls(ui: &mut egui::Ui, canvas: &mut Canvas, slider_width: f32) {
     let scale = canvas.scale();
     let (low, high) = (
         *ZOOM_RANGE.start() as f32 * 100.0,
@@ -1041,7 +1058,13 @@ fn view_controls(ui: &mut egui::Ui, canvas: &mut Canvas, pointer: Option<[f64; 2
     );
     // Logarithmic, so every step reads as the same change in size.
     let mut position = (scale.ln() as f32 - low.ln() + 100f32.ln()) / ((high / low).ln());
-    let slider = widgets::slider(ui, &mut position, 0.0..=1.0, tr("canvas-zoom"), 96.0);
+    let slider = widgets::slider(
+        ui,
+        &mut position,
+        0.0..=1.0,
+        tr("canvas-zoom"),
+        slider_width,
+    );
     if slider.changed() {
         let percent = low * (high / low).powf(position);
         canvas.zoom_to(f64::from(percent) / 100.0);
@@ -1059,16 +1082,6 @@ fn view_controls(ui: &mut egui::Ui, canvas: &mut Canvas, pointer: Option<[f64; 2
     .on_hover_text(tr("canvas-zoom-percent"));
     if field.changed() {
         canvas.zoom_to(f64::from(percent) / 100.0);
-    }
-    view_turn(ui, canvas, keys);
-    let fit = widgets::text_icon_button(
-        ui,
-        actions::button_glyph(Action::Fit),
-        tr("fit"),
-        tr("fit-tip"),
-    );
-    if fit.clicked() {
-        canvas.fit();
     }
 }
 
@@ -1667,6 +1680,10 @@ pub fn color(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels, room: 
 
 pub fn color_history(ui: &mut egui::Ui, canvas: &mut Canvas) {
     history::show(ui, canvas);
+}
+
+pub fn navigator(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels, room: Option<f32>) {
+    navigator::show(ui, canvas, &mut panels.navigator, room);
 }
 
 pub fn layers(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {

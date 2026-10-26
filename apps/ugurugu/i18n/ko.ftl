@@ -302,6 +302,8 @@ color-history-swatch = 기록 색상 { $color }
 
 # Layers
 layers = 레이어
+navigator = 내비게이터
+navigator-picture = 캔버스 전체입니다. 클릭하거나 드래그해서 캔버스 보기를 옮깁니다.
 layer-add = 레이어 추가
 layer-add-group = 선택한 레이어를 포함하는 그룹 추가
 layer-ungroup = 선택한 그룹 해제

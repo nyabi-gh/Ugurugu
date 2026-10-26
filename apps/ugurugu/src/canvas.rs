@@ -2128,6 +2128,13 @@ impl Canvas {
         }
     }
 
+    /// How much smaller than the canvas the pixels shown are, and where on
+    /// the canvas they start.
+    pub fn shown_part(&self) -> (u32, [u32; 2]) {
+        let (_, shrink, origin) = self.shown();
+        (shrink, origin)
+    }
+
     /// Where the pixels shown are drawn: pixels drawn smaller spread over
     /// more screen pixels, and a part of the canvas starts where it is.
     pub fn shown_placement(&self) -> Placement {

@@ -17,8 +17,9 @@ the save dialog's added extension, the transform box's cursors, no blank
 frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, a file opened from outside going to the open window as
-a tab, the window opening where and as it closed, and pixel art GIFs
-enlarged into blocks and the pixel size of new pixel art.
+a tab, the window opening where and as it closed, pixel art GIFs
+enlarged into blocks and the pixel size of new pixel art, and the
+navigator moving the view.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -1068,6 +1069,95 @@ function Get-Ink($Process, $Paper) {
     $bitmap.Dispose()
     $centre = if ($count) { [int]($sum / $count) } else { -1 }
     [pscustomobject]@{ Centre = $centre; Count = $count; Red = $red }
+}
+
+# The navigator: a tab behind the wobble showing the whole canvas with a
+# stroke in it; pressing on its picture brings that point to the middle of
+# the view, and dragging the view's outline moves the view with it rather
+# than jumping to where it was pressed.
+Step 'Navigator' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $words = Read-Words 'en'
+    $process = Start-App
+    Invoke-Named $process $words['navigator']
+    $element = Find-Element $process { param($n) $n -eq $words['navigator-picture'] } 15 'the navigator picture'
+    $box = $element.Current.BoundingRectangle
+    $picture = [pscustomobject]@{
+        Left = [int]$box.X; Top = [int]$box.Y; Right = [int]($box.X + $box.Width); Bottom = [int]($box.Y + $box.Height)
+    }
+    # Every second pixel of the picture, to count those a stroke changes.
+    $read = {
+        Start-Sleep -Milliseconds 700
+        $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+        $pixels = New-Object System.Collections.Generic.List[int]
+        for ($y = $picture.Top + 1; $y -lt $picture.Bottom - 1; $y += 2) {
+            for ($x = $picture.Left + 1; $x -lt $picture.Right - 1; $x += 2) {
+                $c = $bitmap.GetPixel($x, $y)
+                $pixels.Add($c.R + $c.G + $c.B)
+            }
+        }
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        , $pixels
+    }
+    $before = & $read
+    [void](Draw-Stroke $process)
+    $after = & $read
+    $changed = 0
+    for ($i = 0; $i -lt $before.Count; $i++) {
+        if ([Math]::Abs($after[$i] - $before[$i]) -gt 30) { $changed++ }
+    }
+    $shown = Save-Screen 'navigator'
+    Set-Field $process $words['canvas-zoom-percent'] '400'
+    # The middle of the view's outline in the picture, from its accent
+    # pixels: it is drawn from where the canvas shows the document.
+    $outline = {
+        [Native]::MoveTo($picture.Right + 40, $picture.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
+        $sx = 0; $sy = 0; $count = 0
+        for ($y = $picture.Top; $y -lt $picture.Bottom; $y++) {
+            for ($x = $picture.Left; $x -lt $picture.Right; $x++) {
+                $c = $bitmap.GetPixel($x, $y)
+                if ($c.R -gt 200 -and $c.G -gt 140 -and $c.G -lt 230 -and $c.B -lt 140) { $sx += $x; $sy += $y; $count++ }
+            }
+        }
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        if ($count -eq 0) { throw "no outline in the picture; $(Save-Screen 'no-outline')" }
+        [pscustomobject]@{ X = $sx / $count; Y = $sy / $count }
+    }
+    $cx = [int](($picture.Left + $picture.Right) / 2)
+    $cy = [int](($picture.Top + $picture.Bottom) / 2)
+    # Pressed outside the outline, which is about where the picture's middle
+    # is, the view's middle jumps there.
+    [Native]::Drag(@(($cx - 60), ($cx - 60)), @($cy, $cy))
+    $left = & $outline
+    [Native]::Drag(@(($cx + 40), ($cx + 40)), @($cy, $cy))
+    $right = & $outline
+    # Pressed 10 pixels right of the outline's middle and dragged 30 left:
+    # the outline follows the drag to 10 right of the picture's middle,
+    # instead of jumping to the press first and ending 20 right.
+    [Native]::Drag(@(($cx + 50), ($cx + 35), ($cx + 20)), @($cy, $cy, $cy))
+    $dragged = & $outline
+    $moved = Save-Screen 'navigator-moved'
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $at = { param($point) "$([Math]::Round($point.X - $cx, 1)),$([Math]::Round($point.Y - $cy, 1))" }
+    $detail = "picture $(Format-Rect $picture), $changed pixels changed by the stroke; outline middle from the picture's after a press 60 left $(& $at $left), after a press 40 right $(& $at $right), after a drag from 50 to 20 right $(& $at $dragged); $shown, $moved"
+    $near = { param($point, $x) [Math]::Abs($point.X - ($cx + $x)) -le 2 -and [Math]::Abs($point.Y - $cy) -le 2 }
+    if ($changed -lt 10 -or -not (& $near $left -60) -or -not (& $near $right 40) -or -not (& $near $dragged 10)) {
+        throw $detail
+    }
+    $detail
 }
 
 Step 'Pixel art exports at its own size' {

@@ -117,10 +117,12 @@ fn title(panel: Panel) -> &'static str {
         Panel::ColorHistory => "color-history",
         Panel::Wobble => "wobble-dock",
         Panel::Layers => "layers",
+        Panel::Navigator => "navigator",
     })
 }
 
-/// The panel's content; `room` is the height it has, for the colour wheel.
+/// The panel's content; `room` is the height it has, for the colour wheel
+/// and the navigator's picture.
 fn body(ui: &mut Ui, panel: Panel, canvas: &mut Canvas, panels: &mut Panels, room: Option<f32>) {
     match panel {
         Panel::ToolSettings => super::tool_settings(ui, canvas, panels),
@@ -128,6 +130,7 @@ fn body(ui: &mut Ui, panel: Panel, canvas: &mut Canvas, panels: &mut Panels, roo
         Panel::ColorHistory => super::color_history(ui, canvas),
         Panel::Wobble => super::wobble(ui, canvas, panels),
         Panel::Layers => super::layers(ui, canvas, panels),
+        Panel::Navigator => super::navigator(ui, canvas, panels, room),
     }
 }
 
@@ -741,7 +744,7 @@ pub fn floating(ui: &mut Ui, canvas: &mut Canvas, panels: &mut Panels) {
 /// the panel in front. A drag measures from `origin`: a floating group's
 /// corner, so that it follows the pointer from where it was grabbed. Given
 /// the `room` it has, the panel scrolls what it cannot show, except the
-/// colour and the layers, which fit themselves to it.
+/// colour, the layers and the navigator, which fit themselves to it.
 #[expect(clippy::too_many_arguments)]
 fn group_ui(
     ui: &mut Ui,
@@ -810,7 +813,7 @@ fn group_ui(
         .rect;
     let head = header.height() + ui.spacing().item_spacing.y;
     let width = ui.available_width();
-    let fits = matches!(front, Panel::Color | Panel::Layers);
+    let fits = matches!(front, Panel::Color | Panel::Layers | Panel::Navigator);
     let content = match room {
         Some(room) if !fits => {
             let inner = (room - head).max(0.0);
@@ -856,6 +859,11 @@ fn group_ui(
             panels.color.least_height(width)
         }
         Panel::Layers => panels.layers.least_height(),
+        Panel::Navigator => {
+            let natural = head + super::navigator::natural_height(width, canvas);
+            remember(ui, &mut panels.docks.naturals, front, natural);
+            super::navigator::LEAST
+        }
         Panel::ColorHistory | Panel::Wobble => ROWS_LEAST,
     };
     remember(ui, &mut panels.docks.leasts, front, head + least);
@@ -1211,7 +1219,10 @@ mod tests {
         window.drag(window.handle(Panel::Wobble), pos2(800.0, 400.0));
         let layout = &window.panels.layout;
         assert!(layout.right.groups.is_empty());
-        assert_eq!(layout.floating[0].group.panels, [Panel::Wobble]);
+        assert_eq!(
+            layout.floating[0].group.panels,
+            [Panel::Wobble, Panel::Navigator]
+        );
         let at = layout.floating[0].at;
 
         // Grabbed by its handle, a floating panel follows the pointer from
@@ -1245,7 +1256,8 @@ mod tests {
         let before = widths(&window);
         window.size = vec2(500.0, 900.0);
         window.frame(Vec::new());
-        let inside = window.target(Place::With(Panel::Wobble)).center();
+        // Under the tabs, which a press would switch.
+        let inside = window.target(Place::Before(Panel::Wobble)).center();
         window.drag(inside, inside + vec2(0.0, 1.0));
         assert_eq!(widths(&window), before);
 

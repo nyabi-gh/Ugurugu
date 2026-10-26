@@ -203,12 +203,31 @@ impl Canvas {
         };
     }
 
+    /// The canvas area's corners as document points, clockwise from its
+    /// top left on screen.
+    pub fn view_outline(&self) -> Option<[[f64; 2]; 4]> {
+        let area = self.area?;
+        Some(
+            [[0, 1], [2, 1], [2, 3], [0, 3]]
+                .map(|[x, y]| self.to_document([f64::from(area[x]), f64::from(area[y])])),
+        )
+    }
+
+    /// Moves the view so that document point `point` is in the middle of the
+    /// canvas area.
+    pub fn center_on(&mut self, point: [f64; 2]) {
+        if let Some([left, top, right, bottom]) = self.area
+            && point.iter().all(|value| value.is_finite())
+        {
+            let middle = [f64::from(left + right) / 2.0, f64::from(top + bottom) / 2.0];
+            self.pin(point, middle);
+        }
+    }
+
     /// The document pixels in view, as the bounds of the canvas area's
     /// corners: left, top, right, bottom.
     pub(super) fn in_view(&self) -> Option<[f64; 4]> {
-        let area = self.area?;
-        let corners = [[0, 1], [2, 1], [2, 3], [0, 3]]
-            .map(|[x, y]| self.to_document([f64::from(area[x]), f64::from(area[y])]));
+        let corners = self.view_outline()?;
         let low = |axis: usize| {
             corners
                 .iter()

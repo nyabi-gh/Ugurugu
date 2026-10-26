@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use ugu_render::ants::Ants;
 use ugu_render::gpu::{AdapterChoice, Gpu};
+use ugu_render::overview::{Overview, Part};
 use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::{DocumentView, Placement};
 use ugu_win::clock::Ticks;
@@ -207,6 +208,10 @@ struct Display {
     egui_renderer: egui_wgpu::Renderer,
     canvas_view: DocumentView,
     ants: Ants,
+    /// The navigator's picture, made when it is first shown.
+    overview: Option<Overview>,
+    /// The picture's egui texture while the navigator is shown.
+    overview_texture: Option<egui::TextureId>,
     /// What the last presented frame shows, to skip frames that would
     /// present the same picture again.
     shown: Option<Shown>,
@@ -300,6 +305,8 @@ impl Display {
             egui_renderer,
             canvas_view,
             ants,
+            overview: None,
+            overview_texture: None,
             shown: None,
             slot_held: false,
         })
@@ -899,6 +906,13 @@ impl RenderThread {
         let placement = shown.placement;
         let document = shown.document;
         let pixel_grid = shown.pixel_grid;
+        let navigator = self.panels.navigator.wanted;
+        let (shrink, origin) = self.canvas.shown_part();
+        let part = Part {
+            canvas: self.canvas.session().document().canvas,
+            origin,
+            shrink,
+        };
         let primitives = self
             .egui_ctx
             .tessellate(shown.shapes.clone(), pixels_per_point);
@@ -913,6 +927,8 @@ impl RenderThread {
                 egui_renderer,
                 canvas_view,
                 ants,
+                overview,
+                overview_texture,
                 ..
             } = &mut self.display;
             for (id, deltas) in &textures.set {
@@ -924,6 +940,51 @@ impl RenderThread {
                 tracing::debug!(?rect, "canvas uploaded");
             }
             canvas_view.update(&gpu.device, &gpu.queue, self.canvas.display(), upload);
+            let picture = match navigator {
+                Some(size) => {
+                    let made = overview.get_or_insert_with(|| Overview::new(&gpu.device, size));
+                    let resized = made.size() != size;
+                    if resized {
+                        made.resize(&gpu.device, size);
+                    }
+                    let id = match *overview_texture {
+                        Some(id) if !resized => id,
+                        Some(id) => {
+                            egui_renderer.update_egui_texture_from_wgpu_texture(
+                                &gpu.device,
+                                made.view(),
+                                wgpu::FilterMode::Nearest,
+                                id,
+                            );
+                            id
+                        }
+                        None => egui_renderer.register_native_texture(
+                            &gpu.device,
+                            made.view(),
+                            wgpu::FilterMode::Nearest,
+                        ),
+                    };
+                    // What it showed before it was hidden is old.
+                    let whole = resized || overview_texture.is_none();
+                    *overview_texture = Some(id);
+                    if whole || upload.is_some() {
+                        made.draw(
+                            &gpu.device,
+                            &gpu.queue,
+                            canvas_view,
+                            part,
+                            if whole { None } else { upload },
+                        );
+                    }
+                    Some((id, size))
+                }
+                None => {
+                    if let Some(id) = overview_texture.take() {
+                        egui_renderer.free_texture(&id);
+                    }
+                    None
+                }
+            };
             ants.show(
                 &gpu.device,
                 &gpu.queue,
@@ -965,14 +1026,21 @@ impl RenderThread {
             for id in &textures.free {
                 egui_renderer.free_texture(id);
             }
-            presented
+            (presented, picture)
         }));
+        if let Ok((_, picture)) = drawn
+            && self.panels.navigator.picture != picture
+        {
+            // The navigator shows a picture it had not had yet.
+            self.panels.navigator.picture = picture;
+            self.needs_frame = true;
+        }
         match drawn {
-            Ok(true) => {
+            Ok((true, _)) => {
                 self.display.shown = Some(shown);
                 self.display.slot_held = false;
             }
-            Ok(false) => {}
+            Ok((false, _)) => {}
             Err(panic) => {
                 if !self.display.gpu.check_removed() {
                     std::panic::resume_unwind(panic);

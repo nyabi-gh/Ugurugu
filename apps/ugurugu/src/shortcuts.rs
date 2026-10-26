@@ -370,6 +370,7 @@ actions! {
     ColorDock "colorDock" "color-dock" [] [];
     ColorHistory "colorHistory" "color-history" [] [];
     Layers "layers" "layers" [] [];
+    Navigator "navigator" "navigator" [] [];
     ResetLayout "resetPanelLayout" "window-reset-layout" [] [];
     CheckUpdates "checkForUpdates" "help-check-updates" [] [];
     Help "help" "help-contents" [plain(Key::F1)] [];

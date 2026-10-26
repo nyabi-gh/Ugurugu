@@ -302,6 +302,8 @@ color-history-swatch = 履歴の色 { $color }
 
 # Layers
 layers = レイヤー
+navigator = ナビゲーター
+navigator-picture = キャンバス全体です。クリックかドラッグでキャンバス表示を移動します。
 layer-add = レイヤーを追加
 layer-add-group = 選択したレイヤーを含むグループを追加
 layer-ungroup = 選択したグループを解除

@@ -300,6 +300,8 @@ color-history-swatch | History color %1 | 기록 색상 %1 | 履歴の色 %1 | �
 
 # Layers
 layers | Layers | 레이어 | レイヤー | 图层
+navigator | Navigator | 내비게이터 | ナビゲーター | 导航器
+navigator-picture | The whole canvas. Click or drag to move the canvas view. | 캔버스 전체입니다. 클릭하거나 드래그해서 캔버스 보기를 옮깁니다. | キャンバス全体です。クリックかドラッグでキャンバス表示を移動します。 | 整个画布。点击或拖动以移动画布视图。
 layer-add | Add layer | 레이어 추가 | レイヤーを追加 | 添加图层
 layer-add-group | Add group containing the selected layer | 선택한 레이어를 포함하는 그룹 추가 | 選択したレイヤーを含むグループを追加 | 添加包含所选图层的组
 layer-ungroup | Ungroup the selected group | 선택한 그룹 해제 | 選択したグループを解除 | 取消所选组的编组
