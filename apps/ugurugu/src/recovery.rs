@@ -11,6 +11,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
+#[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -36,7 +37,6 @@ const FAILED_KEPT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// stopped removing it.
 const STARTING: Duration = Duration::from_secs(60);
 const FORMAT: &str = "ugurugu.recovery";
-const ERROR_SHARING_VIOLATION: i32 = 32;
 
 /// `UGURUGU_RECOVERY_PATH`, else `recovery` in [`crate::logs::local_data`].
 pub fn default_root() -> Option<PathBuf> {
@@ -170,13 +170,47 @@ pub fn tab_folder(window: &Path, tab: u64) -> PathBuf {
 /// Opens a folder's lock with no sharing, which fails while another process
 /// has it open, even one that crashed and has not been cleaned up yet.
 fn lock(folder: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .share_mode(0)
-        .open(folder.join(LOCK))
+    open_lock(
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false),
+        &folder.join(LOCK),
+    )
+}
+
+#[cfg(windows)]
+fn open_lock(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
+    options.share_mode(0).open(path)
+}
+
+/// A lock is on the open file, not on its name: a lock file removed and made
+/// again after it was opened here is not the one other windows take, so it
+/// counts as held.
+#[cfg(not(windows))]
+fn open_lock(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::MetadataExt;
+
+    let file = options.open(path)?;
+    file.try_lock()?;
+    let (opened, named) = (file.metadata()?, std::fs::metadata(path)?);
+    if (opened.dev(), opened.ino()) != (named.dev(), named.ino()) {
+        return Err(io::ErrorKind::WouldBlock.into());
+    }
+    Ok(file)
+}
+
+/// Whether `error` is from a lock another window holds.
+#[cfg(windows)]
+fn is_held(error: &io::Error) -> bool {
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+}
+
+#[cfg(not(windows))]
+fn is_held(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
 }
 
 /// As `lock`, for another window's folder. One without a lock made less
@@ -190,11 +224,10 @@ fn lock_left(folder: &Path, starting: Duration) -> io::Result<File> {
     {
         return lock(folder);
     }
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .share_mode(0)
-        .open(folder.join(LOCK))
+    open_lock(
+        OpenOptions::new().read(true).write(true),
+        &folder.join(LOCK),
+    )
 }
 
 fn document_path(folder: &Path, slot: u64) -> PathBuf {
@@ -282,10 +315,7 @@ fn begin_with(root: &Path, session: &Path, starting: Duration) -> io::Result<(Fi
         }
         let lock = match lock_left(&folder, starting) {
             Ok(lock) => lock,
-            Err(error)
-                if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
-                    || error.kind() == io::ErrorKind::NotFound =>
-            {
+            Err(error) if is_held(&error) || error.kind() == io::ErrorKind::NotFound => {
                 continue;
             }
             Err(error) => {
@@ -567,7 +597,7 @@ pub(crate) mod tests {
         // A cut-off newest generation falls back to the one before.
         let newest = document_path(&session, 1);
         let length = std::fs::metadata(&newest).unwrap().len();
-        OpenOptions::new()
+        std::fs::OpenOptions::new()
             .write(true)
             .open(&newest)
             .unwrap()
@@ -650,10 +680,7 @@ pub(crate) mod tests {
         discard(found.pop().unwrap()).unwrap();
         // The other is still there, and its window's folder with it.
         assert!(crashed.exists() && last.folder.exists());
-        assert_eq!(
-            lock(&crashed).unwrap_err().raw_os_error(),
-            Some(ERROR_SHARING_VIOLATION)
-        );
+        assert!(is_held(&lock(&crashed).unwrap_err()));
         discard(last).unwrap();
         assert!(!crashed.exists());
     }
@@ -671,10 +698,7 @@ pub(crate) mod tests {
         assert!(found.is_empty(), "{found:?}");
         assert_eq!(root.names(), ["new", "running"]);
         // Nor can a running window's folder be taken over.
-        assert_eq!(
-            lock(&running).unwrap_err().raw_os_error(),
-            Some(ERROR_SHARING_VIOLATION)
-        );
+        assert!(is_held(&lock(&running).unwrap_err()));
         end(&root.0.join("new"), own).unwrap();
         drop(running_lock);
         assert_eq!(root.names(), ["running"]);
@@ -703,6 +727,7 @@ pub(crate) mod tests {
         assert_eq!(root.names(), ["next"]);
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_normal_end_removes_the_lock_last() {
         let root = Root::new("end");
@@ -723,6 +748,7 @@ pub(crate) mod tests {
         assert_eq!(root.names(), ["next"]);
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_left_folder_that_cannot_be_looked_in_does_not_stop_the_start() {
         let root = Root::new("unlisted");

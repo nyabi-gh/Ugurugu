@@ -8,14 +8,11 @@
 //! free; acquiring then never blocks. Waiting after reading input instead
 //! would show input one frame late. Display times come from DXGI frame
 //! statistics, the only per-present display record available to the app.
+//! Other OSes have neither yet: a frame never waits here and has no display
+//! time.
 
 use std::collections::VecDeque;
 use std::time::Duration;
-
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
-use windows::Win32::Graphics::Dxgi::{DXGI_FRAME_STATISTICS, IDXGISwapChain3};
-use windows::Win32::System::Performance::QueryPerformanceCounter;
-use windows::Win32::System::Threading::WaitForSingleObject;
 
 /// Swap chain buffers the app may queue ahead of the display. One keeps
 /// input-to-display at one refresh after the frame is ready.
@@ -126,12 +123,7 @@ impl Presenter {
     /// Waits until the swap chain can take another frame. Returns `false` on
     /// timeout, in which case the caller should not draw yet.
     pub fn wait_for_frame(&self, timeout: Duration) -> bool {
-        let Some(handle) = self.waitable() else {
-            return true;
-        };
-        let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
-        // SAFETY: the handle belongs to the live swap chain of `self.surface`.
-        unsafe { WaitForSingleObject(handle, millis) == WAIT_OBJECT_0 }
+        swap_chain::wait_for_frame(&self.surface, timeout)
     }
 
     pub fn acquire(&mut self, device: &wgpu::Device) -> Acquired {
@@ -158,22 +150,23 @@ impl Presenter {
         frame: wgpu::SurfaceTexture,
         input_qpc: Option<u64>,
     ) {
-        let present_qpc = qpc();
+        let present_qpc = swap_chain::qpc();
         queue.present(frame);
-        let (Some(input_qpc), Some(swap_chain)) = (input_qpc, self.swap_chain()) else {
+        let (Some(input_qpc), Some(present_qpc), Some(count)) = (
+            input_qpc,
+            present_qpc,
+            swap_chain::last_present_count(&self.surface),
+        ) else {
             return;
         };
-        // SAFETY: plain query on a live swap chain.
-        if let Ok(count) = unsafe { swap_chain.GetLastPresentCount() } {
-            if self.pending.len() == PENDING_LIMIT {
-                self.pending.pop_front();
-            }
-            self.pending.push_back(Pending {
-                count,
-                input_qpc,
-                present_qpc,
-            });
+        if self.pending.len() == PENDING_LIMIT {
+            self.pending.pop_front();
         }
+        self.pending.push_back(Pending {
+            count,
+            input_qpc,
+            present_qpc,
+        });
     }
 
     pub fn has_pending_display_times(&self) -> bool {
@@ -184,34 +177,10 @@ impl Presenter {
     /// describe the newest displayed present, so presents replaced before
     /// the call are dropped rather than given a guessed time.
     pub fn take_display_times(&mut self) -> Vec<Displayed> {
-        let Some(swap_chain) = self.swap_chain() else {
+        let Some((shown, display_qpc)) = swap_chain::last_displayed(&self.surface) else {
             return Vec::new();
         };
-        let mut stats = DXGI_FRAME_STATISTICS::default();
-        // SAFETY: valid out pointer on a live swap chain. Disjoint or not yet
-        // available statistics are an error and simply mean "nothing new".
-        if unsafe { swap_chain.GetFrameStatistics(&mut stats) }.is_err() {
-            return Vec::new();
-        }
-        settle(
-            &mut self.pending,
-            stats.PresentCount,
-            stats.SyncQPCTime as u64,
-        )
-    }
-
-    fn swap_chain(&self) -> Option<IDXGISwapChain3> {
-        // SAFETY: the hal surface is only read here.
-        let hal = unsafe { self.surface.as_hal::<wgpu::hal::api::Dx12>() }?;
-        hal.swap_chain()
-    }
-
-    fn waitable(&self) -> Option<HANDLE> {
-        // SAFETY: the hal surface is only read here.
-        let hal = unsafe { self.surface.as_hal::<wgpu::hal::api::Dx12>() }?;
-        // SAFETY: the swap chain is replaced only by `configure`, which needs
-        // `&mut self`, so the handle stays valid while `self` is borrowed.
-        unsafe { hal.waitable_handle() }
+        settle(&mut self.pending, shown, display_qpc)
     }
 }
 
@@ -236,11 +205,82 @@ fn settle(pending: &mut VecDeque<Pending>, shown: u32, display_qpc: u64) -> Vec<
     displayed
 }
 
-fn qpc() -> u64 {
-    let mut value = 0i64;
-    // SAFETY: valid out pointer; the call cannot fail on supported Windows.
-    let _ = unsafe { QueryPerformanceCounter(&mut value) };
-    value as u64
+#[cfg(windows)]
+mod swap_chain {
+    use std::time::Duration;
+
+    use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+    use windows::Win32::Graphics::Dxgi::{DXGI_FRAME_STATISTICS, IDXGISwapChain3};
+    use windows::Win32::System::Performance::QueryPerformanceCounter;
+    use windows::Win32::System::Threading::WaitForSingleObject;
+
+    pub fn wait_for_frame(surface: &wgpu::Surface<'static>, timeout: Duration) -> bool {
+        let Some(handle) = waitable(surface) else {
+            return true;
+        };
+        let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+        // SAFETY: the handle belongs to the live swap chain of `surface`.
+        unsafe { WaitForSingleObject(handle, millis) == WAIT_OBJECT_0 }
+    }
+
+    pub fn last_present_count(surface: &wgpu::Surface<'static>) -> Option<u32> {
+        // SAFETY: plain query on a live swap chain.
+        unsafe { swap_chain(surface)?.GetLastPresentCount() }.ok()
+    }
+
+    /// The present count and QPC display time of the newest displayed
+    /// present.
+    pub fn last_displayed(surface: &wgpu::Surface<'static>) -> Option<(u32, u64)> {
+        let swap_chain = swap_chain(surface)?;
+        let mut stats = DXGI_FRAME_STATISTICS::default();
+        // SAFETY: valid out pointer on a live swap chain. Disjoint or not yet
+        // available statistics are an error and simply mean "nothing new".
+        unsafe { swap_chain.GetFrameStatistics(&mut stats) }.ok()?;
+        Some((stats.PresentCount, stats.SyncQPCTime as u64))
+    }
+
+    pub fn qpc() -> Option<u64> {
+        let mut value = 0i64;
+        // SAFETY: valid out pointer; the call cannot fail on supported Windows.
+        let _ = unsafe { QueryPerformanceCounter(&mut value) };
+        Some(value as u64)
+    }
+
+    fn swap_chain(surface: &wgpu::Surface<'static>) -> Option<IDXGISwapChain3> {
+        // SAFETY: the hal surface is only read here.
+        let hal = unsafe { surface.as_hal::<wgpu::hal::api::Dx12>() }?;
+        hal.swap_chain()
+    }
+
+    fn waitable(surface: &wgpu::Surface<'static>) -> Option<HANDLE> {
+        // SAFETY: the hal surface is only read here.
+        let hal = unsafe { surface.as_hal::<wgpu::hal::api::Dx12>() }?;
+        // SAFETY: the swap chain is replaced only by `configure`, which needs
+        // the presenter mutably, so the handle stays valid while the surface
+        // is borrowed.
+        unsafe { hal.waitable_handle() }
+    }
+}
+
+#[cfg(not(windows))]
+mod swap_chain {
+    use std::time::Duration;
+
+    pub fn wait_for_frame(_surface: &wgpu::Surface<'static>, _timeout: Duration) -> bool {
+        true
+    }
+
+    pub fn last_present_count(_surface: &wgpu::Surface<'static>) -> Option<u32> {
+        None
+    }
+
+    pub fn last_displayed(_surface: &wgpu::Surface<'static>) -> Option<(u32, u64)> {
+        None
+    }
+
+    pub fn qpc() -> Option<u64> {
+        None
+    }
 }
 
 #[cfg(test)]

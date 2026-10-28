@@ -352,7 +352,7 @@ mod tests {
             read(device, queue, overview.texture())
         });
         let Some(Some(drawn)) = drawn else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         for y in 0..2 {
@@ -377,7 +377,7 @@ mod tests {
             read(device, queue, overview.texture())
         });
         let Some(Some(drawn)) = drawn else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         assert_eq!(at(&drawn, 16, [0, 0]), [255, 255, 255, 255]);
@@ -405,7 +405,7 @@ mod tests {
             read(device, queue, overview.texture())
         });
         let Some(Some(drawn)) = drawn else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         for y in 0..4 {
@@ -440,7 +440,7 @@ mod tests {
             read(device, queue, overview.texture())
         });
         let Some(Some(drawn)) = drawn else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         for y in 0..4 {
@@ -468,7 +468,7 @@ mod tests {
             (overview.size(), read(device, queue, overview.texture()))
         });
         let Some((size, Some(drawn))) = drawn else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         assert_eq!(size, [2, 1]);

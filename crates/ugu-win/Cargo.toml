@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
 arboard.workspace = true
 clipboard-win.workspace = true
 tracing.workspace = true

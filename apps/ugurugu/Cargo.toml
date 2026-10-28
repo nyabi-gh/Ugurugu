@@ -31,7 +31,7 @@ velopack.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
-[build-dependencies]
+[target.'cfg(windows)'.build-dependencies]
 embed-resource.workspace = true
 
 [dev-dependencies]

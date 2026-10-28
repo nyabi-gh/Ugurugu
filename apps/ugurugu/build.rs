@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Puts the icon and the version into the executable, as 2.2.13 did. The
-//! icon is resource 1, which the window and the file association use.
-
-use std::path::PathBuf;
+//! Puts the icon and the version into the Windows executable, as 2.2.13
+//! did. The icon is resource 1, which the window and the file association
+//! use.
 
 fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    // Cargo picks target-specific build dependencies by the host, so only a
+    // Windows host has the resource compiler's crate.
+    #[cfg(windows)]
+    embed_resources();
+    #[cfg(not(windows))]
+    println!("cargo:warning=the executable has no icon or version: resources need a Windows host");
+}
+
+#[cfg(windows)]
+fn embed_resources() {
+    use std::path::PathBuf;
+
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("set by Cargo"));
     let icon = manifest.join("../../resources/icons/Ugurugu.ico");
     let icon = icon.canonicalize().expect("the icon is in resources/icons");

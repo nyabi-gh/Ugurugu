@@ -33,13 +33,7 @@ use winit::event_loop::EventLoop;
 fn main() -> ExitCode {
     // Velopack's install, update and uninstall hooks start this program with
     // arguments of their own and end it here; a normal start goes on.
-    velopack::VelopackApp::build()
-        .on_after_install_fast_callback(|_| associate())
-        .on_after_update_fast_callback(|_| associate())
-        .on_before_uninstall_fast_callback(|_| {
-            ugu_platform::association::unregister(ugu_platform::association::CLASSES)
-        })
-        .run();
+    with_install_hooks(velopack::VelopackApp::build()).run();
     let document = app::document_in(std::env::args_os().skip(1));
     // One window, like Clip Studio Paint: a later start hands its document
     // to the window open, or just brings it to the front. The lock is held
@@ -64,7 +58,24 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(windows)]
+fn with_install_hooks(velopack: velopack::VelopackApp<'_>) -> velopack::VelopackApp<'_> {
+    velopack
+        .on_after_install_fast_callback(|_| associate())
+        .on_after_update_fast_callback(|_| associate())
+        .on_before_uninstall_fast_callback(|_| {
+            ugu_platform::association::unregister(ugu_platform::association::CLASSES)
+        })
+}
+
+/// Only the Windows package has the hooks.
+#[cfg(not(windows))]
+fn with_install_hooks(velopack: velopack::VelopackApp<'_>) -> velopack::VelopackApp<'_> {
+    velopack
+}
+
 /// Opens `.ugurugu` files with this executable.
+#[cfg(windows)]
 fn associate() {
     if let Ok(app) = std::env::current_exe() {
         let _ = ugu_platform::association::register(

@@ -5,8 +5,15 @@
 //! running OS's implementation of each service, so that nothing above this
 //! crate names an OS crate.
 
+#[cfg(unix)]
+mod unix;
+#[cfg(not(windows))]
+mod unsupported;
+
 #[cfg(windows)]
 use ugu_win as os;
+#[cfg(not(windows))]
+use unsupported as os;
 
 pub mod association {
     pub use crate::os::association::{CLASSES, register, unregister};

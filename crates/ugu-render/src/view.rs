@@ -535,7 +535,7 @@ pub(crate) mod tests {
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: crate::gpu::BACKEND.0,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter =
@@ -567,8 +567,8 @@ pub(crate) mod tests {
     }
 
     /// Clears a `target`-sized RGBA8 image to black, runs what `prepare`
-    /// makes in one render pass over it and reads it back; `None` without a
-    /// DX12 adapter.
+    /// makes in one render pass over it and reads it back; `None` without an
+    /// adapter.
     pub(crate) fn render_with<D: FnOnce(&wgpu::Queue, &mut wgpu::RenderPass<'_>)>(
         target: [u32; 2],
         prepare: impl FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat) -> D,
@@ -618,7 +618,12 @@ pub(crate) mod tests {
         .flatten()
     }
 
-    /// Runs `work` with the one test device; `None` without a DX12 adapter.
+    /// Says that a test checked nothing because there is no adapter.
+    pub(crate) fn no_adapter() {
+        eprintln!("skipped: no {} adapter", crate::gpu::BACKEND.1);
+    }
+
+    /// Runs `work` with the one test device; `None` without an adapter.
     pub(crate) fn with_device<R>(work: impl FnOnce(&wgpu::Device, &wgpu::Queue) -> R) -> Option<R> {
         // Declared first, so released after everything made with the device.
         let _alone = ONE_DEVICE
@@ -683,7 +688,7 @@ pub(crate) mod tests {
             let placement = Placement::new([5.0, 3.0], scale);
             let target = [80, 48];
             let Some(shown) = render(&document, placement, target) else {
-                eprintln!("skipped: no DX12 adapter");
+                crate::view::tests::no_adapter();
                 return;
             };
             let source = document.data_as_u8_slice();
@@ -753,7 +758,7 @@ pub(crate) mod tests {
         };
         let target = [40, 48];
         let Some(shown) = render(&document, placement, target) else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         let source = document.data_as_u8_slice();
@@ -819,7 +824,7 @@ pub(crate) mod tests {
             }
         });
         let Some(shown) = shown else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         assert!(shown == expected.data_as_u8_slice());
@@ -834,7 +839,7 @@ pub(crate) mod tests {
         }
         let placement = Placement::new([0.0, 0.0], 0.5);
         let Some(shown) = render(&document, placement, [2, 2]) else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         for pixel in shown.chunks(4) {
@@ -849,7 +854,7 @@ pub(crate) mod tests {
         let at = |shown: &[u8], x: usize, y: usize| shown[(y * 20 + x) * 4];
         let enlarged = |scale| Placement::new([0.0, 0.0], scale);
         let Some(shown) = render_grid(&document, enlarged(10.0), true, [20, 20]) else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         for (x, y) in [(0, 5), (10, 5), (5, 0), (5, 10)] {

@@ -352,7 +352,7 @@ mod tests {
             })
         };
         let Some(first) = shot(0.0, Affine::IDENTITY) else {
-            eprintln!("skipped: no DX12 adapter");
+            crate::view::tests::no_adapter();
             return;
         };
         let at = |pixels: &[u8], x: u32, y: u32| {

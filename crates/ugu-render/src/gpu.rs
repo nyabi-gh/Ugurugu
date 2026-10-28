@@ -1,14 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! Opening a DX12 device for the window, falling back to WARP, and noticing
+//! Opening a GPU device for the window, falling back to WARP, and noticing
 //! when the device is lost so the caller can open a new one.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(windows)]
 use windows::Win32::Graphics::Direct3D12::ID3D12Device5;
+#[cfg(windows)]
 use windows::core::Interface;
+
+/// The one backend each OS opens, and its name in messages. Windows has no
+/// Vulkan: with it, wgpu would prefer a Vulkan adapter (decisions.md
+/// section 2).
+#[cfg(windows)]
+pub const BACKEND: (wgpu::Backends, &str) = (wgpu::Backends::DX12, "DX12");
+#[cfg(target_os = "macos")]
+pub const BACKEND: (wgpu::Backends, &str) = (wgpu::Backends::METAL, "Metal");
+#[cfg(not(any(windows, target_os = "macos")))]
+pub const BACKEND: (wgpu::Backends, &str) = (wgpu::Backends::VULKAN, "Vulkan");
 
 /// Which adapters to try.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +85,7 @@ impl Gpu {
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..wgpu::DeviceDescriptor::default()
         }))
-        .map_err(|error| format!("cannot open the DX12 device: {error}"))?;
+        .map_err(|error| format!("cannot open the {} device: {error}", BACKEND.1))?;
         tracing::debug!("GPU device opened");
 
         let lost = Arc::new(AtomicBool::new(false));
@@ -116,7 +128,9 @@ impl Gpu {
 
     /// Asks D3D12 whether the device was removed. wgpu reports a removal
     /// only through the device-lost callback, which it calls when a wait on
-    /// the device fails; this catches it on the next frame instead.
+    /// the device fails; this catches it on the next frame instead. Other
+    /// OSes have only the callback.
+    #[cfg(windows)]
     pub fn check_removed(&self) -> bool {
         if self.is_lost() {
             return true;
@@ -131,8 +145,14 @@ impl Gpu {
         removed
     }
 
+    #[cfg(not(windows))]
+    pub fn check_removed(&self) -> bool {
+        self.is_lost()
+    }
+
     /// Puts the device into the removed state, as a driver reset would, for
     /// testing recovery. Affects only this device.
+    #[cfg(windows)]
     pub fn remove_for_test(&self) -> Result<(), String> {
         // SAFETY: removal is what this is for; the caller then replaces the
         // device.
@@ -145,6 +165,11 @@ impl Gpu {
         // SAFETY: plain call on a live device.
         unsafe { device5.RemoveDevice() };
         Ok(())
+    }
+
+    #[cfg(not(windows))]
+    pub fn remove_for_test(&self) -> Result<(), String> {
+        Err(format!("removing a {} device is not supported", BACKEND.1))
     }
 }
 
@@ -166,11 +191,15 @@ fn request_adapter(
     match choice {
         AdapterChoice::Warp => request(true),
         AdapterChoice::Hardware => request(false).or_else(|error| {
-            tracing::warn!(%error, "no hardware DX12 adapter can show the window; trying WARP");
+            tracing::warn!(
+                %error,
+                "no hardware {} adapter can show the window; trying WARP",
+                BACKEND.1
+            );
             request(true)
         }),
     }
-    .map_err(|error| format!("no DX12 adapter can show the window: {error}"))
+    .map_err(|error| format!("no {} adapter can show the window: {error}", BACKEND.1))
 }
 
 pub fn adapter_summary(info: &wgpu::AdapterInfo) -> String {

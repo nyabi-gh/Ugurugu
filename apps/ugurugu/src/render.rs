@@ -321,7 +321,7 @@ impl Display {
 impl RenderThread {
     pub fn create_instance() -> wgpu::Instance {
         wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: ugu_render::gpu::BACKEND.0,
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             backend_options: ugu_render::present::backend_options(),

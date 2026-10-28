@@ -6,8 +6,8 @@
 //! The document goes to a new temporary file next to the target, which is
 //! finished, flushed to disk and checked before it replaces the target. Any
 //! failure removes the temporary file and leaves the target as it was. The
-//! replacing itself is the platform's (`ugu_win::file::replace_file` on
-//! Windows), passed in so that it can be tested.
+//! replacing itself is the platform's (`ugu_platform::file::replace_file`),
+//! passed in so that it can be tested.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Seek, Write};

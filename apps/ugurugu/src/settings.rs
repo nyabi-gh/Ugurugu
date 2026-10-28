@@ -513,6 +513,7 @@ fn write_changes_over(
 
 /// Held while the file is read and written, so windows take turns; removed
 /// as it closes.
+#[cfg(windows)]
 fn lock(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
     const ERROR_SHARING_VIOLATION: i32 = 32;
@@ -537,6 +538,32 @@ fn lock(path: &Path) -> std::io::Result<std::fs::File> {
                 std::thread::sleep(Duration::from_millis(10));
             }
             opened => return opened,
+        }
+    }
+}
+
+/// Held while the file is read and written, so windows take turns. The lock
+/// is on the open file, not on its name, so the file is left in place: one
+/// removed as it closes would let a window that was waiting and the next to
+/// come both in.
+#[cfg(not(windows))]
+fn lock(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(".lock");
+    let lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_file_name(name))?;
+    let started = std::time::Instant::now();
+    loop {
+        match lock.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock)
+                if started.elapsed() < Duration::from_secs(2) =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            locked => return locked.map(|()| lock).map_err(Into::into),
         }
     }
 }
@@ -780,7 +807,11 @@ mod tests {
             theme: crate::theme::Mode::Light,
             wobble_animation: false,
             pixel_grid: false,
-            default_save_folder: Some(PathBuf::from(r"C:\Drawings\새 폴더")),
+            default_save_folder: Some(PathBuf::from(if cfg!(windows) {
+                r"C:\Drawings\새 폴더"
+            } else {
+                "/Drawings/새 폴더"
+            })),
             export_edge: Some(384),
             pixel_export_times: Some(4),
             tools: {
@@ -1051,6 +1082,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_failed_write_leaves_the_old_file() {
         let folder = Folder::new("fail");
@@ -1076,6 +1108,7 @@ mod tests {
         assert_eq!(leftovers, 1, "the temporary file is removed");
     }
 
+    #[cfg(windows)]
     #[test]
     fn settings_not_written_are_written_once_the_file_can_be() {
         let folder = Folder::new("retry");
@@ -1132,7 +1165,11 @@ mod tests {
         assert!(!read.get().check_updates);
         assert!(!read.get().pixel_grid);
         let files = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
-        assert_eq!(files, 1, "the lock is removed");
+        if cfg!(windows) {
+            assert_eq!(files, 1, "the lock is removed");
+        } else {
+            assert_eq!(files, 2, "the lock is kept");
+        }
     }
 
     #[test]

@@ -11,7 +11,10 @@ tiny-skia = { version = "=0.12.0", default-features = false, features = ["std", 
 vello_cpu.workspace = true
 vello_gpu = { version = "=0.3.0", default-features = false, features = ["std", "wgpu"] }
 pollster.workspace = true
+ugu-render.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_System_ProcessStatus"] }
 
 [lints]

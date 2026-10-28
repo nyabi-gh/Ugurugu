@@ -14,7 +14,16 @@ ugu-core.workspace = true
 vello_common.workspace = true
 vello_cpu.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+wgpu = { workspace = true, features = ["dx12"] }
 windows.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { workspace = true, features = ["metal"] }
+
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+wgpu = { workspace = true, features = ["vulkan"] }
 
 [dev-dependencies]
 sha2.workspace = true

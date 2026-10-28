@@ -89,8 +89,11 @@ fn simd_level(name: &str) -> Option<vello_cpu::Level> {
     match name {
         "auto" => Some(detected),
         "baseline" => Some(vello_cpu::Level::baseline()),
+        #[cfg(target_arch = "x86_64")]
         "sse4.2" => detected.as_sse4_2().map(vello_cpu::Level::Sse4_2),
+        #[cfg(target_arch = "x86_64")]
         "avx2" => detected.as_avx2().map(vello_cpu::Level::Avx2),
+        #[cfg(target_arch = "x86_64")]
         "avx512" => detected.as_avx512().map(vello_cpu::Level::Avx512),
         _ => None,
     }
@@ -208,12 +211,8 @@ fn measure<B: Backend>(options: &Options, mut backend: B) -> Result<(), String> 
     if !segment.is_empty() {
         report("segment", segment);
     }
-    let (working_set, private) = peak_memory();
-    println!(
-        "peak working set {:.1} MiB, peak private {:.1} MiB",
-        working_set as f64 / 1048576.0,
-        private as f64 / 1048576.0
-    );
+    let (working_set, private) = peak_memory_mib();
+    println!("peak working set {working_set:.1} MiB, peak private {private:.1} MiB");
     Ok(())
 }
 
@@ -231,7 +230,14 @@ fn save(options: &Options, name: &str, bytes: &[u8]) -> Result<(), String> {
         .map_err(|error| format!("cannot write {}: {error}", png.display()))
 }
 
-fn peak_memory() -> (usize, usize) {
+/// NaN where the OS is not supported yet.
+#[cfg(not(windows))]
+fn peak_memory_mib() -> (f64, f64) {
+    (f64::NAN, f64::NAN)
+}
+
+#[cfg(windows)]
+fn peak_memory_mib() -> (f64, f64) {
     use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
     use windows::Win32::System::Threading::GetCurrentProcess;
     let mut counters = PROCESS_MEMORY_COUNTERS {
@@ -240,7 +246,10 @@ fn peak_memory() -> (usize, usize) {
     };
     // SAFETY: valid out pointer of the stated size for this process.
     let _ = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
-    (counters.PeakWorkingSetSize, counters.PeakPagefileUsage)
+    (
+        counters.PeakWorkingSetSize as f64 / 1048576.0,
+        counters.PeakPagefileUsage as f64 / 1048576.0,
+    )
 }
 
 /// `heatmap`, if given, gets each pixel's largest channel difference times 4.

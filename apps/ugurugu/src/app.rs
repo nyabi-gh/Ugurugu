@@ -160,9 +160,6 @@ impl Session {
         settings: Store,
         open_at_start: Option<std::path::PathBuf>,
     ) -> Result<Self, String> {
-        use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
-        // Resource 1, put in by build.rs.
-        let icon = winit::window::Icon::from_resource(1, None).ok();
         let (first_size, first_maximized) =
             first_place(event_loop.primary_monitor().map(|monitor| {
                 let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
@@ -170,12 +167,19 @@ impl Session {
             }));
         let attributes = Window::default_attributes()
             .with_title("Ugurugu")
-            .with_class_name(WINDOW_CLASS)
-            .with_window_icon(icon.clone())
-            .with_taskbar_icon(icon)
             .with_inner_size(first_size)
             // AccessKit must be attached before the window is first shown.
             .with_visible(false);
+        #[cfg(windows)]
+        let attributes = {
+            use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
+            // Resource 1, put in by build.rs.
+            let icon = winit::window::Icon::from_resource(1, None).ok();
+            attributes
+                .with_class_name(WINDOW_CLASS)
+                .with_window_icon(icon.clone())
+                .with_taskbar_icon(icon)
+        };
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -487,7 +491,8 @@ mod tests {
         let document = |arguments: &[&str]| document_in(arguments.iter().map(Into::into));
         assert_eq!(document(&[]), None);
         assert_eq!(document(&["--help"]), None);
-        let file = r"C:\Drawings\cat.ugurugu";
+        let file = std::env::temp_dir().join("cat.ugurugu");
+        let file = file.to_str().unwrap();
         assert_eq!(document(&["--later-option", file]), Some(file.into()));
         assert_eq!(
             document(&["--", "-dash.ugurugu"]),
@@ -509,6 +514,7 @@ mod tests {
         assert_eq!(place(Some([1366.0, 768.0])), ([1229.0, 614.0], true));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_document_argument_is_made_absolute_in_windows_form() {
         assert_eq!(

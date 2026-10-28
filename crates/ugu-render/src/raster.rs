@@ -46,10 +46,11 @@ mod tests {
     /// Every SIMD level this CPU has, so that pixels can be compared across
     /// the levels other users' CPUs would pick.
     fn levels() -> Vec<(&'static str, vello_cpu::Level)> {
-        let detected = vello_cpu::Level::new();
-        let mut levels = vec![("baseline", vello_cpu::Level::baseline())];
+        let levels = vec![("baseline", vello_cpu::Level::baseline())];
         #[cfg(target_arch = "x86_64")]
-        {
+        let levels = {
+            let detected = vello_cpu::Level::new();
+            let mut levels = levels;
             if let Some(sse) = detected.as_sse4_2() {
                 levels.push(("sse4.2", vello_cpu::Level::Sse4_2(sse)));
             }
@@ -59,7 +60,8 @@ mod tests {
             if let Some(avx) = detected.as_avx512() {
                 levels.push(("avx512", vello_cpu::Level::Avx512(avx)));
             }
-        }
+            levels
+        };
         levels
     }
 

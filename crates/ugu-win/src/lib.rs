@@ -3,6 +3,8 @@
 
 //! Windows input and OS services. GPU presentation lives in `ugu-render`.
 
+#![cfg(windows)]
+
 pub mod association;
 pub mod clipboard;
 pub mod clock;

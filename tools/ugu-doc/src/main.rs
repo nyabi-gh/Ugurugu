@@ -1123,6 +1123,13 @@ fn insert(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// NaN where the OS is not supported yet.
+#[cfg(not(windows))]
+fn peak_working_set_mib() -> f64 {
+    f64::NAN
+}
+
+#[cfg(windows)]
 fn peak_working_set_mib() -> f64 {
     use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
     use windows::Win32::System::Threading::GetCurrentProcess;

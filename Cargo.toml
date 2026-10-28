@@ -50,12 +50,12 @@ ugu-win = { path = "crates/ugu-win" }
 # Vello CPU's own strip generator, for strokes stamped at pen-up.
 vello_common = { version = "=0.3.0", default-features = false, features = ["std"] }
 vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
-# DX12 only: with Vulkan compiled in, wgpu would prefer a Vulkan adapter.
 # public-utils makes the types an update source names public.
 velopack = { version = "=1.2.161", default-features = false, features = ["public-utils"] }
 # The version and features Velopack uses, for downloading its packages.
 ureq = "=3.4.2"
-wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "wgsl"] }
+# ugu-render adds each OS's one backend (`gpu::BACKEND`).
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 # Same version as wgpu-hal so that its DXGI interfaces can be used directly.
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi", "Win32_System_Com", "Win32_System_Performance", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }

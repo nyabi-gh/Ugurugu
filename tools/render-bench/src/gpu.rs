@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Nyabi (nyabi-gh)
 
-//! The benchmark operations on Vello GPU over wgpu DX12.
+//! The benchmark operations on Vello GPU over wgpu, on DX12 on Windows.
 //!
 //! Every operation waits for the GPU to finish, so its time is when the
 //! result is ready, as for the CPU renderers. Layers stay in GPU textures.
@@ -50,14 +50,14 @@ impl VelloGpu {
     pub fn new(size: u32, level: vello_cpu::Level) -> Result<Self, String> {
         let size = u16::try_from(size).map_err(|_| "Vello GPU images are at most 65535 wide")?;
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: ugu_render::gpu::BACKEND.0,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..wgpu::RequestAdapterOptions::default()
         }))
-        .map_err(|error| format!("no DX12 adapter: {error}"))?;
+        .map_err(|error| format!("no {} adapter: {error}", ugu_render::gpu::BACKEND.1))?;
         println!("adapter {}", adapter.get_info().name);
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
