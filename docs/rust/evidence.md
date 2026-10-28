@@ -1857,3 +1857,21 @@ pen-up은 레이어마다 획 하나를 찍고 바뀐 곳을 합성한 시간이
 ARM 1스레드 시간: 스칼라 441.6·442.9·466.5ms, NEON 370.0·371.0·373.3ms(약 16% 짧다). NEON 8스레드 70.6~72.3ms. Rosetta의 x86 시간은 번역 비용이 섞여 비교하지 않는다.
 
 **결론:** ARM에서 NEON은 x86과 바이트가 다르고 스칼라는 같다. 차이는 NEON의 `mul_add`가 FMA(`vfmaq_f32`, 반올림 1회)이고 SSE4.2·스칼라는 곱한 뒤 더하는 것(반올림 2회) 때문이라고 본다(**가설**: `fearless_simd` 0.7.0 `generated/neon.rs`·`sse4_2.rs`·`fallback.rs`를 읽은 것, 연산마다 나눠 재지 않았다). 같은 PC 안에서 캔버스와 내보내기가 같다는 약속은 어느 수준이든 지켜진다(1·8스레드 같음). 이 장면은 앱의 fixture가 아니므로, 앱 렌더러로 같은 비교(`ugu-doc digest`)를 다시 해야 한다. 고르는 일은 [plan-cross-platform.md](plan-cross-platform.md) 6절이다.
+
+## 98. macOS에서 앱의 첫 실행 (2026-10-28)
+
+**질문:** 1단계의 첫 변경(winit 입력, 트랙패드 제스처)으로 앱이 macOS에서 그리기·재생을 버티나. 사용자가 debug 빌드에서 큰 에어브러시와 우글거림 재생에 "렉이 엄청나다"고 했다.
+
+**방법:** Apple M4 Mac, swap chain 3420×1902(`Bgra8Unorm`, Fifo), `platform/mac-window` 브랜치(커밋 전). 문서는 사용자가 그린 1024×768, 30프레임 재생. 사용자가 직접 조작했고, 수치는 앱 로그(`UGURUGU_LOG=debug`의 `frame ui_ms`·`rest_ms`, `playback frame rendered`·`shown`, 끝날 때의 `input to present-return latency`)에서 셌다. debug 실행은 `cargo run`(dev 프로필, 작업자 수 기본), release 실행은 `UGU_WORKER_THREADS=8`.
+
+**결과:**
+
+| 실행 | 프레임 | 프레임 시간(ui+rest) | 재생 프레임 렌더 | 입력→present 반환 p50·p95·최대 |
+|---|---|---|---|---|
+| debug, 그리기·재생 | 699 | 로그 수준이 info라 없음 | 없음 | 18.32·23.08·88.50ms |
+| release, 그리기·재생 | 1,181 | 30ms 초과 1개(32.7ms), 보통 ui 0.3~0.5 + rest 0.5~0.8ms | 약 2ms | 1.92·17.77·293.61ms |
+| release, 트랙패드 제스처·재생 | 1,085 | 20ms 초과 4개, 최대 31.7ms | 중앙값 2.1ms, 최대 16.5ms | 10.80·17.95·34.14ms |
+
+release 첫 실행에서 재생 프레임이 보인 간격은 중앙값 40ms(25fps)였다. 270~950ms 간격 9번은 모두 재생 중에 획을 그은 동안이다(획이 끝나면 `pen-up shown` 뒤 `playback started`). 저장 확인 창이 떠 있는 동안 rest가 약 16ms인 것은 60Hz 화면의 vsync 대기다.
+
+**결론:** release에서는 프레임과 재생이 제때 나온다. 사용자가 느낀 렉은 최적화하지 않은 debug 빌드 탓으로 본다(**가설**: debug 실행의 프레임 시간을 기록하지 않아 같은 방법으로 비교하지 못했다). 속도는 release로 본다. release 첫 실행의 최대 293.61ms가 어디서 났는지는 모른다. 최소화(`Occluded`) 동안 그리지 않게 한 변경 전후의 CPU는 아직 재지 않았다.
