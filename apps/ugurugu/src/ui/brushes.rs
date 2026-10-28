@@ -61,6 +61,10 @@ pub struct Presets {
 }
 
 impl Presets {
+    pub fn forget_textures(&mut self) {
+        self.previews.clear();
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas, tool: Tool) {
         let scale = ui.ctx().pixels_per_point();
         let pressure = canvas.tools().uses_pressure;
@@ -419,6 +423,19 @@ mod tests {
             .chunks(4)
             .map(|pixel| u64::from(pixel[3]))
             .sum()
+    }
+
+    #[test]
+    fn previews_are_made_again_once_their_textures_are_forgotten() {
+        let ctx = egui::Context::default();
+        let mut presets = Presets {
+            scale: 1.0,
+            ..Presets::default()
+        };
+        let kept = presets.preview(&ctx, &BRUSHES[0], 0).id();
+        assert_eq!(presets.preview(&ctx, &BRUSHES[0], 0).id(), kept);
+        presets.forget_textures();
+        assert_ne!(presets.preview(&ctx, &BRUSHES[0], 0).id(), kept);
     }
 
     #[test]

@@ -458,7 +458,7 @@ impl RenderThread {
             [size.width, size.height],
         )?;
         self.canvas.upload_all();
-        self.panels.layers.forget_textures();
+        self.panels.forget_textures();
         // egui sends only changes to its font atlas, so the new device gets
         // the whole atlas once.
         let atlas = self.egui_ctx.fonts(|fonts| fonts.image());

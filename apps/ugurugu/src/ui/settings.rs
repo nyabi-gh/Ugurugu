@@ -100,6 +100,10 @@ pub fn restore_tools(settings: &Settings, canvas: &mut Canvas) {
 /// Puts `settings` into effect everywhere but the interface language, which
 /// waits for the next start.
 impl Dialog {
+    pub fn forget_textures(&mut self) {
+        self.icon = None;
+    }
+
     /// Open on the about tab, for Help > About.
     pub fn about() -> Self {
         Self {

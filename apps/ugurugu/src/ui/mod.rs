@@ -95,6 +95,16 @@ pub struct Panels {
 }
 
 impl Panels {
+    /// Drops every texture the panels made, which a new GPU device does not
+    /// have; each is made again when next shown.
+    pub fn forget_textures(&mut self) {
+        self.layers.forget_textures();
+        self.presets.forget_textures();
+        if let Some(settings) = self.settings.as_mut() {
+            settings.forget_textures();
+        }
+    }
+
     /// Drops edits under way in the panels when another document is shown:
     /// another tab, or one made, opened or recovered.
     pub fn follow_document(&mut self, canvas: &Canvas) {
