@@ -11,6 +11,8 @@ use std::collections::{BTreeMap, HashMap};
 use ugu_platform::clock::Ticks;
 use ugu_platform::pointer::{Buttons, PointerEvent, PointerId, PointerKind, PointerSample};
 
+use crate::shortcuts;
+
 const EGUI_BUTTONS: [(Buttons, egui::PointerButton); 5] = [
     (Buttons::PRIMARY, egui::PointerButton::Primary),
     (Buttons::SECONDARY, egui::PointerButton::Secondary),
@@ -198,7 +200,7 @@ impl InputRouter {
                         let gesture = if pressed.contains(Buttons::PRIMARY) {
                             Some((
                                 Buttons::PRIMARY,
-                                match (pan_held, modifiers.command, modifiers.shift) {
+                                match (pan_held, shortcuts::primary(modifiers), modifiers.shift) {
                                     (false, ..) => Gesture::Draw,
                                     (true, true, _) => Gesture::Zoom,
                                     (true, false, true) => Gesture::Turn,
@@ -487,6 +489,8 @@ mod tests {
         assert_eq!(press(egui::Modifiers::NONE, true), Gesture::Pan);
         assert_eq!(press(egui::Modifiers::SHIFT, true), Gesture::Turn);
         assert_eq!(press(egui::Modifiers::COMMAND, true), Gesture::Zoom);
+        // Control too on macOS, where ⌘Space is the system's Spotlight key.
+        assert_eq!(press(egui::Modifiers::CTRL, true), Gesture::Zoom);
         assert_eq!(press(egui::Modifiers::SHIFT, false), Gesture::Draw);
 
         let mut router = InputRouter::default();

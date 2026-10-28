@@ -672,7 +672,7 @@ fn shortcuts(ui: &mut egui::Ui, dialog: &mut Dialog, canvas: &Canvas, settings: 
                     .contains(&query)
                 || keys
                     .key(action)
-                    .is_some_and(|key| key.text().to_lowercase().contains(&query))
+                    .is_some_and(|key| key.shown().to_lowercase().contains(&query))
         })
         .collect();
     if shown.is_empty() {
@@ -700,7 +700,7 @@ fn shortcut_row(
     let key = keys.key(action);
     let text = match key {
         _ if capturing => tr("settings-shortcut-press").to_owned(),
-        Some(key) => key.text(),
+        Some(key) => key.shown(),
         None => tr("settings-shortcut-none").to_owned(),
     };
     let (field, clear) = widgets::setting_row(ui, first, name, None, |ui| {

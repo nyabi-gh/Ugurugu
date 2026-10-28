@@ -11,9 +11,19 @@ use std::collections::{BTreeMap, HashMap};
 use egui::Key;
 use serde_json::{Map, Value};
 
+/// Whether the shortcut modifier is held: Ctrl, and on macOS also ⌘, which
+/// its menus show. Both count so that a key kept as "Ctrl" means the same
+/// on every OS, and Control+Tab still moves between tabs on macOS, where
+/// ⌘Tab belongs to the system.
+pub fn primary(modifiers: egui::Modifiers) -> bool {
+    // egui-winit sets both on Windows; `COMMAND` alone sets one.
+    modifiers.ctrl || modifiers.command
+}
+
 /// A key pressed with exactly these modifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Chord {
+    /// The shortcut modifier, as [`primary`] finds it.
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
@@ -82,8 +92,7 @@ fn shift_is_part_of_key(key: Key) -> bool {
 impl Chord {
     pub fn new(modifiers: egui::Modifiers, key: Key) -> Self {
         Self {
-            // egui-winit sets both on Windows; `COMMAND` alone sets one.
-            ctrl: modifiers.ctrl || modifiers.command,
+            ctrl: primary(modifiers),
             alt: modifiers.alt,
             shift: modifiers.shift && !shift_is_part_of_key(key),
             key,
@@ -111,7 +120,8 @@ impl Chord {
         )
     }
 
-    /// As 2.2.13 writes it: "Ctrl+Alt+Shift+Key".
+    /// As 2.2.13 writes it, and as the settings keep it on every OS:
+    /// "Ctrl+Alt+Shift+Key".
     pub fn text(self) -> String {
         let mut text = String::new();
         for (held, name) in [
@@ -123,7 +133,56 @@ impl Chord {
                 text.push_str(name);
             }
         }
+        text.push_str(self.key_name());
+        text
+    }
+
+    /// As menus show it: [`Self::text`], or on macOS as its own menus write
+    /// keys, "⌥⇧⌘S".
+    pub fn shown(self) -> String {
+        if cfg!(target_os = "macos") {
+            self.mac_text()
+        } else {
+            self.text()
+        }
+    }
+
+    fn mac_text(self) -> String {
+        let mut text = String::new();
+        // ⌘Tab belongs to the system, so tabs move with Control+Tab.
+        let (control, command) = match self.key {
+            Key::Tab => (self.ctrl, false),
+            _ => (false, self.ctrl),
+        };
+        for (held, symbol) in [
+            (control, '⌃'),
+            (self.alt, '⌥'),
+            (self.shift, '⇧'),
+            (command, '⌘'),
+        ] {
+            if held {
+                text.push(symbol);
+            }
+        }
         text.push_str(match self.key {
+            Key::Backspace => "⌫",
+            Key::Delete => "⌦",
+            Key::Enter => "↩",
+            Key::Tab => "⇥",
+            Key::Escape => "⎋",
+            Key::ArrowLeft => "←",
+            Key::ArrowRight => "→",
+            Key::ArrowUp => "↑",
+            Key::ArrowDown => "↓",
+            Key::PageUp => "⇞",
+            Key::PageDown => "⇟",
+            _ => self.key_name(),
+        });
+        text
+    }
+
+    fn key_name(self) -> &'static str {
+        match self.key {
             Key::Plus => "+",
             Key::Minus => "-",
             Key::Comma => ",",
@@ -133,8 +192,7 @@ impl Chord {
             Key::CloseBracket => "]",
             Key::Escape => "Esc",
             key => key.name(),
-        });
-        text
+        }
     }
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -167,6 +225,26 @@ pub fn clipboard_chord(
     physical: winit::keyboard::PhysicalKey,
     modifiers: winit::keyboard::ModifiersState,
 ) -> Option<Chord> {
+    clipboard_chord_on(
+        cfg!(target_os = "windows"),
+        cfg!(target_os = "macos"),
+        logical,
+        physical,
+        modifiers,
+    )
+}
+
+/// egui-winit 0.36.2's `is_cut_command` and the like: ⌘ on macOS and Ctrl
+/// elsewhere with X, C or V, and the Delete and Insert keys only on Windows.
+/// A key it passes on as a key reaches the actions as one, so finding it
+/// here too would run its action twice.
+fn clipboard_chord_on(
+    windows: bool,
+    macos: bool,
+    logical: &winit::keyboard::Key,
+    physical: winit::keyboard::PhysicalKey,
+    modifiers: winit::keyboard::ModifiersState,
+) -> Option<Chord> {
     use winit::keyboard::{Key as Logical, KeyCode, NamedKey, PhysicalKey};
     let meant = match logical {
         Logical::Named(NamedKey::Delete) => Some(Key::Delete),
@@ -183,15 +261,20 @@ pub fn clipboard_chord(
         _ => None,
     };
     let key = meant.or(placed)?;
-    let (ctrl, shift) = (modifiers.control_key(), modifiers.shift_key());
+    let (control, shift) = (modifiers.control_key(), modifiers.shift_key());
+    let command = if macos {
+        modifiers.super_key()
+    } else {
+        control
+    };
     let clipboard = match key {
-        Key::X | Key::C | Key::V => ctrl,
-        Key::Delete => shift,
-        Key::Insert => ctrl || shift,
+        Key::X | Key::C | Key::V => command,
+        Key::Delete => windows && shift,
+        Key::Insert => windows && (control || shift),
         _ => false,
     };
     clipboard.then_some(Chord {
-        ctrl,
+        ctrl: control || command,
         alt: modifiers.alt_key(),
         shift,
         key,
@@ -526,7 +609,7 @@ impl Keymap {
 
     /// The key as menus show it, or nothing.
     pub fn text(&self, action: Action) -> String {
-        self.key(action).map(Chord::text).unwrap_or_default()
+        self.key(action).map(Chord::shown).unwrap_or_default()
     }
 
     pub fn action(&self, key: Chord) -> Option<Action> {
@@ -751,9 +834,13 @@ mod tests {
         let character = |text: &str| Logical::Character(text.into());
         let code = PhysicalKey::Code;
         let control = ModifiersState::CONTROL;
+        let command = ModifiersState::SUPER;
         let shift_held = ModifiersState::SHIFT;
         let delete = Logical::Named(NamedKey::Delete);
         let insert = Logical::Named(NamedKey::Insert);
+        let on_windows = |logical: &Logical, physical, modifiers| {
+            clipboard_chord_on(true, false, logical, code(physical), modifiers)
+        };
         for (logical, physical, modifiers, chord) in [
             (character("c"), KeyCode::KeyC, control, Some(ctrl(Key::C))),
             (
@@ -768,7 +855,12 @@ mod tests {
                 shift_held,
                 Some(shift(Key::Delete)),
             ),
-            (insert, KeyCode::Insert, control, Some(ctrl(Key::Insert))),
+            (
+                insert.clone(),
+                KeyCode::Insert,
+                control,
+                Some(ctrl(Key::Insert)),
+            ),
             // A layout whose letters are not Latin falls back on the place.
             (
                 character("\u{314a}"),
@@ -778,15 +870,88 @@ mod tests {
             ),
             // Keys egui-winit passes on as keys.
             (character("c"), KeyCode::KeyC, ModifiersState::empty(), None),
-            (delete, KeyCode::Delete, ModifiersState::ALT, None),
+            (delete.clone(), KeyCode::Delete, ModifiersState::ALT, None),
             (character("z"), KeyCode::KeyZ, control, None),
+            (character("c"), KeyCode::KeyC, command, None),
         ] {
             assert_eq!(
-                clipboard_chord(&logical, code(physical), modifiers),
+                on_windows(&logical, physical, modifiers),
                 chord,
                 "{logical:?}"
             );
         }
+
+        let on_macos = |logical: &Logical, physical, modifiers| {
+            clipboard_chord_on(false, true, logical, code(physical), modifiers)
+        };
+        let on_linux = |logical: &Logical, physical, modifiers| {
+            clipboard_chord_on(false, false, logical, code(physical), modifiers)
+        };
+        let c = character("c");
+        assert_eq!(on_macos(&c, KeyCode::KeyC, command), Some(ctrl(Key::C)));
+        assert_eq!(
+            on_macos(&character("x"), KeyCode::KeyX, command | shift_held),
+            Some(ctrl_shift(Key::X))
+        );
+        // Control+C reaches egui on macOS as a key, which is a shortcut.
+        assert_eq!(on_macos(&c, KeyCode::KeyC, control), None);
+        assert_eq!(on_linux(&c, KeyCode::KeyC, control), Some(ctrl(Key::C)));
+        assert_eq!(on_linux(&c, KeyCode::KeyC, command), None);
+        for macos in [false, true] {
+            for (logical, physical, modifiers) in [
+                (&delete, KeyCode::Delete, shift_held),
+                (&insert, KeyCode::Insert, control),
+                (&insert, KeyCode::Insert, shift_held),
+            ] {
+                assert_eq!(
+                    clipboard_chord_on(false, macos, logical, code(physical), modifiers),
+                    None
+                );
+            }
+        }
+        #[cfg(not(windows))]
+        assert_eq!(
+            clipboard_chord(&insert, code(KeyCode::Insert), shift_held),
+            None
+        );
+    }
+
+    #[test]
+    fn menus_on_macos_show_keys_as_its_own_menus_do() {
+        for (chord, text) in [
+            (ctrl(Key::S), "⌘S"),
+            (ctrl_shift(Key::S), "⇧⌘S"),
+            (ctrl_alt(Key::E), "⌥⌘E"),
+            (alt(Key::Backspace), "⌥⌫"),
+            (plain(Key::Delete), "⌦"),
+            (ctrl(Key::Tab), "⌃⇥"),
+            (ctrl_shift(Key::Tab), "⌃⇧⇥"),
+            (plain(Key::Escape), "⎋"),
+            (ctrl(Key::Plus), "⌘+"),
+            (plain(Key::F1), "F1"),
+            (shift(Key::Comma), "⇧,"),
+        ] {
+            assert_eq!(chord.mac_text(), text);
+        }
+        let shown = Keymap::default().text(Action::SaveAs);
+        if cfg!(target_os = "macos") {
+            assert_eq!(shown, "⇧⌘S");
+        } else {
+            assert_eq!(shown, "Ctrl+Shift+S");
+        }
+    }
+
+    #[test]
+    fn command_and_control_are_both_the_shortcut_modifier_on_macos() {
+        // egui-winit on macOS: ⌘ sets `mac_cmd` and `command`, Control `ctrl`.
+        let cmd = egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND;
+        let keymap = Keymap::default();
+        assert_eq!(keymap.action(Chord::new(cmd, Key::S)), Some(Action::Save));
+        assert_eq!(
+            keymap.action(Chord::new(egui::Modifiers::CTRL, Key::Tab)),
+            Some(Action::NextTab)
+        );
+        assert!(!primary(egui::Modifiers::ALT | egui::Modifiers::SHIFT));
     }
 
     #[test]
