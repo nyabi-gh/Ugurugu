@@ -46,8 +46,12 @@ are what `tools/strings_to_ftl.py` makes, and checks that the workspace
 version has release notes in `release-notes/<version>.en.md`. The others run
 only when something other than documents changed (the paths are listed in
 the "Detect changes" job), side by side: "Format and dependencies" on Ubuntu,
-and "Rust Windows tests", "Rust Windows release tests" and "Windows package"
-on Windows. Together they run:
+"Rust Windows tests", "Rust Windows release tests" and "Windows package"
+on Windows, and "Rust macOS tests" and "Rust Linux tests", which run the
+same clippy and debug tests there. The GPU tests run on WARP on Windows,
+the runner's Metal on macOS and Mesa's lavapipe on Linux; CI sets
+`UGU_REQUIRE_ADAPTER`, so a test without an adapter fails instead of
+skipping. Together they run:
 
 ```powershell
 cargo fmt --all --check
@@ -73,8 +77,9 @@ python -X utf8 tools/check_docs.py
 python -X utf8 tools/strings_to_ftl.py; git diff --exit-code apps/ugurugu/i18n
 ```
 
-`tools/native_deps.py` fails when a crate the app links builds or links
-native code that is not on its approved list. `tools/check_docs.py` fails
+`tools/native_deps.py` fails when a crate the app links on Windows, macOS
+or Linux builds or links native code that is not on that OS's approved
+list. `tools/check_docs.py` fails
 when a document links to a file that is not in the tree, or names a backlog
 ID that `docs/rust/backlog.md` has no row for. The last line fails when the
 `.ftl` files are not what `strings.txt` makes.

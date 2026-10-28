@@ -168,6 +168,8 @@ jobs:
       # A failing test's backtrace keeps its files and lines, without the
       # full debug information to build, link and cache.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # GPU tests fail rather than pass unchecked without WARP.
+      UGU_REQUIRE_ADAPTER: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -194,6 +196,7 @@ jobs:
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
+      UGU_REQUIRE_ADAPTER: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -207,6 +210,66 @@ jobs:
       # Some faults show only in the optimised build.
       - name: Test optimised
         run: cargo test --workspace --release --locked
+
+  # The GPU tests run on the runner's Metal adapter.
+  test-macos:
+    name: Rust macOS tests
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      UGU_REQUIRE_ADAPTER: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  # The GPU tests run on Mesa's lavapipe, the CPU Vulkan driver; the text
+  # tests need the Noto and DejaVu fonts that ugu-text falls back to.
+  test-linux:
+    name: Rust Linux tests
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      UGU_REQUIRE_ADAPTER: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install fontconfig, lavapipe and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig-dev mesa-vulkan-drivers fonts-noto-core fonts-noto-cjk fonts-dejavu-core
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
 
   # The executable, package and checks of release-3.yml, so a release does
   # not find a build or packaging problem first.
@@ -259,7 +322,7 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, rust-static, test, release-test, package]
+    needs: [changes, static, rust-static, test, release-test, test-macos, test-linux, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -270,6 +333,8 @@ jobs:
           RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
           TEST_RESULT: ${{ needs.test.result }}
           RELEASE_TEST_RESULT: ${{ needs.release-test.result }}
+          MACOS_RESULT: ${{ needs.test-macos.result }}
+          LINUX_RESULT: ${{ needs.test-linux.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           failed=0
@@ -279,7 +344,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC RUST_STATIC TEST RELEASE_TEST PACKAGE; do
+          for check in STATIC RUST_STATIC TEST RELEASE_TEST MACOS LINUX PACKAGE; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

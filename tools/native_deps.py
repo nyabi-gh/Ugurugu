@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-"""Fails when the 3.0 app links native code nobody approved.
+"""Fails when the 3.0 app links native code nobody approved, on any OS.
 
 Native code comes in through crates that link a system library (`links`)
 or build C, C++ or assembly in their build scripts. Each one shipped is
 listed here with the reason it is accepted (docs/rust/decisions.md M6-6).
+Every target is checked from whichever OS runs this.
 
     python tools/native_deps.py
 """
@@ -16,7 +17,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILDERS = {"cc", "cmake", "bindgen", "nasm-rs", "pkg-config", "vcpkg"}
-APPROVED = {
+COMMON = {
     # libwebp 1.6.0 from source, for animated WebP export (scope.md).
     "libwebp-sys",
     # TLS for the update check through Velopack (decisions.md M6-5).
@@ -24,9 +25,41 @@ APPROVED = {
     # Sets `links` only so that a build has one copy; no native code.
     "rayon-core",
 }
+APPROVED = {
+    "x86_64-pc-windows-msvc": COMMON,
+    "aarch64-apple-darwin": COMMON
+    | {
+        # Links macOS's own Objective-C runtime, which AppKit needs (winit,
+        # AccessKit); its C part is built only with `unstable-exception`.
+        "objc-sys",
+    },
+    "x86_64-unknown-linux-gnu": COMMON
+    | {
+        # Loads libwayland-client at run time (`dlopen`, which
+        # smithay-clipboard turns on); links nothing.
+        "wayland-sys",
+        # Builds its C log shim only with `log`, which is off.
+        "wayland-backend",
+        # Asks pkg-config for xkbcommon only with `xkbcommon`, which is off.
+        "smithay-client-toolkit",
+        # Loads the X11 libraries at run time; links nothing.
+        "x11-dl",
+        # Links the system fontconfig, through which Parley finds the
+        # installed fonts.
+        "yeslogic-fontconfig-sys",
+    },
+}
 
 
 def main() -> None:
+    failed = False
+    for target, approved in APPROVED.items():
+        failed |= not check(target, approved)
+    if failed:
+        raise SystemExit(1)
+
+
+def check(target: str, approved: set[str]) -> bool:
     metadata = json.loads(
         subprocess.run(
             [
@@ -36,7 +69,7 @@ def main() -> None:
                 "--format-version",
                 "1",
                 "--filter-platform",
-                "x86_64-pc-windows-msvc",
+                target,
             ],
             cwd=ROOT,
             check=True,
@@ -72,11 +105,12 @@ def main() -> None:
         if package.get("links") or builders & BUILDERS:
             native.add(package["name"])
 
-    print(f"{len(shipped)} crates shipped; native: {', '.join(sorted(native))}")
-    if native - APPROVED:
-        raise SystemExit(f"not approved: {', '.join(sorted(native - APPROVED))}")
-    if APPROVED - native:
-        raise SystemExit(f"approved but no longer shipped: {', '.join(sorted(APPROVED - native))}")
+    print(f"{target}: {len(shipped)} crates shipped; native: {', '.join(sorted(native))}")
+    if native - approved:
+        print(f"{target}: not approved: {', '.join(sorted(native - approved))}")
+    if approved - native:
+        print(f"{target}: approved but no longer shipped: {', '.join(sorted(approved - native))}")
+    return native == approved
 
 
 if __name__ == "__main__":

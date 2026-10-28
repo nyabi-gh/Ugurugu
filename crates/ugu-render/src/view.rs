@@ -618,9 +618,16 @@ pub(crate) mod tests {
         .flatten()
     }
 
-    /// Says that a test checked nothing because there is no adapter.
+    /// Says that a test checked nothing because there is no adapter, or,
+    /// with `UGU_REQUIRE_ADAPTER` set as on CI, fails it: a runner whose
+    /// adapter stopped opening would otherwise pass every GPU test unseen.
     pub(crate) fn no_adapter() {
-        eprintln!("skipped: no {} adapter", crate::gpu::BACKEND.1);
+        let message = format!("no {} adapter", crate::gpu::BACKEND.1);
+        assert!(
+            std::env::var_os("UGU_REQUIRE_ADAPTER").is_none(),
+            "{message}"
+        );
+        eprintln!("skipped: {message}");
     }
 
     /// Runs `work` with the one test device; `None` without an adapter.
