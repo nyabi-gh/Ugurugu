@@ -40,10 +40,10 @@ pub fn preferred_ui_languages() -> Vec<String> {
         .collect()
 }
 
-/// The Windows version as `10.0.<build>.<revision> (<release>)`, read from
-/// the registry, since `GetVersionEx` reports the version the app was
-/// manifested for.
-pub fn windows_version() -> String {
+/// The Windows version as `Windows 10.0.<build>.<revision> (<release>)`,
+/// read from the registry, since `GetVersionEx` reports the version the app
+/// was manifested for.
+pub fn os_version() -> String {
     use windows_sys::Win32::System::Registry::{
         HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
     };
@@ -90,8 +90,8 @@ pub fn windows_version() -> String {
     let build = text("CurrentBuild").unwrap_or_else(|| "?".to_owned());
     let release = text("DisplayVersion").unwrap_or_default();
     match revision {
-        Some(revision) => format!("10.0.{build}.{revision} ({release})"),
-        None => format!("10.0.{build} ({release})"),
+        Some(revision) => format!("Windows 10.0.{build}.{revision} ({release})"),
+        None => format!("Windows 10.0.{build} ({release})"),
     }
 }
 
@@ -99,9 +99,9 @@ pub fn windows_version() -> String {
 mod version_tests {
     #[test]
     fn the_version_names_a_build() {
-        let version = super::windows_version();
+        let version = super::os_version();
         assert!(
-            version.starts_with("10.0.") && !version.starts_with("10.0.?"),
+            version.starts_with("Windows 10.0.") && !version.starts_with("Windows 10.0.?"),
             "{version}"
         );
     }

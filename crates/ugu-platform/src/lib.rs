@@ -55,7 +55,7 @@ pub mod instance {
 }
 
 pub mod locale {
-    pub use crate::os::locale::{preferred_ui_languages, windows_version};
+    pub use crate::os::locale::{os_version, preferred_ui_languages};
 }
 
 pub mod memory {

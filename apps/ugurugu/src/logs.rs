@@ -129,9 +129,9 @@ pub fn gpu() -> String {
 
 fn heading() -> String {
     format!(
-        "Ugurugu {} ({COMMIT})\r\nWindows {}\r\n",
+        "Ugurugu {} ({COMMIT})\r\n{}\r\n",
         env!("CARGO_PKG_VERSION"),
-        ugu_platform::locale::windows_version()
+        ugu_platform::locale::os_version()
     )
 }
 
@@ -139,9 +139,9 @@ fn heading() -> String {
 pub fn summary() -> String {
     let workers = std::thread::available_parallelism().map_or(0, usize::from);
     format!(
-        "Ugurugu {} ({COMMIT})\nWindows {}\nGPU: {}\nLogical processors: {workers}\nLogs: {}",
+        "Ugurugu {} ({COMMIT})\n{}\nGPU: {}\nLogical processors: {workers}\nLogs: {}",
         env!("CARGO_PKG_VERSION"),
-        ugu_platform::locale::windows_version(),
+        ugu_platform::locale::os_version(),
         gpu(),
         folder().map_or_else(|| "-".to_owned(), |folder| folder.display().to_string()),
     )

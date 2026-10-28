@@ -159,13 +159,14 @@ pub mod instance {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod locale {
     pub fn preferred_ui_languages() -> Vec<String> {
         Vec::new()
     }
 
     /// The OS's name: there is no version to read yet.
-    pub fn windows_version() -> String {
+    pub fn os_version() -> String {
         std::env::consts::OS.to_owned()
     }
 }
