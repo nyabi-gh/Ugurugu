@@ -875,7 +875,7 @@ impl RenderThread {
         }
         self.canvas.sync();
         let upload = self.canvas.take_upload();
-        let textures = output.textures_delta;
+        let mut textures = output.textures_delta;
         let shown = Shown {
             shapes: output.shapes,
             pixels_per_point: output.pixels_per_point,
@@ -1028,6 +1028,9 @@ impl RenderThread {
             }
             (presented, picture)
         }));
+        // Applied, or lost with a device whose display is replaced; epaint
+        // asserts that none is dropped unapplied.
+        textures.clear();
         if let Ok((_, picture)) = drawn
             && self.panels.navigator.picture != picture
         {
