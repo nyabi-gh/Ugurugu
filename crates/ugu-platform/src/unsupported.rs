@@ -73,10 +73,9 @@ pub mod clock {
         Duration::from_nanos(ticks.0.saturating_sub(earlier.0)).as_secs_f64()
     }
 
-    pub fn local_stamp() -> Option<String> {
-        None
-    }
+    pub use crate::unix::clock::local_stamp;
 
+    #[cfg(not(target_os = "macos"))]
     pub fn local_text(_since_unix_epoch: Duration) -> Option<String> {
         None
     }

@@ -7,14 +7,13 @@
 use std::ffi::{CStr, c_char, c_int, c_void};
 
 pub mod clipboard;
+pub mod clock;
 pub mod dialog;
 pub mod folder;
 pub mod locale;
 pub mod memory;
 
-pub use crate::unsupported::{
-    association, clock, crash, file, instance, placement, recent, session,
-};
+pub use crate::unsupported::{association, crash, file, instance, placement, recent, session};
 
 unsafe extern "C" {
     fn sysctlbyname(

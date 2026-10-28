@@ -3,6 +3,64 @@
 
 //! What macOS and Linux do alike.
 
+pub mod clock {
+    use std::ffi::{c_char, c_int, c_long};
+
+    /// `struct tm` of `<time.h>`, as macOS and glibc lay it out.
+    #[repr(C)]
+    struct Tm {
+        second: c_int,
+        minute: c_int,
+        hour: c_int,
+        day: c_int,
+        month: c_int,
+        year: c_int,
+        weekday: c_int,
+        year_day: c_int,
+        daylight_saving: c_int,
+        offset: c_long,
+        zone: *const c_char,
+    }
+
+    unsafe extern "C" {
+        fn time(out: *mut i64) -> i64;
+        fn localtime_r(time: *const i64, out: *mut Tm) -> *mut Tm;
+    }
+
+    /// The local date and time as `YYYYMMDD-hhmmss`.
+    pub fn local_stamp() -> Option<String> {
+        // SAFETY: all-zero is a valid `tm`, and both pointers are to live
+        // values for the calls.
+        let mut now = unsafe { std::mem::zeroed::<Tm>() };
+        if unsafe { localtime_r(&time(std::ptr::null_mut()), &mut now) }.is_null() {
+            return None;
+        }
+        Some(format!(
+            "{:04}{:02}{:02}-{:02}{:02}{:02}",
+            now.year + 1900,
+            now.month + 1,
+            now.day,
+            now.hour,
+            now.minute,
+            now.second
+        ))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn the_stamp_is_a_date_and_a_time() {
+            let stamp = super::local_stamp().unwrap();
+            let (date, time) = stamp.split_once('-').unwrap();
+            assert!(date.len() == 8 && date.starts_with("20"), "{stamp}");
+            assert!(
+                time.len() == 6 && time.bytes().all(|b| b.is_ascii_digit()),
+                "{stamp}"
+            );
+        }
+    }
+}
+
 pub mod file {
     //! Putting a finished file in place of another.
 
