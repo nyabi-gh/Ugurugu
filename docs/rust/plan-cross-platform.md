@@ -165,6 +165,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - winit 이벤트를 `PointerEvent`로(4절). 트랙패드 두 손가락 팬·핀치·회전.
 - `file`·잠금·`folder`·`dialog`·`clipboard`·`locale`·`memory`·`placement`·`crash`·`clock`(3.3절). 단일 실행은 우선 잠금만(두 번째 실행은 끝냄).
 - Cmd 단축키와 표시.
+- 배포 대상 macOS 14(`MACOSX_DEPLOYMENT_TARGET=14.0`, decisions.md 10절).
 - 측정: fixture ①~⑤ `ugu-doc render <file> 8`, 6절의 digest 비교(NEON·스칼라·C), 창 호출의 메인 스레드 왕복 시간(3.4절), 2.2.13 macOS 판과 같은 방식의 획 지연(macOS용 측정 도구가 필요하다, `CGEventPost`로 입력, 표시 시각은 3.2절).
 - 개발용 실행: `.app` 번들 없이 `cargo run`으로도 창·입력이 동작하는지 확인한다(번들이 아니면 메뉴·Dock 아이콘이 다르게 보일 수 있다, **가설**).
 
@@ -186,8 +187,8 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 ### 4단계: 패키지·업데이트·릴리스
 
 - Velopack 1.2.161(지금 판)은 macOS `.app`·`.pkg`·`.zip`과 Linux `.AppImage`를 만든다. 채널은 `osx-arm64`·`linux-x64`처럼 나누고, 패키지 ID는 `Ugurugu3` 그대로(**확인 필요**: 한 피드에 여러 채널을 두는 방식).
-- macOS 서명: 9절 결정 3에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
-- Linux: AppImage 하나. glibc 하한을 정한다(빌드 이미지로).
+- macOS 서명: 9절 결정 2에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
+- Linux: AppImage 하나. Ubuntu 22.04에서 빌드해 glibc 2.35를 하한으로 둔다(decisions.md 10절).
 - 제3자 고지(`tools/third_party_notices.py`)를 OS마다 링크되는 crate로.
 - `release-3.yml`에 macOS·Linux job, 다운로드 배지·릴리스 노트의 파일 이름.
 - 사용자 안내: README(ko·en·ja)의 요구 사항, `BUILDING.md`의 macOS·Linux 빌드 절, 릴리스 노트.
@@ -207,7 +208,5 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 ## 9. 남은 사용자 결정
 
 1. **ARM의 SIMD**(6절): A(NEON, 추천), B(스칼라), C(FMA를 뺀 NEON, 실험이 맞을 때). 1단계의 앱 측정 뒤 정한다.
-2. **Mac 하드웨어**: Apple Silicon만(추천). Apple은 macOS 26을 Intel Mac의 마지막 판으로 밝혔고, Intel까지 하면 SIMD·digest 조합이 하나 더 는다.
-3. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
-4. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
-5. **지원 OS 하한**: macOS 몇 판부터, Linux glibc 몇부터. 1단계 전에 정한다.
+2. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
+3. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
