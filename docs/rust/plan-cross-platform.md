@@ -181,11 +181,11 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 확인: macOS clippy·시험(`UGU_REQUIRE_ADAPTER=1`, 앱 300개 통과), `x86_64-pc-windows-gnu` 교차 clippy, fmt.
 
-그 뒤 `platform/mac-services` 브랜치에서 3.3절의 OS 함수를 macOS 구현으로 바꿨다(`crates/ugu-platform/src/macos/`, decisions.md 2·6·7·9·10·11절의 2026-10-28 macOS 1단계 행): `folder`(Application Support·Documents), `dialog`(sheet로 여는 NSOpenPanel·NSSavePanel, 형식 팝업), `clipboard`(NSPasteboard의 PNG·TIFF), `locale`(선호 언어, `windows_version`은 OS 이름을 붙인 `os_version`으로), `memory`, `clock`의 지역 시각, `crash`(신호 처리기). 지역 시각 문자열(`local_stamp`)과 `crash`는 Linux에서도 쓴다. `placement`는 OS 함수 대신 앱이 winit으로 읽고 놓는다. 시험으로 확인한 것은 폴더·언어·OS 판·메모리·시각과 신호 노트(자식 프로세스를 실제로 죽여 본다)다. 대화상자·형식 팝업·붙여넣기·창 위치는 사용자가 화면에서 확인했다. 남은 것:
+그 뒤 `platform/mac-services` 브랜치에서 3.3절의 OS 함수를 macOS 구현으로 바꿨다(`crates/ugu-platform/src/macos/`, decisions.md 2·6·7·9·10·11절의 2026-10-28 macOS 1단계 행): `folder`(Application Support·Documents), `dialog`(sheet로 여는 NSOpenPanel·NSSavePanel, 형식 팝업), `clipboard`(NSPasteboard의 PNG·TIFF), `locale`(선호 언어, `windows_version`은 OS 이름을 붙인 `os_version`으로), `memory`, `clock`의 지역 시각, `crash`(신호 처리기). 지역 시각 문자열(`local_stamp`)과 `crash`는 Linux에서도 쓴다. `placement`는 OS 함수 대신 앱이 winit으로 읽고 놓는다. 단일 실행은 복구 루트의 잠금으로, 잡혀 있으면 나중 실행이 끝난다(decisions.md 7절). 시험으로 확인한 것은 폴더·언어·OS 판·메모리·시각과 신호 노트(자식 프로세스를 실제로 죽여 본다)다. 대화상자·형식 팝업·붙여넣기·창 위치는 사용자가 화면에서 확인했다. 남은 것:
 
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 장치 손실 복구, 표시 시각(`presentedTime`), 막힌 프레임 대기(3.2절). 메인 스레드 왕복 측정과 render 스레드를 기다리는 곳(3.4절).
-- 단일 실행 잠금(`instance`, 1단계 목록). `association`·`recent`·`session`은 2단계.
+- `association`·`recent`·`session`은 2단계.
 - Cmd 단축키 표시(⌘), 배포 대상 macOS 14, 측정(1단계 목록).
 
 ### 2단계: macOS 펜과 OS 연동

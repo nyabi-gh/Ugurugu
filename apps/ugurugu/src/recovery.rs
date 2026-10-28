@@ -26,6 +26,9 @@ pub const QUIET: Duration = Duration::from_secs(3);
 pub const LONGEST: Duration = Duration::from_secs(30);
 
 const LOCK: &str = "lock";
+/// In the root, beside the window folders; see [`take_running`].
+#[cfg(not(windows))]
+const RUNNING: &str = "running.lock";
 /// Written as a window closes normally, whose work was saved or dropped.
 const ENDED: &str = "ended";
 /// Folders whose work could not be read; kept for the user, never offered.
@@ -211,6 +214,26 @@ fn is_held(error: &io::Error) -> bool {
 #[cfg(not(windows))]
 fn is_held(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::WouldBlock
+}
+
+/// Held by a window for as long as it runs with the recovery root `root`;
+/// `None` while another window holds it. Outside Windows no start hands its
+/// document to a running window yet, so a second start ends instead.
+#[cfg(not(windows))]
+pub fn take_running(root: &Path) -> io::Result<Option<File>> {
+    std::fs::create_dir_all(root)?;
+    match open_lock(
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false),
+        &root.join(RUNNING),
+    ) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if is_held(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// As `lock`, for another window's folder. One without a lock made less
@@ -702,6 +725,21 @@ pub(crate) mod tests {
         end(&root.0.join("new"), own).unwrap();
         drop(running_lock);
         assert_eq!(root.names(), ["running"]);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn one_window_runs_with_a_recovery_root() {
+        let root = Root::new("one-window");
+        let first = take_running(&root.0)
+            .unwrap()
+            .expect("the first start runs");
+        assert!(take_running(&root.0).unwrap().is_none());
+        // The lock is no window's work left for the window to find.
+        let (window, found) = begin(&root.0, &root.0.join("window")).unwrap();
+        assert!(found.is_empty(), "{found:?}");
+        drop((window, first));
+        assert!(take_running(&root.0).unwrap().is_some());
     }
 
     #[test]

@@ -49,8 +49,19 @@ fn main() -> ExitCode {
     ) {
         return ExitCode::SUCCESS;
     }
+    #[cfg(not(windows))]
+    let running = recovery::default_root().map(|root| recovery::take_running(&root));
+    #[cfg(not(windows))]
+    if matches!(running, Some(Ok(None))) {
+        eprintln!("Ugurugu is already running with this recovery folder");
+        return ExitCode::SUCCESS;
+    }
     let _logging = logs::start();
     tracing::debug!("starting");
+    #[cfg(not(windows))]
+    if let Some(Err(error)) = &running {
+        tracing::warn!(%error, "cannot take the running lock; a second window may start");
+    }
 
     match run(document, start_lock) {
         Ok(()) => ExitCode::SUCCESS,
