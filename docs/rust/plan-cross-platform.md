@@ -43,7 +43,7 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
   - 장치 손실: `set_device_lost_callback`만 쓴다. 손실을 일부러 일으키는 시험은 Windows에만 둔다.
   - 프레임 지연: `desired_maximum_frame_latency = 1`과 `get_current_texture`의 대기. 입력→표시 지연을 같은 방식으로 재 Windows와 비교한다.
   - 프레임 대기의 상한: wgpu-hal 30.0.1의 Metal은 `allowsNextDrawableTimeout(false)`라 `get_current_texture`가 시간 제한 없이 기다린다. `Presenter::wait_for_frame`은 waitable이 없으면 곧바로 `true`를 돌려주므로, 장치 손실 뒤 프레임이 1초 넘게 막히면 표시를 다시 만드는 장치(`render.rs` `STALL_LIMIT`, decisions.md 2절)가 macOS에서는 걸리지 않는다. 대기를 render 스레드 밖에서 지켜보거나, 가려진 창(`WindowEvent::Occluded`)은 그리지 않게 한다(실제로 오래 막히는 경우가 있는지는 **가설**).
-  - 표시 시각: macOS는 `CAMetalDrawable`의 `presentedTime`(wgpu hal로 닿는지 확인 필요), Linux는 없음(`Displayed`를 내지 않고 지연 기록에서 뺀다).
+  - 표시 시각: macOS는 `CAMetalDrawable`의 `presentedTime`(wgpu-hal 30.0.1에서는 drawable이 비공개라 닿지 않는다, decisions.md 2절), Linux는 없음(`Displayed`를 내지 않고 지연 기록에서 뺀다).
 - 소프트웨어 대체(WARP 자리): Linux는 Mesa lavapipe(Vulkan, `DeviceType::Cpu`)를 `force_fallback_adapter`로. macOS는 소프트웨어 Metal이 없지만 지원할 macOS는 모두 Metal이 있어, 대체 없이 실패를 안내한다. `UGURUGU_ADAPTER=warp`는 `fallback`으로 이름을 넓히고 `warp`도 받는다.
 
 ### 3.3 모듈별 대응
@@ -181,10 +181,11 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 확인: macOS clippy·시험(`UGU_REQUIRE_ADAPTER=1`, 앱 300개 통과), `x86_64-pc-windows-gnu` 교차 clippy, fmt.
 
-그 뒤 `platform/mac-services` 브랜치에서 3.3절의 OS 함수를 macOS 구현으로 바꿨다(`crates/ugu-platform/src/macos/`, decisions.md 2·6·7·9·10·11절의 2026-10-28 macOS 1단계 행): `folder`(Application Support·Documents), `dialog`(sheet로 여는 NSOpenPanel·NSSavePanel, 형식 팝업), `clipboard`(NSPasteboard의 PNG·TIFF), `locale`(선호 언어, `windows_version`은 OS 이름을 붙인 `os_version`으로), `memory`, `clock`의 지역 시각, `crash`(신호 처리기). 지역 시각 문자열(`local_stamp`)과 `crash`는 Linux에서도 쓴다. `placement`는 OS 함수 대신 앱이 winit으로 읽고 놓는다. 단일 실행은 복구 루트의 잠금으로, 잡혀 있으면 나중 실행이 끝난다(decisions.md 7절). 시험으로 확인한 것은 폴더·언어·OS 판·메모리·시각과 신호 노트(자식 프로세스를 실제로 죽여 본다)다. 대화상자·형식 팝업·붙여넣기·창 위치는 사용자가 화면에서 확인했다. 남은 것:
+그 뒤 `platform/mac-services` 브랜치에서 3.3절의 OS 함수를 macOS 구현으로 바꿨다(`crates/ugu-platform/src/macos/`, decisions.md 2·6·7·9·10·11절의 2026-10-28 macOS 1단계 행): `folder`(Application Support·Documents), `dialog`(sheet로 여는 NSOpenPanel·NSSavePanel, 형식 팝업), `clipboard`(NSPasteboard의 PNG·TIFF), `locale`(선호 언어, `windows_version`은 OS 이름을 붙인 `os_version`으로), `memory`, `clock`의 지역 시각, `crash`(신호 처리기). 지역 시각 문자열(`local_stamp`)과 `crash`는 Linux에서도 쓴다. `placement`는 OS 함수 대신 앱이 winit으로 읽고 놓는다. 장치 손실 복구는 F9(wgpu `destroy`)로 macOS에서 확인했다(evidence.md 99절). 단일 실행은 복구 루트의 잠금으로, 잡혀 있으면 나중 실행이 끝난다(decisions.md 7절). 시험으로 확인한 것은 폴더·언어·OS 판·메모리·시각과 신호 노트(자식 프로세스를 실제로 죽여 본다)다. 대화상자·형식 팝업·붙여넣기·창 위치는 사용자가 화면에서 확인했다. 남은 것:
 
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
-- 장치 손실 복구, 표시 시각(`presentedTime`), 막힌 프레임 대기(3.2절). 메인 스레드 왕복 측정과 render 스레드를 기다리는 곳(3.4절).
+- 메인 스레드 왕복 측정과 render 스레드를 기다리는 곳(3.4절).
+- 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
 - Cmd 단축키 표시(⌘), 배포 대상 macOS 14, 측정(1단계 목록).
 

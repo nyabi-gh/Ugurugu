@@ -167,9 +167,15 @@ impl Gpu {
         Ok(())
     }
 
+    /// Destroys the device instead, which loses it the same way to wgpu.
     #[cfg(not(windows))]
     pub fn remove_for_test(&self) -> Result<(), String> {
-        Err(format!("removing a {} device is not supported", BACKEND.1))
+        self.device.destroy();
+        // wgpu calls the device-lost callback from the next poll.
+        self.device
+            .poll(wgpu::PollType::Poll)
+            .map(drop)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -254,6 +260,21 @@ mod tests {
         let both: Result<(), String> =
             with_warp_fallback(AdapterChoice::Hardware, |_| Err("broken".to_owned()));
         assert_eq!(both, Err("broken; with WARP: broken".to_owned()));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_device_removed_for_a_test_is_lost() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: BACKEND.0,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let Ok(gpu) = Gpu::open_without_surface(&instance, AdapterChoice::Hardware) else {
+            return crate::view::tests::no_adapter();
+        };
+        assert!(!gpu.check_removed());
+        gpu.remove_for_test().unwrap();
+        assert!(gpu.check_removed());
     }
 
     #[test]

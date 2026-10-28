@@ -1875,3 +1875,20 @@ ARM 1스레드 시간: 스칼라 441.6·442.9·466.5ms, NEON 370.0·371.0·373.3
 release 첫 실행에서 재생 프레임이 보인 간격은 중앙값 40ms(25fps)였다. 270~950ms 간격 9번은 모두 재생 중에 획을 그은 동안이다(획이 끝나면 `pen-up shown` 뒤 `playback started`). 저장 확인 창이 떠 있는 동안 rest가 약 16ms인 것은 60Hz 화면의 vsync 대기다.
 
 **결론:** release에서는 프레임과 재생이 제때 나온다. 사용자가 느낀 렉은 최적화하지 않은 debug 빌드 탓으로 본다(**가설**: debug 실행의 프레임 시간을 기록하지 않아 같은 방법으로 비교하지 못했다). 속도는 release로 본다. release 첫 실행의 최대 293.61ms가 어디서 났는지는 모른다. 최소화(`Occluded`) 동안 그리지 않게 한 변경 전후의 CPU는 아직 재지 않았다.
+
+## 99. macOS에서의 장치 손실 복구 (2026-10-28)
+
+**질문:** Windows의 장치 손실 복구(decisions.md 2절)가 macOS Metal에서도 화면을 되살리나. 복구 뒤 프레임 대기가 막히나(plan-cross-platform 3.2절의 **가설**).
+
+**방법:** Apple M4 Mac, release 빌드, swap chain 3420×1902, `UGURUGU_DIAGNOSTICS=1 UGURUGU_LOG=debug UGU_WORKER_THREADS=8`. 사용자가 F9를 누르고 그렸다. Windows 밖의 F9는 wgpu `Device::destroy()` 뒤 한 번 poll해 장치 손실 콜백(`reason=Destroyed`)을 부른다. 드라이버가 일으킨 손실이 아니라 앱이 버린 장치다. 수치는 앱 로그의 `GPU device replaced`·`Missing texture`·`no swap chain buffer`·`frame abandoned`에서 셌다.
+
+**결과:**
+
+| 빌드 | 복구 | 복구 시간(`total_ms`) | 복구 뒤 건너뛴·버린 프레임 | egui `Missing texture` |
+|---|---|---|---|---|
+| 고치기 전 | 8번 | 16.5~25.1ms | 0 | 177번씩 5개(`Managed(1..5)`), 다음 시작까지 |
+| 고친 뒤 | 2번 | 18.4~20.0ms | 0 | 0 |
+
+고치기 전 마지막 복구 뒤에도 프레임 133개가 이어졌다. 사라진 텍스처는 브러시 미리보기였다: 복구가 레이어 썸네일만 비우고 브러시 미리보기와 정보 탭 아이콘의 캐시는 옛 장치의 텍스처를 가리킨 채 두었다. 이제 패널의 텍스처 캐시를 모두 비운다(`Panels::forget_textures`). 같은 코드라 Windows에서도 일어났을 것으로 본다(**가설**: Windows에서 확인하지 않았다).
+
+**결론:** 앱이 버린 장치에서는 macOS 복구가 20ms 남짓에 끝나고 프레임 대기가 막히지 않는다. 드라이버가 일으킨 손실 뒤에 `nextDrawable`이 막히는지는 일으킬 방법이 없어 확인하지 못했다(Apple Silicon의 GPU는 떼어 낼 수 없다).

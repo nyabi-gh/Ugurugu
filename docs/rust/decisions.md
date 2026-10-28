@@ -34,6 +34,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 | 렌더 가속에 GPU를 쓰지 않고, 내보내기는 언제나 CPU 결과다 | — | ②p cold 8스레드의 단계 스레드 시간 합 467ms 중 CPU 윤곽 75 + 인코딩 293 = 368ms, 약 79%다(evidence.md 10절) | M3-13 |
 | 어댑터·장치·swapchain 중 하나라도 실패하면 WARP로 다시 열고(시작·복구 모두) 상태 표시줄에 늘 안내한다. `UGURUGU_ADAPTER=warp`로 강제 | D3D11 | 문서 쪽은 CPU라 그대로 동작. WARP 지연 60~75ms는 받아들인다 | scope 3.2, A-03 |
 | 장치 손실·TDR: 모든 GPU 자원을 버리고 새 `Instance`·surface로 연다. 복구 뒤 프레임 대기가 1초 넘게 안 풀리면 표시를 다시 만든다(최대 3번). egui-wgpu의 장치 손실 panic은 그때만 `catch_unwind`로 흡수한다(`render.rs`) | — | 문서·래스터는 CPU에 있다. 상류가 고쳐지면 흡수를 뺀다 | M3-12, m0-close 4절 |
+| macOS·Linux의 장치 손실 시험(F9)은 wgpu `Device::destroy()` 뒤 poll로 손실 콜백을 부른다. macOS는 `nextDrawable`의 시간 제한을 끈 wgpu 설정 그대로 두고, 프레임 대기·표시 시각(`Displayed`)이 없다: 복구 뒤 막힌 표시를 다시 만드는 장치는 걸리지 않고, 지연은 present 반환까지만 잰다 | — | wgpu-hal 30.0.1의 Metal은 command buffer를 만들지 못할 때만 장치 손실을 알린다. 버린 장치의 복구는 막히지 않았다(evidence.md 99절). drawable은 hal `SurfaceTexture`의 비공개 필드라 `presentedTime`·`addPresentedHandler`에 닿지 않는다 | 2026-10-28 macOS 1단계 |
 | 시작하자마자 "gpu" 스레드가 어댑터·장치를 연다. 어댑터 4개를 모두 여는 비용(약 0.3초)은 wgpu를 고치지 않고 둔다 | D3D11 장치 하나 | fork 유지 비용이 더 크다. 출시 뒤 다시 본다 | M5-2, m6 2절 3 |
 | 색: SDR sRGB, RGBA8 premultiplied, 합성은 sRGB 인코딩 값. ICC·HDR 없음 | 같음 | linear로 바꾸려면 모든 경로를 함께 바꾼다 | port 7.1 |
 | 합성 모드 4종은 W3C 분리형 공식(Qt 정의와 같음), 반올림은 3.0 규칙. 그룹은 늘 격리, 클리핑 규칙은 2.2.13과 같다 | 같음 | 픽셀 호환은 약속하지 않는다 | M3 2절 |
