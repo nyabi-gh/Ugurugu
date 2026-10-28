@@ -171,6 +171,7 @@ pub mod locale {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod memory {
     use ugu_platform_types::memory::Memory;
 

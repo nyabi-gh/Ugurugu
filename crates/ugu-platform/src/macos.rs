@@ -10,9 +10,10 @@ pub mod clipboard;
 pub mod dialog;
 pub mod folder;
 pub mod locale;
+pub mod memory;
 
 pub use crate::unsupported::{
-    association, clock, crash, file, instance, memory, placement, recent, session,
+    association, clock, crash, file, instance, placement, recent, session,
 };
 
 unsafe extern "C" {
@@ -64,4 +65,8 @@ fn sysctl_text(name: &CStr) -> Option<String> {
     let value = sysctl(name)?;
     let text = CStr::from_bytes_until_nul(&value).ok()?;
     Some(text.to_string_lossy().into_owned())
+}
+
+fn sysctl_u64(name: &CStr) -> Option<u64> {
+    Some(u64::from_ne_bytes(sysctl(name)?.try_into().ok()?))
 }
