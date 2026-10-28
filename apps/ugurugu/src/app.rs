@@ -13,6 +13,7 @@ use std::thread::JoinHandle;
 
 use egui_winit::accesskit_winit;
 use ugu_platform::instance::{DocumentReceiver, StartLock};
+#[cfg(windows)]
 use ugu_platform::pointer::PointerInput;
 use ugu_platform::session::SessionEnd;
 use winit::application::ApplicationHandler;
@@ -92,7 +93,10 @@ struct Session {
     _documents: DocumentReceiver,
     /// Keeps unsaved work for recovery when Windows ends the session.
     _session_end: Option<SessionEnd>,
+    #[cfg(windows)]
     pointer: PointerInput,
+    #[cfg(not(windows))]
+    pointer: crate::winit_pointer::WinitPointer,
     /// UI Automation provider; it must live on the thread that owns the
     /// window, so egui's tree updates are sent here from the render thread.
     accessibility: accesskit_winit::Adapter,
@@ -142,13 +146,20 @@ fn first_place(monitor: Option<[f64; 2]>) -> (winit::dpi::LogicalSize<f64>, bool
     (winit::dpi::LogicalSize::new(width, height), smaller)
 }
 
+/// The OS's own handle of `window`: the `HWND` on Windows, the `NSView` on
+/// macOS, the X11 window or the Wayland surface.
 fn hwnd_of(window: &Window) -> Result<isize, String> {
     let handle = window
         .window_handle()
         .map_err(|error| format!("the window has no handle: {error}"))?;
     match handle.as_raw() {
         RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get()),
-        _ => Err("the window is not a Win32 window".to_owned()),
+        RawWindowHandle::AppKit(handle) => Ok(handle.ns_view.as_ptr() as isize),
+        RawWindowHandle::Xlib(handle) => Ok(handle.window as isize),
+        RawWindowHandle::Wayland(handle) => Ok(handle.surface.as_ptr() as isize),
+        other => Err(format!(
+            "the window has a handle of no known kind: {other:?}"
+        )),
     }
 }
 
@@ -189,8 +200,11 @@ impl Session {
             accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy.clone());
         // SAFETY: the window is alive and owned by this thread, and `Session`
         // drops the subclass before the window.
+        #[cfg(windows)]
         let pointer = unsafe { PointerInput::install(hwnd_of(&window)?) }
             .map_err(|error| format!("cannot receive pointer input: {error}"))?;
+        #[cfg(not(windows))]
+        let pointer = crate::winit_pointer::WinitPointer::default();
         // Where it last closed: placed while hidden, then maximized and shown
         // through winit, which keeps track of both.
         if let Some(placement) = settings.get().window {
@@ -326,12 +340,17 @@ impl Session {
         })
     }
 
+    #[cfg(windows)]
     fn forward_pointer_input(&self) {
         let events = self.pointer.drain();
         if !events.is_empty() {
             let _ = self.to_render.send(ToRender::Pointer(events));
         }
     }
+
+    /// Elsewhere pointer input comes with each window event instead.
+    #[cfg(not(windows))]
+    fn forward_pointer_input(&self) {}
 }
 
 impl ApplicationHandler<UiEvent> for App {
@@ -361,13 +380,20 @@ impl ApplicationHandler<UiEvent> for App {
     }
 
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.as_mut() else {
             if matches!(event, WindowEvent::CloseRequested) {
                 tracing::warn!("close requested before the window was ready; not taken");
             }
             return;
         };
         session.forward_pointer_input();
+        #[cfg(not(windows))]
+        if let Some(events) = session.pointer.translate(&event) {
+            if !events.is_empty() {
+                let _ = session.to_render.send(ToRender::Pointer(events));
+            }
+            return;
+        }
         let message = match event {
             // Closing waits for the render thread to report back.
             WindowEvent::CloseRequested => {

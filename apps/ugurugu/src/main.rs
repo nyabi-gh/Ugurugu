@@ -25,6 +25,8 @@ mod theme;
 mod ui;
 mod update;
 mod widgets;
+#[cfg(not(windows))]
+mod winit_pointer;
 
 use std::process::ExitCode;
 
@@ -94,6 +96,7 @@ fn run(
     let settings = settings::Store::load();
     i18n::choose(settings.get().language);
     theme::read_fonts_early();
+    #[cfg(windows)]
     ugu_platform::pointer::enable_mouse_in_pointer()
         .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
     let event_loop = EventLoop::<app::UiEvent>::with_user_event()

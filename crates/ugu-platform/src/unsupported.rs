@@ -140,7 +140,8 @@ pub mod instance {
     /// None; unsafe to match the OSes that have it.
     pub unsafe fn bring_to_front(_hwnd: isize) {}
 
-    pub enum DocumentReceiver {}
+    /// Receives nothing: no start hands a document over here.
+    pub struct DocumentReceiver;
 
     impl DocumentReceiver {
         /// # Safety
@@ -150,7 +151,7 @@ pub mod instance {
             _key: &str,
             _receive: impl FnMut(Option<PathBuf>) -> bool + 'static,
         ) -> Result<Self, &'static str> {
-            Err("not supported on this OS")
+            Ok(Self)
         }
     }
 }
@@ -185,28 +186,6 @@ pub mod placement {
     /// None; unsafe to match the OSes that have it.
     pub unsafe fn restore_to(_hwnd: isize, _placement: &Placement) -> bool {
         false
-    }
-}
-
-pub mod pointer {
-    use ugu_platform_types::pointer::{PointerError, PointerEvent};
-
-    pub fn enable_mouse_in_pointer() -> Result<(), PointerError> {
-        Err(PointerError("pointer input is not supported on this OS"))
-    }
-
-    pub enum PointerInput {}
-
-    impl PointerInput {
-        /// # Safety
-        /// None; unsafe to match the OSes that have it.
-        pub unsafe fn install(_hwnd: isize) -> Result<Self, PointerError> {
-            Err(PointerError("pointer input is not supported on this OS"))
-        }
-
-        pub fn drain(&self) -> Vec<PointerEvent> {
-            match *self {}
-        }
     }
 }
 

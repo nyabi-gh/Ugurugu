@@ -65,6 +65,7 @@ pub mod placement {
 }
 
 pub mod pointer {
+    #[cfg(windows)]
     pub use crate::os::pointer::{PointerInput, enable_mouse_in_pointer};
     pub use ugu_platform_types::pointer::{
         Buttons, PointerError, PointerEvent, PointerId, PointerKind, PointerSample,
