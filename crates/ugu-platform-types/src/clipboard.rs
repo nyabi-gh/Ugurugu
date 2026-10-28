@@ -15,6 +15,8 @@ pub enum Encoded {
     Png(Vec<u8>),
     /// `CF_DIBV5`: a `BITMAPV5HEADER` and the pixels, without a file header.
     Dib(Vec<u8>),
+    /// What macOS apps that put no PNG there put.
+    Tiff(Vec<u8>),
 }
 
 #[derive(Debug, PartialEq)]

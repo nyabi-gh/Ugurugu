@@ -165,8 +165,8 @@ fn run(job: Job) -> ClipboardEvent {
                     image
                         .map(|image| {
                             match image {
-                                Encoded::Png(png) => {
-                                    ugu_io::import::decode(std::io::Cursor::new(png), fit)
+                                Encoded::Png(file) | Encoded::Tiff(file) => {
+                                    ugu_io::import::decode(std::io::Cursor::new(file), fit)
                                 }
                                 Encoded::Dib(dib) => ugu_io::import::decode_dib(dib, fit),
                             }

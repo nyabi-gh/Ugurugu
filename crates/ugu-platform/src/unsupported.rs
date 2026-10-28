@@ -32,6 +32,7 @@ pub mod association {
     pub fn unregister(_classes: &str) {}
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod clipboard {
     use ugu_platform_types::clipboard::{Encoded, Image, ReadError};
 
