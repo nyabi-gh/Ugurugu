@@ -1835,3 +1835,25 @@ pen-up은 레이어마다 획 하나를 찍고 바뀐 곳을 합성한 시간이
 **확인:** `overview::tests`가 평균·체커보드·바뀐 곳만 다시 그림·줄인 일부·크기 바꿈을 GPU로 본다. Windows Sandbox에서 `gui.ps1` "Navigator" 단계(1600×1000 창, 영어): 우글거림 뒤의 탭을 열고 획을 그으면 그림의 픽셀 262~267개가 바뀌고, 400%로 확대한 뒤 그림 가운데 60px 왼쪽을 누르면 테두리 가운데가 -60.3~-60.4, 40px 오른쪽은 39.3~39.4, 테두리 안 50px 오른쪽을 눌러 20px까지 끌면 9.3이다(누른 자리로 뛰었다면 20). 첫 두 실행은 끌기 끝이 14.4로 5px 모자랐다: 누른 프레임에 포인터가 이미 움직였으면 egui가 누른 자리 대신 움직인 자리를 줘서 테두리 안에서 잡은 거리가 틀렸다. 누른 자리(`press_origin`)로 재게 고쳤고, 놓는 프레임에 함께 온 마지막 움직임도 반영하게 했다. 시험 `navigator::tests`의 두 끌기 시험은 고치기 전에 실패한다. 고친 뒤 두 번 연속 통과했고, 같은 빌드로 "Turn and flip the view", "Docks of a short window", "Splits and the menu bar of a small window", "Tab moves the keyboard focus through the controls"도 통과했다.
 
 상태 표시줄의 포인터 위치(`x … y …`)는 UI Automation 트리에 없어 시험이 읽지 못했다(backlog B3-168). 그래서 단계는 그림 안 강조색 테두리의 가운데를 화면에서 잰다.
+
+## 97. macOS에서의 빌드 상태와 ARM의 SIMD 수준 (2026-10-28)
+
+**질문:** 지금 트리 중 무엇이 macOS(Apple Silicon)에서 빌드·시험되나. Vello CPU를 ARM에서 NEON으로 그리면 x86 SSE4.2와 바이트가 같나.
+
+**방법:** Apple Silicon Mac(macOS, arm64). 환경 절의 Windows PC가 아니다, main `843b5a4`, 툴체인 1.99.0 `aarch64-apple-darwin`. 빌드는 패키지마다 `cargo check --locked -p <패키지> --all-targets`, 시험은 `cargo test --locked -p ugu-core -p ugu-io -p ugu-session -p ugu-text`(debug). SIMD는 저장소 밖 시험 프로그램(`vello_cpu` =0.3.0 `u8_pipeline`·`multithreading`, `fearless_simd` =0.7.0에 `force_support_fallback`)이 같은 장면을 수준마다 그려 RGBA8 결과를 바이트로 비교했다. 장면: 1024², Normal·Multiply·Screen·Overlay 레이어 4개(불투명도 0.8), 레이어마다 xorshift로 만든 2차 곡선 40조각 경로 1,500개(⅓ 채우기, ⅔ 굵기 1~13 선), 반투명 색(alpha 0.2~0.8), 7번째마다 두 점 방사형, 11번째마다 선형 그라디언트, 작은 회전 변환, 레이어마다 사각형 하나. x86은 같은 프로그램을 `x86_64-apple-darwin`으로 빌드해 Rosetta 2로 돌렸다. 시간은 그리기 호출부터 `render`까지 벽시계(인코드·래스터·합성), 3 round.
+
+**결과(빌드):** `ugu-core`·`ugu-io`·`ugu-session`·`ugu-text`는 빌드된다. `ugu-render`·`ugu-win`·`ugurugu`·`ugu-doc`·`render-bench`는 `windows` crate(`windows-future`)가 컴파일되지 않아 실패한다. 시험은 core 123·io 68·session 102개 통과, `ugu-text` 4개 중 2개 실패(`letters_become_closed_contours_below_and_right_of_the_origin`의 크기, `each_line_starts_lower_and_empty_lines_count`의 줄 높이). `Fonts::new`의 대체 글꼴이 Windows 글꼴 이름(Malgun Gothic, Segoe UI, Yu Gothic UI, Microsoft YaHei)뿐이라 macOS에서는 `sans-serif`가 다른 글꼴로 풀린 것이 원인이다(**가설**: 풀린 글꼴을 확인하지 않았다).
+
+**결과(SIMD):** aarch64에서 `Level::baseline()`은 `Neon`이다(NEON이 대상 기본 기능이라). 그래서 `raster::document_level`은 ARM에서 이미 NEON이다. 스칼라는 `force_support_fallback`의 `Level::fallback()`으로만 고를 수 있다.
+
+| 비교 (4,194,304바이트) | 다른 바이트 |
+|---|---|
+| ARM 스칼라 대 x86 SSE4.2(Rosetta) | 0 |
+| ARM 스칼라 대 x86 스칼라(Rosetta) | 0 |
+| ARM NEON 대 ARM 스칼라 | 34,901(0.83%, 최대 차 5) |
+| ARM NEON 대 x86 SSE4.2 | 34,901 |
+| ARM NEON 1스레드 대 8스레드 | 0 |
+
+ARM 1스레드 시간: 스칼라 441.6·442.9·466.5ms, NEON 370.0·371.0·373.3ms(약 16% 짧다). NEON 8스레드 70.6~72.3ms. Rosetta의 x86 시간은 번역 비용이 섞여 비교하지 않는다.
+
+**결론:** ARM에서 NEON은 x86과 바이트가 다르고 스칼라는 같다. 차이는 NEON의 `mul_add`가 FMA(`vfmaq_f32`, 반올림 1회)이고 SSE4.2·스칼라는 곱한 뒤 더하는 것(반올림 2회) 때문이라고 본다(**가설**: `fearless_simd` 0.7.0 `generated/neon.rs`·`sse4_2.rs`·`fallback.rs`를 읽은 것, 연산마다 나눠 재지 않았다). 같은 PC 안에서 캔버스와 내보내기가 같다는 약속은 어느 수준이든 지켜진다(1·8스레드 같음). 이 장면은 앱의 fixture가 아니므로, 앱 렌더러로 같은 비교(`ugu-doc digest`)를 다시 해야 한다. 고르는 일은 [plan-cross-platform.md](plan-cross-platform.md) 6절이다.

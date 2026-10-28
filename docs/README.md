@@ -3,7 +3,7 @@
 ## 지금 상태
 
 - Ugurugu 3(Rust, `apps/`, `crates/`)은 Windows판으로 3.0.0, 3.0.1, 3.0.2(2026-10-13), 3.1.0과 3.2.0(2026-10-14), 3.2.1과 3.3.0(2026-10-15), 3.3.1과 3.3.2(2026-10-16), 3.4.0과 3.4.1(2026-10-17), 3.4.2(2026-10-21), 3.4.3(2026-10-22)을 냈다. 열린 일은 [backlog.md](rust/backlog.md)에 있고, 2026-10-21 UI/UX 검토의 남은 일은 그 15절에 있다.
-- 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이고, macOS 3.x는 나중에 따로 한다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
+- 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. macOS는 2.2.13이 마지막이다. macOS·Linux 3.x는 [plan-cross-platform.md](rust/plan-cross-platform.md)로 준비한다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
 
 ## 3.0 문서 (`rust/`)
 
@@ -15,6 +15,7 @@
 | [backlog.md](rust/backlog.md) | 열린 일: 출시 전 할 일, 열린 gate, 미룬 결정, 알려진 한계, 개선 후보 |
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
+| [plan-cross-platform.md](rust/plan-cross-platform.md) | macOS·Linux 지원 계획(진행 중, 끝나면 지운다) |
 
 새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다. 일을 닫으면 backlog.md의 행과 다른 문서의 그 ID도 함께 지운다. CI의 `tools/check_docs.py`가 문서 링크와 backlog ID를 검사한다.
 
