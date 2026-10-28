@@ -9,6 +9,9 @@ publish.workspace = true
 [dependencies]
 ugu-platform-types.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard.workspace = true
 block2.workspace = true

@@ -82,9 +82,7 @@ pub mod clock {
 }
 
 pub mod crash {
-    use std::path::Path;
-
-    pub fn note_crashes(_path: &Path, _heading: &str) {}
+    pub use crate::unix::crash::note_crashes;
 }
 
 #[cfg(not(target_os = "macos"))]

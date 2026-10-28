@@ -27,6 +27,8 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 kurbo = "=0.13.1"
 # Animated WebP export: libwebp 1.6.0's own sources, built with `cc`.
 libwebp-sys = "=0.14.4"
+# The signal structures, which macOS and Linux lay out differently.
+libc = { version = "=0.2.190", default-features = false, features = ["std"] }
 # AppKit and Foundation for the macOS services, in the versions arboard and
 # wgpu-hal already use.
 block2 = { version = "=0.6.2", default-features = false, features = ["std"] }

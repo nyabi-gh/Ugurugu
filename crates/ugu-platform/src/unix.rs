@@ -61,6 +61,271 @@ pub mod clock {
     }
 }
 
+pub mod crash {
+    //! A note of a crash that Rust cannot catch, such as a bad access in a
+    //! driver, written from a signal handler. The handler runs in a broken
+    //! process, so it allocates nothing and calls only functions that are
+    //! safe in a signal handler: the file name and the heading are made
+    //! beforehand. Unlike the Windows note it names no module: macOS's own
+    //! crash report, in `~/Library/Logs/DiagnosticReports`, has the stack.
+
+    use std::ffi::{CString, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    const SIGNALS: [(c_int, &str); 5] = [
+        (libc::SIGSEGV, "SIGSEGV"),
+        (libc::SIGBUS, "SIGBUS"),
+        (libc::SIGILL, "SIGILL"),
+        (libc::SIGFPE, "SIGFPE"),
+        (libc::SIGABRT, "SIGABRT"),
+    ];
+
+    struct Note {
+        path: CString,
+        heading: Vec<u8>,
+        /// The handlers there were before, by [`SIGNALS`]: Rust's own tells
+        /// a stack overflow from other bad accesses.
+        previous: [libc::sigaction; SIGNALS.len()],
+    }
+
+    static NOTE: OnceLock<Note> = OnceLock::new();
+    /// A crash that leads to another, as a stack overflow leads to an
+    /// abort, keeps the note of the first.
+    static WRITTEN: AtomicBool = AtomicBool::new(false);
+
+    /// From now on, a bad access, an illegal instruction, an arithmetic
+    /// fault or an abort writes `path` with `heading` and then the signal,
+    /// its code and the address it names. The handler there was before
+    /// runs after it.
+    pub fn note_crashes(path: &Path, heading: &str) {
+        let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+            return;
+        };
+        // SAFETY: all-zero is a valid `sigaction`, and each is only read
+        // into.
+        let mut previous: [libc::sigaction; SIGNALS.len()] = unsafe { std::mem::zeroed() };
+        for ((signal, _), previous) in SIGNALS.iter().zip(&mut previous) {
+            // SAFETY: a null new action only reads the current one.
+            unsafe { libc::sigaction(*signal, std::ptr::null(), previous) };
+        }
+        let note = Note {
+            path,
+            heading: heading.as_bytes().to_vec(),
+            previous,
+        };
+        if NOTE.set(note).is_err() {
+            return;
+        }
+        // SAFETY: all-zero is a valid `sigaction`; the handler lives as long
+        // as the process, and it runs on the stack Rust gives each thread it
+        // starts for signals, so a stack overflow can still be noted.
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = handler as *const () as usize;
+            action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
+            libc::sigemptyset(&mut action.sa_mask);
+            for (signal, _) in SIGNALS {
+                libc::sigaction(signal, &action, std::ptr::null_mut());
+            }
+        }
+    }
+
+    extern "C" fn handler(signal: c_int, info: *mut libc::siginfo_t, context: *mut c_void) {
+        let Some(note) = NOTE.get() else {
+            return;
+        };
+        let Some(index) = SIGNALS.iter().position(|(each, _)| *each == signal) else {
+            return;
+        };
+        if !WRITTEN.swap(true, Ordering::SeqCst) {
+            // SAFETY: the kernel passes a valid `siginfo_t` to an
+            // `SA_SIGINFO` handler.
+            let (code, address) = unsafe { ((*info).si_code, (*info).si_addr() as usize) };
+            let mut text = Text::new();
+            text.push_str("\r\nSignal ");
+            text.push_decimal(signal as u64);
+            text.push_str(" (");
+            text.push_str(SIGNALS[index].1);
+            text.push_str("), code ");
+            text.push_decimal(code as u64);
+            text.push_str(", address 0x");
+            text.push_hex(address as u64, 16);
+            text.push_str("\r\n");
+            write(note, &text);
+        }
+        // SAFETY: the previous action is put back so that it takes this
+        // signal from now on, and called as it was set to be.
+        unsafe { forward(&note.previous[index], signal, info, context) };
+    }
+
+    fn write(note: &Note, text: &Text) {
+        // SAFETY: the path is NUL-terminated and each buffer's length is
+        // given; open, write and close are safe in a signal handler.
+        unsafe {
+            let file = libc::open(
+                note.path.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC,
+                0o644 as libc::c_uint,
+            );
+            if file >= 0 {
+                for part in [note.heading.as_slice(), text.as_slice()] {
+                    libc::write(file, part.as_ptr().cast(), part.len());
+                }
+                libc::close(file);
+            }
+        }
+    }
+
+    /// # Safety
+    /// Called from the handler of `signal` with what it was given.
+    unsafe fn forward(
+        previous: &libc::sigaction,
+        signal: c_int,
+        info: *mut libc::siginfo_t,
+        context: *mut c_void,
+    ) {
+        // SAFETY: as the caller says; the previous handler, if any, takes
+        // the arguments its flags say.
+        unsafe {
+            libc::sigaction(signal, previous, std::ptr::null_mut());
+            match previous.sa_sigaction {
+                // The signal is blocked until the handler returns, and then
+                // ends the process.
+                libc::SIG_DFL => {
+                    libc::raise(signal);
+                }
+                libc::SIG_IGN => {}
+                with_info if previous.sa_flags & libc::SA_SIGINFO != 0 => {
+                    let handler: extern "C" fn(c_int, *mut libc::siginfo_t, *mut c_void) =
+                        std::mem::transmute(with_info);
+                    handler(signal, info, context);
+                }
+                plain => {
+                    let handler: extern "C" fn(c_int) = std::mem::transmute(plain);
+                    handler(signal);
+                }
+            }
+        }
+    }
+
+    /// Text on the stack.
+    struct Text {
+        bytes: [u8; 256],
+        length: usize,
+    }
+
+    impl Text {
+        fn new() -> Self {
+            Self {
+                bytes: [0; 256],
+                length: 0,
+            }
+        }
+
+        fn push(&mut self, byte: u8) {
+            if self.length < self.bytes.len() {
+                self.bytes[self.length] = byte;
+                self.length += 1;
+            }
+        }
+
+        fn push_str(&mut self, text: &str) {
+            text.bytes().for_each(|byte| self.push(byte));
+        }
+
+        fn push_hex(&mut self, value: u64, digits: u32) {
+            for shift in (0..digits).rev() {
+                self.push(b"0123456789ABCDEF"[(value >> (shift * 4) & 0xF) as usize]);
+            }
+        }
+
+        fn push_decimal(&mut self, value: u64) {
+            let mut digits = [0u8; 20];
+            let mut count = 0;
+            let mut rest = value;
+            loop {
+                digits[count] = b'0' + (rest % 10) as u8;
+                count += 1;
+                rest /= 10;
+                if rest == 0 {
+                    break;
+                }
+            }
+            digits[..count]
+                .iter()
+                .rev()
+                .for_each(|&digit| self.push(digit));
+        }
+
+        fn as_slice(&self) -> &[u8] {
+            &self.bytes[..self.length]
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn numbers_are_written_as_they_read() {
+            let mut text = Text::new();
+            text.push_decimal(0);
+            text.push_str(" ");
+            text.push_decimal(18_446_744_073_709_551_615);
+            text.push_str(" 0x");
+            text.push_hex(0xBEEF, 8);
+            assert_eq!(text.as_slice(), b"0 18446744073709551615 0x0000BEEF");
+        }
+
+        /// Run as a child: notes crashes into the file named by the
+        /// variable and writes through a null pointer.
+        #[test]
+        fn child_that_crashes() {
+            let Some(path) = std::env::var_os("UGU_CRASH_CHILD") else {
+                return;
+            };
+            note_crashes(Path::new(&path), "Ugurugu test\r\n");
+            // SAFETY: not safe on purpose; this child exists to crash.
+            unsafe { std::ptr::null_mut::<u8>().write_volatile(1) };
+        }
+
+        /// The bad access first reaches Rust's own handler, which tells it
+        /// from a stack overflow, and then ends the child as it would have.
+        #[test]
+        fn a_crash_leaves_a_note_and_still_ends_the_process() {
+            use std::os::unix::process::ExitStatusExt;
+
+            let folder =
+                std::env::temp_dir().join(format!("ugu-platform-crash-{}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = folder.join("crash.txt");
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "unix::crash::tests::child_that_crashes",
+                    "--test-threads=1",
+                ])
+                .env("UGU_CRASH_CHILD", &path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            let text = std::fs::read_to_string(&path);
+            let _ = std::fs::remove_dir_all(&folder);
+            assert!(
+                matches!(status.signal(), Some(libc::SIGSEGV | libc::SIGBUS)),
+                "{status:?}"
+            );
+            let text = text.unwrap();
+            assert!(text.starts_with("Ugurugu test\r\n\r\nSignal "), "{text}");
+            assert!(text.contains(", address 0x0000000000000000"), "{text}");
+        }
+    }
+}
+
 pub mod file {
     //! Putting a finished file in place of another.
 
