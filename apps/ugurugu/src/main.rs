@@ -99,7 +99,12 @@ fn run(
     #[cfg(windows)]
     ugu_platform::pointer::enable_mouse_in_pointer()
         .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
-    let event_loop = EventLoop::<app::UiEvent>::with_user_event()
+    let mut event_loop = EventLoop::<app::UiEvent>::with_user_event();
+    // winit's menu quits on Cmd+Q without asking about unsaved changes;
+    // without it Cmd+Q reaches the app's own Quit.
+    #[cfg(target_os = "macos")]
+    winit::platform::macos::EventLoopBuilderExtMacOS::with_default_menu(&mut event_loop, false);
+    let event_loop = event_loop
         .build()
         .map_err(|error| format!("cannot create the event loop: {error}"))?;
     let mut app = app::App::new(
