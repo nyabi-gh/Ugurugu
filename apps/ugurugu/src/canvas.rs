@@ -829,7 +829,7 @@ impl Canvas {
     pub fn zoom_in_place(&mut self, notches: f32) {
         if let Some([left, top, right, bottom]) = self.area {
             let middle = [f64::from(left + right) / 2.0, f64::from(top + bottom) / 2.0];
-            self.zoom(middle, notches);
+            self.zoom(middle, ZOOM_STEP.powf(f64::from(notches)));
         }
     }
 
@@ -1444,8 +1444,16 @@ impl Canvas {
             CanvasInput::Cancel => {
                 self.cancel_gesture();
             }
-            CanvasInput::Zoom { position, notches } => self.zoom(position, notches),
+            CanvasInput::Zoom { position, notches } => {
+                self.zoom(position, ZOOM_STEP.powf(f64::from(notches)));
+            }
             CanvasInput::Turn { notches } => self.turn_by(TURN_STEP * f64::from(notches)),
+            CanvasInput::Scroll { delta: [x, y] } => {
+                self.tab.offset[0] += x;
+                self.tab.offset[1] += y;
+            }
+            CanvasInput::Magnify { position, factor } => self.zoom(position, factor),
+            CanvasInput::Rotate { degrees } => self.turn_by(degrees),
             CanvasInput::Pinch { fingers, fresh } => self.pinch(fingers, fresh),
             CanvasInput::PinchEnd => {
                 if matches!(self.interaction, Interaction::Pinching { .. }) {
@@ -2008,10 +2016,10 @@ impl Canvas {
         );
     }
 
-    fn zoom(&mut self, position: [f64; 2], notches: f32) {
+    /// Multiplies the zoom by `factor`, keeping `position` in place.
+    fn zoom(&mut self, position: [f64; 2], factor: f64) {
         let anchor = self.to_document(position);
-        let scale = (self.tab.scale * ZOOM_STEP.powf(f64::from(notches)))
-            .clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
+        let scale = (self.tab.scale * factor).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
         self.tab.scale = scale;
         // Keep the document point under the pointer where it is.
         self.tab.offset = [0.0, 0.0];

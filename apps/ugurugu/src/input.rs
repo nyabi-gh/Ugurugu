@@ -45,6 +45,21 @@ pub enum CanvasInput {
     Turn {
         notches: f32,
     },
+    /// Touchpad fingers moved over the canvas; the view follows them by
+    /// `delta` physical pixels.
+    Scroll {
+        delta: [f64; 2],
+    },
+    /// Touchpad fingers pinched over the canvas; the zoom grows by `factor`
+    /// around `position`.
+    Magnify {
+        position: [f64; 2],
+        factor: f64,
+    },
+    /// Touchpad fingers turned over the canvas, in degrees clockwise.
+    Rotate {
+        degrees: f64,
+    },
     /// Exactly two fingers on the canvas, by pointer id; `fresh` when they
     /// are not the two of the last `Pinch`.
     Pinch {
@@ -268,6 +283,48 @@ impl InputRouter {
                         phase: egui::TouchPhase::Move,
                         modifiers,
                     });
+                }
+                PointerEvent::Scroll {
+                    position,
+                    delta,
+                    time,
+                } => {
+                    self.oldest_unpresented.get_or_insert(time);
+                    if starts_on_canvas(position) {
+                        routed.canvas.push(CanvasInput::Scroll { delta });
+                    } else {
+                        routed.egui.push(egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(delta[0] as f32, delta[1] as f32) / pixels_per_point,
+                            phase: egui::TouchPhase::Move,
+                            modifiers,
+                        });
+                    }
+                }
+                // The interface keeps its size: only the canvas zooms and
+                // turns.
+                PointerEvent::Magnify {
+                    position,
+                    delta,
+                    time,
+                } => {
+                    if starts_on_canvas(position) {
+                        self.oldest_unpresented.get_or_insert(time);
+                        routed.canvas.push(CanvasInput::Magnify {
+                            position,
+                            factor: 1.0 + delta,
+                        });
+                    }
+                }
+                PointerEvent::Rotate {
+                    position,
+                    degrees,
+                    time,
+                } => {
+                    if starts_on_canvas(position) {
+                        self.oldest_unpresented.get_or_insert(time);
+                        routed.canvas.push(CanvasInput::Rotate { degrees });
+                    }
                 }
             }
         }
@@ -619,6 +676,66 @@ mod tests {
             }]
         );
         assert_eq!(routed.egui.len(), 1);
+    }
+
+    #[test]
+    fn touchpad_fingers_pan_zoom_and_turn_the_canvas_and_scroll_the_ui() {
+        let mut router = InputRouter::default();
+        let routed = router.route(
+            vec![
+                PointerEvent::Scroll {
+                    position: [150.0, 0.0],
+                    delta: [3.0, -4.0],
+                    time: Ticks(1),
+                },
+                PointerEvent::Magnify {
+                    position: [150.0, 0.0],
+                    delta: 0.25,
+                    time: Ticks(2),
+                },
+                PointerEvent::Rotate {
+                    position: [150.0, 0.0],
+                    degrees: -10.0,
+                    time: Ticks(3),
+                },
+                PointerEvent::Scroll {
+                    position: [50.0, 0.0],
+                    delta: [0.0, 8.0],
+                    time: Ticks(4),
+                },
+                PointerEvent::Magnify {
+                    position: [50.0, 0.0],
+                    delta: 0.25,
+                    time: Ticks(5),
+                },
+            ],
+            2.0,
+            egui::Modifiers::NONE,
+            false,
+            |position| position[0] >= 100.0,
+        );
+        assert_eq!(
+            routed.canvas,
+            [
+                CanvasInput::Scroll { delta: [3.0, -4.0] },
+                CanvasInput::Magnify {
+                    position: [150.0, 0.0],
+                    factor: 1.25
+                },
+                CanvasInput::Rotate { degrees: -10.0 },
+            ]
+        );
+        assert_eq!(
+            routed.egui,
+            [egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, 4.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            "in points; a pinch over the interface does nothing"
+        );
+        assert_eq!(router.take_oldest_unpresented(), Some(Ticks(1)));
     }
 
     #[test]

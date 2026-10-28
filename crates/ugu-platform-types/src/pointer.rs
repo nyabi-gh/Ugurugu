@@ -88,6 +88,25 @@ pub enum PointerEvent {
         horizontal: bool,
         time: Ticks,
     },
+    /// Fingers moved across a touchpad by `delta` client physical pixels,
+    /// the way the content under them should follow.
+    Scroll {
+        position: [f64; 2],
+        delta: [f64; 2],
+        time: Ticks,
+    },
+    /// Fingers pinched on a touchpad: the zoom grows by `1 + delta`.
+    Magnify {
+        position: [f64; 2],
+        delta: f64,
+        time: Ticks,
+    },
+    /// Fingers turned on a touchpad, in degrees clockwise on screen.
+    Rotate {
+        position: [f64; 2],
+        degrees: f64,
+        time: Ticks,
+    },
 }
 
 #[derive(Debug)]

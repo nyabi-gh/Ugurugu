@@ -55,8 +55,13 @@ impl WinitPointer {
                 };
                 let [x, y] = match *delta {
                     MouseScrollDelta::LineDelta(x, y) => [x, y],
-                    // Not yet: a trackpad's scroll is to pan the canvas.
-                    MouseScrollDelta::PixelDelta(_) => return Some(Vec::new()),
+                    MouseScrollDelta::PixelDelta(delta) => {
+                        return Some(vec![PointerEvent::Scroll {
+                            position,
+                            delta: [delta.x, delta.y],
+                            time,
+                        }]);
+                    }
                 };
                 [(y, false), (x, true)]
                     .into_iter()
@@ -69,6 +74,23 @@ impl WinitPointer {
                     })
                     .collect()
             }
+            WindowEvent::PinchGesture { delta, .. } => match self.position {
+                Some(position) => vec![PointerEvent::Magnify {
+                    position,
+                    delta: *delta,
+                    time,
+                }],
+                None => Vec::new(),
+            },
+            // winit counts counterclockwise.
+            WindowEvent::RotationGesture { delta, .. } => match self.position {
+                Some(position) => vec![PointerEvent::Rotate {
+                    position,
+                    degrees: -f64::from(*delta),
+                    time,
+                }],
+                None => Vec::new(),
+            },
             WindowEvent::Touch(touch) => {
                 // Ids are the OS's, unique among the fingers down; 0 is the
                 // mouse's.
@@ -218,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wheel_line_is_a_notch_where_the_cursor_is_and_leaving_forgets_it() {
+    fn the_wheel_and_touchpad_act_where_the_cursor_is_and_leaving_forgets_it() {
         let mut pointer = WinitPointer::default();
         pointer.translate_at(&moved(7.0, 8.0), Ticks(1));
         let wheel = |delta| WindowEvent::MouseWheel {
@@ -243,15 +265,55 @@ mod tests {
                 },
             ])
         );
+        assert_eq!(
+            pointer.translate_at(
+                &wheel(MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+                    3.0, -4.0
+                ))),
+                Ticks(3)
+            ),
+            Some(vec![PointerEvent::Scroll {
+                position: [7.0, 8.0],
+                delta: [3.0, -4.0],
+                time: Ticks(3),
+            }])
+        );
+        let pinch = WindowEvent::PinchGesture {
+            device_id: DeviceId::dummy(),
+            delta: 0.25,
+            phase: TouchPhase::Moved,
+        };
+        assert_eq!(
+            pointer.translate_at(&pinch, Ticks(4)),
+            Some(vec![PointerEvent::Magnify {
+                position: [7.0, 8.0],
+                delta: 0.25,
+                time: Ticks(4),
+            }])
+        );
+        let turn = WindowEvent::RotationGesture {
+            device_id: DeviceId::dummy(),
+            delta: 10.0,
+            phase: TouchPhase::Moved,
+        };
+        assert_eq!(
+            pointer.translate_at(&turn, Ticks(5)),
+            Some(vec![PointerEvent::Rotate {
+                position: [7.0, 8.0],
+                degrees: -10.0,
+                time: Ticks(5),
+            }]),
+            "counterclockwise in winit"
+        );
         let left = WindowEvent::CursorLeft {
             device_id: DeviceId::dummy(),
         };
         assert_eq!(
-            pointer.translate_at(&left, Ticks(3)),
+            pointer.translate_at(&left, Ticks(6)),
             Some(vec![PointerEvent::Leave { pointer: MOUSE }])
         );
         assert_eq!(
-            pointer.translate_at(&wheel(MouseScrollDelta::LineDelta(0.0, 1.0)), Ticks(4)),
+            pointer.translate_at(&wheel(MouseScrollDelta::LineDelta(0.0, 1.0)), Ticks(7)),
             Some(Vec::new())
         );
     }
