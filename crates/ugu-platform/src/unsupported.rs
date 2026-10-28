@@ -87,6 +87,7 @@ pub mod crash {
     pub fn note_crashes(_path: &Path, _heading: &str) {}
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod dialog {
     use std::path::PathBuf;
 

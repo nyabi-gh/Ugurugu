@@ -4,9 +4,10 @@
 //! The macOS services. Those not written for macOS yet are the placeholders
 //! of [`crate::unsupported`].
 
+pub mod dialog;
 pub mod folder;
 
 pub use crate::unsupported::{
-    association, clipboard, clock, crash, dialog, file, instance, locale, memory, placement,
-    recent, session,
+    association, clipboard, clock, crash, file, instance, locale, memory, placement, recent,
+    session,
 };
