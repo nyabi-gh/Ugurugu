@@ -5,14 +5,18 @@
 //! running OS's implementation of each service, so that nothing above this
 //! crate names an OS crate.
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(unix)]
 mod unix;
 #[cfg(not(windows))]
 mod unsupported;
 
+#[cfg(target_os = "macos")]
+use macos as os;
 #[cfg(windows)]
 use ugu_win as os;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use unsupported as os;
 
 pub mod association {

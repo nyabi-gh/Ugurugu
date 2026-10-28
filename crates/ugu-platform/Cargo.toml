@@ -9,6 +9,10 @@ publish.workspace = true
 [dependencies]
 ugu-platform-types.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSFileManager", "NSPathUtilities", "NSString", "NSURL"] }
+
 [target.'cfg(windows)'.dependencies]
 ugu-win.workspace = true
 

@@ -101,6 +101,7 @@ pub mod file {
     pub use crate::unix::file::{remove_stale_temporaries, replace_file};
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod folder {
     use std::path::{Path, PathBuf};
 
