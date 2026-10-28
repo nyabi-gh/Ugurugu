@@ -13,7 +13,7 @@ pub mod folder;
 pub mod locale;
 pub mod memory;
 
-pub use crate::unsupported::{association, crash, file, instance, placement, recent, session};
+pub use crate::unsupported::{association, crash, file, instance, recent, session};
 
 unsafe extern "C" {
     fn sysctlbyname(

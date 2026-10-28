@@ -148,7 +148,7 @@ fn first_place(monitor: Option<[f64; 2]>) -> (winit::dpi::LogicalSize<f64>, bool
 
 /// The OS's own handle of `window`: the `HWND` on Windows, the `NSView` on
 /// macOS, the X11 window or the Wayland surface.
-fn hwnd_of(window: &Window) -> Result<isize, String> {
+pub fn hwnd_of(window: &Window) -> Result<isize, String> {
     let handle = window
         .window_handle()
         .map_err(|error| format!("the window has no handle: {error}"))?;
@@ -208,10 +208,7 @@ impl Session {
         // Where it last closed: placed while hidden, then maximized and shown
         // through winit, which keeps track of both.
         if let Some(placement) = settings.get().window {
-            // SAFETY: the window is alive and owned by this thread.
-            if unsafe { ugu_platform::placement::restore_to(hwnd_of(&window)?, &placement) } {
-                window.set_maximized(placement.maximized);
-            }
+            crate::placement::restore(&window, &placement);
         } else if first_maximized {
             window.set_maximized(true);
         }

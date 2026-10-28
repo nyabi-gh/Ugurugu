@@ -64,6 +64,7 @@ pub mod memory {
 }
 
 pub mod placement {
+    #[cfg(windows)]
     pub use crate::os::placement::{get, restore_to};
     pub use ugu_platform_types::placement::Placement;
 }

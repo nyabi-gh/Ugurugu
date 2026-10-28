@@ -179,20 +179,6 @@ pub mod memory {
     }
 }
 
-pub mod placement {
-    use ugu_platform_types::placement::Placement;
-
-    pub fn get(_hwnd: isize) -> Option<Placement> {
-        None
-    }
-
-    /// # Safety
-    /// None; unsafe to match the OSes that have it.
-    pub unsafe fn restore_to(_hwnd: isize, _placement: &Placement) -> bool {
-        false
-    }
-}
-
 pub mod recent {
     use std::path::Path;
 

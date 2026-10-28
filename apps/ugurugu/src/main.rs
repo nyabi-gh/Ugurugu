@@ -17,6 +17,7 @@ mod input;
 mod latency;
 mod layout;
 mod logs;
+mod placement;
 mod recovery;
 mod render;
 mod settings;

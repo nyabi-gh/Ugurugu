@@ -565,7 +565,8 @@ impl RenderThread {
             self.files.keep_recovery(&mut self.canvas, Instant::now());
             self.files.keep_updates(Instant::now());
             if self.files.should_close() {
-                if let Some(placement) = ugu_platform::placement::get(self.hwnd)
+                let before = self.settings.get().window;
+                if let Some(placement) = crate::placement::get(&self.window, self.hwnd, before)
                     .filter(ugu_platform::placement::Placement::valid)
                 {
                     self.settings
