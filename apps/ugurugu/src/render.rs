@@ -185,8 +185,11 @@ pub struct RenderThread {
     display_latency: LatencyLog,
     needs_frame: bool,
     repaint_at: Option<Instant>,
-    /// Nothing is drawn, played or uploaded while the window is minimized.
+    /// Nothing is drawn, played or uploaded while the window is minimized,
+    /// or while the OS says none of it can be seen (macOS reports minimizing
+    /// this way, with no change of size).
     minimized: bool,
+    occluded: bool,
     /// Set after a lost device is replaced, until the new swap chain lets a
     /// second frame through. After a driver reset the display can still be
     /// resetting when the new swap chain is made, and such a swap chain shows
@@ -410,6 +413,7 @@ impl RenderThread {
             needs_frame: true,
             repaint_at: None,
             minimized: false,
+            occluded: false,
             recovery: None,
         };
         ui::apply_settings(
@@ -515,7 +519,7 @@ impl RenderThread {
             if !self.apply_queued(messages) {
                 break;
             }
-            if self.minimized {
+            if self.minimized || self.occluded {
                 self.needs_frame = false;
                 self.repaint_at = None;
             }
@@ -729,6 +733,10 @@ impl RenderThread {
                         }
                     }
                     WindowEvent::Focused(false) => self.alt_tap.cancel(),
+                    WindowEvent::Occluded(occluded) => {
+                        self.occluded = *occluded;
+                        self.needs_frame = true;
+                    }
                     _ => {}
                 }
                 if let WindowEvent::Resized(size) = &event {
