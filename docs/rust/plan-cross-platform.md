@@ -171,7 +171,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 끝: macOS에서 새 문서·그리기·저장·열기·내보내기·자동 복구·붙여넣기가 동작하고, 6절의 결정을 decisions.md에 적는다.
 
-상태(2026-10-28, 진행 중): main(`839de35`) 위의 `platform/mac-window` 브랜치에 커밋했고 push하지 않았다. 앱이 macOS에서 Metal로 뜨고, 마우스로 그리고, 재생하고, Cmd+Q로 저장 확인을 거쳐 끝난다(사용자가 release로 확인, evidence.md 98절). 한 것:
+상태(2026-10-28, 진행 중): 처음 것은 PR #140으로 main(`3b49206`)에 들어갔다. 앱이 macOS에서 Metal로 뜨고, 마우스로 그리고, 재생하고, Cmd+Q로 저장 확인을 거쳐 끝난다(사용자가 release로 확인, evidence.md 98절). 한 것:
 
 - winit 창 이벤트를 `PointerEvent`로(`apps/ugurugu/src/winit_pointer.rs`, decisions.md 3절). 트랙패드 스크롤·핀치·회전은 `PointerEvent::Scroll`·`Magnify`·`Rotate`로 공통 타입에 더했다. `enable_mouse_in_pointer`·`PointerInput`은 Windows에서만 내보낸다.
 - `hwnd_of`가 AppKit `NSView`·X11 창·Wayland surface도 돌려준다. `DocumentReceiver`의 자리표시는 오류 대신 아무것도 받지 않는 수신기다(이 OS에서는 문서를 넘기는 실행이 없다).
@@ -179,11 +179,13 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - 창이 보이지 않으면(`Occluded`) 그리지 않는다(decisions.md 2절). 3.2절의 "프레임 대기가 막힐 것"은 가려진 경우에는 wgpu-hal이 막는다. 장치 손실 뒤에 막히는지는 아직 **가설**이다.
 - 첫 프레임의 debug panic: 프레임이 egui 텍스처 변경을 적용한 뒤 비우지 않아 epaint의 `debug_assert`(`TexturesDelta`의 `Drop`)에 걸렸다. 쓴 뒤 `clear()`한다. OS와 무관한 코드라 Windows debug 빌드에서도 나는 것으로 본다(**가설**: Windows에서 실행해 보지 않았다). 창·GPU가 필요해 시험은 없다.
 
-확인: macOS clippy·시험(`UGU_REQUIRE_ADAPTER=1`, 앱 300개 통과), `x86_64-pc-windows-gnu` 교차 clippy, fmt. 남은 것:
+확인: macOS clippy·시험(`UGU_REQUIRE_ADAPTER=1`, 앱 300개 통과), `x86_64-pc-windows-gnu` 교차 clippy, fmt.
+
+그 뒤 `platform/mac-services` 브랜치에서 3.3절의 OS 함수를 macOS 구현으로 바꿨다(`crates/ugu-platform/src/macos/`, decisions.md 2·6·7·9·10·11절의 2026-10-28 macOS 1단계 행): `folder`(Application Support·Documents), `dialog`(sheet로 여는 NSOpenPanel·NSSavePanel, 형식 팝업), `clipboard`(NSPasteboard의 PNG·TIFF), `locale`(선호 언어, `windows_version`은 OS 이름을 붙인 `os_version`으로), `memory`, `clock`의 지역 시각, `crash`(신호 처리기). 지역 시각 문자열(`local_stamp`)과 `crash`는 Linux에서도 쓴다. `placement`는 OS 함수 대신 앱이 winit으로 읽고 놓는다. 시험으로 확인한 것은 폴더·언어·OS 판·메모리·시각과 신호 노트(자식 프로세스를 실제로 죽여 본다)다. 대화상자·형식 팝업·붙여넣기·창 위치는 사용자가 화면에서 확인했다. 남은 것:
 
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 장치 손실 복구, 표시 시각(`presentedTime`), 막힌 프레임 대기(3.2절). 메인 스레드 왕복 측정과 render 스레드를 기다리는 곳(3.4절).
-- OS 함수(`file` 밖의 3.3절 전부: `folder`·`dialog`·`clipboard`·`locale`·`memory`·`placement`·`crash`·`clock`의 지역 시각). 지금은 폴더가 없어 `UGURUGU_SETTINGS_PATH` 등을 주지 않으면 설정을 쓸 곳이 없고, 열기·저장 대화상자가 없다.
+- 단일 실행 잠금(`instance`, 1단계 목록). `association`·`recent`·`session`은 2단계.
 - Cmd 단축키 표시(⌘), 배포 대상 macOS 14, 측정(1단계 목록).
 
 ### 2단계: macOS 펜과 OS 연동
