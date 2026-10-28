@@ -299,32 +299,61 @@ pub fn read_fonts_early() {
     }
 }
 
-/// Windows' Microsoft YaHei, read once; `None`, logged, when it cannot be
+/// The OS's own Chinese font, read once; `None`, logged, when it cannot be
 /// used, and the interface then shows what Pretendard JP has.
 fn chinese_font() -> Option<Arc<egui::FontData>> {
     static FONT: std::sync::OnceLock<Option<Arc<egui::FontData>>> = std::sync::OnceLock::new();
     FONT.get_or_init(|| {
-        let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
-        font_file(
-            &std::path::Path::new(&windows)
-                .join("Fonts")
-                .join("msyh.ttc"),
-        )
+        let (path, index) = chinese_font_file()?;
+        font_file(&path, index)
     })
     .clone()
 }
 
-/// The first font of the file at `path`, parsed as egui will parse it:
+/// Microsoft YaHei.
+#[cfg(windows)]
+fn chinese_font_file() -> Option<(std::path::PathBuf, u32)> {
+    let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
+    Some((
+        std::path::Path::new(&windows)
+            .join("Fonts")
+            .join("msyh.ttc"),
+        0,
+    ))
+}
+
+/// Hiragino Sans GB: PingFang SC is a downloaded asset without a fixed path.
+#[cfg(target_os = "macos")]
+fn chinese_font_file() -> Option<(std::path::PathBuf, u32)> {
+    Some(("/System/Library/Fonts/Hiragino Sans GB.ttc".into(), 0))
+}
+
+/// What fontconfig gives for simplified Chinese, with the font's place in
+/// its collection: one Noto CJK file holds every language's.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn chinese_font_file() -> Option<(std::path::PathBuf, u32)> {
+    let output = std::process::Command::new("fc-match")
+        .args(["--format=%{file}\n%{index}", "sans-serif:lang=zh-cn"])
+        .output()
+        .inspect_err(|error| tracing::warn!(%error, "cannot run fc-match"))
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let (file, index) = text.split_once('\n')?;
+    Some((file.into(), index.trim().parse().ok()?))
+}
+
+/// The font at `index` of the file at `path`, parsed as egui will parse it:
 /// egui panics on a font it cannot parse, and then the app could not start
 /// for as long as the language is set to Chinese.
-fn font_file(path: &std::path::Path) -> Option<Arc<egui::FontData>> {
-    let font = egui::FontData::from_owned(
+fn font_file(path: &std::path::Path, index: u32) -> Option<Arc<egui::FontData>> {
+    let mut font = egui::FontData::from_owned(
         std::fs::read(path)
             .inspect_err(|error| {
                 tracing::warn!(?path, %error, "cannot read the Chinese interface font");
             })
             .ok()?,
     );
+    font.index = index;
     if let Err(error) = skrifa::FontRef::from_index(&font.font, font.index) {
         tracing::warn!(?path, %error, "cannot parse the Chinese interface font");
         return None;
@@ -344,13 +373,13 @@ pub fn apply(ctx: &egui::Context) {
     // In front of egui's own fonts, which stay as fallbacks for symbols.
     let mut first = vec!["Pretendard JP".to_owned()];
     // Pretendard JP has the Han characters in Japanese forms and lacks many
-    // simplified ones, so Chinese reads from Windows' own Chinese font
+    // simplified ones, so Chinese reads from the OS's own Chinese font
     // first, Pretendard JP after it for Hangul.
     if crate::i18n::language() == "zh-Hans"
-        && let Some(yahei) = chinese_font()
+        && let Some(chinese) = chinese_font()
     {
-        fonts.font_data.insert("Microsoft YaHei".to_owned(), yahei);
-        first.insert(0, "Microsoft YaHei".to_owned());
+        fonts.font_data.insert("Chinese".to_owned(), chinese);
+        first.insert(0, "Chinese".to_owned());
     }
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         let names = fonts.families.entry(family).or_default();
@@ -460,7 +489,7 @@ fn style_accent(style: &mut egui::Style, colors: &Palette) {
 mod tests {
     use super::*;
 
-    /// How long the thread that sets the fonts waits for Microsoft YaHei,
+    /// How long the thread that sets the fonts waits for the Chinese font,
     /// with `UGURUGU_EARLY=1` after it was read early while the window
     /// would open (300 ms, about the time the GPU takes): run once each
     /// way, `cargo test --release -p ugurugu chinese_font_wait --
@@ -487,7 +516,7 @@ mod tests {
         let path = dir.join("msyh.ttc");
         // A collection's header, cut off before its fonts.
         std::fs::write(&path, b"ttcf\0\x01\0\0\0\0\0\x01").unwrap();
-        let font = font_file(&path);
+        let font = font_file(&path, 0);
         let _ = std::fs::remove_dir_all(&dir);
         let mut fonts = egui::FontDefinitions::default();
         if let Some(font) = font {

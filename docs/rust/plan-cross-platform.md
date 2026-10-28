@@ -16,7 +16,7 @@
 
 evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 
-- OS 의존이 없는 네 crate(`ugu-core`·`ugu-io`·`ugu-session`·`ugu-text`)는 macOS에서 빌드되고, `ugu-text`의 시험 둘만 실패한다. `Fonts::new`의 대체 글꼴이 Windows 글꼴 이름뿐이라 다른 글꼴로 풀린 탓으로 본다(**가설**: 풀린 글꼴을 확인하지 않았다).
+- OS 의존이 없는 네 crate(`ugu-core`·`ugu-io`·`ugu-session`·`ugu-text`)는 macOS에서 빌드되고, `ugu-text`의 시험 둘만 실패한다. `Fonts::new`의 대체 글꼴이 Windows 글꼴 이름뿐이라 다른 글꼴로 풀린 탓이다(evidence.md 97절에서 확인).
 - 나머지는 `windows` crate를 조건 없이 의존해 빌드되지 않는다. 코드에 `cfg(windows)` 분기가 하나도 없다.
 - Windows 코드는 거의 `ugu-win`(14개 모듈, 약 2,800줄)에 있고, 그 밖에는 `ugu-render`의 `gpu.rs`·`present.rs`·`view.rs` 시험, 앱의 `app.rs`·`build.rs`·`recovery.rs`·`settings.rs`·`theme.rs`·`render.rs`(`Backends::DX12`), 도구 셋이다. 앱과 도구의 파일 22개가 `ugu_win::`을 부르고, 3.1절대로 하면 이것들은 경로만 바뀐다.
 

@@ -31,20 +31,13 @@ pub struct Fonts {
 
 impl Fonts {
     /// `language` (as "ko", "ja" or "zh-Hans") orders the fallback, so kana
-    /// and Han characters take that language's forms.
+    /// and Han characters take that language's forms. The first family is
+    /// one the OS has: an empty line takes its height.
     pub fn new(language: &str) -> Self {
-        let fallback = match language {
-            "ko" => "\"Malgun Gothic\", \"Yu Gothic UI\", sans-serif",
-            "ja" => "\"Yu Gothic UI\", Meiryo, \"Malgun Gothic\", sans-serif",
-            "zh-Hans" => {
-                "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Malgun Gothic\", sans-serif"
-            }
-            _ => "\"Segoe UI\", \"Yu Gothic UI\", \"Malgun Gothic\", sans-serif",
-        };
         Self {
             fonts: FontContext::new(),
             layouts: LayoutContext::new(),
-            fallback,
+            fallback: fallback(language),
         }
     }
 
@@ -113,6 +106,37 @@ impl Fonts {
             contours: flatten(&path),
             size: [f64::from(layout.width()), f64::from(layout.height())],
         }
+    }
+}
+
+#[cfg(windows)]
+fn fallback(language: &str) -> &'static str {
+    match language {
+        "ko" => "\"Malgun Gothic\", \"Yu Gothic UI\", sans-serif",
+        "ja" => "\"Yu Gothic UI\", Meiryo, \"Malgun Gothic\", sans-serif",
+        "zh-Hans" => "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Malgun Gothic\", sans-serif",
+        _ => "\"Segoe UI\", \"Yu Gothic UI\", \"Malgun Gothic\", sans-serif",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn fallback(language: &str) -> &'static str {
+    match language {
+        "ko" => "\"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "ja" => "\"Hiragino Sans\", \"Apple SD Gothic Neo\", sans-serif",
+        "zh-Hans" => "\"PingFang SC\", \"Hiragino Sans GB\", \"Apple SD Gothic Neo\", sans-serif",
+        _ => "\"Helvetica Neue\", \"Hiragino Sans\", \"Apple SD Gothic Neo\", sans-serif",
+    }
+}
+
+/// Noto through fontconfig, as most distributions install it.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn fallback(language: &str) -> &'static str {
+    match language {
+        "ko" => "\"Noto Sans CJK KR\", \"Noto Sans CJK JP\", sans-serif",
+        "ja" => "\"Noto Sans CJK JP\", \"Noto Sans CJK KR\", sans-serif",
+        "zh-Hans" => "\"Noto Sans CJK SC\", \"Noto Sans CJK KR\", sans-serif",
+        _ => "\"Noto Sans\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", sans-serif",
     }
 }
 
@@ -246,10 +270,15 @@ mod tests {
 
     #[test]
     fn characters_a_font_lacks_come_from_the_fallback() {
+        let latin_only = if cfg!(any(windows, target_os = "macos")) {
+            "Arial"
+        } else {
+            "DejaVu Sans"
+        };
         let mut fonts = Fonts::new("ko");
-        let latin = fonts.outline("A", Some("Arial"), 40.0);
-        let both = fonts.outline("A한", Some("Arial"), 40.0);
+        let latin = fonts.outline("A", Some(latin_only), 40.0);
+        let both = fonts.outline("A한", Some(latin_only), 40.0);
         assert!(both.contours.len() > latin.contours.len());
-        assert!(fonts.families().iter().any(|family| family == "Arial"));
+        assert!(fonts.families().iter().any(|family| family == latin_only));
     }
 }
