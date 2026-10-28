@@ -11,8 +11,8 @@ png.workspace = true
 sha2.workspace = true
 ugu-core.workspace = true
 ugu-io.workspace = true
+ugu-platform.workspace = true
 ugu-render.workspace = true
-ugu-win.workspace = true
 vello_cpu.workspace = true
 windows = { workspace = true, features = ["Win32_System_ProcessStatus"] }
 

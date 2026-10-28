@@ -360,7 +360,7 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use ugu_core::document::Document;
-    use ugu_win::pointer::{PointerKind, PointerSample};
+    use ugu_platform::pointer::{PointerKind, PointerSample};
 
     use crate::input::{CanvasInput, Gesture};
 
@@ -488,10 +488,10 @@ mod tests {
             pressure: None,
             tilt: None,
             twist: None,
-            buttons: ugu_win::pointer::Buttons::empty(),
+            buttons: ugu_platform::pointer::Buttons::empty(),
             in_contact: true,
             inverted: false,
-            time: ugu_win::clock::Ticks(0),
+            time: ugu_platform::clock::Ticks(0),
             frame_id: 0,
         }
     }

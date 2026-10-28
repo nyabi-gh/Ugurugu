@@ -4063,8 +4063,8 @@ dependencies = [
  "sha2",
  "ugu-core",
  "ugu-io",
+ "ugu-platform",
  "ugu-render",
- "ugu-win",
  "vello_cpu 0.3.0",
  "windows",
 ]
@@ -4084,6 +4084,18 @@ dependencies = [
  "ugu-core",
  "zip",
 ]
+
+[[package]]
+name = "ugu-platform"
+version = "3.4.3"
+dependencies = [
+ "ugu-platform-types",
+ "ugu-win",
+]
+
+[[package]]
+name = "ugu-platform-types"
+version = "3.4.3"
 
 [[package]]
 name = "ugu-render"
@@ -4126,6 +4138,7 @@ dependencies = [
  "arboard",
  "clipboard-win",
  "tracing",
+ "ugu-platform-types",
  "windows",
  "windows-sys 0.61.2",
 ]
@@ -4149,10 +4162,10 @@ dependencies = [
  "tracing-subscriber",
  "ugu-core",
  "ugu-io",
+ "ugu-platform",
  "ugu-render",
  "ugu-session",
  "ugu-text",
- "ugu-win",
  "unic-langid",
  "ureq",
  "vello_cpu 0.3.0",

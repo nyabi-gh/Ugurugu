@@ -5,14 +5,8 @@
 //! read them with their transparency. Both calls can take a while for a
 //! large image, so callers run them off the UI and render threads.
 
+use ugu_platform_types::clipboard::{Encoded, Image, ReadError};
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
-
-/// Straight RGBA pixels, row by row.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Image {
-    pub size: [u32; 2],
-    pub straight: Vec<u8>,
-}
 
 /// Changes whenever anything is put on the clipboard, by any app.
 pub fn sequence() -> u32 {
@@ -32,22 +26,6 @@ pub fn write_image(Image { size, straight }: Image) -> Result<u32, String> {
         })
         .map_err(|error| error.to_string())?;
     Ok(sequence())
-}
-
-/// An image on the clipboard as the app that put it there encoded it, to be
-/// decoded within the limits files are.
-#[derive(Debug, PartialEq)]
-pub enum Encoded {
-    Png(Vec<u8>),
-    /// `CF_DIBV5`: a `BITMAPV5HEADER` and the pixels, without a file header.
-    Dib(Vec<u8>),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ReadError {
-    /// More than the caller would take, left on the clipboard.
-    TooLarge,
-    System(String),
 }
 
 /// The image on the clipboard, PNG first as arboard reads it, if it is no

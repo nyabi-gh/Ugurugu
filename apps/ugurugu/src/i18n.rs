@@ -55,7 +55,7 @@ fn text() -> &'static Text {
             .ok()
             .or(chosen)
             .map(|language| vec![language])
-            .unwrap_or_else(ugu_win::locale::preferred_ui_languages);
+            .unwrap_or_else(ugu_platform::locale::preferred_ui_languages);
         let chosen = language_for(&preferred);
         tracing::info!(language = chosen, "interface language");
         load(chosen)

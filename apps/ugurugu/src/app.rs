@@ -12,9 +12,9 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 
 use egui_winit::accesskit_winit;
-use ugu_win::instance::{DocumentReceiver, StartLock};
-use ugu_win::pointer::PointerInput;
-use ugu_win::session::SessionEnd;
+use ugu_platform::instance::{DocumentReceiver, StartLock};
+use ugu_platform::pointer::PointerInput;
+use ugu_platform::session::SessionEnd;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -29,7 +29,7 @@ use crate::settings::Store;
 
 /// Every window's class, which later starts look for to hand a document to.
 pub const WINDOW_CLASS: &str = "Ugurugu 3";
-/// Taken by every start; see [`ugu_win::instance`].
+/// Taken by every start; see [`ugu_platform::instance`].
 pub const START_LOCK: &str = r"Local\Ugurugu 3 start";
 /// How long the session end waits for unsaved work to be written. Windows
 /// offers to end apps that take longer than about five seconds.
@@ -191,7 +191,7 @@ impl Session {
         // through winit, which keeps track of both.
         if let Some(placement) = settings.get().window {
             // SAFETY: the window is alive and owned by this thread.
-            if unsafe { ugu_win::placement::restore_to(hwnd_of(&window)?, &placement) } {
+            if unsafe { ugu_platform::placement::restore_to(hwnd_of(&window)?, &placement) } {
                 window.set_maximized(placement.maximized);
             }
         } else if first_maximized {
@@ -251,7 +251,7 @@ impl Session {
             };
             if taken {
                 // SAFETY: the receiver calls this on the window's thread.
-                unsafe { ugu_win::instance::bring_to_front(hwnd) };
+                unsafe { ugu_platform::instance::bring_to_front(hwnd) };
             }
             taken
         };

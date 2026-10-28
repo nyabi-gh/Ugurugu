@@ -79,7 +79,7 @@ fn what_is_told_at_start_outlasts_opening_a_document() {
         &Document::new([9, 9]),
         [7; 16],
         &path,
-        &ugu_win::file::replace_file,
+        &ugu_platform::file::replace_file,
     )
     .unwrap();
     let (mut files, mut canvas, events) = setup();
@@ -103,7 +103,7 @@ fn a_document_read_while_the_shown_one_is_edited_opens_beside_it() {
         &Document::new([9, 9]),
         [7; 16],
         &path,
-        &ugu_win::file::replace_file,
+        &ugu_platform::file::replace_file,
     )
     .unwrap();
     let (mut files, mut canvas, events) = setup();

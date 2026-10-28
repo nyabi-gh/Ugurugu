@@ -3,13 +3,13 @@
 
 //! Splits Win32 pointer input between egui and the canvas.
 //!
-//! Every pointer message reaches the app only through `ugu_win::pointer`, so
+//! Every pointer message reaches the app only through `ugu_platform::pointer`, so
 //! egui and the canvas see the same samples and no synthesised mouse events.
 
 use std::collections::{BTreeMap, HashMap};
 
-use ugu_win::clock::Ticks;
-use ugu_win::pointer::{Buttons, PointerEvent, PointerId, PointerKind, PointerSample};
+use ugu_platform::clock::Ticks;
+use ugu_platform::pointer::{Buttons, PointerEvent, PointerId, PointerKind, PointerSample};
 
 const EGUI_BUTTONS: [(Buttons, egui::PointerButton); 5] = [
     (Buttons::PRIMARY, egui::PointerButton::Primary),

@@ -6,7 +6,7 @@
 //! keeps more, and no more than half of what is free when it is worked out,
 //! so other programs are not paged out and allocations are not refused.
 
-use ugu_win::memory::Memory;
+use ugu_platform::memory::Memory;
 
 const MIB: u64 = 1024 * 1024;
 /// The share of installed memory the caches may take.
@@ -45,7 +45,7 @@ impl Budget {
 
     /// The budget for memory as it is now.
     pub fn now(held: u64) -> Self {
-        Self::new(ugu_win::memory::status(), held)
+        Self::new(ugu_platform::memory::status(), held)
     }
 }
 

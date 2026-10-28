@@ -491,7 +491,7 @@ fn save_folder(ui: &mut egui::Ui, files: &mut Files, settings: &mut Settings) {
     let shown = settings
         .default_save_folder
         .clone()
-        .or_else(ugu_win::folder::documents)
+        .or_else(ugu_platform::folder::documents)
         .map(|folder| folder.display().to_string())
         .unwrap_or_default();
     widgets::card(ui, |ui| {

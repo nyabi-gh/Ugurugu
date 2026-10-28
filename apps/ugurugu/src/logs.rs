@@ -39,7 +39,7 @@ static EARLIER: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 /// no install of either version can be this folder.
 pub fn local_data() -> Option<PathBuf> {
     Some(
-        ugu_win::folder::local_app_data()?
+        ugu_platform::folder::local_app_data()?
             .join("Ugurugu Data")
             .join("3"),
     )
@@ -99,7 +99,7 @@ pub fn start() -> Logging {
     if let Some(folder) = &folder {
         *EARLIER.lock().expect("no panic while holding it") = unseen(folder);
         record_panics(folder.clone(), started.clone());
-        ugu_win::crash::note_crashes(
+        ugu_platform::crash::note_crashes(
             &folder.join(format!("crash-{started}-native.txt")),
             &heading(),
         );
@@ -114,7 +114,7 @@ pub fn start() -> Logging {
 
 /// `ugurugu-<local date and time>-<process id>`.
 fn run_name() -> String {
-    let stamp = ugu_win::clock::local_stamp().unwrap_or_else(|| "unknown".to_owned());
+    let stamp = ugu_platform::clock::local_stamp().unwrap_or_else(|| "unknown".to_owned());
     format!("ugurugu-{stamp}-{}", std::process::id())
 }
 
@@ -131,7 +131,7 @@ fn heading() -> String {
     format!(
         "Ugurugu {} ({COMMIT})\r\nWindows {}\r\n",
         env!("CARGO_PKG_VERSION"),
-        ugu_win::locale::windows_version()
+        ugu_platform::locale::windows_version()
     )
 }
 
@@ -141,7 +141,7 @@ pub fn summary() -> String {
     format!(
         "Ugurugu {} ({COMMIT})\nWindows {}\nGPU: {}\nLogical processors: {workers}\nLogs: {}",
         env!("CARGO_PKG_VERSION"),
-        ugu_win::locale::windows_version(),
+        ugu_platform::locale::windows_version(),
         gpu(),
         folder().map_or_else(|| "-".to_owned(), |folder| folder.display().to_string()),
     )
@@ -324,7 +324,7 @@ pub fn tell_about_crashes(ctx: &egui::Context, asking: bool) -> bool {
 /// Opens the log folder in File Explorer.
 pub fn show_folder() {
     if let Some(folder) = folder()
-        && let Err(error) = ugu_win::folder::show(&folder)
+        && let Err(error) = ugu_platform::folder::show(&folder)
     {
         tracing::warn!(error, "cannot show the log folder");
     }

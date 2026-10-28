@@ -10,10 +10,10 @@ use ugu_core::clip::Clip;
 use ugu_core::document::{Document, LayerId};
 use ugu_core::ops::AssetId;
 use ugu_core::store::Asset;
+use ugu_platform::clipboard::Image;
 use ugu_render::document::DocumentRenderer;
 use ugu_render::plan::{Reference, RenderPlan};
 use ugu_session::FillError;
-use ugu_win::clipboard::Image;
 use vello_cpu::Pixmap;
 
 use super::Canvas;

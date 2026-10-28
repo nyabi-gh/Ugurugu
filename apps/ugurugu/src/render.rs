@@ -11,13 +11,13 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use ugu_platform::clock::{self, Ticks};
+use ugu_platform::pointer::PointerEvent;
 use ugu_render::ants::Ants;
 use ugu_render::gpu::{AdapterChoice, Gpu};
 use ugu_render::overview::{Overview, Part};
 use ugu_render::present::{Acquired, Presenter};
 use ugu_render::view::{DocumentView, Placement};
-use ugu_win::clock::Ticks;
-use ugu_win::pointer::PointerEvent;
 use winit::event::WindowEvent;
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
@@ -561,8 +561,8 @@ impl RenderThread {
             self.files.keep_recovery(&mut self.canvas, Instant::now());
             self.files.keep_updates(Instant::now());
             if self.files.should_close() {
-                if let Some(placement) =
-                    ugu_win::placement::get(self.hwnd).filter(ugu_win::placement::Placement::valid)
+                if let Some(placement) = ugu_platform::placement::get(self.hwnd)
+                    .filter(ugu_platform::placement::Placement::valid)
                 {
                     self.settings
                         .change(|settings| settings.window = Some(placement));
@@ -843,7 +843,7 @@ impl RenderThread {
         }
         // egui-winit sets the pointer shape only while winit has seen the
         // pointer in the window, and pointer messages never reach winit
-        // (`ugu_win::pointer`), so it never did: the brush ring left the
+        // (`ugu_platform::pointer`), so it never did: the brush ring left the
         // arrow showing ahead of the stroke, and no other shape showed.
         if self.cursor != Some(platform_output.cursor_icon) {
             self.cursor = Some(platform_output.cursor_icon);
@@ -1012,7 +1012,7 @@ impl RenderThread {
                     presenter.present(&gpu.queue, frame, oldest_input.map(|ticks| ticks.0));
                     if let Some(oldest_input) = oldest_input {
                         self.present_latency
-                            .record(Ticks::now().seconds_since(oldest_input));
+                            .record(clock::seconds_since(clock::now(), oldest_input));
                     }
                     true
                 }
@@ -1064,8 +1064,10 @@ impl RenderThread {
                 display_qpc = displayed.display_qpc,
                 "frame displayed"
             );
-            self.display_latency
-                .record(Ticks(displayed.display_qpc).seconds_since(Ticks(displayed.input_qpc)));
+            self.display_latency.record(clock::seconds_since(
+                Ticks(displayed.display_qpc),
+                Ticks(displayed.input_qpc),
+            ));
         }
     }
 }

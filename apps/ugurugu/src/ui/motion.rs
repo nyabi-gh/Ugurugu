@@ -242,9 +242,9 @@ pub fn settings(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap) {
 mod tests {
     use egui::{Pos2, RawInput, Rect, vec2};
     use ugu_core::document::Document;
+    use ugu_platform::clock::Ticks;
+    use ugu_platform::pointer::{Buttons, PointerKind, PointerSample};
     use ugu_session::Tool;
-    use ugu_win::clock::Ticks;
-    use ugu_win::pointer::{Buttons, PointerKind, PointerSample};
 
     use super::*;
     use crate::input::{CanvasInput, Gesture};

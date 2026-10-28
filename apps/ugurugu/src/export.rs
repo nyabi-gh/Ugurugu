@@ -325,7 +325,7 @@ fn replace_unless(cancel: &AtomicBool) -> impl Fn(&Path, &Path) -> std::io::Resu
         if cancel.load(Ordering::Relaxed) {
             return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
         }
-        ugu_win::file::replace_file(written, target)
+        ugu_platform::file::replace_file(written, target)
     }
 }
 

@@ -21,6 +21,8 @@ use ugu_core::motion::frame_in_cycle;
 use ugu_core::ops::{MergeRefusal, Op};
 use ugu_core::selection::Combine;
 use ugu_core::store::StoreError;
+use ugu_platform::clock::{self, Ticks};
+use ugu_platform::pointer::{PointerKind, PointerSample};
 use ugu_render::compose::{Split, Stamp, composite};
 use ugu_render::document::{FULL_DETAIL, Purpose, TILE_EDGE, scaled_size, surface_estimate};
 use ugu_render::live::{LiveStroke, Spare};
@@ -31,8 +33,6 @@ use ugu_render::view::Placement;
 use ugu_session::{
     Brushes, Drag, FillError, InputPoint, Reads, Session, StrokeRefused, Tool, Tools,
 };
-use ugu_win::clock::Ticks;
-use ugu_win::pointer::{PointerKind, PointerSample};
 use vello_cpu::Pixmap;
 
 use crate::budget::Budget;
@@ -385,7 +385,7 @@ fn union(a: Option<PixelRect>, b: Option<PixelRect>) -> Option<PixelRect> {
 }
 
 fn millis(ticks: Ticks) -> f64 {
-    ticks.seconds_since(Ticks(0)) * 1000.0
+    clock::seconds_since(ticks, Ticks(0)) * 1000.0
 }
 
 impl Canvas {
@@ -3607,7 +3607,7 @@ mod tests {
             pressure: None,
             tilt: None,
             twist: None,
-            buttons: ugu_win::pointer::Buttons::empty(),
+            buttons: ugu_platform::pointer::Buttons::empty(),
             in_contact: true,
             inverted: false,
             time: Ticks(0),

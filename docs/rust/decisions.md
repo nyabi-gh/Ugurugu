@@ -14,7 +14,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 | C++ 엔진을 감싸지 않고 Rust로 다시 쓴다. 앱·엔진·UI에 C++·Qt·C ABI가 없다 | Qt·C++ | 사용자 결정 | port 1 |
 | 픽셀 결과·설정·클립보드·ABI 호환은 지키지 않고, 사용자가 보는 의미(지우개 순서, 프레임별 선택 변형, 병합, 모션)는 지킨다. 기능을 빼려면 범위를 명시적으로 바꾼다 | — | "레거시 제거"는 "기능 제거"가 아니다 | port 1·3 |
 | 2.2.13은 기준이지 정답이 아니다. 같게 옮기는 것이 기본이고, 측정으로 더 나은 것을 고르면 여기 적는다 | — | 알려진 결함(D13·D14·D18·D19)을 되풀이하지 않는다 | 사용자 결정(2026-10-07) |
-| 크레이트: `ugu-core`(문서·연산·history·모션, 외부 의존 없음), `ugu-render`(CPU 렌더러·wgpu 표시), `ugu-session`, `ugu-io`, `ugu-win`, `ugu-text`, 앱 `apps/ugurugu`, 측정 도구 `tools/ugu-doc` | — | core가 UI·GPU·Win32·직렬화를 모르게. 글꼴 의존은 `ugu-text`로 격리 | port 5.1, M4-13 |
+| 크레이트: `ugu-core`(문서·연산·history·모션, 외부 의존 없음), `ugu-render`(CPU 렌더러·wgpu 표시), `ugu-session`, `ugu-io`, `ugu-text`, OS 경계 셋(`ugu-platform-types`: 앱과 OS 구현이 함께 쓰는 타입, 의존 없음. `ugu-win`: Windows 구현, 타입 crate만 의존. `ugu-platform`: 타입을 다시 내보내고 대상 OS의 구현을 고름), 앱 `apps/ugurugu`, 측정 도구 `tools/ugu-doc`. 앱과 도구는 OS crate를 직접 쓰지 않고 `ugu-platform`만 쓴다 | `ugu-win`을 `cfg` 모듈로 나눈 `ugu-os` | core가 UI·GPU·Win32·직렬화를 모르게. 글꼴 의존은 `ugu-text`로 격리. 타입과 구현 고르기를 한 crate에 두면 그 crate와 `ugu-win`이 서로를 의존해 Cargo가 받지 않는다. 이름 바꾸기는 Windows 코드의 diff를 키운다 | port 5.1, M4-13, 2026-10-28 macOS·Linux 0단계 |
 | 성능 통과 조건은 "절대 목표 **그리고** 같은 PC·fixture·계측 지점의 2.2.13 값보다 나쁘지 않음"이다. 못 미치면 이유와 제품 판단을 기록한다 | — | 절대 목표만으로는 2.2.13보다 느려도 통과한다 | port 10.2 |
 | 절대 목표: GUI 이벤트 batch p95 4ms, 입력→present p95 33ms이고 2.2.13 이하, pen-up 점유 p95 8ms, 2048² 표준 문서 30fps 처리, 앱 소유 연산 취소 p95 100ms, 유휴·최소화 때 렌더·업로드 0회, 저장·내보내기 중 UI 스레드에서 직렬화·인코딩·전체 렌더 없음 | — | 계획의 출발 목표 | port 10.2 |
 | RAM 1GiB는 통과 기준이 아니라 참고값이다(2.2.13 대비 배수와 함께 기록) | — | 근거를 따로 정한 값이 아니었다 | M4 2절 사용자 결정 |

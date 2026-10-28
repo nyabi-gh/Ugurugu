@@ -8,10 +8,10 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use ugu_core::ops::Rgba8;
+use ugu_platform::clock::Ticks;
+use ugu_platform::pointer::{Buttons, PointerKind, PointerSample};
 use ugu_render::document::{DocumentRenderer, Purpose as RenderPurpose};
 use ugu_session::{Session, Tool};
-use ugu_win::clock::Ticks;
-use ugu_win::pointer::{Buttons, PointerKind, PointerSample};
 
 use super::*;
 use crate::cache::Rendered;

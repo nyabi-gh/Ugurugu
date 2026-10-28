@@ -358,7 +358,7 @@ pub fn write(folder: &Path, document: &Document, id: [u8; 16], meta: &Meta) -> R
     std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     let slot = meta.sequence % 2;
     remove(&meta_path(folder, slot)).map_err(|error| error.to_string())?;
-    let replace = &ugu_win::file::replace_file;
+    let replace = &ugu_platform::file::replace_file;
     ugu_io::save::save(document, id, &document_path(folder, slot), replace)
         .map_err(|error| error.to_string())?;
     let text = meta.to_json().to_string();

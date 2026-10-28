@@ -10,6 +10,7 @@ publish.workspace = true
 arboard.workspace = true
 clipboard-win.workspace = true
 tracing.workspace = true
+ugu-platform-types.workspace = true
 windows.workspace = true
 windows-sys.workspace = true
 

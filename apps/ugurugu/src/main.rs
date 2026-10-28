@@ -37,15 +37,19 @@ fn main() -> ExitCode {
         .on_after_install_fast_callback(|_| associate())
         .on_after_update_fast_callback(|_| associate())
         .on_before_uninstall_fast_callback(|_| {
-            ugu_win::association::unregister(ugu_win::association::CLASSES)
+            ugu_platform::association::unregister(ugu_platform::association::CLASSES)
         })
         .run();
     let document = app::document_in(std::env::args_os().skip(1));
     // One window, like Clip Studio Paint: a later start hands its document
     // to the window open, or just brings it to the front. The lock is held
     // until this start's own window can take later ones.
-    let start_lock = ugu_win::instance::StartLock::take(app::START_LOCK);
-    if ugu_win::instance::hand_over(app::WINDOW_CLASS, &app::instance_key(), document.as_deref()) {
+    let start_lock = ugu_platform::instance::StartLock::take(app::START_LOCK);
+    if ugu_platform::instance::hand_over(
+        app::WINDOW_CLASS,
+        &app::instance_key(),
+        document.as_deref(),
+    ) {
         return ExitCode::SUCCESS;
     }
     let _logging = logs::start();
@@ -63,20 +67,23 @@ fn main() -> ExitCode {
 /// Opens `.ugurugu` files with this executable.
 fn associate() {
     if let Ok(app) = std::env::current_exe() {
-        let _ =
-            ugu_win::association::register(&app, "Ugurugu document", ugu_win::association::CLASSES);
+        let _ = ugu_platform::association::register(
+            &app,
+            "Ugurugu document",
+            ugu_platform::association::CLASSES,
+        );
     }
 }
 
 fn run(
     document: Option<std::path::PathBuf>,
-    start_lock: Option<ugu_win::instance::StartLock>,
+    start_lock: Option<ugu_platform::instance::StartLock>,
 ) -> Result<(), String> {
     let early_gpu = render::open_gpu_early();
     let settings = settings::Store::load();
     i18n::choose(settings.get().language);
     theme::read_fonts_early();
-    ugu_win::pointer::enable_mouse_in_pointer()
+    ugu_platform::pointer::enable_mouse_in_pointer()
         .map_err(|error| format!("cannot route the mouse through pointer input: {error}"))?;
     let event_loop = EventLoop::<app::UiEvent>::with_user_event()
         .build()

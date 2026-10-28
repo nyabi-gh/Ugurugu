@@ -263,8 +263,8 @@ mod tests {
     use super::*;
     use crate::input::{CanvasInput, Gesture};
     use ugu_core::document::Document;
-    use ugu_win::clock::Ticks;
-    use ugu_win::pointer::{Buttons, PointerKind, PointerSample};
+    use ugu_platform::clock::Ticks;
+    use ugu_platform::pointer::{Buttons, PointerKind, PointerSample};
 
     fn canvas() -> Canvas {
         let mut canvas = Canvas::new(Document::new([320, 200]), |_| {});

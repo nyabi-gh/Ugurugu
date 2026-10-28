@@ -177,7 +177,7 @@ fn main() -> ExitCode {
 }
 
 fn save(document: &Document, path: &Path) -> Result<(), String> {
-    ugu_io::save::save(document, [0; 16], path, &ugu_win::file::replace_file)
+    ugu_io::save::save(document, [0; 16], path, &ugu_platform::file::replace_file)
         .map_err(|error| error.to_string())
 }
 

@@ -26,7 +26,7 @@ use ugu_session::Tools;
 
 use crate::layout::Layout;
 use crate::shortcuts::Shortcuts;
-use ugu_win::placement::Placement;
+use ugu_platform::placement::Placement;
 
 pub mod preset;
 mod tools;
@@ -392,7 +392,7 @@ pub fn save_folder(configured: Option<&Path>) -> Option<PathBuf> {
     configured
         .filter(|folder| folder.is_dir())
         .map(Path::to_path_buf)
-        .or_else(ugu_win::folder::documents)
+        .or_else(ugu_platform::folder::documents)
 }
 
 fn parse_rgb(text: &str) -> Option<[u8; 3]> {
@@ -411,7 +411,7 @@ pub fn default_path() -> Option<PathBuf> {
         return Some(PathBuf::from(path));
     }
     Some(
-        ugu_win::folder::roaming_app_data()?
+        ugu_platform::folder::roaming_app_data()?
             .join("Ugurugu")
             .join("3")
             .join("settings.json"),
@@ -456,7 +456,7 @@ fn read_text(path: &Path) -> std::io::Result<Option<String>> {
 /// Moves the file at `path` beside it, named for now, and says where.
 fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let stamp = ugu_win::clock::local_stamp().unwrap_or_else(|| "unknown".to_owned());
+    let stamp = ugu_platform::clock::local_stamp().unwrap_or_else(|| "unknown".to_owned());
     let mut kept = path.with_file_name(format!("{stem}-unreadable-{stamp}.json"));
     for again in 2.. {
         if !kept.exists() {
@@ -558,7 +558,7 @@ fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
         drop(file);
-        ugu_win::file::replace_file(&temporary, path)
+        ugu_platform::file::replace_file(&temporary, path)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -1139,9 +1139,9 @@ mod tests {
     fn a_missing_save_folder_falls_back_to_documents() {
         let folder = Folder::new("save-folder");
         let gone = folder.0.join("gone");
-        assert_eq!(save_folder(Some(&gone)), ugu_win::folder::documents());
+        assert_eq!(save_folder(Some(&gone)), ugu_platform::folder::documents());
         std::fs::create_dir_all(&gone).unwrap();
         assert_eq!(save_folder(Some(&gone)), Some(gone));
-        assert_eq!(save_folder(None), ugu_win::folder::documents());
+        assert_eq!(save_folder(None), ugu_platform::folder::documents());
     }
 }

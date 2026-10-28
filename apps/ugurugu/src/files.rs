@@ -26,8 +26,8 @@ use ugu_core::document::{Document, LayerId, limits};
 use ugu_core::history::StateId;
 use ugu_core::ops::{Affine, AssetId};
 use ugu_core::store::Asset;
+use ugu_platform::dialog::{Dialog, FileType};
 use ugu_session::TextStyle;
-use ugu_win::dialog::{Dialog, FileType};
 
 use crate::canvas::Canvas;
 use crate::export::{self, Animation, Exporting, Job as ExportJob, Outcome};
@@ -533,7 +533,7 @@ impl Files {
                         // After the answer: the shell can take long for a
                         // document on a network share.
                         if let Some(path) = recent {
-                            ugu_win::recent::add(&path);
+                            ugu_platform::recent::add(&path);
                         }
                     }
                 }
@@ -1248,7 +1248,7 @@ impl Files {
                     }
                     _ => {}
                 }
-                let path = ugu_win::dialog::pick(owner, &dialog).unwrap_or_else(|error| {
+                let path = ugu_platform::dialog::pick(owner, &dialog).unwrap_or_else(|error| {
                     tracing::error!(%error, "the file dialog failed");
                     None
                 });
@@ -2096,7 +2096,7 @@ impl Files {
             return;
         };
         let meta = &found.meta;
-        let time = ugu_win::clock::local_text(meta.time).unwrap_or_default();
+        let time = ugu_platform::clock::local_text(meta.time).unwrap_or_default();
         let [width, height] = meta.canvas;
         let mut choice = None;
         let modal = widgets::dialog(
@@ -2416,7 +2416,7 @@ fn run(job: Job) -> Option<FileEvent> {
         } => {
             remove_stale_temporaries(&path);
             let started = std::time::Instant::now();
-            let replace = &ugu_win::file::replace_file;
+            let replace = &ugu_platform::file::replace_file;
             let result = ugu_io::save::save_with(&document, id, Some(layer), &path, replace)
                 .map_err(|error| error.to_string());
             tracing::info!(
@@ -2437,12 +2437,15 @@ fn run(job: Job) -> Option<FileEvent> {
             FileEvent::ToolsRead(path, read)
         }
         Job::WriteTools { path, bytes } => {
-            let result =
-                ugu_io::save::replace_with(&path, &ugu_win::file::replace_file, |mut file, _| {
+            let result = ugu_io::save::replace_with(
+                &path,
+                &ugu_platform::file::replace_file,
+                |mut file, _| {
                     std::io::Write::write_all(&mut file, &bytes)?;
                     Ok(())
-                })
-                .map_err(|error| error.to_string());
+                },
+            )
+            .map_err(|error| error.to_string());
             FileEvent::ToolsWritten(path, result)
         }
         Job::Insert {
@@ -2954,7 +2957,7 @@ mod tests {
             [30, 20],
             ugu_io::image::Format::Png,
             &path,
-            &ugu_win::file::replace_file,
+            &ugu_platform::file::replace_file,
         )
         .unwrap();
         files.handle(
@@ -3004,7 +3007,7 @@ mod tests {
             [3, 2],
             ugu_io::image::Format::Png,
             &picture,
-            &ugu_win::file::replace_file,
+            &ugu_platform::file::replace_file,
         )
         .unwrap();
         files.drop_path(picture, &mut canvas);
@@ -3017,7 +3020,13 @@ mod tests {
 
         let drawing = folder.join("drawing.ugurugu");
         let document = ugu_core::document::Document::new([40, 30]);
-        ugu_io::save::save(&document, [5; 16], &drawing, &ugu_win::file::replace_file).unwrap();
+        ugu_io::save::save(
+            &document,
+            [5; 16],
+            &drawing,
+            &ugu_platform::file::replace_file,
+        )
+        .unwrap();
         files.drop_path(drawing.clone(), &mut canvas);
         files.handle(next(&events), &mut canvas);
         assert_eq!(canvas.file().path.as_deref(), Some(drawing.as_path()));
@@ -3053,7 +3062,7 @@ mod tests {
         let mut document = Files::new_canvas();
         document.frames = 12;
         let good = folder.join("good.ugurugu");
-        ugu_io::save::save(&document, [7; 16], &good, &ugu_win::file::replace_file).unwrap();
+        ugu_io::save::save(&document, [7; 16], &good, &ugu_platform::file::replace_file).unwrap();
         let airbrush = ugu_core::store::Stroke {
             points: vec![ugu_core::store::Point {
                 x: 4.0,
@@ -3082,7 +3091,7 @@ mod tests {
             &document,
             [8; 16],
             &airbrush_file,
-            &ugu_win::file::replace_file,
+            &ugu_platform::file::replace_file,
         )
         .unwrap();
 
@@ -3105,7 +3114,7 @@ mod tests {
         let folder = folder("twice");
         let path = folder.join("twice.ugurugu");
         let document = Files::new_canvas();
-        ugu_io::save::save(&document, [3; 16], &path, &ugu_win::file::replace_file).unwrap();
+        ugu_io::save::save(&document, [3; 16], &path, &ugu_platform::file::replace_file).unwrap();
         canvas.edit(|session| session.add_layer()).unwrap();
 
         files.open_path(path.clone(), &mut canvas);
@@ -3127,7 +3136,7 @@ mod tests {
             &Files::new_canvas(),
             [4; 16],
             &path,
-            &ugu_win::file::replace_file,
+            &ugu_platform::file::replace_file,
         )
         .unwrap();
         canvas.edit(Session::add_layer).unwrap();
@@ -3508,7 +3517,8 @@ mod late;
 
 /// Removes what a window killed while writing `path` left beside it.
 pub fn remove_stale_temporaries(path: &Path) {
-    let removed = ugu_win::file::remove_stale_temporaries(ugu_io::save::others_temporaries(path));
+    let removed =
+        ugu_platform::file::remove_stale_temporaries(ugu_io::save::others_temporaries(path));
     if removed > 0 {
         tracing::info!(removed, ?path, "temporary files of ended processes removed");
     }

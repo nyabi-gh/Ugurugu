@@ -41,6 +41,8 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 unic-langid = "=0.9.6"
 ugu-core = { path = "crates/ugu-core" }
 ugu-io = { path = "crates/ugu-io" }
+ugu-platform = { path = "crates/ugu-platform" }
+ugu-platform-types = { path = "crates/ugu-platform-types" }
 ugu-render = { path = "crates/ugu-render" }
 ugu-session = { path = "crates/ugu-session" }
 ugu-text = { path = "crates/ugu-text" }

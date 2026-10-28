@@ -15,7 +15,7 @@ use ugu_core::clip::Clip;
 use ugu_core::ops::AssetId;
 use ugu_core::store::Asset;
 
-use ugu_win::clipboard::{Encoded, ReadError};
+use ugu_platform::clipboard::{Encoded, ReadError};
 
 use crate::canvas::{Canvas, CopiedPixels};
 use crate::i18n::tr;
@@ -86,7 +86,7 @@ impl Clipboard {
         let holds_ours = self.writing > 0
             || self
                 .ours
-                .is_some_and(|ours| ours == ugu_win::clipboard::sequence());
+                .is_some_and(|ours| ours == ugu_platform::clipboard::sequence());
         match &self.clip {
             Some(clip) if holds_ours => canvas.paste(clip),
             _ => {
@@ -104,7 +104,7 @@ impl Clipboard {
                 let sequence = result.unwrap_or_else(|error| {
                     tracing::warn!(%error, "the copy could not be put on the clipboard");
                     canvas.set_notice(tr("copy-not-shared").to_owned());
-                    ugu_win::clipboard::sequence()
+                    ugu_platform::clipboard::sequence()
                 });
                 if self.writing == 0 {
                     self.ours = Some(sequence);
@@ -145,7 +145,7 @@ fn run(job: Job) -> ClipboardEvent {
             let image = pixels.image();
             let size = image.size;
             let drawn = started.elapsed();
-            let result = ugu_win::clipboard::write_image(image);
+            let result = ugu_platform::clipboard::write_image(image);
             tracing::debug!(
                 drawn_ms = drawn.as_secs_f64() * 1000.0,
                 ms = started.elapsed().as_secs_f64() * 1000.0,
@@ -156,7 +156,7 @@ fn run(job: Job) -> ClipboardEvent {
         }
         Job::Read { fit, generation } => {
             let limit = usize::try_from(ugu_io::import::ALLOCATION).unwrap_or(usize::MAX);
-            let result = ugu_win::clipboard::read_encoded(limit)
+            let result = ugu_platform::clipboard::read_encoded(limit)
                 .map_err(|error| match error {
                     ReadError::TooLarge => ugu_io::import::ImportError::TooLarge.to_string(),
                     ReadError::System(reason) => reason,
