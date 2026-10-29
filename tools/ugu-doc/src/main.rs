@@ -1123,10 +1123,28 @@ fn insert(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// NaN where the OS is not supported yet.
-#[cfg(not(windows))]
+/// The largest resident set: the working set's nearest counterpart.
+#[cfg(unix)]
 fn peak_working_set_mib() -> f64 {
-    f64::NAN
+    peak_resident_mib()
+}
+
+/// The largest resident set so far: `ru_maxrss`, bytes on macOS and KiB on
+/// Linux.
+#[cfg(unix)]
+fn peak_resident_mib() -> f64 {
+    // SAFETY: `getrusage` fills the zeroed struct for this process.
+    let usage = unsafe {
+        let mut usage = std::mem::zeroed::<libc::rusage>();
+        libc::getrusage(libc::RUSAGE_SELF, &mut usage);
+        usage
+    };
+    let unit = if cfg!(target_os = "macos") {
+        1.0
+    } else {
+        1024.0
+    };
+    usage.ru_maxrss as f64 * unit / (1024.0 * 1024.0)
 }
 
 #[cfg(windows)]

@@ -3313,6 +3313,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "render-bench"
 version = "3.4.3"
 dependencies = [
+ "libc",
  "pollster",
  "tiny-skia",
  "ugu-render",
@@ -4148,6 +4149,7 @@ version = "3.4.3"
 name = "ugu-doc"
 version = "3.4.3"
 dependencies = [
+ "libc",
  "png",
  "sha2",
  "ugu-core",
