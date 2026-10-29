@@ -1942,3 +1942,19 @@ release 첫 실행에서 재생 프레임이 보인 간격은 중앙값 40ms(25f
 C는 NEON보다 ①~③이 4~8% 길고, ④는 4% 짧고, ⑤는 같다(round 범위가 겹친다). B는 ①~③·⑤가 30~45% 길다. 지금의 NEON으로 앞서 잰 2 round(프레임 시간이 이 표와 맞는 때)의 최대 메모리(`getrusage`의 `ru_maxrss`, 프레임을 다 그린 뒤): ① 46, ② 526, ③ 486~497, ④ 154~179, ⑤ 1,144~1,210MiB.
 
 **결론:** FMA를 빼면 ARM이 스칼라·x86 SSE4.2와 바이트가 같다. 그러니 97절의 차이는 NEON `mul_add`의 FMA다(97절의 **가설**을 앱 렌더러로 확인). x86 판이 Rosetta이고 macOS의 libm을 쓰므로, Windows PC의 digest와 같은지는 아직 모른다(backlog B3-71). 고르는 일은 [plan-cross-platform.md](plan-cross-platform.md) 6절과 9절이다.
+
+## 102. zip 9.0.5와 헤더 일치 검사의 열기 시간 (2026-10-29)
+
+**질문:** ugu-io를 zip 8.6.0에서 9.0.5로 올리고 열 때 `validate_header_consistency`를 부르면(decisions.md 11절) 열기가 얼마나 느려지나.
+
+**방법:** Apple M4, 24GiB, macOS 27.2, release. 판 셋: main `2377b8e`(zip 8.6.0), 바꾼 브랜치(zip 9.0.5 + 검사), 브랜치에서 검사 한 줄만 뺀 빌드(zip 9.0.5). 파일은 main의 `ugu-doc fixture 4`·`5`(항목 4·5개)와, 개수 검사를 넘는 가장 많은 항목인 60,002개의 빈 `images/<64 hex>.png`만 있는 ZIP(Python `zipfile`, stored, manifest 없음). fixture는 `ugu-doc bench <file> 30`의 open p50을 판을 번갈아 2 round, 큰 ZIP은 `ugu-doc readmem`을 3 round(검사 뺀 빌드는 2).
+
+**결과:**
+
+| 파일 | main(zip 8.6.0) | zip 9.0.5, 검사 없음 | zip 9.0.5 + 검사 |
+|---|---|---|---|
+| fixture ④ open p50 | 21.6~22.7ms | 22.8ms | 23.4~24.4ms |
+| fixture ⑤ open p50 | 7.8~8.1ms | 8.4~8.8ms | 8.5~8.7ms |
+| 항목 60,002개, 거절까지 | 139~146ms, 최대 62MiB | 182~190ms, 38MiB | 240~243ms, 39MiB |
+
+fixture에서 늘어난 0.6~1.5ms는 검사 없는 zip 9.0.5에서 이미 나오고, 검사가 더하는 몫은 round 사이 차이보다 작다. zip 9가 왜 느린지는 재지 않았다(가설: 9.0의 중앙 디렉터리 처리 변경). 항목 60,002개에서 검사는 로컬 헤더를 하나씩 읽어 약 55ms를 더하고, 그런 파일은 앱이 쓰지 않는다(앱은 이미지 하나에 항목 하나).

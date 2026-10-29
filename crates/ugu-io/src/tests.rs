@@ -257,7 +257,14 @@ fn entries_come_in_a_fixed_order_with_only_used_data() {
     let bytes = written(&sample());
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let names: Vec<_> = (0..archive.len())
-        .map(|index| archive.by_index(index).unwrap().name().to_owned())
+        .map(|index| {
+            archive
+                .by_index(index)
+                .unwrap()
+                .name()
+                .unwrap()
+                .into_owned()
+        })
         .collect();
     let image = sample_image_entry();
     assert_eq!(names, [MANIFEST, DOCUMENT, STROKES, MASKS, image.as_str()]);
@@ -333,7 +340,7 @@ fn entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
             let mut entry = archive.by_index(index).unwrap();
             let mut data = Vec::new();
             entry.read_to_end(&mut data).unwrap();
-            (entry.name().to_owned(), data)
+            (entry.name().unwrap().into_owned(), data)
         })
         .collect()
 }
@@ -441,6 +448,59 @@ fn missing_extra_and_unknown_entries_are_refused() {
         read_bytes(archive(&all)),
         Err(ReadError::Corrupt(_))
     ));
+}
+
+/// `bytes` with each `from` that `pick` keeps, counted from 0, made
+/// `to`; the two are the same length, so every offset still holds.
+fn renamed(bytes: &[u8], from: &str, to: &str, pick: impl Fn(usize) -> bool) -> Vec<u8> {
+    assert_eq!(from.len(), to.len());
+    let mut bytes = bytes.to_vec();
+    let at: Vec<_> = bytes
+        .windows(from.len())
+        .enumerate()
+        .filter(|(_, window)| *window == from.as_bytes())
+        .map(|(at, _)| at)
+        .collect();
+    assert!(!at.is_empty(), "{from} not found");
+    for (count, at) in at.into_iter().enumerate() {
+        if pick(count) {
+            bytes[at..at + to.len()].copy_from_slice(to.as_bytes());
+        }
+    }
+    bytes
+}
+
+#[test]
+fn an_entry_named_twice_is_refused() {
+    let mut all = entries(&written(&sample()));
+    let (_, manifest) = all.iter().find(|(name, _)| name == MANIFEST).unwrap();
+    let other = String::from_utf8(manifest.clone())
+        .unwrap()
+        .replace(&hex(&ID), &hex(&[0xcd; 16]))
+        .into_bytes();
+    all.push(("manifest.jsoX".to_owned(), other));
+    let twice = renamed(&archive(&all), "manifest.jsoX", MANIFEST, |_| true);
+    let read = read_bytes(twice);
+    assert!(
+        matches!(read, Err(ReadError::Corrupt(_))),
+        "{:?}",
+        read.map(|(_, id)| hex(&id))
+    );
+}
+
+#[test]
+fn an_entry_whose_local_header_names_another_is_refused() {
+    // The local header comes first, so a reader that walks the file
+    // sees an unknown entry where the directory lists the manifest.
+    let cloaked = renamed(&written(&sample()), MANIFEST, "manifest.jsoX", |count| {
+        count == 0
+    });
+    let read = read_bytes(cloaked);
+    assert!(
+        matches!(read, Err(ReadError::Corrupt(_))),
+        "{:?}",
+        read.map(|(_, id)| hex(&id))
+    );
 }
 
 #[test]

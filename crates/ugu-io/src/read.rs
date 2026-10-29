@@ -168,6 +168,7 @@ pub fn read_with<R: Read + Seek>(
     }
     let mut entries = Entries {
         archive,
+        listed: Vec::new(),
         names: HashSet::new(),
         total: 0,
     };
@@ -284,6 +285,8 @@ fn read_up_to(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize
 
 struct Entries<R> {
     archive: ZipArchive<R>,
+    /// Names in the central directory, in its order.
+    listed: Vec<String>,
     /// Names read so far.
     names: HashSet<String>,
     /// Bytes inflated so far.
@@ -292,16 +295,15 @@ struct Entries<R> {
 
 impl<R: Read + Seek> Entries<R> {
     fn check_names(&mut self) -> Result<(), ReadError> {
-        let mut seen = HashSet::new();
         for index in 0..self.archive.len() {
             let entry = self
                 .archive
                 .by_index_raw(index)
                 .map_err(|error| corrupt(error.to_string()))?;
-            let name = entry.name().to_owned();
-            if !seen.insert(name.clone()) {
-                return Err(corrupt(format!("{name} appears twice")));
-            }
+            let name = entry
+                .name()
+                .map_err(|error| corrupt(error.to_string()))?
+                .into_owned();
             if entry.is_dir() || entry.encrypted() || !known_name(&name) {
                 return Err(corrupt(format!("unexpected entry {name}")));
             }
@@ -311,8 +313,14 @@ impl<R: Read + Seek> Entries<R> {
             ) {
                 return Err(corrupt(format!("{name} uses an unsupported compression")));
             }
+            self.listed.push(name);
         }
-        Ok(())
+        // Entries are found through the central directory alone, so a name
+        // listed twice or a local header that says otherwise would show
+        // other tools a different document (GHSA-m665-v7pm-7grj).
+        self.archive
+            .validate_header_consistency()
+            .map_err(|error| corrupt(error.to_string()))
     }
 
     /// Reads an entry, stopping at `limit` bytes of actual output.
@@ -337,8 +345,9 @@ impl<R: Read + Seek> Entries<R> {
     }
 
     fn unread(&self) -> impl Iterator<Item = &str> {
-        self.archive
-            .file_names()
+        self.listed
+            .iter()
+            .map(String::as_str)
             .filter(|name| !self.names.contains(*name))
     }
 
