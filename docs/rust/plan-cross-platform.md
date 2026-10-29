@@ -76,7 +76,7 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 - **단축키**(`shortcuts.rs`): `ctrl || command`(macOS에서는 ⌘와 Control)를 한 주 수정자로 보고, 저장은 OS와 무관하게 "Ctrl+", 메뉴 표시는 macOS에서 ⌘ 기호로 한다. Space 끌기 확대도 같은 주 수정자다. `clipboard_chord`는 egui-winit의 OS별 판정을 따른다(decisions.md 9절, 2026-10-28).
 - **메뉴**: 처음에는 지금의 창 안 메뉴를 그대로 쓴다. macOS 메뉴 막대(`muda`)는 macOS 전용 의존으로 나중에 본다(Linux 쪽이 GTK를 끌어온다). winit이 만드는 기본 메뉴는 3.4절.
 - **파일 끌어놓기**: 앱은 `WindowEvent::DroppedFile`로 연다(`render.rs`). winit 0.30.13은 이 이벤트를 Windows·macOS·X11에서만 내고 Wayland에서는 내지 않는다. Wayland는 `wl_data_device`로 직접 받거나, 안 되는 기능으로 안내한다(3단계).
-- **도구**: `ugu-doc`·`render-bench`의 최대 메모리는 `getrusage(RUSAGE_SELF).ru_maxrss`(Linux KiB, macOS 바이트). `latency-probe`는 PresentMon·`SendInput`에 기대므로 Windows에만 빌드한다.
+- **도구**: `ugu-doc`·`render-bench`의 최대 메모리는 `getrusage(RUSAGE_SELF).ru_maxrss`(Linux KiB, macOS 바이트, 2026-10-29). `render-bench`의 최대 private 바이트는 Unix에 맞는 값이 없어 NaN이다. `latency-probe`는 PresentMon·`SendInput`에 기대므로 Windows에만 빌드한다.
 
 ### 3.4 macOS의 메인 스레드와 앱 delegate
 
@@ -134,6 +134,8 @@ x86을 SSE4.2로 고정한 이유도 FMA다(`raster::document_level`: AVX2는 mu
 
 정하기 전에 앱 렌더러로 다시 잰다: 1단계에서 `ugu-doc digest`를 fixture ①~⑤·회귀 fixture로 NEON·스칼라·C의 판으로 돌려 Windows PC의 digest(`digests.txt`)와 비교하고, `ugu-doc render <file> 8`로 시간을 비교한다. C의 비교가 FMA 가설을 바로 확인한다. `f64` `sin`·`cos`·`hypot`이 OS의 libm마다 다를 수 있다는 점(backlog B3-71)도 그때 같이 본다. 그쪽이 다르면 B·C를 골라도 OS 사이 바이트가 같지 않다.
 
+잰 것(evidence.md 101절, Apple M4): C는 fixture ①~⑤에서 B·x86 SSE4.2(Rosetta)와 digest가 같고, 지금의 NEON은 ③~⑤에서 다르다. 그래서 차이는 FMA다. `render 8`의 p50은 NEON 대비 C가 −4~+8%, B가 +6~45%다. 남은 비교는 Windows PC의 digest다: 같은 `ugu-doc`로 `fixture <n>`의 파일과 `digest <file> 8`을 101절의 값과 맞춰 본다(파일이 다르면 만드는 쪽의 libm부터 다르다).
+
 ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 비교하는 것이 없다: `levels()`에 aarch64 분기가 없어 baseline 하나만 돈다. ARM에서 문서를 그리는 수준은 어느 안이든 하나뿐이라 그것이 맞지만, ARM의 바이트는 회귀 digest만 지킨다.
 
 ## 7. 단계
@@ -186,7 +188,9 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
-- 배포 대상 macOS 14, 측정(1단계 목록).
+- 2.2.13 macOS 판과 같은 방식의 획 지연(측정 도구 필요), 6절의 Windows PC digest 비교와 SIMD 결정(9절).
+
+배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 
 단축키(`platform/mac-shortcuts`): macOS에서 ⌘와 Control이 주 수정자이고 메뉴는 ⇧⌘S처럼 적는다. 설정 파일의 "Ctrl+…"는 그대로다. 클립보드 키를 egui-winit과 같게 판정해 macOS의 ⌘C·X·V가 선택에 동작하고, macOS·Linux의 Shift+Delete·Ctrl/Shift+Insert가 두 번 돌지 않는다(decisions.md 9절). 시험으로 확인했고, 화면의 메뉴 표시와 ⌘ 키 동작은 사용자 확인이 남았다.
 
@@ -226,6 +230,6 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ## 9. 남은 사용자 결정
 
-1. **ARM의 SIMD**(6절): A(NEON, 추천), B(스칼라), C(FMA를 뺀 NEON, 실험이 맞을 때). 1단계의 앱 측정 뒤 정한다.
+1. **ARM의 SIMD**(6절): A(NEON), B(스칼라), C(FMA를 뺀 NEON). 앱 측정(evidence.md 101절)에서 C는 x86과 바이트가 같고 NEON과 속도 차이가 −4~+8%다. C를 고르면 `fearless_simd`의 사본을 유지하거나 상류에 선택 기능을 요청해야 한다. Windows PC의 digest 비교 뒤 정한다.
 2. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
 3. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.

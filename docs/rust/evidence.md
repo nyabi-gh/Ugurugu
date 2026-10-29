@@ -1910,3 +1910,35 @@ release 첫 실행에서 재생 프레임이 보인 간격은 중앙값 40ms(25f
 창 호출 한 번이 1ms를 넘은 프레임은 25개, 0.5ms를 넘은 것은 36개였다. 대부분 사용자가 창을 끌고 크기를 바꾸던 약 25초 사이에 몰렸다(어느 조작인지는 나누어 기록하지 않았다). 같은 실행의 입력→present 반환은 p50 17.33ms, p95 26.69ms, 최대 35.37ms(프레임 464개). 창을 닫자 render 스레드가 끝나고 창이 닫혔다(서로 기다리지 않음).
 
 **결론:** 왕복은 보통 수십 µs이고, 메인 스레드가 바쁠 때도 한 프레임(8~17ms) 안이다. egui-winit `State`는 render 스레드에 둔다. 메인 스레드가 render 스레드를 기다리는 곳은 macOS 앱 코드에 없다: 창 닫기는 render 스레드가 끝난 뒤 `join`하고, 메인 스레드가 기다리는 세션 끝은 Windows에만 있다.
+
+## 101. macOS에서 fixture 렌더 시간과 ARM의 SIMD 판 비교 (2026-10-29)
+
+**질문:** 앱 렌더러로 fixture ①~⑤를 그리면 Apple Silicon에서 얼마나 걸리나(plan-cross-platform 1단계 측정). 97절의 시험 장면처럼 NEON은 x86과 바이트가 다르고, 그 차이는 FMA 때문인가(6절의 A·B·C).
+
+**방법:** Apple M4(성능 코어 4 + 효율 코어 6), 24GiB, macOS 27.2, release, `MACOSX_DEPLOYMENT_TARGET=14.0`, main `683a0b6`에서. fixture는 이 빌드의 `ugu-doc fixture <n>`으로 만든 파일 하나씩을 모든 판이 함께 쓴다. 판 넷: 지금의 NEON, B(스칼라: `fearless_simd`에 `force_support_fallback`을 켜고 `document_level`이 aarch64에서 `Level::fallback()`), C(FMA를 뺀 NEON: `fearless_simd` 0.7.0의 `generated/neon.rs`에서 `vfmaq`·`vfmsq` 네 곳을 곱한 뒤 더하기·빼기로 바꾼 사본을 `[patch.crates-io]`), x86(`x86_64-apple-darwin` 빌드를 Rosetta 2로, SSE4.2). B·C는 저장소 밖 작업 트리이고 커밋하지 않았다. digest는 `ugu-doc digest <file> 8`(크기 1·½·¼의 모든 프레임 SHA-256), 시간은 `ugu-doc render <file> 8`의 60프레임 p50을 세 판을 번갈아 5 round. 처음 세 round는 다른 일로 바쁜 때여서(지금의 NEON도 앞선 측정의 약 2배) 버리고, 5 round를 다시 쟀다.
+
+**결과(digest, 앞 16자리):**
+
+| fixture | NEON | C(FMA 뺀 NEON) | B(스칼라) | x86 SSE4.2(Rosetta) |
+|---|---|---|---|---|
+| ① | `ccd396597b042136` | 같음 | 같음 | 같음 |
+| ② | `9d90bb30f920379c` | 같음 | 같음 | 같음 |
+| ③ | `0b6890c2f1f6ab02` | `e06d18d0f05f55f3` | `e06d18d0f05f55f3` | `e06d18d0f05f55f3` |
+| ④ | `4f08897ad113c472` | `1948db8835fbc089` | `1948db8835fbc089` | `1948db8835fbc089` |
+| ⑤ | `74e18886e01bf57b` | `10d33f3b71ba26e0` | `10d33f3b71ba26e0` | `10d33f3b71ba26e0` |
+
+회귀 fixture(`crates/ugu-render/tests/regression/digests.txt`, Windows PC에서 고정)는 지금의 NEON으로도 macOS 시험에서 그대로 통과한다.
+
+**결과(시간, 8스레드 프레임 p50 ms, 5 round의 중앙값과 범위):**
+
+| fixture | NEON | C | B |
+|---|---|---|---|
+| ① | 2.0 (2.0~2.3) | 2.1 (2.1~2.3) | 2.6 (2.6~2.7) |
+| ② | 53.4 (51.3~55.2) | 55.6 (52.9~65.8) | 74.7 (71.6~78.1) |
+| ③ | 28.8 (27.9~31.5) | 31.0 (29.3~32.7) | 40.9 (37.7~42.9) |
+| ④ | 20.6 (19.4~21.1) | 19.8 (19.5~20.9) | 21.8 (20.5~22.6) |
+| ⑤ | 105.4 (99.1~108.7) | 105.8 (100.5~107.7) | 153.2 (151.7~158.1) |
+
+C는 NEON보다 ①~③이 4~8% 길고, ④는 4% 짧고, ⑤는 같다(round 범위가 겹친다). B는 ①~③·⑤가 30~45% 길다. 지금의 NEON으로 앞서 잰 2 round(프레임 시간이 이 표와 맞는 때)의 최대 메모리(`getrusage`의 `ru_maxrss`, 프레임을 다 그린 뒤): ① 46, ② 526, ③ 486~497, ④ 154~179, ⑤ 1,144~1,210MiB.
+
+**결론:** FMA를 빼면 ARM이 스칼라·x86 SSE4.2와 바이트가 같다. 그러니 97절의 차이는 NEON `mul_add`의 FMA다(97절의 **가설**을 앱 렌더러로 확인). x86 판이 Rosetta이고 macOS의 libm을 쓰므로, Windows PC의 digest와 같은지는 아직 모른다(backlog B3-71). 고르는 일은 [plan-cross-platform.md](plan-cross-platform.md) 6절과 9절이다.
