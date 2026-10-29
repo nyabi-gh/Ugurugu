@@ -3,3 +3,8 @@
 # administrator rights (2.2.13 installed vcredist through Velopack).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# The oldest macOS Ugurugu runs on (decisions.md section 10). rustc and the
+# cc builds of C dependencies both read it.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"
