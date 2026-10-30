@@ -16,5 +16,18 @@ windows = { version = "=0.62.2", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2.workspace = true
+dispatch2.workspace = true
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["libc", "objc2-core-foundation", "NSGraphics", "NSRunningApplication", "NSScreen"] }
+objc2-application-services = { workspace = true, features = ["libc", "HIServices", "AXError", "AXUIElement", "AXValue"] }
+objc2-core-foundation = { workspace = true, features = ["CFCGTypes", "CFString"] }
+objc2-core-graphics = { workspace = true, features = ["CGEvent", "CGEventTypes", "CGRemoteOperation", "CGWindow"] }
+objc2-core-media = { workspace = true, features = ["objc2-core-video", "CMSampleBuffer", "CMTime"] }
+objc2-core-video = { workspace = true, features = ["bitflags", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSEnumerator", "NSError", "NSString", "NSValue"] }
+objc2-screen-capture-kit = { workspace = true, features = ["block2", "dispatch2", "libc", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media", "SCShareableContent", "SCStream"] }
+
 [lints]
 workspace = true

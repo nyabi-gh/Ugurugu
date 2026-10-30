@@ -36,6 +36,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
+use crate::stats::{Lcg, summary};
+
 const SESSION: &str = "UguruguLatencyProbe";
 
 const USAGE: &str = "usage: latency-probe --exe <app.exe> --presentmon <PresentMon.exe> \
@@ -239,18 +241,6 @@ fn send_key(virtual_key: u8) {
     };
 }
 
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_unit(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 11) as f64 / (1u64 << 53) as f64
-    }
-}
-
 /// One present of the target as PresentMon reports it.
 struct Frame {
     swap_chain: String,
@@ -300,23 +290,6 @@ fn read_frames(csv: &PathBuf, pid: u32) -> Result<Vec<Frame>, String> {
     }
     frames.sort_by_key(|frame| frame.present_qpc);
     Ok(frames)
-}
-
-fn summary(name: &str, mut values: Vec<f64>) {
-    if values.is_empty() {
-        println!("{name}: no samples");
-        return;
-    }
-    values.sort_by(f64::total_cmp);
-    let rank = |fraction: f64| values[(fraction * (values.len() - 1) as f64).round() as usize];
-    println!(
-        "{name}: n={} p50={:.2}ms p95={:.2}ms max={:.2}ms min={:.2}ms",
-        values.len(),
-        rank(0.5),
-        rank(0.95),
-        values[values.len() - 1],
-        values[0],
-    );
 }
 
 fn run(options: &Options) -> Result<(), String> {
