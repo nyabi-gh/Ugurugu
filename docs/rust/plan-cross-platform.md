@@ -76,7 +76,7 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 - **단축키**(`shortcuts.rs`): `ctrl || command`(macOS에서는 ⌘와 Control)를 한 주 수정자로 보고, 저장은 OS와 무관하게 "Ctrl+", 메뉴 표시는 macOS에서 ⌘ 기호로 한다. Space 끌기 확대도 같은 주 수정자다. `clipboard_chord`는 egui-winit의 OS별 판정을 따른다(decisions.md 9절, 2026-10-28).
 - **메뉴**: 처음에는 지금의 창 안 메뉴를 그대로 쓴다. macOS 메뉴 막대(`muda`)는 macOS 전용 의존으로 나중에 본다(Linux 쪽이 GTK를 끌어온다). winit이 만드는 기본 메뉴는 3.4절.
 - **파일 끌어놓기**: 앱은 `WindowEvent::DroppedFile`로 연다(`render.rs`). winit 0.30.13은 이 이벤트를 Windows·macOS·X11에서만 내고 Wayland에서는 내지 않는다. Wayland는 `wl_data_device`로 직접 받거나, 안 되는 기능으로 안내한다(3단계).
-- **도구**: `ugu-doc`·`render-bench`의 최대 메모리는 `getrusage(RUSAGE_SELF).ru_maxrss`(Linux KiB, macOS 바이트, 2026-10-29). `render-bench`의 최대 private 바이트는 Unix에 맞는 값이 없어 NaN이다. `latency-probe`는 PresentMon·`SendInput`에 기대므로 Windows에만 빌드한다.
+- **도구**: `ugu-doc`·`render-bench`의 최대 메모리는 `getrusage(RUSAGE_SELF).ru_maxrss`(Linux KiB, macOS 바이트, 2026-10-29). `render-bench`의 최대 private 바이트는 Unix에 맞는 값이 없어 NaN이다. `latency-probe`는 Windows에서 PresentMon·`SendInput`, macOS에서 ScreenCaptureKit·`CGEventPost`로 재고(evidence.md 103절), 다른 OS에서는 안내만 낸다.
 
 ### 3.4 macOS의 메인 스레드와 앱 delegate
 
@@ -188,11 +188,13 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
-- 2.2.13 macOS 판과 같은 방식의 획 지연(측정 도구 필요), 6절의 Windows PC digest 비교와 SIMD 결정(9절).
+- 6절의 Windows PC digest 비교와 SIMD 결정(9절).
 
 배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 
-단축키(`platform/mac-shortcuts`): macOS에서 ⌘와 Control이 주 수정자이고 메뉴는 ⇧⌘S처럼 적는다. 설정 파일의 "Ctrl+…"는 그대로다. 클립보드 키를 egui-winit과 같게 판정해 macOS의 ⌘C·X·V가 선택에 동작하고, macOS·Linux의 Shift+Delete·Ctrl/Shift+Insert가 두 번 돌지 않는다(decisions.md 9절). 시험으로 확인했고, 화면의 메뉴 표시와 ⌘ 키 동작은 사용자 확인이 남았다.
+단축키(`platform/mac-shortcuts`): macOS에서 ⌘와 Control이 주 수정자이고 메뉴는 ⇧⌘S처럼 적는다. 설정 파일의 "Ctrl+…"는 그대로다. 클립보드 키를 egui-winit과 같게 판정해 macOS의 ⌘C·X·V가 선택에 동작하고, macOS·Linux의 Shift+Delete·Ctrl/Shift+Insert가 두 번 돌지 않는다(decisions.md 9절). 시험으로 확인했고, 화면의 메뉴 표시와 ⌘ 키 동작은 사용자가 확인했다.
+
+획 지연(`platform/mac-measure`): `latency-probe`의 macOS 판으로 2.2.13 macOS 판과 번갈아 쟀다. 3.x p50 14.3ms, 2.2.13 23.4ms(evidence.md 103절).
 
 ### 2단계: macOS 펜과 OS 연동
 
