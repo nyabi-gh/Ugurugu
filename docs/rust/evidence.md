@@ -1239,7 +1239,7 @@ WARP는 렌더가 입력 간격을 못 따라가 20~32%의 칸이 다음 프레�
 
 **최근 문서(Jump List):** Windows Sandbox 수용 시험에 "Recent documents on the taskbar"를 더했다. 설치한 앱을 실행 인자로 연 `ugurugu-recent-probe.ugurugu`(셸을 거치지 않음)가 작업 표시줄 단추의 Jump List "최근 항목"에 보이는지 UI Automation과 화면으로 본다. 이 변경의 빌드는 항목이 보였다(앞 단계에서 탐색기로 연 "새 그림"과 함께). 고치기 전 빌드로는 돌리지 않았다. 셸이 실행 인자의 파일을 넣지 않는다는 것은 가설이다.
 
-**가려진 창:** `gui.ps1` "CPU while the window is hidden": 획 하나가 우글거리는 동안 앱 프로세스의 CPU 시간을 5초씩 쟀다. 보일 때 31ms, 최소화 16ms, 최대화한 다른 창 아래 31ms. Sandbox는 vGPU가 꺼져 WARP의 그리기도 앱 CPU에 든다. 실제 GPU의 전력은 재지 않았다.
+**가려진 창:** `gui.ps1` "CPU while the window is hidden": 획 하나가 우글거리는 동안 앱 프로세스의 CPU 시간을 5초씩 쟀다. 보일 때 31ms, 최소화 16ms, 최대화한 다른 창 아래 31ms. `Process.TotalProcessorTime`이 15.6ms 단위로 늘어 이 값은 0~2 tick이다. Sandbox에서도 앱은 호스트 GPU를 연다(32절, 104절). 실제 GPU의 전력은 재지 않았다.
 
 **ZIP 중앙 디렉터리:** `ugu-doc cd-only <entries>`로 내용 없이 중앙 디렉터리만 있는 ZIP64를 만들고 `ugu-doc readmem`으로 읽었다.
 
@@ -1941,7 +1941,7 @@ release 첫 실행에서 재생 프레임이 보인 간격은 중앙값 40ms(25f
 
 C는 NEON보다 ①~③이 4~8% 길고, ④는 4% 짧고, ⑤는 같다(round 범위가 겹친다). B는 ①~③·⑤가 30~45% 길다. 지금의 NEON으로 앞서 잰 2 round(프레임 시간이 이 표와 맞는 때)의 최대 메모리(`getrusage`의 `ru_maxrss`, 프레임을 다 그린 뒤): ① 46, ② 526, ③ 486~497, ④ 154~179, ⑤ 1,144~1,210MiB.
 
-**결론:** FMA를 빼면 ARM이 스칼라·x86 SSE4.2와 바이트가 같다. 그러니 97절의 차이는 NEON `mul_add`의 FMA다(97절의 **가설**을 앱 렌더러로 확인). x86 판이 Rosetta이고 macOS의 libm을 쓰므로, Windows PC의 digest와 같은지는 아직 모른다(backlog B3-71). 고르는 일은 [plan-cross-platform.md](plan-cross-platform.md) 6절과 9절이다.
+**결론:** FMA를 빼면 ARM이 스칼라·x86 SSE4.2와 바이트가 같다. 그러니 97절의 차이는 NEON `mul_add`의 FMA다(97절의 **가설**을 앱 렌더러로 확인). x86 판은 Rosetta이고 macOS의 libm을 쓴다. Windows PC의 digest도 같았다(104절). 고른 안(C)은 [plan-cross-platform.md](plan-cross-platform.md) 6절이다.
 
 ## 102. zip 9.0.5와 헤더 일치 검사의 열기 시간 (2026-10-29)
 
@@ -1986,3 +1986,38 @@ fixture에서 늘어난 0.6~1.5ms는 검사 없는 zip 9.0.5에서 이미 나오
 프로브가 프레임을 받은 시각은 표시 시각보다 0.4~0.7ms(p50) 늦다.
 
 **결론:** macOS에서 3.x가 2.2.13보다 p50 약 9ms, p95 약 5ms 짧다. 표시 시각의 정의가 Windows(scanout 시작, 1절)와 다르므로(**가설**: window server가 그 프레임을 합성해 내보낸 시각) 이 값을 Windows 값과 견주지 않는다. 캡처가 앱의 표시 경로를 바꾸는지는 재지 않았다(두 앱에 같은 조건이다). 주사율은 확인하지 않았다(**가설**: 60Hz, 유휴 프레임 간격으로).
+
+## 104. Windows PC에서 macOS·Linux 0·1단계 전후 비교 (2026-11-05)
+
+**질문:** Mac에서 만든 0·1단계(plan-cross-platform 7절)가 Windows의 픽셀·속도·입력→표시·GUI를 바꿨나. 이 PC의 x86 SSE4.2 digest가 101절의 Mac 값과 같나. 1단계에서 고친 첫 프레임 debug panic(`b382794`)이 Windows에도 있었나.
+
+**방법:** 환경 절의 Windows PC(호스트 10.0.26300), 툴체인 1.99.0. 두 판을 작업 트리 둘에서 따로 빌드했다: `843b5a4`(이 계획 전의 main)와 `eb240f6`(지금 main), 각각 `cargo build --release --locked -p ugurugu -p ugu-doc -p render-bench -p latency-probe`. 두 판의 `ugu-doc fixture <n>`이 만든 파일을 바이트로 비교하고, 그 뒤로는 `eb240f6`의 파일을 두 판이 함께 썼다. digest는 `ugu-doc digest <file> 8`. 시간은 `UGU_WORKER_THREADS=8`로 `ugu-doc render <file> 8`의 60프레임 p50과 `render-bench run --renderer vello-mt=8`을, round마다 순서를 바꿔 두 판을 번갈아 5 round 쟀다(재기 전 전체 CPU 사용률 2~6%). debug panic은 두 판의 debug 빌드를 Windows Sandbox `gui.ps1`의 "Exe and window icons" 한 단계로 띄워 앱 로그와 충돌 기록을 봤다.
+
+**결과(digest):** 두 판이 만든 fixture 파일은 ①~⑤ 모두 바이트가 같고, 두 판의 digest도 64자리 모두 같다. 앞 16자리는 101절 표의 x86 SSE4.2(Rosetta)·C·B 열과 같다: ① `ccd396597b042136`, ② `9d90bb30f920379c`, ③ `e06d18d0f05f55f3`, ④ `1948db8835fbc089`, ⑤ `10d33f3b71ba26e0`. 이 PC에서 만들고 그린 것이 Mac에서 만들고 그린 것과 같으므로, 이 다섯 문서에서는 만드는 쪽과 그리는 쪽 모두 UCRT와 macOS libm의 차이(B3-71)가 드러나지 않았다. Mac에서 만든 파일을 옮겨 다시 재지는 않았다.
+
+**결과(시간, 8스레드 프레임 p50 ms, 5 round의 중앙값과 범위):**
+
+| fixture | `843b5a4` | `eb240f6` |
+|---|---|---|
+| ① | 2.8 (2.5~3.0) | 2.8 (2.0~2.9) |
+| ② | 41.7 (41.7~42.5) | 41.7 (41.6~41.9) |
+| ③ | 20.6 (20.4~20.9) | 20.4 (20.3~20.6) |
+| ④ | 24.7 (24.2~26.5) | 24.0 (23.3~25.5) |
+| ⑤ | 89.1 (88.4~90.8) | 88.6 (87.7~88.9) |
+
+최대 working set(모든 프레임을 그린 뒤)은 두 판이 round 범위 안에서 같다: ① 41~52, ② 522~529, ③ 392~407, ④ 128~131, ⑤ 1,037~1,063MiB.
+
+`render-bench`(5 round p50의 중앙값, `843b5a4` → `eb240f6`): 래스터화 40.08 → 39.87ms, 합성 8.09 → 8.11ms, 선택 변형 2.25 → 2.24ms, geometry 6.45 → 6.61ms, 실시간 획 한 칸 0.102 → 0.110ms(두 판 모두 round마다 0.095~0.102와 0.110~0.115 중 하나로 나왔다), 최대 working set 229.8 → 239.4MiB(round 범위 225.6~241.2와 225.8~247.9). 합성·실시간 획·변형의 RGBA 결과는 바이트가 같다.
+
+**결과(debug):** `843b5a4` debug는 swap chain을 만든 지 0.23초 뒤 render 스레드가 `Dropped TexturesDelta with 6 unapplied deltas`(epaint 0.36.2 `textures.rs:337`)로 panic해 끝났다. `eb240f6` debug는 같은 단계를 통과했다(창을 그리고 닫음). 그러니 `b382794`가 고친 결함은 Windows debug 빌드에도 있었다. release 빌드는 `debug_assert`를 빼므로 해당하지 않는다. 이 Sandbox에서도 앱은 RTX 5080(DX12)을 열었다(32절의 `<VGpu>Disable</VGpu>`와 같음).
+
+**결과(Sandbox):** `eb240f6` release로 `gui.ps1`·`pointer.ps1`·`accept.ps1`를 하나씩 돌렸다(95절과 같은 방식, `-ShutDown` 없이 마지막 단계의 줄이 생기면 `wsb stop --id`). GUI 37단계는 한 번에 모두 통과했고(Sandbox 시작부터 약 43분), 앱을 띄운 10번 모두 RTX 5080이었다. "CPU while the window is hidden"(보일 때·최소화·가린 창 아래 5초의 CPU ms)은 `eb240f6` 0·0·31과 0·0·16, 같은 단계를 `843b5a4`로 두 번 돌린 것은 0·0·0과 0·16·16으로, 두 판 모두 0~2 tick(15.6ms 단위) 안이다. pointer 첫 실행은 11/13이었다: "Many samples at once"가 34번째 표본에서 `InjectSyntheticPointerInput` 오류 87(ERROR_INVALID_PARAMETER)로 멈췄고, 그 단계가 펜을 떼지 않은 채 끝나 그때까지 그린 획(압력 600/1024 = 0.586, 31점)을 다음 "One finger does not draw"가 새 획으로 셌다. 다시 돌린 실행은 13/13(2,000표본, 1,000개/초)이다. 오류 87이 왜 났는지는 모른다.
+
+수용 첫 실행은 10/11이었다. "Update with unsaved changes"에서 업데이트 뒤 다시 시작한 앱이 `Close-App`(`CloseMainWindow` 뒤 30초)에 끝나지 않았고, 3.3.1의 "Run"(70절)과 같은 모양이었다. 같은 스크립트로 더 돌리자 첫 실행을 포함해 `eb240f6`은 4번 중 2번 실패했고, `843b5a4`는 6번 모두 통과했다. 앱에 단계마다 debug 줄을 더한 진단 빌드(`eb240f6` 위, 커밋하지 않음)로 12번 돌려 5번 실패했고("Update with unsaved changes" 3번, "Run" 2번), 실패한 시작에서는 다음이 보였다:
+
+- `Session::create`는 끝까지 갔고 render 스레드는 첫 surface를 요청했다. 이벤트 루프는 그 뒤에도 깼지만(`new_events` → `about_to_wait`) 그 사용자 이벤트도 `CloseRequested`도 오지 않았다. "Run"에서는 앱이 다 떠서 그린 뒤 루프가 20초 넘게 돌았지만 `CloseRequested`가 끝내 오지 않았다.
+- `Close-App`이 닫기 직전에 `MainWindowHandle`의 창 클래스를 적게 하자, 4번 돌린 32번의 닫기 중 실패한 하나("Run")만 `Winit Thread Event Target`이었다. 27번은 앱의 `Ugurugu 3`, 4번은 클래스를 읽지 못했다("Check for updates offline": 그 앞의 `Press 'Close'`가 앱을 이미 닫은 것으로 본다, 가설. 단계는 통과). "Update with unsaved changes"의 실패는 이 기록이 없는 실행에서만 나와, 같은 원인이라는 것은 아래처럼 고친 뒤 다시 나오지 않았다는 데서 미루어 본 것이다.
+
+winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 창이라, .NET Framework의 `MainWindowHandle`(보이고 주인 없는 첫 최상위 창)이 앱의 창이 보이기 전에는 그 창을 고르고 값을 캐시한다. `WM_CLOSE`는 그 창의 `DefWindowProcW`가 창을 없애므로, 그 뒤 render 스레드의 사용자 이벤트는 갈 곳이 없고 앱의 창은 닫기를 받지 못한다. 두 판의 시작에서 로그 첫 줄부터 창이 보일 때까지는 p50 276~311ms로 비슷해서, `843b5a4`가 한 번도 실패하지 않은 이유는 설명하지 못했다(가설: 우연, 실패 확률이 낮은 쪽에서 6번). `Wait-Window`가 주 창의 클래스가 `Ugurugu 3`인 프로세스만 돌려주게 고친 뒤 `eb240f6` 수용은 6번 모두 11/11이다(고치기 전 `eb240f6`과 진단 빌드의 실패율 16번 중 7번이 그대로라면, 여섯 번 다 통과할 확률은 약 3%). 같은 함수를 쓰는 pointer는 고친 스크립트로 13/13, GUI는 그 함수를 직접 부르는 단계를 포함한 넷("Exe and window icons", "Splits and the menu bar of a small window", "A file opened from outside becomes a tab of the open window", "The window opens where it closed")이 통과했다. 바깥 도구가 이 창에 닫기를 보낼 때 앱에 생길 일은 backlog B3-169.
+
+**결론:** 0·1단계는 Windows의 픽셀(fixture ①~⑤의 파일과 digest), 8스레드 렌더 시간, `render-bench`, Sandbox GUI·pointer를 바꾸지 않았다. 수용의 간헐 실패는 앱이 아니라 시험 스크립트의 창 고르기였고(고친 뒤 6/6), 3.3.1에서 원인을 모르던 "Run" 실패(70절)도 같은 것으로 본다(그때의 창 클래스는 기록하지 않았다). x86 SSE4.2는 Windows(Intel, UCRT)와 macOS(Rosetta)에서 같은 바이트다. 입력→표시는 이 절에서 재지 않았다(plan-cross-platform 7절 0단계의 남은 것).

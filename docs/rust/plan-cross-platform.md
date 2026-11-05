@@ -128,13 +128,13 @@ x86을 SSE4.2로 고정한 이유도 FMA다(`raster::document_level`: AVX2는 mu
 
 | 안 | 좋은 점 | 대가 |
 |---|---|---|
-| **A. ARM은 NEON(추천)** | 성능 우선 원칙. 지금 코드 그대로(`document_level`은 ARM에서 이미 NEON) | 회귀 digest(`crates/ugu-render/tests/regression/digests.txt`)를 ARM용으로 하나 더 둔다. 같은 파일을 Mac과 Windows에서 내보내면 1~5단계 다른 화소가 생긴다. `document_level`의 주석("all CPUs give the same pixels")과 decisions.md 2절의 "SSE4.2 고정" 행을 x86에 한정해 고친다 |
+| A. ARM은 NEON | 성능 우선 원칙. 지금 코드 그대로(`document_level`은 ARM에서 이미 NEON) | 회귀 digest(`crates/ugu-render/tests/regression/digests.txt`)를 ARM용으로 하나 더 둔다. 같은 파일을 Mac과 Windows에서 내보내면 1~5단계 다른 화소가 생긴다. `document_level`의 주석("all CPUs give the same pixels")과 decisions.md 2절의 "SSE4.2 고정" 행을 x86에 한정해 고친다 |
 | B. ARM은 스칼라 | 모든 OS·CPU에서 같은 바이트, digest 하나 | `fearless_simd`의 `force_support_fallback`을 켜야 하고, ARM에서 래스터가 느려진다 |
-| C. ARM은 FMA를 뺀 NEON(실험) | 바이트가 x86과 같아지면 NEON에 가까운 속도에 digest 하나 | `fearless_simd`의 NEON `mul_add`를 곱한 뒤 더하기로 바꾼 판을 `[patch]`로 써야 한다(직접 유지하거나 상류에 선택 기능을 요청). 같은 바이트가 될지는 위의 FMA 가설에 달렸고, 빼면 얼마나 느려지는지는 재야 안다 |
+| **C. ARM은 FMA를 뺀 NEON(고름)** | 바이트가 x86과 같아지면 NEON에 가까운 속도에 digest 하나 | `fearless_simd`의 NEON `mul_add`를 곱한 뒤 더하기로 바꾼 판을 `[patch]`로 써야 한다(직접 유지하거나 상류에 선택 기능을 요청). 같은 바이트가 될지는 위의 FMA 가설에 달렸고, 빼면 얼마나 느려지는지는 재야 안다 |
 
 정하기 전에 앱 렌더러로 다시 잰다: 1단계에서 `ugu-doc digest`를 fixture ①~⑤·회귀 fixture로 NEON·스칼라·C의 판으로 돌려 Windows PC의 digest(`digests.txt`)와 비교하고, `ugu-doc render <file> 8`로 시간을 비교한다. C의 비교가 FMA 가설을 바로 확인한다. `f64` `sin`·`cos`·`hypot`이 OS의 libm마다 다를 수 있다는 점(backlog B3-71)도 그때 같이 본다. 그쪽이 다르면 B·C를 골라도 OS 사이 바이트가 같지 않다.
 
-잰 것(evidence.md 101절, Apple M4): C는 fixture ①~⑤에서 B·x86 SSE4.2(Rosetta)와 digest가 같고, 지금의 NEON은 ③~⑤에서 다르다. 그래서 차이는 FMA다. `render 8`의 p50은 NEON 대비 C가 −4~+8%, B가 +6~45%다. 남은 비교는 Windows PC의 digest다: 같은 `ugu-doc`로 `fixture <n>`의 파일과 `digest <file> 8`을 101절의 값과 맞춰 본다(파일이 다르면 만드는 쪽의 libm부터 다르다).
+잰 것(evidence.md 101절, Apple M4): C는 fixture ①~⑤에서 B·x86 SSE4.2(Rosetta)와 digest가 같고, 지금의 NEON은 ③~⑤에서 다르다. 그래서 차이는 FMA다. `render 8`의 p50은 NEON 대비 C가 −4~+8%, B가 +6~45%다. Windows PC(Intel, UCRT)에서 만들고 그린 ①~⑤의 digest도 C·B·x86(Rosetta)과 같다(evidence.md 104절). 그래서 2026-11-05 사용자가 C를 골랐다. 구현은 1단계에 남았다.
 
 ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 비교하는 것이 없다: `levels()`에 aarch64 분기가 없어 baseline 하나만 돈다. ARM에서 문서를 그리는 수준은 어느 안이든 하나뿐이라 그것이 맞지만, ARM의 바이트는 회귀 digest만 지킨다.
 
@@ -154,9 +154,9 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 끝: 세 OS에서 빌드·clippy·시험이 통과하고, Windows의 digest·패키지·Sandbox `gui`가 그대로.
 
-상태(2026-10-28): 구현은 쌓은 PR #135(플랫폼 crate)·#136(대상별 의존·cfg)·#137(글꼴)·#138(CI)에 있다. Mac에서 확인한 것: macOS clippy·시험(Metal 어댑터로 GPU 시험 포함), Ubuntu 24.04 arm64 Docker의 clippy·시험(lavapipe), `x86_64-pc-windows-gnu` 교차 clippy. #135~#138의 CI는 모든 job이 통과했다. #138의 macOS job(`macos-26-arm64`)과 Linux job(`ubuntu-24.04`, lavapipe)에서 `UGU_REQUIRE_ADAPTER`를 켠 채 `view`·`ants`의 GPU 시험이 건너뛰지 않고 통과했으니 두 runner에서 어댑터가 열린다. 남은 것:
+상태(2026-10-28): 구현은 쌓은 PR #135(플랫폼 crate)·#136(대상별 의존·cfg)·#137(글꼴)·#138(CI)에 있다. Mac에서 확인한 것: macOS clippy·시험(Metal 어댑터로 GPU 시험 포함), Ubuntu 24.04 arm64 Docker의 clippy·시험(lavapipe), `x86_64-pc-windows-gnu` 교차 clippy. #135~#138의 CI는 모든 job이 통과했다. #138의 macOS job(`macos-26-arm64`)과 Linux job(`ubuntu-24.04`, lavapipe)에서 `UGU_REQUIRE_ADAPTER`를 켠 채 `view`·`ants`의 GPU 시험이 건너뛰지 않고 통과했으니 두 runner에서 어댑터가 열린다. Windows PC에서는 1단계까지 넣은 main(`eb240f6`)이 이 계획 전의 main(`843b5a4`)과 픽셀·렌더 속도·Sandbox 결과가 같았다(evidence.md 104절). 남은 것:
 
-- Windows PC에서 전과 비교: 아래 "Windows PC 확인".
+- Windows PC의 입력→표시: `latency-probe`를 두 판으로 번갈아(`--steps 100 --warmup 150 --window max`, evidence.md 1절의 조건). Sandbox는 원격 세션으로 표시하므로 실제 데스크톱에서 사용자가 돌린다. 전과 같으면 3.5.0을 준비한다(`b096d66` "Prepare the 3.4.3 release"와 같은 방식).
 - 계획과 달라진 것: 파일 교체와 복구·설정 잠금은 "지원하지 않음" 대신 Unix 구현을 앞당겼다(앱 시험이 저장·복구·설정에 기대므로, decisions.md 7절). 그 밖의 OS 함수는 `crates/ugu-platform/src/unsupported.rs`의 자리표시이고, 1단계가 이것을 macOS 구현으로 바꾼다. `hwnd`(`isize`)를 받는 API는 아직 그대로다(3.1절). Windows 밖의 `Ticks`는 표준 라이브러리 단조 시계의 나노초다.
 - 글꼴이 없을 때의 안내(3.3절)는 하지 않았다.
 
@@ -179,7 +179,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `hwnd_of`가 AppKit `NSView`·X11 창·Wayland surface도 돌려준다. `DocumentReceiver`의 자리표시는 오류 대신 아무것도 받지 않는 수신기다(이 OS에서는 문서를 넘기는 실행이 없다).
 - winit 기본 메뉴를 껐다(decisions.md 9절).
 - 창이 보이지 않으면(`Occluded`) 그리지 않는다(decisions.md 2절). 3.2절의 "프레임 대기가 막힐 것"은 가려진 경우에는 wgpu-hal이 막는다. 장치 손실 뒤에 막히는지는 아직 **가설**이다.
-- 첫 프레임의 debug panic: 프레임이 egui 텍스처 변경을 적용한 뒤 비우지 않아 epaint의 `debug_assert`(`TexturesDelta`의 `Drop`)에 걸렸다. 쓴 뒤 `clear()`한다. OS와 무관한 코드라 Windows debug 빌드에서도 나는 것으로 본다(**가설**: Windows에서 실행해 보지 않았다). 창·GPU가 필요해 시험은 없다.
+- 첫 프레임의 debug panic: 프레임이 egui 텍스처 변경을 적용한 뒤 비우지 않아 epaint의 `debug_assert`(`TexturesDelta`의 `Drop`)에 걸렸다. 쓴 뒤 `clear()`한다. 고치기 전의 Windows debug 빌드도 첫 프레임에 같은 panic으로 끝났다(evidence.md 104절). 창·GPU가 필요해 시험은 없다.
 
 확인: macOS clippy·시험(`UGU_REQUIRE_ADAPTER=1`, 앱 300개 통과), `x86_64-pc-windows-gnu` 교차 clippy, fmt.
 
@@ -188,25 +188,13 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
-- 6절의 Windows PC digest 비교와 SIMD 결정(9절): 아래 "Windows PC 확인".
+- 6절의 C(FMA를 뺀 NEON): `fearless_simd` 0.7.0의 `generated/neon.rs`에서 `mul_add`·`mul_sub`(f32x4·f64x2) 네 곳을 곱한 뒤 더하기·빼기로 바꾼 사본을 `[patch.crates-io]`로 두고, ARM의 바이트가 x86과 같은지를 macOS CI의 시험으로 지킨다(지금의 회귀 digest는 NEON으로도 통과해 그 차이를 잡지 못한다, evidence.md 101절). 그때 decisions.md 2절의 SSE4.2 행에 ARM을 더한다.
 
 배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 
 단축키(`platform/mac-shortcuts`): macOS에서 ⌘와 Control이 주 수정자이고 메뉴는 ⇧⌘S처럼 적는다. 설정 파일의 "Ctrl+…"는 그대로다. 클립보드 키를 egui-winit과 같게 판정해 macOS의 ⌘C·X·V가 선택에 동작하고, macOS·Linux의 Shift+Delete·Ctrl/Shift+Insert가 두 번 돌지 않는다(decisions.md 9절). 시험으로 확인했고, 화면의 메뉴 표시와 ⌘ 키 동작은 사용자가 확인했다.
 
 획 지연(`platform/mac-measure`): `latency-probe`의 macOS 판으로 2.2.13 macOS 판과 번갈아 쟀다. 3.x p50 14.3ms, 2.2.13 23.4ms(evidence.md 103절).
-
-### Windows PC 확인 (0·1단계의 끝, 3.5.0 출시 전)
-
-0·1단계는 Mac에서 만들었고, 그동안 Windows는 CI(clippy, debug·release 시험, 회귀 fixture digest, 설치·실행·제거)로만 봤다. 1절 2의 "Windows는 그대로"와 6절의 digest 비교는 환경 절(evidence.md)의 Windows PC에서 한 번에 한다(2026-11-05 사용자 결정). 비교 기준은 이 계획 전의 main `843b5a4`(내비게이터까지)이고, 지금 main과 같은 방법(evidence.md 1절)으로 번갈아 잰다.
-
-1. SIMD digest(6절): 지금 main의 release `ugu-doc`로 `fixture <n>`(①~⑤)을 만들고 `digest <file> 8`의 앞 16자리를 evidence.md 101절 표의 x86 SSE4.2(Rosetta)·C 열과 맞춘다. 다르면 Mac에서 만든 fixture 파일을 옮겨 같은 파일로 다시 재서, 파일을 만드는 쪽과 그리는 쪽 중 어디서 다른지 가른다(B3-71의 libm). 결과를 evidence.md에, 고른 안을 decisions.md 2절에 적고 9절 1을 지운다.
-2. 렌더 속도: fixture ①~⑤의 `ugu-doc render <file> 8`과 `render-bench`를 두 판으로.
-3. 입력→표시: `latency-probe`를 두 판으로(`--steps 100 --warmup 150 --window max`, evidence.md 1절의 조건).
-4. Sandbox: 지금 main의 release 빌드로 `gui`(전체)·`pointer`·`accept`를 하나씩(`tools/sandbox/prepare.ps1 -Work <새 폴더> -Scenario <이름>`, 끝나면 `wsb stop --id`). 3.4.3 출시 때와 같은 범위다(evidence.md 95절).
-5. 1단계 상태의 가설 하나: `843b5a4`의 debug 빌드가 첫 프레임에 epaint의 `TexturesDelta` `debug_assert`로 panic하는지(`b382794`가 고친 것이 Windows에도 있었는지).
-
-모두 전과 같으면 0단계와 1단계의 Windows 항목을 지우고, 3.5.0을 준비한다: `Cargo.toml` 판 번호, `docs/README.md`의 릴리스 목록, `release-notes/3.5.0.en.md` 첫 문단(`b096d66` "Prepare the 3.4.3 release"와 같은 방식), 태그.
 
 ### 2단계: macOS 펜과 OS 연동
 
@@ -224,7 +212,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 ### 4단계: 패키지·업데이트·릴리스
 
 - Velopack 1.2.161(지금 판)은 macOS `.app`·`.pkg`·`.zip`과 Linux `.AppImage`를 만든다. 채널은 `osx-arm64`·`linux-x64`처럼 나누고, 패키지 ID는 `Ugurugu3` 그대로(**확인 필요**: 한 피드에 여러 채널을 두는 방식).
-- macOS 서명: 9절 결정 2에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
+- macOS 서명: 9절 결정 1에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
 - Linux: AppImage 하나. Ubuntu 22.04에서 빌드해 glibc 2.35를 하한으로 둔다(decisions.md 10절).
 - 제3자 고지(`tools/third_party_notices.py`)를 OS마다 링크되는 crate로.
 - `release-3.yml`에 macOS·Linux job, 다운로드 배지·릴리스 노트의 파일 이름.
@@ -244,6 +232,5 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ## 9. 남은 사용자 결정
 
-1. **ARM의 SIMD**(6절): A(NEON), B(스칼라), C(FMA를 뺀 NEON). 앱 측정(evidence.md 101절)에서 C는 x86과 바이트가 같고 NEON과 속도 차이가 −4~+8%다. C를 고르면 `fearless_simd`의 사본을 유지하거나 상류에 선택 기능을 요청해야 한다. Windows PC의 digest 비교 뒤 정한다.
-2. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
-3. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
+1. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
+2. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
