@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-10-22 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-11-05 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -183,6 +183,7 @@
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
 | B3-169 | 바깥에서 모든 창에 보낸 `WM_CLOSE`가 winit의 이벤트 창도 없앤다 | winit 0.30.13의 사용자 이벤트 창(`Winit Thread Event Target`)은 보이는(`WS_VISIBLE`) 투명 popup이고 `WM_CLOSE`를 `DefWindowProcW`에 넘겨 스스로 없어진다. 그 뒤 render 스레드가 보내는 사용자 이벤트는 닿지 않는다(evidence.md 104절에서 Sandbox 시험이 그 창을 닫았을 때 첫 surface 요청이 오지 않았다). `/F` 없는 `taskkill`처럼 프로세스의 모든 최상위 창에 `WM_CLOSE`를 보내는 도구로 끄면, 앱 창은 닫기를 받아도 render 스레드가 끝났다는 알림(`RenderStopped`)이 오지 않아 프로세스가 남을 것이다(가설, 재지 않음). 확인한 뒤 고치는 방법(상류 winit, 또는 앱이 그 창의 `WM_CLOSE`를 받지 않게)을 정한다 | `apps/ugurugu/src/app.rs`, winit `platform_impl/windows/event_loop.rs` | 2026-11-05 Windows PC 확인 |
+| B3-170 | pointer 시험의 합성 입력이 가끔 오류 87로 실패하고, 실패한 단계가 다음 단계를 오염시킨다 | 2026-11-05 `pointer.ps1`의 "Many samples at once"가 34번째 표본에서 `InjectSyntheticPointerInput` 오류 87(ERROR_INVALID_PARAMETER)로 멈췄다. 원인은 모른다(다시 돌린 두 번은 2,000표본 모두 들어갔다). 그 단계는 예외로 빠지면서 펜을 떼지 않고 `$script:before`도 갱신하지 않아, 그때까지 그린 획을 다음 "One finger does not draw"가 새 획으로 세어 함께 실패했다(evidence.md 104절). 실패한 단계도 펜을 떼고 획 수를 다시 세어 다음 단계가 깨끗이 시작하게 한다. 오류 87은 다시 나오면 그 표본의 플래그·좌표·앞 표본과의 시간 차를 남긴다 | `tools/sandbox/pointer.ps1` `Send`, "Many samples at once" | 2026-11-05 Windows PC 확인 |
 
 ## 15. 2026-10-21 UI/UX 검토에서 남은 것
 

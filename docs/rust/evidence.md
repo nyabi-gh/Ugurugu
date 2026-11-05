@@ -2011,7 +2011,7 @@ fixture에서 늘어난 0.6~1.5ms는 검사 없는 zip 9.0.5에서 이미 나오
 
 **결과(debug):** `843b5a4` debug는 swap chain을 만든 지 0.23초 뒤 render 스레드가 `Dropped TexturesDelta with 6 unapplied deltas`(epaint 0.36.2 `textures.rs:337`)로 panic해 끝났다. `eb240f6` debug는 같은 단계를 통과했다(창을 그리고 닫음). 그러니 `b382794`가 고친 결함은 Windows debug 빌드에도 있었다. release 빌드는 `debug_assert`를 빼므로 해당하지 않는다. 이 Sandbox에서도 앱은 RTX 5080(DX12)을 열었다(32절의 `<VGpu>Disable</VGpu>`와 같음).
 
-**결과(Sandbox):** `eb240f6` release로 `gui.ps1`·`pointer.ps1`·`accept.ps1`를 하나씩 돌렸다(95절과 같은 방식, `-ShutDown` 없이 마지막 단계의 줄이 생기면 `wsb stop --id`). GUI 37단계는 한 번에 모두 통과했고(Sandbox 시작부터 약 43분), 앱을 띄운 10번 모두 RTX 5080이었다. "CPU while the window is hidden"(보일 때·최소화·가린 창 아래 5초의 CPU ms)은 `eb240f6` 0·0·31과 0·0·16, 같은 단계를 `843b5a4`로 두 번 돌린 것은 0·0·0과 0·16·16으로, 두 판 모두 0~2 tick(15.6ms 단위) 안이다. pointer 첫 실행은 11/13이었다: "Many samples at once"가 34번째 표본에서 `InjectSyntheticPointerInput` 오류 87(ERROR_INVALID_PARAMETER)로 멈췄고, 그 단계가 펜을 떼지 않은 채 끝나 그때까지 그린 획(압력 600/1024 = 0.586, 31점)을 다음 "One finger does not draw"가 새 획으로 셌다. 다시 돌린 실행은 13/13(2,000표본, 1,000개/초)이다. 오류 87이 왜 났는지는 모른다.
+**결과(Sandbox):** `eb240f6` release로 `gui.ps1`·`pointer.ps1`·`accept.ps1`를 하나씩 돌렸다(95절과 같은 방식, `-ShutDown` 없이 마지막 단계의 줄이 생기면 `wsb stop --id`). GUI 37단계는 한 번에 모두 통과했고(Sandbox 시작부터 약 43분), 앱을 띄운 10번 모두 RTX 5080이었다. "CPU while the window is hidden"(보일 때·최소화·가린 창 아래 5초의 CPU ms)은 `eb240f6` 0·0·31과 0·0·16, 같은 단계를 `843b5a4`로 두 번 돌린 것은 0·0·0과 0·16·16으로, 두 판 모두 0~2 tick(15.6ms 단위) 안이다. pointer 첫 실행은 11/13이었다: "Many samples at once"가 34번째 표본에서 `InjectSyntheticPointerInput` 오류 87(ERROR_INVALID_PARAMETER)로 멈췄고, 그 단계가 펜을 떼지 않은 채 끝나 그때까지 그린 획(압력 600/1024 = 0.586, 31점)을 다음 "One finger does not draw"가 새 획으로 셌다. 다시 돌린 실행은 13/13(2,000표본, 1,000개/초)이다. 오류 87이 왜 났는지는 모른다(backlog B3-170).
 
 수용 첫 실행은 10/11이었다. "Update with unsaved changes"에서 업데이트 뒤 다시 시작한 앱이 `Close-App`(`CloseMainWindow` 뒤 30초)에 끝나지 않았고, 3.3.1의 "Run"(70절)과 같은 모양이었다. 같은 스크립트로 더 돌리자 첫 실행을 포함해 `eb240f6`은 4번 중 2번 실패했고, `843b5a4`는 6번 모두 통과했다. 앱에 단계마다 debug 줄을 더한 진단 빌드(`eb240f6` 위, 커밋하지 않음)로 12번 돌려 5번 실패했고("Update with unsaved changes" 3번, "Run" 2번), 실패한 시작에서는 다음이 보였다:
 
@@ -2031,3 +2031,13 @@ winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 �
 두 판의 범위가 겹친다. 주사율에 덜 매이는 입력→present도 3.1~3.4ms로 같다.
 
 **결론:** 0·1단계는 Windows의 픽셀(fixture ①~⑤의 파일과 digest), 8스레드 렌더 시간, `render-bench`, 입력→표시(60Hz에서), Sandbox GUI·pointer를 바꾸지 않았다. 수용의 간헐 실패는 앱이 아니라 시험 스크립트의 창 고르기였고(고친 뒤 6/6), 3.3.1에서 원인을 모르던 "Run" 실패(70절)도 같은 것으로 본다(그때의 창 클래스는 기록하지 않았다). x86 SSE4.2는 Windows(Intel, UCRT)와 macOS(Rosetta)에서 같은 바이트다. 입력→표시를 160Hz가 아닌 60Hz에서 잰 것은 사용자가 그대로 받았다(2026-11-05).
+
+## 105. 3.5.0 출시 (2026-11-05)
+
+**고친 것:** 3.4.3 뒤의 #133(내비게이터, 96절), #143(장치를 바꾼 뒤 패널 텍스처를 모두 다시 만듦, 99절), #147(헤더가 서로 다른 ZIP 거절, 102절). 그 밖의 #134~#154는 macOS·Linux 0·1단계, 문서, CI다. Windows에서 바뀐 것이 없다는 것은 104절에서 확인했다.
+
+**방법:** 출시 전 Sandbox는 104절의 `eb240f6` release 실행(GUI 37/37, pointer 13/13, 시험 스크립트를 고친 뒤 수용 6번 11/11)이다. 판 번호만 바꾼 준비 커밋 `995e652`의 release 빌드로 수용을 한 번 더 돌렸다: 11/11(3.5.0 설치 → 3.5.1 피드로 업데이트). 준비 커밋 전에 BUILDING.md의 검사를 모두 돌렸다(debug·release 시험 각 775개 통과, `cargo deny --locked check` 전체 통과).
+
+**CI:** PR #155 4분 44초, main(`995e652`) 4분 26초, 둘 다 통과. `Cargo.lock`이 바뀌었지만 작업 공간 crate의 판만 바뀌어 캐시 없는 빌드(76절의 13분)가 되지 않았다(가설: 의존성 빌드 캐시가 그대로 맞았다, 캐시 기록은 보지 않았다).
+
+**출시:** 태그 `v3.5.0`(annotated, `995e652`) → `release-3.yml` 실행 41997690031 성공(약 12분). `v3.5.0`에는 `Ugurugu-3.5.0-Windows-x64-Setup.exe`(23,937,507바이트)만, 본문 끝에 "What's Changed"(#132~#155)와 비교 링크가 붙었고 Latest다. `updates`에 `Ugurugu3-3.5.0-win-x64-full.nupkg`(16,372,195바이트)가 더해지고 `releases.win-x64.json`이 3.5.0을 가리킨다. 다운로드 배지 실행(41999194263)도 성공했다. Dependabot 경고 4~8은 출시 전에 "vulnerable code not used"로 닫았다(B3-145). macOS판은 없다: 패키지·릴리스(plan-cross-platform 4단계)와 서명 결정(그 9절 1)이 남았다.
