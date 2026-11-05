@@ -156,7 +156,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 상태(2026-10-28): 구현은 쌓은 PR #135(플랫폼 crate)·#136(대상별 의존·cfg)·#137(글꼴)·#138(CI)에 있다. Mac에서 확인한 것: macOS clippy·시험(Metal 어댑터로 GPU 시험 포함), Ubuntu 24.04 arm64 Docker의 clippy·시험(lavapipe), `x86_64-pc-windows-gnu` 교차 clippy. #135~#138의 CI는 모든 job이 통과했다. #138의 macOS job(`macos-26-arm64`)과 Linux job(`ubuntu-24.04`, lavapipe)에서 `UGU_REQUIRE_ADAPTER`를 켠 채 `view`·`ants`의 GPU 시험이 건너뛰지 않고 통과했으니 두 runner에서 어댑터가 열린다. 남은 것:
 
-- Windows PC에서 `render-bench`·`latency-probe`·Sandbox `gui`를 전과 비교.
+- Windows PC에서 전과 비교: 아래 "Windows PC 확인".
 - 계획과 달라진 것: 파일 교체와 복구·설정 잠금은 "지원하지 않음" 대신 Unix 구현을 앞당겼다(앱 시험이 저장·복구·설정에 기대므로, decisions.md 7절). 그 밖의 OS 함수는 `crates/ugu-platform/src/unsupported.rs`의 자리표시이고, 1단계가 이것을 macOS 구현으로 바꾼다. `hwnd`(`isize`)를 받는 API는 아직 그대로다(3.1절). Windows 밖의 `Ticks`는 표준 라이브러리 단조 시계의 나노초다.
 - 글꼴이 없을 때의 안내(3.3절)는 하지 않았다.
 
@@ -188,13 +188,25 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
-- 6절의 Windows PC digest 비교와 SIMD 결정(9절).
+- 6절의 Windows PC digest 비교와 SIMD 결정(9절): 아래 "Windows PC 확인".
 
 배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 
 단축키(`platform/mac-shortcuts`): macOS에서 ⌘와 Control이 주 수정자이고 메뉴는 ⇧⌘S처럼 적는다. 설정 파일의 "Ctrl+…"는 그대로다. 클립보드 키를 egui-winit과 같게 판정해 macOS의 ⌘C·X·V가 선택에 동작하고, macOS·Linux의 Shift+Delete·Ctrl/Shift+Insert가 두 번 돌지 않는다(decisions.md 9절). 시험으로 확인했고, 화면의 메뉴 표시와 ⌘ 키 동작은 사용자가 확인했다.
 
 획 지연(`platform/mac-measure`): `latency-probe`의 macOS 판으로 2.2.13 macOS 판과 번갈아 쟀다. 3.x p50 14.3ms, 2.2.13 23.4ms(evidence.md 103절).
+
+### Windows PC 확인 (0·1단계의 끝, 3.5.0 출시 전)
+
+0·1단계는 Mac에서 만들었고, 그동안 Windows는 CI(clippy, debug·release 시험, 회귀 fixture digest, 설치·실행·제거)로만 봤다. 1절 2의 "Windows는 그대로"와 6절의 digest 비교는 환경 절(evidence.md)의 Windows PC에서 한 번에 한다(2026-11-05 사용자 결정). 비교 기준은 이 계획 전의 main `843b5a4`(내비게이터까지)이고, 지금 main과 같은 방법(evidence.md 1절)으로 번갈아 잰다.
+
+1. SIMD digest(6절): 지금 main의 release `ugu-doc`로 `fixture <n>`(①~⑤)을 만들고 `digest <file> 8`의 앞 16자리를 evidence.md 101절 표의 x86 SSE4.2(Rosetta)·C 열과 맞춘다. 다르면 Mac에서 만든 fixture 파일을 옮겨 같은 파일로 다시 재서, 파일을 만드는 쪽과 그리는 쪽 중 어디서 다른지 가른다(B3-71의 libm). 결과를 evidence.md에, 고른 안을 decisions.md 2절에 적고 9절 1을 지운다.
+2. 렌더 속도: fixture ①~⑤의 `ugu-doc render <file> 8`과 `render-bench`를 두 판으로.
+3. 입력→표시: `latency-probe`를 두 판으로(`--steps 100 --warmup 150 --window max`, evidence.md 1절의 조건).
+4. Sandbox: 지금 main의 release 빌드로 `gui`(전체)·`pointer`·`accept`를 하나씩(`tools/sandbox/prepare.ps1 -Work <새 폴더> -Scenario <이름>`, 끝나면 `wsb stop --id`). 3.4.3 출시 때와 같은 범위다(evidence.md 95절).
+5. 1단계 상태의 가설 하나: `843b5a4`의 debug 빌드가 첫 프레임에 epaint의 `TexturesDelta` `debug_assert`로 panic하는지(`b382794`가 고친 것이 Windows에도 있었는지).
+
+모두 전과 같으면 0단계와 1단계의 Windows 항목을 지우고, 3.5.0을 준비한다: `Cargo.toml` 판 번호, `docs/README.md`의 릴리스 목록, `release-notes/3.5.0.en.md` 첫 문단(`b096d66` "Prepare the 3.4.3 release"와 같은 방식), 태그.
 
 ### 2단계: macOS 펜과 OS 연동
 
