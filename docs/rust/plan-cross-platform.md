@@ -154,9 +154,8 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 끝: 세 OS에서 빌드·clippy·시험이 통과하고, Windows의 digest·패키지·Sandbox `gui`가 그대로.
 
-상태(2026-10-28): 구현은 쌓은 PR #135(플랫폼 crate)·#136(대상별 의존·cfg)·#137(글꼴)·#138(CI)에 있다. Mac에서 확인한 것: macOS clippy·시험(Metal 어댑터로 GPU 시험 포함), Ubuntu 24.04 arm64 Docker의 clippy·시험(lavapipe), `x86_64-pc-windows-gnu` 교차 clippy. #135~#138의 CI는 모든 job이 통과했다. #138의 macOS job(`macos-26-arm64`)과 Linux job(`ubuntu-24.04`, lavapipe)에서 `UGU_REQUIRE_ADAPTER`를 켠 채 `view`·`ants`의 GPU 시험이 건너뛰지 않고 통과했으니 두 runner에서 어댑터가 열린다. Windows PC에서는 1단계까지 넣은 main(`eb240f6`)이 이 계획 전의 main(`843b5a4`)과 픽셀·렌더 속도·Sandbox 결과가 같았다(evidence.md 104절). 남은 것:
+상태(2026-10-28): 구현은 쌓은 PR #135(플랫폼 crate)·#136(대상별 의존·cfg)·#137(글꼴)·#138(CI)에 있다. Mac에서 확인한 것: macOS clippy·시험(Metal 어댑터로 GPU 시험 포함), Ubuntu 24.04 arm64 Docker의 clippy·시험(lavapipe), `x86_64-pc-windows-gnu` 교차 clippy. #135~#138의 CI는 모든 job이 통과했다. #138의 macOS job(`macos-26-arm64`)과 Linux job(`ubuntu-24.04`, lavapipe)에서 `UGU_REQUIRE_ADAPTER`를 켠 채 `view`·`ants`의 GPU 시험이 건너뛰지 않고 통과했으니 두 runner에서 어댑터가 열린다. Windows PC에서는 1단계까지 넣은 main(`eb240f6`)이 이 계획 전의 main(`843b5a4`)과 픽셀·렌더 속도·입력→표시(60Hz에서)·Sandbox 결과가 같았다(evidence.md 104절). 남은 것:
 
-- Windows PC의 입력→표시: `latency-probe`를 두 판으로 번갈아(`--steps 100 --warmup 150 --window max`, evidence.md 1절의 조건). Sandbox는 원격 세션으로 표시하므로 실제 데스크톱에서 사용자가 돌린다. 전과 같으면 3.5.0을 준비한다(`b096d66` "Prepare the 3.4.3 release"와 같은 방식).
 - 계획과 달라진 것: 파일 교체와 복구·설정 잠금은 "지원하지 않음" 대신 Unix 구현을 앞당겼다(앱 시험이 저장·복구·설정에 기대므로, decisions.md 7절). 그 밖의 OS 함수는 `crates/ugu-platform/src/unsupported.rs`의 자리표시이고, 1단계가 이것을 macOS 구현으로 바꾼다. `hwnd`(`isize`)를 받는 API는 아직 그대로다(3.1절). Windows 밖의 `Ticks`는 표준 라이브러리 단조 시계의 나노초다.
 - 글꼴이 없을 때의 안내(3.3절)는 하지 않았다.
 

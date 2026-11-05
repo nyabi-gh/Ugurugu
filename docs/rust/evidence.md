@@ -2020,4 +2020,14 @@ fixture에서 늘어난 0.6~1.5ms는 검사 없는 zip 9.0.5에서 이미 나오
 
 winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 창이라, .NET Framework의 `MainWindowHandle`(보이고 주인 없는 첫 최상위 창)이 앱의 창이 보이기 전에는 그 창을 고르고 값을 캐시한다. `WM_CLOSE`는 그 창의 `DefWindowProcW`가 창을 없애므로, 그 뒤 render 스레드의 사용자 이벤트는 갈 곳이 없고 앱의 창은 닫기를 받지 못한다. 두 판의 시작에서 로그 첫 줄부터 창이 보일 때까지는 p50 276~311ms로 비슷해서, `843b5a4`가 한 번도 실패하지 않은 이유는 설명하지 못했다(가설: 우연, 실패 확률이 낮은 쪽에서 6번). `Wait-Window`가 주 창의 클래스가 `Ugurugu 3`인 프로세스만 돌려주게 고친 뒤 `eb240f6` 수용은 6번 모두 11/11이다(고치기 전 `eb240f6`과 진단 빌드의 실패율 16번 중 7번이 그대로라면, 여섯 번 다 통과할 확률은 약 3%). 같은 함수를 쓰는 pointer는 고친 스크립트로 13/13, GUI는 그 함수를 직접 부르는 단계를 포함한 넷("Exe and window icons", "Splits and the menu bar of a small window", "A file opened from outside becomes a tab of the open window", "The window opens where it closed")이 통과했다. 바깥 도구가 이 창에 닫기를 보낼 때 앱에 생길 일은 backlog B3-169.
 
-**결론:** 0·1단계는 Windows의 픽셀(fixture ①~⑤의 파일과 digest), 8스레드 렌더 시간, `render-bench`, Sandbox GUI·pointer를 바꾸지 않았다. 수용의 간헐 실패는 앱이 아니라 시험 스크립트의 창 고르기였고(고친 뒤 6/6), 3.3.1에서 원인을 모르던 "Run" 실패(70절)도 같은 것으로 본다(그때의 창 클래스는 기록하지 않았다). x86 SSE4.2는 Windows(Intel, UCRT)와 macOS(Rosetta)에서 같은 바이트다. 입력→표시는 이 절에서 재지 않았다(plan-cross-platform 7절 0단계의 남은 것).
+**결과(입력→표시):** 사용자가 실제 데스크톱에서 `eb240f6`의 `latency-probe`로 두 판을 번갈아 3 round 쟀다(`--steps 100 --warmup 150 --window max`, PresentMon 2.6.0, 창 3840×2059). 여섯 실행 모두 misses 0, 칸마다 남는 present 0, 표시 방식은 100% "Hardware Composed: Independent Flip"이었다. 이때 주 모니터는 **60Hz**였다(PresentMon의 표시 간격 최소 16.2~16.6ms, WMI도 60). 그래서 1절의 값(160Hz)과 견주지 않는다. 재기 전 유휴 5초에는 dwm.exe가 5번, parsecd.exe가 1번 present했다.
+
+| round | `843b5a4` 입력→present p50 / p95 | 입력→표시 p50 / p95 | `eb240f6` 입력→present p50 / p95 | 입력→표시 p50 / p95 |
+|---|---|---|---|---|
+| 1 | 3.06 / 4.63 | 11.50 / 19.82 | 3.21 / 5.01 | 12.36 / 20.34 |
+| 2 | 3.22 / 4.79 | 13.06 / 18.81 | 3.08 / 5.15 | 12.80 / 19.47 |
+| 3 | 3.18 / 4.99 | 13.44 / 20.28 | 3.37 / 4.91 | 13.25 / 19.65 |
+
+두 판의 범위가 겹친다. 주사율에 덜 매이는 입력→present도 3.1~3.4ms로 같다.
+
+**결론:** 0·1단계는 Windows의 픽셀(fixture ①~⑤의 파일과 digest), 8스레드 렌더 시간, `render-bench`, 입력→표시(60Hz에서), Sandbox GUI·pointer를 바꾸지 않았다. 수용의 간헐 실패는 앱이 아니라 시험 스크립트의 창 고르기였고(고친 뒤 6/6), 3.3.1에서 원인을 모르던 "Run" 실패(70절)도 같은 것으로 본다(그때의 창 클래스는 기록하지 않았다). x86 SSE4.2는 Windows(Intel, UCRT)와 macOS(Rosetta)에서 같은 바이트다. 입력→표시를 160Hz가 아닌 60Hz에서 잰 것은 사용자가 그대로 받았다(2026-11-05).
