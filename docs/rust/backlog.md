@@ -178,11 +178,11 @@
 |---|---|---|---|---|
 | B3-140 | 대칭자의 남은 것 | 대칭자(decisions.md 4절)는 파일에 저장하지 않고, 도형 도구는 따르지 않는다. 후보: 파일 저장(형식에 선택 필드), 도형과 채운 도형의 복사, 복사가 같이 우글거리는 선택지. 큰 획이 많으면 펜을 뗄 때가 길다: 2048²에서 문서 대부분을 덮는 획 24개는 약 40ms이고, 그 절반 가까이가 획 경계 사각형마다 coverage를 읽어 놓는 일이다(evidence.md 68절) | `crates/ugu-session/src/symmetry.rs`, `apps/ugurugu/src/canvas/symmetry.rs`, `crates/ugu-render/src/compose.rs` `stamp_strokes` | 2026-10-15 대칭자 |
 
-## 14. 3.3.1 출시에서 남은 것
+## 14. 출시 시험에서 남은 것
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
-| B3-141 | 막 뜬 창이 닫기 요청에 30초 안에 끝나지 않음 | 3.3.1 수용 시험의 "Run"이 설치 뒤 첫 실행에서 `CloseMainWindow` 뒤 30초 안에 끝나지 않았다(evidence.md 70절). 로그는 업데이트 확인 실패(오프라인)에서 멈췄고 닫기는 로그에 남지 않는다. 같은 빌드로 다시 돌린 수용 10/10에서는 나오지 않았다. 시작 직후 창 스레드가 메시지를 돌리지 않는 B3-97과 같은 원인일 수 있다(가설). 2026-10-17부터 닫기 경로가 로그에 남는다: 창 스레드가 받음(`close requested`, 창이 준비되기 전이면 `not taken` 경고), 기다림(`closing waits`와 저장·대화상자·열기 수)·내보내기 질문·저장 안 한 변경 질문, render 스레드 끝(`the render thread ends`), 창 닫힘(`the window closes`). 다음에 나오면 어느 줄까지 남았는지로 창 스레드가 메시지를 받지 못했는지, 질문이나 기다림에 걸렸는지 가른다 | `apps/ugurugu/src/app.rs` 시작·닫기 순서 | evidence.md 70절 |
+| B3-169 | 바깥에서 모든 창에 보낸 `WM_CLOSE`가 winit의 이벤트 창도 없앤다 | winit 0.30.13의 사용자 이벤트 창(`Winit Thread Event Target`)은 보이는(`WS_VISIBLE`) 투명 popup이고 `WM_CLOSE`를 `DefWindowProcW`에 넘겨 스스로 없어진다. 그 뒤 render 스레드가 보내는 사용자 이벤트는 닿지 않는다(evidence.md 104절에서 Sandbox 시험이 그 창을 닫았을 때 첫 surface 요청이 오지 않았다). `/F` 없는 `taskkill`처럼 프로세스의 모든 최상위 창에 `WM_CLOSE`를 보내는 도구로 끄면, 앱 창은 닫기를 받아도 render 스레드가 끝났다는 알림(`RenderStopped`)이 오지 않아 프로세스가 남을 것이다(가설, 재지 않음). 확인한 뒤 고치는 방법(상류 winit, 또는 앱이 그 창의 `WM_CLOSE`를 받지 않게)을 정한다 | `apps/ugurugu/src/app.rs`, winit `platform_impl/windows/event_loop.rs` | 2026-11-05 Windows PC 확인 |
 
 ## 15. 2026-10-21 UI/UX 검토에서 남은 것
 

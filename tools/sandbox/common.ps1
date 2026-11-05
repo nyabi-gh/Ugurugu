@@ -132,10 +132,27 @@ function Read-Automation([scriptblock] $Read, [int] $Seconds, [string] $What) {
     (Wait-Until { [pscustomobject]@{ Answer = & $Read } } $Seconds $What).Answer
 }
 
-function Wait-Window([int] $Seconds = 90, [string] $Root = $installRoot) {
+Add-Type -Namespace Sandbox -Name Window -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder name, int size);
+
+public static string ClassOf(IntPtr hwnd)
+{
+    var name = new System.Text.StringBuilder(256);
+    return GetClassName(hwnd, name, name.Capacity) > 0 ? name.ToString() : "";
+}
+'@
+
+# A process whose main window is the app's own window of class $Class (any
+# window when $Class is empty). winit's event window is visible, so .NET can
+# take it for the main window while the app's window is still hidden, and
+# keeps it: WM_CLOSE posted there destroys it, and the app's own window
+# never hears of the close.
+function Wait-Window([int] $Seconds = 90, [string] $Root = $installRoot, [string] $Class = 'Ugurugu 3') {
     Wait-Until {
         $process = Get-AppProcess $Root | Select-Object -First 1
-        if ($process -and $process.MainWindowHandle -ne 0) { $process }
+        if ($process -and $process.MainWindowHandle -ne 0 -and
+            (-not $Class -or [Sandbox.Window]::ClassOf($process.MainWindowHandle) -eq $Class)) { $process }
     } $Seconds 'the app window'
 }
 

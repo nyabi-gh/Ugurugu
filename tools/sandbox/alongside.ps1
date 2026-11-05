@@ -100,7 +100,7 @@ function Uninstall([string] $Root) {
 
 function Start-Legacy {
     Start-Process -FilePath $legacyApp | Out-Null
-    $process = Wait-Window 90 $legacyRoot
+    $process = Wait-Window 90 $legacyRoot ''
     $caption = $process.MainWindowTitle
     Close-App $process
     "2.2.13 ran ('$caption')"
