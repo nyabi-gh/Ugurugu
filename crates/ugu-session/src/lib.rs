@@ -198,6 +198,36 @@ impl LiveStroke {
         }
     }
 
+    /// Puts a straight line from `from` (layer pixels) before the stroke's
+    /// only point, all at that point's pressure. Its points are as far apart
+    /// as a shape's outline, so that the line wobbles along its length.
+    fn join_from(&mut self, from: [f64; 2]) {
+        let [first] = self.points[..] else {
+            unreachable!("joined as it begins");
+        };
+        let to = [f64::from(first.x), f64::from(first.y)];
+        if distance(from, &first) < MIN_POINT_DISTANCE {
+            return;
+        }
+        let mut line = shaping::dense(&[from, to]);
+        line.pop();
+        self.points = line
+            .into_iter()
+            .map(|position| point(position, first.pressure))
+            .chain(std::iter::once(first))
+            .collect();
+        for copy in &mut self.copies {
+            copy.points = self
+                .points
+                .iter()
+                .map(|kept| {
+                    let moved = copy.transform.apply([f64::from(kept.x), f64::from(kept.y)]);
+                    point(clamp_position(moved), kept.pressure)
+                })
+                .collect();
+        }
+    }
+
     fn last_pressure(&self) -> f32 {
         self.points
             .last()
@@ -242,6 +272,9 @@ pub struct Session {
     lasso: Option<Lasso>,
     seeds: RandomState,
     strokes_started: u64,
+    /// Where the last stroke drawn by hand lifted, in document pixels, for
+    /// `begin_joined_stroke`.
+    stroke_end: Option<[f64; 2]>,
     posing: Option<Posing>,
     /// The cel added for the stroke or fill under way, its folder and the
     /// state the addition left.
@@ -283,6 +316,7 @@ impl Session {
             lasso: None,
             seeds: RandomState::new(),
             strokes_started: 0,
+            stroke_end: None,
             posing: None,
             made_cel: None,
             symmetry: Symmetry::new(canvas),
@@ -446,6 +480,30 @@ impl Session {
         self.start_stroke(tools, input, true)
     }
 
+    /// `begin_stroke`, starting with a straight line from where the last
+    /// stroke drawn by hand lifted, as Shift and a press do in Photoshop.
+    /// Without such a stroke it is `begin_stroke`.
+    pub fn begin_joined_stroke(
+        &mut self,
+        tools: &Tools,
+        input: InputPoint,
+    ) -> Result<(), StrokeRefused> {
+        let from = self.stroke_end;
+        self.start_stroke(tools, input, true)?;
+        if let Some(from) = from {
+            let live = self.live.as_mut().expect("just begun");
+            let from = clamp_position(into(live.to_layer, from));
+            live.join_from(from);
+        }
+        Ok(())
+    }
+
+    /// Where `begin_joined_stroke` would start its line, in document
+    /// pixels.
+    pub fn stroke_end(&self) -> Option<[f64; 2]> {
+        self.stroke_end
+    }
+
     /// `begin_stroke`, with the symmetry ruler's copies when `repeated`.
     pub(crate) fn start_stroke(
         &mut self,
@@ -601,7 +659,11 @@ impl Session {
         let mut live = self.live.take().expect("still drawing");
         let end = into(live.to_layer, input.position);
         live.finish(clamp_position(end), carried);
-        self.commit(live)
+        let outcome = self.commit(live);
+        if let Ok(Outcome::Committed(_)) = outcome {
+            self.stroke_end = Some(input.position);
+        }
+        outcome
     }
 
     /// Commits `live`, and the symmetry ruler's copies after it, as one
@@ -659,6 +721,8 @@ impl Session {
         }
         let undone = self.history.undo()?;
         self.keep_layer_valid();
+        // The stroke it lifted from may be gone.
+        self.stroke_end = None;
         Ok(undone)
     }
 
@@ -672,6 +736,7 @@ impl Session {
         }
         let redone = self.history.redo()?;
         self.keep_layer_valid();
+        self.stroke_end = None;
         Ok(redone)
     }
 
@@ -863,6 +928,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         self.lasso = None;
+        self.stroke_end = None;
         self.history_mut()?.group("Canvas size", |group| {
             group.apply(|document| command::crop_canvas(document, offset, size))?;
             let moved = group
@@ -883,6 +949,7 @@ impl Session {
             return Ok(Outcome::NoChange);
         }
         self.lasso = None;
+        self.stroke_end = None;
         let sampling = if self.pixel_mode() {
             Sampling::Nearest
         } else {

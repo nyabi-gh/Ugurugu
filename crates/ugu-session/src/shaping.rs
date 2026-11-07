@@ -315,7 +315,7 @@ fn close(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
 }
 
 /// `corners` joined by straight pieces of points at most `STEP` apart.
-fn dense(corners: &[[f64; 2]]) -> Vec<[f64; 2]> {
+pub(crate) fn dense(corners: &[[f64; 2]]) -> Vec<[f64; 2]> {
     let mut points = vec![corners[0]];
     for pair in corners.windows(2) {
         let [from, to] = [pair[0], pair[1]];

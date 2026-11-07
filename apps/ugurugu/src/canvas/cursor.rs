@@ -71,6 +71,28 @@ impl Canvas {
             eraser,
         })
     }
+
+    /// The straight line a press at `pointer` would start its stroke with,
+    /// from where the last stroke lifted to `pointer`, in client physical
+    /// pixels; `None` unless the press would draw a joined stroke.
+    pub fn join_guide(&self, pointer: [f64; 2]) -> Option<[[f64; 2]; 2]> {
+        if !self.joins()
+            || !matches!(self.interaction, Interaction::Idle)
+            || self.sizing.is_some()
+            || self.picks()
+            || self.tab.session.pending().is_some()
+        {
+            return None;
+        }
+        // The tools whose press `apply` makes a stroke.
+        let strokes = match self.tools.tool {
+            Tool::Pen | Tool::Eraser => true,
+            Tool::Shape => self.hover_eraser,
+            _ => false,
+        };
+        let end = self.tab.session.stroke_end().filter(|_| strokes)?;
+        Some([self.to_client(end), pointer])
+    }
 }
 
 #[cfg(test)]

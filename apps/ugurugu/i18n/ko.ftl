@@ -538,6 +538,7 @@ help-contents = Ugurugu 도움말
 help-title = Ugurugu 도움말
 help-start = 시작하기
 help-start-draw = 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요.
+help-start-line = 브러시나 지우개로 Shift+클릭하면 마지막 획이 끝난 곳부터 직선을 긋습니다.
 help-start-pixel = 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 프로젝트를 만들 때 픽셀 모드를 켜세요.
 help-start-export = 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다.
 help-files = 프로젝트

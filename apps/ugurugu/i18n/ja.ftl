@@ -538,6 +538,7 @@ help-contents = Ugurugu ヘルプ
 help-title = Ugurugu ヘルプ
 help-start = はじめに
 help-start-draw = 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。
+help-start-line = ブラシや消しゴムで Shift+クリックすると、最後のストロークの終わりから直線を引きます。
 help-start-pixel = ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。
 help-start-export = ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。
 help-files = 作業ファイル

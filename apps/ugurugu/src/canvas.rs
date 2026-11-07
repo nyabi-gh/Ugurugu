@@ -1522,6 +1522,12 @@ impl Canvas {
         self.modifiers = (shift, alt);
     }
 
+    /// Whether a stroke pressed now starts with a straight line from where
+    /// the last one lifted: with Shift, as in Photoshop.
+    fn joins(&self) -> bool {
+        self.modifiers.0
+    }
+
     /// As in 2.2.13: Shift adds, Alt takes away, both replace.
     fn combine(&self) -> Combine {
         match self.modifiers {
@@ -1741,16 +1747,22 @@ impl Canvas {
         let point = self.input_point(sample);
         // The eraser end of a pen erases whatever tool is chosen. A pending
         // transform or placed text is applied first, as changing tools does.
-        let begun =
+        let eraser;
+        let tools =
             if kind == PointerKind::Pen && sample.inverted && self.tools.tool != Tool::Eraser {
-                let eraser = Tools {
+                eraser = Tools {
                     tool: Tool::Eraser,
                     ..self.tools.clone()
                 };
-                self.tab.session.begin_stroke(&eraser, point)
+                &eraser
             } else {
-                self.tab.session.begin_stroke(&self.tools, point)
+                &self.tools
             };
+        let begun = if self.joins() {
+            self.tab.session.begin_joined_stroke(tools, point)
+        } else {
+            self.tab.session.begin_stroke(tools, point)
+        };
         self.start_drawing(begun, false);
     }
 
@@ -4259,6 +4271,52 @@ mod tests {
         }
         let last = at(canvas, *points.last().unwrap());
         canvas.apply(CanvasInput::End(last));
+    }
+
+    #[test]
+    fn shift_starts_a_stroke_with_a_line_from_the_last_and_it_ends_as_the_export_draws_it() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([120, 90]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 120, 90]);
+        settle(&mut canvas, &renders);
+        stroke_through(&mut canvas, &[[10.0, 10.0], [30.0, 20.0]]);
+        let pointer = canvas.to_client([100.0, 70.0]);
+        assert_eq!(canvas.join_guide(pointer), None);
+        canvas.set_modifiers(true, false);
+        assert_eq!(
+            canvas.join_guide(pointer),
+            Some([canvas.to_client([30.0, 20.0]), pointer])
+        );
+        stroke_through(&mut canvas, &[[100.0, 70.0]]);
+        assert_eq!(
+            canvas.join_guide(pointer),
+            Some([canvas.to_client([100.0, 70.0]), pointer])
+        );
+        canvas.set_modifiers(false, false);
+        let document = canvas.session().document();
+        let layer = canvas.session().current_layer();
+        let LayerKind::Paint(paint) = &document.layer(layer).unwrap().kind else {
+            panic!("a paint layer");
+        };
+        let ugu_core::ops::Op::Paint { stroke, .. } = &paint.ops[1] else {
+            panic!("a stroke");
+        };
+        let points = &document.store.strokes[stroke].points;
+        let ends =
+            [points.first().unwrap(), points.last().unwrap()].map(|point| [point.x, point.y]);
+        assert_eq!(ends, [[30.0, 20.0], [100.0, 70.0]]);
+        assert!(canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
+
+        // Only a press that draws a stroke joins.
+        canvas.set_modifiers(true, false);
+        canvas.set_tool(Tool::Fill).unwrap();
+        assert_eq!(canvas.join_guide(pointer), None);
+        canvas.set_tool(Tool::Shape).unwrap();
+        assert_eq!(canvas.join_guide(pointer), None);
+        canvas.set_hover_eraser(true);
+        assert!(canvas.join_guide(pointer).is_some());
     }
 
     #[test]

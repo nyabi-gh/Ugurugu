@@ -538,6 +538,7 @@ help-contents = Ugurugu Help
 help-title = Ugurugu Help
 help-start = Getting started
 help-start-draw = Draw a stroke, choose a motion in the Wobble panel and press P to play it.
+help-start-line = With the brush or the eraser, Shift+click draws a straight line from where the last stroke ended.
 help-start-pixel = For pixel art, turn on Pixel mode in the Edit menu, or when making a new project.
 help-start-export = Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu.
 help-files = Projects

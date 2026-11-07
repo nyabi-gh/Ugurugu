@@ -3005,3 +3005,172 @@ fn shapes_are_not_repeated_by_the_ruler() {
     session.end_shape([40.0, 40.0], Drag::default()).unwrap();
     assert_eq!(strokes_on(&session, layer).len(), 1);
 }
+
+/// Asserts that `points` run straight from `from` to `to`, no more than a
+/// shape outline's step apart.
+fn assert_line(points: &[Point], from: [f32; 2], to: [f32; 2]) {
+    let first = points.first().unwrap();
+    let last = points.last().unwrap();
+    assert_eq!([first.x, first.y], from);
+    assert_eq!([last.x, last.y], to);
+    let [dx, dy] = [to[0] - from[0], to[1] - from[1]];
+    for point in points {
+        let across = (point.x - from[0]) * dy - (point.y - from[1]) * dx;
+        assert!(
+            across.abs() / dx.hypot(dy) < 1e-3,
+            "{point:?} is off the line"
+        );
+    }
+    for pair in points.windows(2) {
+        let step = (pair[1].x - pair[0].x).hypot(pair[1].y - pair[0].y);
+        assert!(step > 0.0 && step <= 2.0 + 1e-4, "a step of {step}");
+    }
+}
+
+#[test]
+fn a_joined_stroke_starts_with_a_line_from_where_the_last_one_lifted() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    assert_eq!(session.stroke_end(), None);
+    draw(&mut session, &tools, 10.0, 60.0);
+    assert_eq!(session.stroke_end(), Some([60.0, 50.0]));
+
+    session
+        .begin_joined_stroke(&tools, at(100.0, 80.0, 0.0))
+        .unwrap();
+    session.end_stroke(at(100.0, 80.0, 8.0)).unwrap();
+    let strokes = strokes_on(&session, layer);
+    assert_eq!(strokes.len(), 2);
+    assert_line(&strokes[1].points, [60.0, 50.0], [100.0, 80.0]);
+    // A mouse draws the line at full pressure, as any stroke.
+    assert!(strokes[1].points.iter().all(|point| point.pressure == 1.0));
+    assert_eq!(session.stroke_end(), Some([100.0, 80.0]));
+    assert_eq!(session.undo_label(), Some("Draw"));
+    assert!(session.undo().unwrap());
+    assert_eq!(strokes_on(&session, layer).len(), 1);
+}
+
+#[test]
+fn a_joined_stroke_goes_on_freehand_from_the_press() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    session
+        .begin_joined_stroke(&tools, at(100.0, 50.0, 0.0))
+        .unwrap();
+    session.extend_stroke(at(110.0, 60.0, 8.0));
+    session.end_stroke(at(120.0, 70.0, 16.0)).unwrap();
+    let points = &strokes_on(&session, layer)[1].points;
+    let press = points.iter().position(|point| point.x == 100.0).unwrap();
+    assert_line(&points[..=press], [60.0, 50.0], [100.0, 50.0]);
+    let after: Vec<[f32; 2]> = points[press + 1..].iter().map(|p| [p.x, p.y]).collect();
+    assert_eq!(after, [[110.0, 60.0], [120.0, 70.0]]);
+}
+
+#[test]
+fn a_joined_stroke_without_one_before_or_at_the_same_spot_is_a_plain_one() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    session
+        .begin_joined_stroke(&tools, at(30.0, 30.0, 0.0))
+        .unwrap();
+    assert_eq!(session.live().unwrap().points.len(), 1);
+    session.end_stroke(at(30.0, 30.0, 8.0)).unwrap();
+    session
+        .begin_joined_stroke(&tools, at(30.5, 30.0, 0.0))
+        .unwrap();
+    assert_eq!(session.live().unwrap().points.len(), 1);
+    session.end_stroke(at(30.5, 30.0, 8.0)).unwrap();
+    assert_eq!(strokes_on(&session, layer).len(), 2);
+}
+
+#[test]
+fn a_joined_line_takes_the_pressure_of_the_press() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    let pressed = |x: f64, pressure: f32, time: f64| InputPoint {
+        position: [x, 20.0],
+        pressure: Some(pressure),
+        time,
+    };
+    session
+        .begin_stroke(&tools, pressed(10.0, 0.3, 0.0))
+        .unwrap();
+    session.end_stroke(pressed(20.0, 0.0, 8.0)).unwrap();
+    session
+        .begin_joined_stroke(&tools, pressed(60.0, 0.6, 0.0))
+        .unwrap();
+    session.end_stroke(pressed(60.0, 0.0, 8.0)).unwrap();
+    let points = &strokes_on(&session, layer)[1].points;
+    assert_line(points, [20.0, 20.0], [60.0, 20.0]);
+    assert!(points.iter().all(|point| point.pressure == 0.6));
+}
+
+#[test]
+fn undo_and_canvas_changes_forget_where_the_last_stroke_lifted() {
+    let mut session = session();
+    let tools = Tools::default();
+    draw(&mut session, &tools, 10.0, 60.0);
+    session.undo().unwrap();
+    assert_eq!(session.stroke_end(), None);
+    session.redo().unwrap();
+    assert_eq!(session.stroke_end(), None);
+
+    draw(&mut session, &tools, 10.0, 60.0);
+    session.crop_canvas([10, 0], [200, 100]).unwrap();
+    assert_eq!(session.stroke_end(), None);
+    draw(&mut session, &tools, 10.0, 60.0);
+    session
+        .resample_image([400, 200], Sampling::Smooth)
+        .unwrap();
+    assert_eq!(session.stroke_end(), None);
+
+    // A shape is not drawn by hand.
+    session.begin_shape(&tools, [10.0, 10.0]).unwrap();
+    session.drag_shape([40.0, 40.0], Drag::default());
+    session.end_shape([40.0, 40.0], Drag::default()).unwrap();
+    assert_eq!(session.stroke_end(), None);
+}
+
+#[test]
+fn a_joined_line_starts_where_the_last_stroke_lifted_on_screen() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    // Moved 30 right on frame 0, back where it is drawn on frame 10.
+    session.set_pose(layer, moved_by(30.0), [0.0, 0.0]).unwrap();
+    session.set_frame(10).unwrap();
+    session.set_pose(layer, moved_by(0.0), [0.0, 0.0]).unwrap();
+    session.set_frame(0).unwrap();
+    session
+        .begin_joined_stroke(&tools, at(100.0, 50.0, 0.0))
+        .unwrap();
+    session.end_stroke(at(100.0, 50.0, 8.0)).unwrap();
+    let points = &strokes_on(&session, layer)[1].points;
+    assert_line(points, [30.0, 50.0], [70.0, 50.0]);
+}
+
+#[test]
+fn the_symmetry_ruler_mirrors_a_joined_line() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    mirrored(&mut session);
+    session
+        .begin_joined_stroke(&tools, at(80.0, 20.0, 0.0))
+        .unwrap();
+    session.end_stroke(at(80.0, 20.0, 8.0)).unwrap();
+    let strokes = strokes_on(&session, layer);
+    let [hand, copy] = [&strokes[1], &strokes[2]];
+    assert_line(&hand.points, [60.0, 50.0], [80.0, 20.0]);
+    assert_eq!(hand.points.len(), copy.points.len());
+    for (hand, copy) in hand.points.iter().zip(copy.points.iter()) {
+        assert_eq!([copy.x, copy.y], [200.0 - hand.x, hand.y]);
+    }
+}

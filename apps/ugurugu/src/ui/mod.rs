@@ -885,7 +885,8 @@ pub fn pick_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
 }
 
 /// 2.2.13's brush ring in place of the pointer while a press would draw:
-/// a dark line under a light one, dashed for erasing.
+/// a dark line under a light one, dashed for erasing. With Shift, the
+/// straight line the press would start with leads to it.
 pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
     let (pointer, space) =
         ui.input(|input| (input.pointer.hover_pos(), input.key_down(egui::Key::Space)));
@@ -900,12 +901,19 @@ pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
         return;
     };
     let ppp = ui.ctx().pixels_per_point();
-    let Some(cursor) =
-        canvas.brush_cursor([f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)])
-    else {
+    let client = [f64::from(pointer.x * ppp), f64::from(pointer.y * ppp)];
+    let to_points = |[x, y]: [f64; 2]| egui::pos2(x as f32 / ppp, y as f32 / ppp);
+    let dark = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
+    let light = egui::Color32::from_rgba_unmultiplied(250, 250, 250, 235);
+    if let Some(line) = canvas.join_guide(client) {
+        let line = line.map(to_points);
+        let painter = ui.painter();
+        painter.line_segment(line, egui::Stroke::new(3.0, dark));
+        painter.line_segment(line, egui::Stroke::new(1.0, light));
+    }
+    let Some(cursor) = canvas.brush_cursor(client) else {
         return;
     };
-    let to_points = |[x, y]: [f64; 2]| egui::pos2(x as f32 / ppp, y as f32 / ppp);
     let (points, eraser) = match cursor {
         BrushCursor::Circle {
             centre,
@@ -929,8 +937,6 @@ pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
     };
     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     let painter = ui.painter();
-    let dark = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
-    let light = egui::Color32::from_rgba_unmultiplied(250, 250, 250, 235);
     painter.add(egui::Shape::closed_line(
         points.clone(),
         egui::Stroke::new(3.0, dark),

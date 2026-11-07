@@ -538,6 +538,7 @@ help-contents = Ugurugu 帮助
 help-title = Ugurugu 帮助
 help-start = 入门
 help-start-draw = 画一条线，在抖动面板中选择一种运动，然后按 P 播放。
+help-start-line = 使用画笔或橡皮擦时，按 Shift+点击会从上一笔的终点画一条直线。
 help-start-pixel = 要画像素画，请在编辑菜单中或新建项目时打开像素模式。
 help-start-export = 在文件菜单中可以将动画导出为 GIF 或 WebP，或将当前帧导出为 PNG 或 JPEG。
 help-files = 项目

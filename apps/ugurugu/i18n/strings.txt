@@ -536,6 +536,7 @@ help-contents | Ugurugu &Help | Ugurugu 도움말(&H) | Ugurugu ヘルプ(&H) | 
 help-title | Ugurugu Help | Ugurugu 도움말 | Ugurugu ヘルプ | Ugurugu 帮助
 help-start | Getting started | 시작하기 | はじめに | 入门
 help-start-draw | Draw a stroke, choose a motion in the Wobble panel and press P to play it. | 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요. | 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。 | 画一条线，在抖动面板中选择一种运动，然后按 P 播放。
+help-start-line | With the brush or the eraser, Shift+click draws a straight line from where the last stroke ended. | 브러시나 지우개로 Shift+클릭하면 마지막 획이 끝난 곳부터 직선을 긋습니다. | ブラシや消しゴムで Shift+クリックすると、最後のストロークの終わりから直線を引きます。 | 使用画笔或橡皮擦时，按 Shift+点击会从上一笔的终点画一条直线。
 help-start-pixel | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 프로젝트를 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。 | 要画像素画，请在编辑菜单中或新建项目时打开像素模式。
 help-start-export | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。 | 在文件菜单中可以将动画导出为 GIF 或 WebP，或将当前帧导出为 PNG 或 JPEG。
 help-files | Projects | 프로젝트 | 作業ファイル | 项目

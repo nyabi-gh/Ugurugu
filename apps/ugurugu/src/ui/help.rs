@@ -11,7 +11,12 @@ use crate::theme;
 const SECTIONS: [(&str, &[&str]); 5] = [
     (
         "help-start",
-        &["help-start-draw", "help-start-pixel", "help-start-export"],
+        &[
+            "help-start-draw",
+            "help-start-line",
+            "help-start-pixel",
+            "help-start-export",
+        ],
     ),
     (
         "help-animate",
