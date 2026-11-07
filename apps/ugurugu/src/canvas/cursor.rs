@@ -32,22 +32,25 @@ impl Canvas {
     }
 
     /// The brush cursor for the pointer at `pointer` (client physical
-    /// pixels), or at the stroke's last point while one is drawn; `None`
-    /// when a press would not draw.
+    /// pixels), at the stroke's last point while one is drawn, or where a
+    /// drag sizing the brush began, showing the size it sets; `None` when a
+    /// press would not draw.
     pub fn brush_cursor(&self, pointer: [f64; 2]) -> Option<BrushCursor> {
         if self.sizing.is_some() {
             return None;
         }
-        let position = match self.interaction {
-            Interaction::Idle if !self.picks() => pointer,
-            Interaction::Drawing { .. } => self.drawn_at?,
+        let (position, eraser_end) = match self.interaction {
+            Interaction::Idle if !self.picks() => (pointer, self.hover_eraser),
+            Interaction::Drawing { .. } => (self.drawn_at?, self.hover_eraser),
+            Interaction::BrushSizing { start, .. } => (start, false),
             _ => return None,
         };
         let tool = self.tools.tool;
-        if self.tab.session.pending().is_some() || tool == Tool::Text {
+        let sizing_brush = matches!(self.interaction, Interaction::BrushSizing { .. });
+        if self.tab.session.pending().is_some() && !sizing_brush || tool == Tool::Text {
             return None;
         }
-        let eraser = self.hover_eraser || tool == Tool::Eraser;
+        let eraser = eraser_end || tool == Tool::Eraser;
         if !eraser && !matches!(tool, Tool::Pen | Tool::Shape) {
             return None;
         }

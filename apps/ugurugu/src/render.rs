@@ -671,11 +671,14 @@ impl RenderThread {
                         .layer_id_at(point)
                         .is_some_and(|layer| layer.order != egui::Order::Background)
                 };
-                let routed =
-                    self.router
-                        .route(events, pixels_per_point, modifiers, pan_held, |position| {
-                            canvas.contains(position) && !under_egui(position)
-                        });
+                let routed = self.router.route(
+                    events,
+                    pixels_per_point,
+                    modifiers,
+                    pan_held,
+                    canvas.has_brush_size(),
+                    |position| canvas.contains(position) && !under_egui(position),
+                );
                 if routed.uses_buttons() {
                     self.alt_tap.cancel();
                 }

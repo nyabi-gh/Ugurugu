@@ -249,7 +249,7 @@ fn enabled(action: Action, canvas: &Canvas, layout: &Layout) -> bool {
     let selected = session.selection().is_some();
     let pending = session.pending().is_some();
     match action {
-        A::SmallerBrush | A::LargerBrush => super::sized(canvas),
+        A::SmallerBrush | A::LargerBrush => canvas.has_brush_size(),
         A::Undo => session.undo_label().is_some(),
         A::Redo => session.redo_label().is_some(),
         A::Cut
@@ -584,8 +584,8 @@ pub fn run(
             let result = canvas.edit(Session::new_cel);
             panels.report(result);
         }
-        A::SmallerBrush => super::step_brush_size(canvas, false),
-        A::LargerBrush => super::step_brush_size(canvas, true),
+        A::SmallerBrush => canvas.step_brush_size(false),
+        A::LargerBrush => canvas.step_brush_size(true),
         A::SwapColors => panels.color.swap(canvas),
         A::ResetLayout => panels.set_layout(Layout::default()),
         A::AnimationTools => {

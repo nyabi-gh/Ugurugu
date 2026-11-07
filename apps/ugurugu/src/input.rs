@@ -29,6 +29,9 @@ pub enum Gesture {
     Turn,
     /// Zooms the view: Ctrl+Space and drag.
     Zoom,
+    /// Sizes the brush: Alt and a secondary drag, as in Photoshop; on
+    /// macOS also Control, Option and a primary drag, as in its Mac version.
+    BrushSize,
 }
 
 /// What the canvas receives, in client physical pixels.
@@ -112,11 +115,19 @@ impl Routed {
     }
 }
 
+/// Photoshop for Mac sizes the brush with Control, Option and a drag; a
+/// trackpad has no easy secondary drag.
+fn sizes_with_primary(modifiers: egui::Modifiers) -> bool {
+    cfg!(target_os = "macos") && modifiers.ctrl && modifiers.alt
+}
+
 impl InputRouter {
     /// `starts_on_canvas` decides, for a press at a physical position,
     /// whether the canvas owns the gesture instead of the UI. A primary
     /// press draws, or while `pan_held` pans, turns with Shift or zooms with
-    /// Ctrl, as in 2.2.13; a middle press pans. Shift turns the wheel too.
+    /// Ctrl, as in 2.2.13; a middle press pans; a secondary press with Alt
+    /// sizes the brush, as in Photoshop, when the tool has a size
+    /// (`brush_sized`). Shift turns the wheel too.
     /// Fingers on the canvas follow 2.2.13's touch rules: two pan, zoom and
     /// turn, a pen press takes over from them, and a mouse press waits.
     pub fn route(
@@ -125,6 +136,7 @@ impl InputRouter {
         pixels_per_point: f32,
         modifiers: egui::Modifiers,
         pan_held: bool,
+        brush_sized: bool,
         starts_on_canvas: impl Fn([f64; 2]) -> bool,
     ) -> Routed {
         let mut routed = Routed {
@@ -201,6 +213,9 @@ impl InputRouter {
                             Some((
                                 Buttons::PRIMARY,
                                 match (pan_held, shortcuts::primary(modifiers), modifiers.shift) {
+                                    (false, ..) if brush_sized && sizes_with_primary(modifiers) => {
+                                        Gesture::BrushSize
+                                    }
                                     (false, ..) => Gesture::Draw,
                                     (true, true, _) => Gesture::Zoom,
                                     (true, false, true) => Gesture::Turn,
@@ -209,6 +224,11 @@ impl InputRouter {
                             ))
                         } else if pressed.contains(Buttons::MIDDLE) {
                             Some((Buttons::MIDDLE, Gesture::Pan))
+                        } else if pressed.contains(Buttons::SECONDARY)
+                            && modifiers.alt
+                            && brush_sized
+                        {
+                            Some((Buttons::SECONDARY, Gesture::BrushSize))
                         } else {
                             None
                         };
@@ -394,9 +414,14 @@ mod tests {
     }
 
     fn route(router: &mut InputRouter, events: Vec<PointerEvent>) -> Routed {
-        router.route(events, 1.0, egui::Modifiers::NONE, false, |position| {
-            position[0] >= 100.0
-        })
+        router.route(
+            events,
+            1.0,
+            egui::Modifiers::NONE,
+            false,
+            false,
+            |position| position[0] >= 100.0,
+        )
     }
 
     #[test]
@@ -479,6 +504,7 @@ mod tests {
                 1.0,
                 modifiers,
                 pan_held,
+                false,
                 |_| true,
             );
             match routed.canvas[0] {
@@ -504,9 +530,64 @@ mod tests {
             1.0,
             egui::Modifiers::SHIFT,
             false,
+            false,
             |_| true,
         );
         assert_eq!(routed.canvas, [CanvasInput::Turn { notches: -2.0 }]);
+    }
+
+    #[test]
+    fn alt_and_a_secondary_drag_size_the_brush_of_a_tool_with_a_size() {
+        let press = |button: Buttons, modifiers: egui::Modifiers, brush_sized: bool| {
+            let mut router = InputRouter::default();
+            let routed = router.route(
+                vec![
+                    samples(1, vec![sample(150.0, button, 1)]),
+                    samples(1, vec![sample(160.0, button, 2)]),
+                    samples(1, vec![sample(170.0, Buttons::empty(), 3)]),
+                ],
+                1.0,
+                modifiers,
+                false,
+                brush_sized,
+                |_| true,
+            );
+            match routed.canvas.as_slice() {
+                [CanvasInput::Begin(gesture, ..), ..] => {
+                    assert!(matches!(
+                        routed.canvas[1..],
+                        [CanvasInput::Extend(_), CanvasInput::End(_)]
+                    ));
+                    // Letting go of Alt then does not open the menus.
+                    assert!(routed.uses_buttons());
+                    Some(*gesture)
+                }
+                [] => {
+                    assert!(!routed.egui.is_empty());
+                    None
+                }
+                other => panic!("{other:?}"),
+            }
+        };
+        let alt = egui::Modifiers::ALT;
+        assert_eq!(
+            press(Buttons::SECONDARY, alt, true),
+            Some(Gesture::BrushSize)
+        );
+        assert_eq!(press(Buttons::SECONDARY, alt, false), None);
+        assert_eq!(press(Buttons::SECONDARY, egui::Modifiers::NONE, true), None);
+        // Alt and a primary press stay the eyedropper's, or a selection's.
+        assert_eq!(press(Buttons::PRIMARY, alt, true), Some(Gesture::Draw));
+        let control_option = egui::Modifiers::CTRL | alt;
+        let on_a_mac = cfg!(target_os = "macos").then_some(Gesture::BrushSize);
+        assert_eq!(
+            press(Buttons::PRIMARY, control_option, true),
+            on_a_mac.or(Some(Gesture::Draw))
+        );
+        assert_eq!(
+            press(Buttons::PRIMARY, control_option, false),
+            Some(Gesture::Draw)
+        );
     }
 
     fn finger(pointer: u32, x: f64, down: bool) -> PointerEvent {
@@ -715,6 +796,7 @@ mod tests {
             ],
             2.0,
             egui::Modifiers::NONE,
+            false,
             false,
             |position| position[0] >= 100.0,
         );

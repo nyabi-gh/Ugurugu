@@ -40,6 +40,7 @@ use crate::cache::{CacheWorker, Key, Preview, Rendered, Renders, Snapshot, Versi
 use crate::i18n::tr;
 use crate::input::{CanvasInput, Gesture};
 
+mod brush_size;
 mod clipboard;
 mod cursor;
 mod onion;
@@ -51,6 +52,7 @@ mod text;
 mod transform;
 mod view;
 
+pub use brush_size::BRUSH_SIZES;
 pub use clipboard::CopiedPixels;
 pub use cursor::BrushCursor;
 pub use onion::{OnionKey, OnionSettings, tint as tint_onion};
@@ -163,6 +165,12 @@ enum Interaction {
     },
     /// Picking up colours with the eyedropper.
     Picking,
+    /// Sizing the brush by dragging sideways from `start` (client physical
+    /// pixels), where its size was `base`.
+    BrushSizing {
+        start: [f64; 2],
+        base: f32,
+    },
     /// Turning the view by dragging sideways from client x `start`, where
     /// it was at `angle`.
     Turning {
@@ -1300,6 +1308,9 @@ impl Canvas {
             }
             CanvasInput::Begin(Gesture::Turn, _, sample) => self.begin_turn_drag(sample.position),
             CanvasInput::Begin(Gesture::Zoom, _, sample) => self.begin_zoom_drag(sample.position),
+            CanvasInput::Begin(Gesture::BrushSize, _, sample) => {
+                self.begin_brush_sizing(sample.position);
+            }
             CanvasInput::Begin(Gesture::Draw, _, sample) if self.sizing.is_some() => {
                 self.sample_count += 1;
                 self.begin_sizing_drag(sample.position);
@@ -1373,6 +1384,7 @@ impl Canvas {
                     Interaction::Posing { .. } => self.drag_pose(sample.position),
                     Interaction::Ruling { .. } => self.drag_ruler(sample.position),
                     Interaction::Sizing { .. } => self.drag_sizing(sample.position),
+                    Interaction::BrushSizing { .. } => self.drag_brush_size(sample.position),
                     Interaction::MovingText { .. } => self.drag_text(sample.position),
                     Interaction::Picking => self.pick(sample.position),
                     Interaction::Turning { .. } | Interaction::Zooming { .. } => {
@@ -1419,6 +1431,11 @@ impl Canvas {
                     sizing @ Interaction::Sizing { .. } => {
                         self.interaction = sizing;
                         self.drag_sizing(sample.position);
+                        self.interaction = Interaction::Idle;
+                    }
+                    sizing @ Interaction::BrushSizing { .. } => {
+                        self.interaction = sizing;
+                        self.drag_brush_size(sample.position);
                         self.interaction = Interaction::Idle;
                     }
                     ruling @ Interaction::Ruling { .. } => {
@@ -1482,6 +1499,7 @@ impl Canvas {
                 self.tab.session.cancel_pose();
             }
             Interaction::Sizing { base, .. } => self.undrag_sizing(base),
+            Interaction::BrushSizing { base, .. } => self.undrag_brush_size(base),
             Interaction::Ruling { base, .. } => self.set_symmetry(base),
             Interaction::MovingText { base, .. } => {
                 if let Some(outline) = self

@@ -39,7 +39,7 @@ use ugu_core::ops::{Affine, MotionStyle, Sampling, Wobble};
 use ugu_core::selection::{Combine, Selection};
 use ugu_session::{FillSettings, Lasso, Reads, Session, ShapeKind, Tool};
 
-use crate::canvas::{BrushCursor, Canvas, Grip, HANDLES, RulerGrip, ZOOM_RANGE};
+use crate::canvas::{BRUSH_SIZES, BrushCursor, Canvas, Grip, HANDLES, RulerGrip, ZOOM_RANGE};
 use crate::clipboard::Clipboard;
 use crate::files::Files;
 use crate::i18n::{tr, tr_with};
@@ -368,32 +368,6 @@ fn slider_row(
         let width = ui.available_width().max(40.0);
         widgets::slider(ui, value, range, name, width).union(field)
     })
-}
-
-/// The sizes `[` and `]` step through, closer together where a pixel more
-/// shows; the size slider's range.
-const BRUSH_SIZES: [f32; 24] = [
-    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 28.0, 32.0, 40.0,
-    48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0,
-];
-
-/// Whether the tool has a size for `[` and `]` to change.
-fn sized(canvas: &Canvas) -> bool {
-    matches!(canvas.tool(), Tool::Pen | Tool::Eraser | Tool::Shape)
-}
-
-/// Sets the tool's size to the next of `BRUSH_SIZES` up or down from it.
-fn step_brush_size(canvas: &mut Canvas, larger: bool) {
-    let tool = canvas.tool();
-    let width = canvas.brushes().get(tool).width;
-    let next = if larger {
-        BRUSH_SIZES.iter().copied().find(|&size| size > width)
-    } else {
-        BRUSH_SIZES.iter().rev().copied().find(|&size| size < width)
-    };
-    if let Some(next) = next {
-        canvas.brushes_mut().get_mut(tool).width = next;
-    }
 }
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
@@ -886,16 +860,20 @@ pub fn pick_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
 
 /// 2.2.13's brush ring in place of the pointer while a press would draw:
 /// a dark line under a light one, dashed for erasing. With Shift, the
-/// straight line the press would start with leads to it.
+/// straight line the press would start with leads to it; while a drag
+/// sizes the brush, the size is written beside it.
 pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
     let (pointer, space) =
         ui.input(|input| (input.pointer.hover_pos(), input.key_down(egui::Key::Space)));
+    let dragged = canvas.brush_size_dragged();
+    // A size drag keeps its ring wherever the pointer goes.
     let over = pointer.filter(|pointer| {
-        ui.max_rect().contains(*pointer)
-            && ui
-                .ctx()
-                .layer_id_at(*pointer)
-                .is_none_or(|layer| layer.order == egui::Order::Background)
+        dragged.is_some()
+            || ui.max_rect().contains(*pointer)
+                && ui
+                    .ctx()
+                    .layer_id_at(*pointer)
+                    .is_none_or(|layer| layer.order == egui::Order::Background)
     });
     let (Some(pointer), false) = (over, space) else {
         return;
@@ -937,6 +915,27 @@ pub fn brush_cursor(ui: &mut egui::Ui, canvas: &Canvas) {
     };
     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     let painter = ui.painter();
+    if let Some(width) = dragged {
+        let ring = egui::Rect::from_points(&points);
+        let galley = painter.layout_no_wrap(
+            format!("{width} px"),
+            egui::FontId::proportional(theme::SMALL),
+            theme::text(),
+        );
+        let size = galley.size() + egui::vec2(16.0, 8.0);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(ring.right() + 10.0, ring.center().y - size.y / 2.0),
+            size,
+        );
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(theme::radius::CONTROL),
+            theme::control(),
+            egui::Stroke::new(1.0, theme::border()),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(rect.min + egui::vec2(8.0, 4.0), galley, theme::text());
+    }
     painter.add(egui::Shape::closed_line(
         points.clone(),
         egui::Stroke::new(3.0, dark),
