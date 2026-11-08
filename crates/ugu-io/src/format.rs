@@ -21,7 +21,7 @@ pub const KEY_OPACITY_FEATURE: &str = "key-opacity";
 /// Fills laid behind the lines, which 3.2 would draw over them.
 pub const FILL_BEHIND_FEATURE: &str = "fill-behind";
 /// Strokes that fade along their length, which 3.5 would draw whole.
-/// A line around a layer, which 3.6 would leave out.
+/// A line around a layer, which 3.5 would leave out.
 pub const LAYER_OUTLINE_FEATURE: &str = "layer-outline";
 pub const BRUSH_FADE_FEATURE: &str = "brush-fade";
 pub const FEATURES: [&str; 7] = [

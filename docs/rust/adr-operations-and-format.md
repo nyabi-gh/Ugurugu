@@ -138,7 +138,7 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | `paint`·`group` | `keys` | `"keys"` | `pivot`(문서 px [x, y]), `keys`(프레임 순): `frame`(0 ≤ frame < 문서 프레임 수, 프레임마다 하나), `offset`(px, ±32767), `rotation`(도, 시계 방향, ±3600), `scale`(0.05~20), `flip`(켜졌을 때만 씀), `opacity`(0~1, 레이어 불투명도에 곱함, 1이면 쓰지 않음, 3.3.0), `ease`(`linear`·`smooth`·`hold`, 이 키에서 다음 키까지) |
 | `group` | `cels` | `"cels"` | 애니메이션 폴더의 노출표(프레임 순): `frame`, `cel`(그 그룹의 바로 아래 자식 id, `null`은 빈 프레임). 다음 노출 전까지 유지, 첫 노출 전 프레임은 마지막 노출 |
 
-3.3.0은 같은 방식으로 기능 이름 셋을 더했다(`ugu_io::write`의 `required`가 쓰는 문서를 보고 넣는다). 3.6.0이 `brush-fade`를, 그다음 판이 `layer-outline`을 더했다. 지금 `FEATURES`는 `keys`·`cels`·`frames`·`key-opacity`·`fill-behind`·`brush-fade` 여섯이다.
+3.3.0은 같은 방식으로 기능 이름 셋을 더했다(`ugu_io::write`의 `required`가 쓰는 문서를 보고 넣는다). 3.6.0이 `brush-fade`와 `layer-outline`을 더했다. 지금 `FEATURES`는 `keys`·`cels`·`frames`·`key-opacity`·`fill-behind`·`brush-fade`·`layer-outline` 일곱이다.
 
 | `required` | 넣는 때 | 3.2 이하가 모르고 읽으면(`format.rs` 주석) |
 |---|---|---|
