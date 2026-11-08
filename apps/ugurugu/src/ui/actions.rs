@@ -684,11 +684,17 @@ fn take_pressed(
                 return true;
             };
             let chord = Chord::new(modifiers, key);
-            let Some(action) = keys
-                .action(chord)
-                .filter(|&action| enabled(action, canvas, layout))
-                .filter(|&action| !presses_focused(focused, action, canvas))
-            else {
+            // A drag often holds a modifier of its own (Alt to size the
+            // brush), and Esc pressed with it still ends the drag.
+            let ends_drag =
+                canvas.dragging() && keys.key(A::Escape).is_some_and(|escape| escape.key == key);
+            let Some(action) = (if ends_drag {
+                Some(A::Escape)
+            } else {
+                keys.action(chord)
+            })
+            .filter(|&action| enabled(action, canvas, layout))
+            .filter(|&action| !presses_focused(focused, action, canvas)) else {
                 return true;
             };
             pressed.push((chord, action));
@@ -854,6 +860,33 @@ mod tests {
         canvas.edit(Session::select_all).unwrap();
         canvas.begin_transform();
         canvas
+    }
+
+    #[test]
+    fn escape_ends_a_drag_whatever_modifiers_the_drag_holds() {
+        use crate::input::{CanvasInput, Gesture};
+        use ugu_platform::clock::Ticks;
+        use ugu_platform::pointer::{Buttons, PointerKind, PointerSample};
+        let ctx = egui::Context::default();
+        let alt_escape = [(egui::Modifiers::ALT, egui::Key::Escape)];
+        let mut canvas = Canvas::new(ugu_core::document::Document::new([64, 64]), |_| {});
+        assert!(frame(&ctx, &canvas, &alt_escape, &[], false).is_empty());
+        canvas.apply(CanvasInput::Begin(
+            Gesture::BrushSize,
+            PointerKind::Mouse,
+            PointerSample {
+                position: [60.0, 60.0],
+                pressure: None,
+                tilt: None,
+                twist: None,
+                buttons: Buttons::SECONDARY,
+                in_contact: true,
+                inverted: false,
+                time: Ticks(0),
+                frame_id: 0,
+            },
+        ));
+        assert_eq!(frame(&ctx, &canvas, &alt_escape, &[], false), [A::Escape]);
     }
 
     #[test]

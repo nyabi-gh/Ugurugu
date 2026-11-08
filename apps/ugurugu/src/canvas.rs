@@ -1522,6 +1522,11 @@ impl Canvas {
         true
     }
 
+    /// Whether a press on the canvas is being dragged.
+    pub fn dragging(&self) -> bool {
+        !matches!(self.interaction, Interaction::Idle)
+    }
+
     /// Esc: ends the gesture under way without its result, else stops
     /// sizing the canvas, else deselects.
     pub fn escape(&mut self) {

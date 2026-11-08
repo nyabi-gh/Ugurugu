@@ -125,7 +125,7 @@
 | B3-72 | `vello_cpu`·`vello_common` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다. 펜을 뗄 때 찍는 선은 Vello의 strip 생성기를 직접 돌리고 coarse 단계의 채우기 규칙을 따라 하므로(decisions.md 2절), 판을 올리면 `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`가 전체 렌더와 바이트가 같은지 본다 | `Cargo.toml`, `crates/ugu-render/src/compose.rs` `Stamp::line_coverage` | evidence.md 렌더러·92절 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-174 | Alt를 누른 채 Esc는 브러시 크기 끌기를 되돌리지 않음 | 2026-11-08 Sandbox(evidence.md 106절)에서 Alt+오른쪽 끌기 중 Alt를 먼저 떼고 Esc를 누르면 처음 크기로 돌아갔지만, Alt를 누른 채 Esc를 누르면 크기가 그대로였다(창은 앞에 남음). 앱 쪽 원인은 코드로 확인했다: 단축키 `Chord`는 Alt까지 같아야 맞고(`Chord::new`), 캔버스의 Esc 동작은 Alt 없는 Esc라 Alt+Esc는 아무 동작에도 닿지 않는다. macOS의 Option+Esc도 같을 것이다(가설, 보지 않음). Windows가 Alt+Esc를 앱보다 먼저 가져가는지는 가르지 못했다(가설). 끄는 동안에는 Alt를 쥐고 있으니 Esc도 그 상태로 누르기 쉽다. 정할 것: 캔버스 끌기 중의 Esc는 수식키와 상관없이 끌기를 되돌릴지. 그렇게 하면 Sandbox 단계의 "Esc with Alt"를 실패 조건으로 바꾼다 | `apps/ugurugu/src/shortcuts.rs` `Chord::new`, `canvas.rs` `escape`, `tools/sandbox/gui.ps1` "Alt and a right-drag size the brush" | 2026-11-08 이슈 #157 |
+| B3-175 | macOS에서 끄는 중 Option+Esc | 캔버스에서 끄는 동안의 Esc는 수식키와 상관없이 끌기를 끝낸다(decisions.md 3절). Windows는 Alt+Esc를 창에 보내지 않아 쓸 수 없다(evidence.md 107절). macOS에서 Option+오른쪽 끌기·Control+Option+끌기 중 Option을 쥔 채 Esc가 크기를 되돌리는지는 보지 않았다(가설: 키가 앱에 와서 되돌린다) | `apps/ugurugu/src/ui/actions.rs` `take_pressed` | 2026-11-08 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 

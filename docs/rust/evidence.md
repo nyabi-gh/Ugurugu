@@ -2055,4 +2055,10 @@ winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 �
 
 두 실행 모두 끄는 동안 링이 누른 자리에 머물고 옆에 크기(예: "128 px")가 보였고, 끌기는 획을 남기지 않았다(제목에 `*` 없음).
 
-**원인과 고침:** 캔버스의 Shift·Alt 상태(`Canvas::set_modifiers`)를 `render.rs`가 포인터 이벤트에서만 넣어, 포인터가 멈춰 있으면 Shift를 눌러도 다음 움직임까지 안내선이 없었다. 누를 때는 그 포인터 이벤트가 Shift를 실어 오므로 직선은 그려졌다. `ModifiersChanged`에서도 넣고 프레임을 그리게 했다. Alt를 쥔 채 Esc는 backlog B3-174.
+**원인과 고침:** 캔버스의 Shift·Alt 상태(`Canvas::set_modifiers`)를 `render.rs`가 포인터 이벤트에서만 넣어, 포인터가 멈춰 있으면 Shift를 눌러도 다음 움직임까지 안내선이 없었다. 누를 때는 그 포인터 이벤트가 Shift를 실어 오므로 직선은 그려졌다. `ModifiersChanged`에서도 넣고 프레임을 그리게 했다. Alt를 쥔 채 Esc는 아래 107절.
+
+## 107. 끄는 중의 Esc와 Windows의 Alt+Esc (2026-11-08)
+
+**바꾼 것:** 캔버스에서 끄는 동안 Esc는 수식키와 상관없이 끌기를 끝낸다(`ui::actions::take_pressed`, `Canvas::dragging`). 전에는 단축키가 Alt까지 같아야 맞아서, Alt+오른쪽 끌기 중 Alt를 쥔 채 누른 Esc가 아무 동작에도 닿지 않았다(106절). 시험 `escape_ends_a_drag_whatever_modifiers_the_drag_holds`는 고치기 전에 실패했다.
+
+**결과(Sandbox):** 고친 release 빌드로 "Alt and a right-drag size the brush"를 다시 돌렸어도 Alt를 쥔 채 Esc는 63 → 106 → 106으로 106절과 같았다. 그래서 임시 단계(커밋하지 않음)로 빈 WinForms 창(`KeyPreview`)에 같은 `keybd_event`를 보냈다: Esc만 → `Escape`가 왔고, Alt를 쥔 채 Esc → `Menu`(Alt)만 오고 Esc는 오지 않았다. 창은 앞에 남았다. Windows가 Alt+Esc를 시스템 단축키로 먼저 가져가 어느 창에도 키를 주지 않는다. 그러니 Windows에서는 Alt를 먼저 떼고 Esc를 눌러야 하고(106절에서 되돌림), 이 바꿈은 macOS의 Option+Esc를 위한 것이다(가설, backlog B3-175).
