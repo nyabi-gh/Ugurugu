@@ -16,6 +16,7 @@
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
 | [plan-cross-platform.md](rust/plan-cross-platform.md) | macOS·Linux 지원 계획(진행 중, 끝나면 지운다) |
+| [plan-outline-fade.md](rust/plan-outline-fade.md) | 레이어 외곽선과 페이드 계획(측정 먼저, 끝나면 지운다) |
 
 새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다. 일을 닫으면 backlog.md의 행과 다른 문서의 그 ID도 함께 지운다. CI의 `tools/check_docs.py`가 문서 링크와 backlog ID를 검사한다.
 
