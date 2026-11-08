@@ -18,8 +18,9 @@ frame when pressing during playback, a tab keeping its drawing while
 another is shown, every tab coming back after a crash, Tab moving the
 keyboard focus, a file opened from outside going to the open window as
 a tab, the window opening where and as it closed, pixel art GIFs
-enlarged into blocks and the pixel size of new pixel art, and the
-navigator moving the view.
+enlarged into blocks and the pixel size of new pixel art, the
+navigator moving the view, Shift and a press joining the last stroke, and
+Alt and a right-drag sizing the brush.
 "Screen set" photographs every panel, menu and dialog in Korean and English
 for reviewing the look, and "Screen set at 100%" in Korean, English and
 Japanese with the interface drawn at 100%; the names they press come from
@@ -101,6 +102,11 @@ public static class Native
 
     public static void Down() { mouse_event(0x2, 0, 0, 0, UIntPtr.Zero); }
     public static void Up() { mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); }
+    public static void RightDown() { mouse_event(0x8, 0, 0, 0, UIntPtr.Zero); }
+    public static void RightUp() { mouse_event(0x10, 0, 0, 0, UIntPtr.Zero); }
+    // A key held across mouse input, which SendKeys cannot do.
+    public static void KeyDown(byte key) { keybd_event(key, 0, 0, UIntPtr.Zero); }
+    public static void KeyUp(byte key) { keybd_event(key, 0, 2, UIntPtr.Zero); }
     public static void RightClick()
     {
         mouse_event(0x8, 0, 0, 0, UIntPtr.Zero);
@@ -1069,6 +1075,139 @@ function Get-Ink($Process, $Paper) {
     $bitmap.Dispose()
     $centre = if ($count) { [int]($sum / $count) } else { -1 }
     [pscustomobject]@{ Centre = $centre; Count = $count; Red = $red }
+}
+
+# Issue #157: Shift and a press draw on from where the last stroke lifted,
+# with a guide while Shift is held; one undo takes the joined stroke away.
+Step 'Shift and a press join the last stroke' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    $w = $paper.Right - $paper.Left
+    $h = $paper.Bottom - $paper.Top
+    Send-Keys $process 'b'
+    Set-Field $process 'Brush size' '8'
+    $first = @(($paper.Left + [int]($w * 0.2)), ($paper.Top + [int]($h * 0.3)))
+    $end = @(($paper.Left + [int]($w * 0.35)), ($paper.Top + [int]($h * 0.3)))
+    $press = @(($paper.Left + [int]($w * 0.7)), ($paper.Top + [int]($h * 0.7)))
+    $middle = @([int](($end[0] + $press[0]) / 2 - 6), [int](($end[1] + $press[1]) / 2 - 6), 12, 12)
+    $firstMiddle = @([int](($first[0] + $end[0]) / 2 - 6), ($first[1] - 6), 12, 12)
+    [Native]::Drag(@($first[0], $end[0]), @($first[1], $end[1]))
+    Start-Sleep -Milliseconds 500
+    [Native]::Glide($press[0], $press[1])
+    Start-Sleep -Milliseconds 500
+    $noShift = [Native]::DarkIn($middle[0], $middle[1], $middle[2], $middle[3])
+    [Native]::KeyDown(0x10)
+    Start-Sleep -Milliseconds 500
+    $guide = [Native]::DarkIn($middle[0], $middle[1], $middle[2], $middle[3])
+    $guideShot = Save-Screen 'shift-guide'
+    [Native]::Down()
+    Start-Sleep -Milliseconds 50
+    [Native]::Up()
+    [Native]::KeyUp(0x10)
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $line = [Native]::DarkIn($middle[0], $middle[1], $middle[2], $middle[3])
+    $lineShot = Save-Screen 'shift-line'
+    [Windows.Forms.SendKeys]::SendWait('^z')
+    Start-Sleep -Milliseconds 700
+    $undone = [Native]::DarkIn($middle[0], $middle[1], $middle[2], $middle[3])
+    $kept = [Native]::DarkIn($firstMiddle[0], $firstMiddle[1], $firstMiddle[2], $firstMiddle[3])
+    Stop-Apps
+    $detail = "dark at the line's middle: without Shift $noShift, guide $guide, drawn $line, undone $undone; first stroke after undo $kept; $guideShot; $lineShot"
+    if ($noShift -gt 0 -or $guide -eq 0 -or $line -eq 0 -or $undone -gt 0 -or $kept -eq 0) {
+        throw $detail
+    }
+    $detail
+}
+
+# Whether the menu bar has the keyboard: Enter then opens the File menu.
+# Closes what it opened.
+function Test-MenuFocused($Process) {
+    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 500
+    $words = Read-Words 'en'
+    $item = $words['file-export-frame'].TrimEnd([char]0x2026)
+    $open = Read-Automation {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+        $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+        @($all | Where-Object { ([string]$_.Current.Name).StartsWith($item) }).Count -gt 0
+    } 15 'whether the File menu is open'
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Start-Sleep -Milliseconds 300
+    $open
+}
+
+# Holds Alt and the right button at the middle of $Paper and drags right by
+# $By; $Escape presses Esc before letting go, 'alt' with Alt still held and
+# 'after-alt' once Alt is up. The brush size while held and after.
+function Invoke-AltDrag($Process, $Paper, [int] $By, [string] $Escape = '') {
+    $x = [int](($Paper.Left + $Paper.Right) / 2)
+    $y = [int](($Paper.Top + $Paper.Bottom) / 2)
+    $before = Get-Value $Process 'Brush size'
+    [Native]::Glide($x, $y)
+    Start-Sleep -Milliseconds 300
+    [Native]::KeyDown(0x12)
+    Start-Sleep -Milliseconds 100
+    [Native]::RightDown()
+    for ($i = 1; $i -le $By / 4; $i++) {
+        [Native]::Glide($x + 4 * $i, $y)
+        Start-Sleep -Milliseconds 8
+    }
+    Start-Sleep -Milliseconds 400
+    $held = Get-Value $Process 'Brush size'
+    $shot = Save-Screen "alt-drag-$By$Escape"
+    if ($Escape -eq 'alt') {
+        [Native]::KeyDown(0x1B); [Native]::KeyUp(0x1B)
+        Start-Sleep -Milliseconds 300
+    }
+    [Native]::KeyUp(0x12)
+    if ($Escape -eq 'after-alt') {
+        Start-Sleep -Milliseconds 200
+        [Native]::KeyDown(0x1B); [Native]::KeyUp(0x1B)
+        Start-Sleep -Milliseconds 300
+    }
+    [Native]::RightUp()
+    Start-Sleep -Milliseconds 500
+    $foreground = [Native]::GetForegroundWindow() -eq $Process.MainWindowHandle
+    [pscustomobject]@{ Before = $before; Held = $held; After = (Get-Value $Process 'Brush size'); Front = $foreground; Shot = $shot }
+}
+
+# Issue #157: Alt and a right-drag on the canvas size the brush, show the
+# size by the ring, put it back on Esc, draw nothing, and letting go of Alt
+# afterwards does not give the menu bar the keyboard as a lone Alt does.
+Step 'Alt and a right-drag size the brush' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $paper = Find-Paper $process
+    Send-Keys $process 'b'
+    Set-Field $process 'Brush size' '20'
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $start = Get-Value $process 'Brush size'
+    [Native]::KeyDown(0x12); [Native]::KeyUp(0x12)
+    Start-Sleep -Milliseconds 300
+    $loneAlt = Test-MenuFocused $process
+    $grow = Invoke-AltDrag $process $paper 30
+    $menu = Test-MenuFocused $process
+    $drawn = Test-Named $process 'Untitled*'
+    $escAfterAlt = Invoke-AltDrag $process $paper 30 'after-alt'
+    $escWithAlt = Invoke-AltDrag $process $paper 30 'alt'
+    $menuAfterEsc = Test-MenuFocused $process
+    Stop-Apps
+    $detail = "start $start; lone Alt focuses the menu $loneAlt; drag: held $($grow.Held), after $($grow.After), menu $menu, drawn $drawn, $($grow.Shot); " +
+        "Esc after Alt: before $($escAfterAlt.Before), held $($escAfterAlt.Held), after $($escAfterAlt.After), $($escAfterAlt.Shot); " +
+        "Esc with Alt: before $($escWithAlt.Before), held $($escWithAlt.Held), after $($escWithAlt.After), window in front $($escWithAlt.Front), menu $menuAfterEsc, $($escWithAlt.Shot)"
+    # Esc with Alt held is only recorded: Windows may keep Alt+Esc for itself.
+    $failed = (-not $loneAlt) -or ($grow.Held -le $start) -or ($grow.After -ne $grow.Held) -or $menu -or $drawn -or
+        ($escAfterAlt.Held -le $escAfterAlt.Before) -or ($escAfterAlt.After -ne $escAfterAlt.Before)
+    if ($failed) {
+        throw $detail
+    }
+    $detail
 }
 
 # The navigator: a tab behind the wobble showing the whole canvas with a
