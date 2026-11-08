@@ -2226,3 +2226,13 @@ p95는 ③ 끔 21.7~25.2, 2000px 21.5~22.9, ② 끔 46.5~50.4, 2000px 43.6~45.6�
 캔버스와 내보내기: 외곽선이 있는 레이어에서 split의 표시는 표면 예산 안과 밖 모두 전체 렌더와 바이트가 같고, 찍은 직후의 표시는 다른 획과 같은 허용치(2 이내)로 같으며, 다음 split이 오면 바이트가 같다(`an_outlined_layer_is_shown_and_edited_as_a_full_render_draws_it`, `a_stroke_on_an_outlined_layer_shows_it_and_ends_as_the_export_draws_it`).
 
 화면: Windows Sandbox의 `gui` 단계 'An outline goes around what a layer shows'가 통과했다. 굵기 24 선 옆 18px가 외곽선 색이고, 44px와 끈 뒤에는 종이색이다.
+
+## 114. 3.6.0 출시 (2026-11-09)
+
+**담은 것:** 3.5.0 뒤의 이슈 #157 제안 넷: Shift 직선과 Alt+오른쪽 끌기(#158, #160, 106절), 획의 페이드(#163, 110·111절), 레이어 외곽선(#167, 113절). #161은 끄는 중의 Esc다(107절). 그 밖의 #156~#169는 문서다.
+
+**방법:** 판 번호와 릴리스 노트만 바꾼 준비 커밋 `a14de8b`의 release 빌드로 Sandbox를 돌렸다: GUI 42/42(약 45분, 외곽선 단계 포함), pointer 13/13, 수용 11/11. 준비 커밋 전에 `cargo test --workspace --release --locked`, `tools/check_docs.py`, `cargo fmt --all --check`를 돌려 실패가 없었다. 실제 펜의 압력으로 그린 페이드와 외곽선은 보지 않고 냈다(B3-176).
+
+**CI:** PR #169 4분 53초, main(`a14de8b`) 4분 15초, 둘 다 통과. 105절과 같이 `Cargo.lock`에서 작업 공간 crate의 판만 바뀌었고 캐시 없는 빌드(76절의 13분)가 되지 않았다.
+
+**출시:** 태그 `v3.6.0`(annotated, `a14de8b`) → `release-3.yml` 실행 42498506647 성공(11분 45초). `v3.6.0`에는 `Ugurugu-3.6.0-Windows-x64-Setup.exe`(23,995,945바이트)만, 본문 끝에 "What's Changed"(#156~#169)와 비교 링크가 붙었고 Latest다. `updates`에 `Ugurugu3-3.6.0-win-x64-full.nupkg`(16,430,633바이트)가 더해지고 `releases.win-x64.json`이 3.6.0을 가리킨다. 다운로드 배지 실행(42499516972)도 성공했다. macOS판은 없다.
