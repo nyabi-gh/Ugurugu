@@ -1201,8 +1201,8 @@ Step 'Alt and a right-drag size the brush' {
     $detail = "start $start; lone Alt focuses the menu $loneAlt; drag: held $($grow.Held), after $($grow.After), menu $menu, drawn $drawn, $($grow.Shot); " +
         "Esc after Alt: before $($escAfterAlt.Before), held $($escAfterAlt.Held), after $($escAfterAlt.After), $($escAfterAlt.Shot); " +
         "Esc with Alt: before $($escWithAlt.Before), held $($escWithAlt.Held), after $($escWithAlt.After), window in front $($escWithAlt.Front), menu $menuAfterEsc, $($escWithAlt.Shot)"
-    # Esc with Alt held is only recorded: Windows keeps Alt+Esc and no window
-    # gets the Esc (docs/rust/evidence.md section 107).
+    # Esc with Alt held is only recorded: the Esc reached no window here
+    # (docs/rust/evidence.md section 107).
     $failed = (-not $loneAlt) -or ($grow.Held -le $start) -or ($grow.After -ne $grow.Held) -or $menu -or $drawn -or
         ($escAfterAlt.Held -le $escAfterAlt.Before) -or ($escAfterAlt.After -ne $escAfterAlt.Before) -or
         (-not $escWithAlt.Front) -or $menuAfterEsc

@@ -2061,4 +2061,51 @@ winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 �
 
 **바꾼 것:** 캔버스에서 끄는 동안 Esc는 수식키와 상관없이 끌기를 끝낸다(`ui::actions::take_pressed`, `Canvas::dragging`). 전에는 단축키가 Alt까지 같아야 맞아서, Alt+오른쪽 끌기 중 Alt를 쥔 채 누른 Esc가 아무 동작에도 닿지 않았다(106절). 시험 `escape_ends_a_drag_whatever_modifiers_the_drag_holds`는 고치기 전에 실패했다.
 
-**결과(Sandbox):** 고친 release 빌드로 "Alt and a right-drag size the brush"를 다시 돌렸어도 Alt를 쥔 채 Esc는 63 → 106 → 106으로 106절과 같았다. 그래서 임시 단계(커밋하지 않음)로 빈 WinForms 창(`KeyPreview`)에 같은 `keybd_event`를 보냈다: Esc만 → `Escape`가 왔고, Alt를 쥔 채 Esc → `Menu`(Alt)만 오고 Esc는 오지 않았다. 창은 앞에 남았다. Windows가 Alt+Esc를 시스템 단축키로 먼저 가져가 어느 창에도 키를 주지 않는다. 그러니 Windows에서는 Alt를 먼저 떼고 Esc를 눌러야 하고(106절에서 되돌림), 이 바꿈은 macOS의 Option+Esc를 위한 것이다(가설, backlog B3-175).
+**결과(Sandbox):** 고친 release 빌드로 "Alt and a right-drag size the brush"를 다시 돌렸어도 Alt를 쥔 채 Esc는 63 → 106 → 106으로 106절과 같았다. 그래서 임시 단계(커밋하지 않음)로 빈 WinForms 창(`KeyPreview`)에 같은 `keybd_event`를 보냈다: Esc만 → `Escape`가 왔고, Alt를 쥔 채 Esc → `Menu`(Alt)만 오고 Esc는 오지 않았다. 창은 앞에 남았다. Windows가 Alt+Esc를 시스템 단축키로 먼저 가져간다고 본다(가설). 본 것은 Sandbox에서 `keybd_event`로 넣은 합성 입력뿐이고 실제 키보드로는 보지 않았다. Alt를 먼저 떼고 누른 Esc는 106절에서 되돌렸다. 이 바꿈이 macOS의 Option+Esc에 듣는지도 보지 않았다(backlog B3-175).
+
+**시험 스크립트:** 위 실행은 "Esc with Alt"를 실패 조건에 넣은 판으로 FAIL이었다. 그 뒤 이 조건을 기록만 하도록 뺐고, 뺀 판의 `gui.ps1`은 다시 돌리지 않았다(남은 조건은 위 실행의 기록값으로 통과에 해당한다).
+
+## 108. 페이드 시제품의 비용과 모양 (2026-11-08)
+
+[plan-outline-fade.md](plan-outline-fade.md) 4.2절의 측정이다. 시제품(머지하지 않음)은 형식 필드 없이 `UGU_FADE=<px>`로 모든 획의 굵기에 `max(0, 1 − arc / fade)`를 곱하고, 길이에 닿으면 `Resampler`가 표본을 멈춘다.
+
+**방법:** 이 PC, release, `UGU_WORKER_THREADS=8`, `ugu-doc render <fixture> 8`의 프레임 시간(한 실행 60프레임). 조건을 번갈아 3 round. 기준은 main `b0bea95`를 따로 빌드한 것. "긴 페이드"는 `UGU_FADE=1000000`으로, 모양이 거의 그대로인 채 계산만 돈다. 200px은 잉크가 줄어 빨라지므로 비용 비교가 아니다.
+
+| fixture | main p50(ms) | 끔 | 긴 페이드 | 200px |
+|---|---|---|---|---|
+| ③, 끊기 전 | 20.8~21.6 | 20.6~21.3 | 20.5~21.0 | 17.8~18.3 |
+| ②, 끊기 전 | 42.5~42.8 | 41.8~43.2 | 41.7~42.5 | 33.5~34.4 |
+| ③, 끊은 뒤 | 21.1~22.3 | 21.1~21.4 | 21.3~21.7 | 재지 않음 |
+| ②, 끊은 뒤 | 43.2~43.4 | 43.1~43.9 | 42.8~43.6 | 재지 않음 |
+
+끊기 전 실행의 p95는 ③ 21.5~23.1, ② 42.6~47.2로 조건 사이에 차이가 없었다. 끊은 뒤 실행은 2·3 round의 p95가 main을 포함한 모든 조건에서 튀어(최대 183.1) 비교하지 않는다. 원인은 보지 않았다.
+
+**결과:** 계산 비용은 round 사이 차이 안이고 기준(+5%)을 넘지 않았다. 페이드를 끄면 fixture ①~⑤의 `digest`(모든 프레임, 1/1·1/2·1/4)가 main과 같다.
+
+**시험:** `UGU_FADE=200`으로 `cargo test --release -p ugu-render`를 돌리면 132개 통과, 5개 실패. 고정 폭·전체 길이를 직접 확인하는 시험 넷(`a_marker_has_square_ends`, `the_union_has_the_shape_of_a_round_stroke`, `samples_are_evenly_spaced_and_end_at_the_last_point`, `a_stroke_that_ends_where_it_starts_stays_closed_on_every_frame`)과, 자르기 시험 `a_crop_carries_the_pixels_so_far_and_later_strokes_use_the_new_canvas`다. 자르기 시험은 옅은 가장자리 화소가 2단계 달랐고(허용 ±1, 끊기 전 실행에서 본 값) 반올림으로 보지만 가설이다. 그리는 중과 확정을 비교하는 시험은 통과했으나, 페이드 획을 일부러 만든 시험은 아니므로 구현 때 전용 시험을 더한다.
+
+## 109. 외곽선 시제품의 중간 측정 (2026-11-08)
+
+[plan-outline-fade.md](plan-outline-fade.md) 3.3절의 측정을 1 round에서 멈춘 것이다. 표마다 **한 번 잰 값**이고 round 사이 차이를 모른다.
+
+**시제품:** 브랜치 `proto-outline`(머지하지 않음). `UGU_OUTLINE=<폭>`, `UGU_OUTLINE_LAYERS=one|all`. 레이어 표면을 다 그린 뒤 합성 전에, 알파가 0보다 큰 화소에서의 정확한 유클리드 거리(Felzenszwalb·Huttenlocher, 무차별 계산과 비교하는 시험 통과)로 흰 외곽선을 레이어 아래에 깐다. `one`은 연산이 가장 많은 레이어다. 캔버스 전체를 계산하고, 표면을 통째로 복사하며, 프레임마다 버퍼를 새로 잡는다. 줄일 여지를 재지 않은 상한에 가깝다.
+
+**방법:** 이 PC, release, `UGU_WORKER_THREADS=8`, `ugu-doc render <fixture> 8`의 프레임 시간(한 실행 60프레임). "외곽선 단계"는 `Timings::outline`이고 "최대"는 그 실행의 peak working set이다. 끄면 fixture ①~⑤의 `digest`가 main `b0bea95`와 같았다.
+
+| fixture | 조건 | 프레임 p50 / p95 (ms) | 외곽선 단계 p50 (ms) | 최대(MiB) |
+|---|---|---|---|---|
+| ② | 없음 | 42.5 / 43.8 | 0 | 522 |
+| ② | 하나, 폭 4 | 65.3 / 65.8 | 22.3 | 568 |
+| ② | 하나, 폭 32 | 66.3 / 67.5 | 22.5 | 568 |
+| ② | 하나, 폭 250 | 66.9 / 68.4 | 22.5 | 574 |
+| ② | 모두, 폭 4 | 368.3 / 374.8 | 316.3 | 778 |
+| ② | 모두, 폭 32 | 388.2 / 441.9 | 324.2 | 781 |
+| ② | 모두, 폭 250 | 429.3 / 444.3 | 345.7 | 784 |
+| ⑤ | 없음 | 91.0 / 96.1 | 0 | 1047 |
+| ⑤ | 하나, 폭 4 | 202.3 / 217.0 | 109.4 | 1252 |
+| ⑤ | 하나, 폭 32 | 202.3 / 231.1 | 108.3 | 1245 |
+| ⑤ | 하나, 폭 250 | 198.8 / 215.8 | 104.4 | 1264 |
+| ⑤ | 모두, 폭 4 | 598.6 / 614.8 | 501.8 | 1511 |
+| ⑤ | 모두, 폭 32 | 613.3 / 651.1 | 503.2 | 1511 |
+
+**결과:** ② 하나·폭 32는 +56%(판정 기준 +10%)다. 비용은 폭에 거의 매이지 않고 레이어 수와 캔버스 크기에 비례해 보인다(한 번 잰 값으로 본 것). 계획한 13번째 다음 실행 "⑤ 모두, 폭 250"은 프레임 줄을 내지 않고 끝났다. 측정 스크립트가 출력을 버려 까닭을 모른다. 8스레드 round 2·3과 1스레드, 우글거림이 꺼진 레이어의 재사용, 화소 일치는 재지 않았다.
