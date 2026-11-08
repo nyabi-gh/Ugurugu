@@ -1993,7 +1993,7 @@ dependencies = [
 
 [[package]]
 name = "latency-probe"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
@@ -3413,7 +3413,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render-bench"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "libc",
  "pollster",
@@ -4245,11 +4245,11 @@ dependencies = [
 
 [[package]]
 name = "ugu-core"
-version = "3.5.0"
+version = "3.6.0"
 
 [[package]]
 name = "ugu-doc"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "libc",
  "png",
@@ -4264,7 +4264,7 @@ dependencies = [
 
 [[package]]
 name = "ugu-io"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "flate2",
  "image",
@@ -4280,7 +4280,7 @@ dependencies = [
 
 [[package]]
 name = "ugu-platform"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -4296,11 +4296,11 @@ dependencies = [
 
 [[package]]
 name = "ugu-platform-types"
-version = "3.5.0"
+version = "3.6.0"
 
 [[package]]
 name = "ugu-render"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "png",
  "pollster",
@@ -4317,14 +4317,14 @@ dependencies = [
 
 [[package]]
 name = "ugu-session"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "ugu-core",
 ]
 
 [[package]]
 name = "ugu-text"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "kurbo",
  "parley",
@@ -4334,7 +4334,7 @@ dependencies = [
 
 [[package]]
 name = "ugu-win"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "arboard",
  "clipboard-win",
@@ -4346,7 +4346,7 @@ dependencies = [
 
 [[package]]
 name = "ugurugu"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "egui",
  "egui-wgpu",
