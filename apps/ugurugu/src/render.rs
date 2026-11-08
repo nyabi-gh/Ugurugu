@@ -703,6 +703,11 @@ impl RenderThread {
                 match &event {
                     WindowEvent::ModifiersChanged(modifiers) => {
                         self.modifiers = modifiers.state();
+                        // Shift shows the joining guide under a pointer that
+                        // has not moved since.
+                        self.canvas
+                            .set_modifiers(self.modifiers.shift_key(), self.modifiers.alt_key());
+                        self.needs_frame = true;
                     }
                     WindowEvent::DroppedFile(path) => {
                         self.files.drop_path(path.clone(), &mut self.canvas);
