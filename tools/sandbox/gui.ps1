@@ -1216,6 +1216,45 @@ Step 'Alt and a right-drag size the brush' {
 # stroke in it; pressing on its picture brings that point to the middle of
 # the view, and dragging the view's outline moves the view with it rather
 # than jumping to where it was pressed.
+Step 'Fade narrows a stroke and ends it' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $words = Read-Words 'en'
+    Send-Keys $process 'b'
+    Set-Field $process 'Brush size' '24'
+    Set-Field $process $words['canvas-zoom-percent'] '100'
+    Start-Sleep -Milliseconds 500
+    $paper = Find-Paper $process
+    $x = [Math]::Max($paper.Left + 20, 480)
+    $y = $paper.Top + [int](($paper.Bottom - $paper.Top) / 2)
+    $column = { param($At, $Line) [Native]::DarkIn($x + $At - 2, $Line - 30, 4, 60) }
+    Set-Field $process $words['stroke-fade-name'] '300'
+    Start-Sleep -Milliseconds 300
+    [Native]::Drag(@($x, ($x + 600)), @($y, $y))
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $start = & $column 30 $y
+    $middle = & $column 160 $y
+    $end = & $column 270 $y
+    $past = & $column 340 $y
+    $shot = Save-Screen 'fade-300'
+    $line = $y - 90
+    Set-Field $process $words['stroke-fade-name'] '0'
+    Start-Sleep -Milliseconds 300
+    [Native]::Drag(@($x, ($x + 600)), @($line, $line))
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $whole = & $column 340 $line
+    $wholeShot = Save-Screen 'fade-off'
+    Stop-Apps
+    $detail = "dark in a 4px column: at 30px $start, 160px $middle, 270px $end, 340px $past; without a fade at 340px $whole; $shot; $wholeShot"
+    if (-not ($start -gt $middle -and $middle -gt $end -and $end -gt 0 -and $past -eq 0 -and $whole -gt 0)) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'Navigator' {
     Stop-Apps
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue

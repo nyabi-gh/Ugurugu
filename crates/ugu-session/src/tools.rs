@@ -62,6 +62,7 @@ pub struct Kept {
     pub width: f32,
     pub stabilizer: f32,
     pub opacity: f32,
+    pub fade: f32,
 }
 
 impl Kept {
@@ -71,6 +72,7 @@ impl Kept {
             width: preset.size,
             stabilizer: 0.0,
             opacity: preset.brush.opacity,
+            fade: 0.0,
         }
     }
 
@@ -79,6 +81,7 @@ impl Kept {
             width: settings.width,
             stabilizer: settings.stabilizer,
             opacity: settings.opacity,
+            fade: settings.fade,
         }
     }
 }
@@ -116,6 +119,7 @@ impl Brushes {
             width: preset.size,
             stabilizer: 0.0,
             opacity: preset.brush.opacity,
+            fade: 0.0,
             antialias: preset.brush.antialias,
         };
         Self {
@@ -185,6 +189,7 @@ impl Brushes {
         settings.width = kept.width;
         settings.stabilizer = kept.stabilizer;
         settings.opacity = kept.opacity;
+        settings.fade = kept.fade;
         if tool == Tool::Eraser {
             settings.antialias = preset.brush.antialias;
         }

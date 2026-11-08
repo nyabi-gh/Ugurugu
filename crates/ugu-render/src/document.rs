@@ -1205,7 +1205,7 @@ impl Raster {
                 dabs.clear();
                 let spacing =
                     stroke::spacing(stroke.width) * f64::from(detail) / f64::from(FULL_DETAIL);
-                let samples = Resampler::whole(&stroke.points, spacing);
+                let samples = Resampler::faded(&stroke.points, spacing, stroke.brush.fade);
                 stroke::outline_into(&samples, pen, frame, path);
             } else {
                 // Spacing is part of how dabs add up, so it keeps full detail.

@@ -3174,3 +3174,32 @@ fn the_symmetry_ruler_mirrors_a_joined_line() {
         assert_eq!([copy.x, copy.y], [200.0 - hand.x, hand.y]);
     }
 }
+
+#[test]
+fn only_a_stroke_drawn_by_hand_with_the_brush_fades() {
+    let mut tools = Tools::default();
+    tools.plain.pen.fade = 150.0;
+    tools.plain.eraser.fade = 150.0;
+    let brush_of = |session: &Session| session.live().unwrap().template.brush;
+
+    let mut drawing = session();
+    tools.tool = Tool::Pen;
+    drawing.begin_stroke(&tools, at(10.0, 10.0, 0.0)).unwrap();
+    assert_eq!(brush_of(&drawing).fade, 150.0);
+    drawing.cancel_stroke();
+
+    tools.tool = Tool::Eraser;
+    drawing.begin_stroke(&tools, at(10.0, 10.0, 0.0)).unwrap();
+    assert_eq!(brush_of(&drawing).fade, 0.0);
+    drawing.cancel_stroke();
+
+    tools.tool = Tool::Shape;
+    drawing.begin_shape(&tools, [10.0, 10.0]).unwrap();
+    assert_eq!(brush_of(&drawing).fade, 0.0);
+    drawing.cancel_stroke();
+
+    tools.tool = Tool::Pen;
+    tools.plain.pen.preset = ugu_core::brush::find("pixel-pencil").unwrap();
+    drawing.begin_stroke(&tools, at(10.0, 10.0, 0.0)).unwrap();
+    assert_eq!(brush_of(&drawing).fade, 0.0);
+}

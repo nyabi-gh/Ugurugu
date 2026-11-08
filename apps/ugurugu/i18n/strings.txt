@@ -246,6 +246,9 @@ pen-pressure-use | Use tablet pressure | 필압 반영 | タブレットの筆�
 pen-pressure-tip | Vary stroke size and opacity with tablet pressure | 필압에 따라 선의 크기와 불투명도를 바꿉니다 | タブレットの筆圧に応じて線のサイズと不透明度を変えます | 根据数位板压感改变笔触大小和不透明度
 stabilization | Stabilization | 손떨림 보정 | 手ぶれ補正 | 防抖
 stabilization-name | Stroke stabilization | 손떨림 보정 | 手ぶれ補正 | 笔触防抖
+stroke-fade | Fade | 페이드 | フェード | 渐隐
+stroke-fade-name | Stroke fade length | 획 페이드 길이 | ストロークのフェードの長さ | 笔触渐隐长度
+stroke-fade-tip | The stroke narrows over this length from where it starts, and ends there. 0 turns it off. | 획이 시작점부터 이 길이에 걸쳐 가늘어지다가 거기서 끝납니다. 0이면 꺼집니다. | ストロークは始点からこの長さをかけて細くなり、そこで終わります。0でオフになります。 | 笔触从起点开始在此长度内逐渐变细，并在此结束。设为 0 即关闭。
 antialiasing | Anti-aliasing | 안티앨리어싱 | アンチエイリアス | 抗锯齿
 antialiasing-name | Anti-aliasing | 안티앨리어싱 | アンチエイリアス | 抗锯齿
 antialiasing-tip | Smooth stroke edges | 선 가장자리를 부드럽게 | 線の縁を滑らかにします | 让笔触边缘平滑
@@ -538,6 +541,7 @@ help-start | Getting started | 시작하기 | はじめに | 入门
 help-start-draw | Draw a stroke, choose a motion in the Wobble panel and press P to play it. | 선을 그리고 우글거림 패널에서 움직임을 고른 뒤 P를 눌러 재생하세요. | 線を描き、ゆらぎパネルで動きを選んで P キーで再生します。 | 画一条线，在抖动面板中选择一种运动，然后按 P 播放。
 help-start-line | With the brush or the eraser, Shift+click draws a straight line from where the last stroke ended. | 브러시나 지우개로 Shift+클릭하면 마지막 획이 끝난 곳부터 직선을 긋습니다. | ブラシや消しゴムで Shift+クリックすると、最後のストロークの終わりから直線を引きます。 | 使用画笔或橡皮擦时，按 Shift+点击会从上一笔的终点画一条直线。
 help-start-size | Alt+right-drag on the canvas changes the size of the brush or the eraser. | 캔버스에서 Alt+오른쪽 버튼으로 끌면 브러시나 지우개의 크기가 바뀝니다. | キャンバス上で Alt+右ドラッグすると、ブラシや消しゴムのサイズが変わります。 | 在画布上按住 Alt 用右键拖动可改变画笔或橡皮擦的大小。
+help-start-fade | Fade in the brush settings narrows each stroke from where it starts until it ends, for hair or long tapered shapes. | 브러시 설정의 페이드는 획을 시작점부터 끝날 때까지 가늘게 줄입니다. 머리카락이나 길게 가늘어지는 모양에 씁니다. | ブラシ設定のフェードは、ストロークを始点から終わりまで細くしていきます。髪の毛や細長く先細る形に使えます。 | 画笔设置中的“渐隐”会让每一笔从起点开始逐渐变细直到结束，适合画头发或细长的尖形。
 help-start-pixel | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 프로젝트를 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。 | 要画像素画，请在编辑菜单中或新建项目时打开像素模式。
 help-start-export | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。 | 在文件菜单中可以将动画导出为 GIF 或 WebP，或将当前帧导出为 PNG 或 JPEG。
 help-files | Projects | 프로젝트 | 作業ファイル | 项目

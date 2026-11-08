@@ -184,6 +184,7 @@ mod tests {
             width: 21.0,
             stabilizer: 0.3,
             opacity: 0.6,
+            fade: 0.0,
             antialias: true,
         };
         tools.fill.tolerance = 12;

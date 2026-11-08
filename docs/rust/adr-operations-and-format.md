@@ -113,6 +113,7 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | 위치 | 필드 | 더한 때 | 내용 |
 |---|---|---|---|
 | 획 `brush` | `size_dynamics`, `wobble_scale` | M2 | 굵기 필압 0~1, 흔들림 배율 0~2 |
+| 획 `brush` | `fade` | 3.6.0 | 시작부터 가늘어져 끝나는 길이, 0 초과 2000 이하 px. 0이면 쓰지 않는다 |
 | 획 `brush` | `engine`(`line`·`airbrush`·`spray`·`pixel`), `tip`(`round`·`square`), `opacity`, `flow`, `hardness`, `spacing`, `scatter`, `particle_size`, `density`, `opacity_dynamics`, `size_jitter`, `animated_jitter`, `antialias` | M4-6 | 2.2.13 `BrushSettings`의 모든 필드. `pixel`은 M5-16 픽셀 연필 |
 | 문서·레이어·`isolated`의 `wobble` | `amount`, `style`(`classic`·`smooth`·`stepped`), `poses`, `detail`, `linked`, `randomness`, `broken`, `break_amount`, `break_range` | M2(`style`), M4-7(나머지) | 2.2.13 `MotionSettings`. `poses`는 1~60을 그대로 두고 렌더할 때 프레임 수로 줄인다 |
 | 문서 | `pixel` | M6-17 | 문서 단위 픽셀 모드(decisions.md 픽셀 모드). 꺼져 있으면 쓰지 않으므로 그 파일의 바이트는 전과 같다. render revision은 그대로 |
@@ -137,12 +138,13 @@ images/<sha256>.png  래스터 자산 (RGBA8, straight alpha, 정규화한 PNG)
 | `paint`·`group` | `keys` | `"keys"` | `pivot`(문서 px [x, y]), `keys`(프레임 순): `frame`(0 ≤ frame < 문서 프레임 수, 프레임마다 하나), `offset`(px, ±32767), `rotation`(도, 시계 방향, ±3600), `scale`(0.05~20), `flip`(켜졌을 때만 씀), `opacity`(0~1, 레이어 불투명도에 곱함, 1이면 쓰지 않음, 3.3.0), `ease`(`linear`·`smooth`·`hold`, 이 키에서 다음 키까지) |
 | `group` | `cels` | `"cels"` | 애니메이션 폴더의 노출표(프레임 순): `frame`, `cel`(그 그룹의 바로 아래 자식 id, `null`은 빈 프레임). 다음 노출 전까지 유지, 첫 노출 전 프레임은 마지막 노출 |
 
-3.3.0은 같은 방식으로 기능 이름 셋을 더했다(`ugu_io::write`의 `required`가 쓰는 문서를 보고 넣는다). 지금 `FEATURES`는 `keys`·`cels`·`frames`·`key-opacity`·`fill-behind` 다섯이다.
+3.3.0은 같은 방식으로 기능 이름 셋을 더했다(`ugu_io::write`의 `required`가 쓰는 문서를 보고 넣는다). 3.6.0이 `brush-fade`를 더했다. 지금 `FEATURES`는 `keys`·`cels`·`frames`·`key-opacity`·`fill-behind`·`brush-fade` 여섯이다.
 
 | `required` | 넣는 때 | 3.2 이하가 모르고 읽으면(`format.rs` 주석) |
 |---|---|---|
 | `"frames"` | 프레임 수가 60을 넘을 때(`limits::FRAMES_BEFORE_3_3`) | 3.2 이하가 읽는 것보다 프레임이 많다 |
 | `"key-opacity"` | 어떤 키의 `opacity`가 1이 아닐 때 | 레이어가 서서히 사라지는 것을 빼고 읽는다 |
 | `"fill-behind"` | `fill` 연산 하나라도 `behind: true`일 때(그룹·병합 section 안 포함) | 채우기를 선 뒤가 아니라 위에 덮어 그린다 |
+| `"brush-fade"` | 저장되는 획 하나라도 `brush.fade`가 0보다 클 때 | 획을 줄이지도 끊지도 않고 끝까지 그린다 |
 
 키가 있는 레이어의 화소는 그 프레임의 자세를 중심에 대해 크기·반전 → 회전 → 이동 순으로 적용한 위치에 그린다. 그룹의 키는 안의 레이어마다 자기 키 뒤에 곱한다(그룹 결과를 재샘플하지 않음). 검증 위반은 `DocumentError::Animation`이다.

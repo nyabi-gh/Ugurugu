@@ -52,6 +52,7 @@ pub(crate) fn stroke(x: f32, seed: u64) -> Stroke {
             animated_jitter: true,
             wobble_scale: 1.5,
             antialias: true,
+            fade: 0.0,
         },
         seed,
     }
@@ -967,4 +968,21 @@ fn keys_past_the_last_frame_are_refused_as_corrupt() {
         })
         .collect::<Vec<_>>();
     assert!(read_bytes(archive(&late)).is_err());
+}
+
+#[test]
+fn a_stroke_that_fades_reads_back_and_is_named_as_required() {
+    let mut document = sample();
+    let id = StrokeId(0);
+    document.store.strokes.get_mut(&id).unwrap().brush.fade = 250.0;
+    let bytes = written(&document);
+    assert!(
+        manifest_of(&bytes).ends_with(r#""required":["brush-fade"]}"#),
+        "{}",
+        manifest_of(&bytes)
+    );
+    assert_eq!(
+        read_bytes(bytes).unwrap().0.store.strokes[&id].brush.fade,
+        250.0
+    );
 }

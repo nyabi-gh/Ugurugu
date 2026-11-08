@@ -447,6 +447,19 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         );
         settings.opacity = opacity / 100.0;
     }
+    if tool == Tool::Pen && !pixel {
+        let limits = ugu_core::store::limits::FADE;
+        slider_row(
+            ui,
+            tr("stroke-fade"),
+            tr("stroke-fade-name"),
+            &mut settings.fade,
+            limits,
+            " px",
+            0,
+        )
+        .on_hover_text(tr("stroke-fade-tip"));
+    }
     // A shape is not drawn by hand, so nothing steadies it.
     if tool != Tool::Shape {
         let mut stabilization = settings.stabilizer * 100.0;

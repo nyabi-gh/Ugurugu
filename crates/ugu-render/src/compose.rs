@@ -713,7 +713,11 @@ impl Stamp {
         drawn: PixelRect,
     ) -> Option<PixelRect> {
         let rect = clamp(stroke::bounds(&stroke.points, pen), size)?;
-        let samples = Resampler::whole(&stroke.points, stroke::spacing(stroke.width));
+        let samples = Resampler::faded(
+            &stroke.points,
+            stroke::spacing(stroke.width),
+            stroke.brush.fade,
+        );
         let path = stroke::outline(&samples, pen, frame)?;
         let [left, top, right, bottom] = rect;
         let width = (right - left) as usize;
@@ -1437,12 +1441,19 @@ mod tests {
             ..pen
         };
         let find = |id| ugu_core::brush::find(id).unwrap().brush;
+        let tapered = |brush: Brush| Brush {
+            fade: 70.0,
+            ..brush
+        };
         let brushes = [
             pen,
             fading,
             find("soft-airbrush"),
             find("rough-spray"),
             find("pixel-pencil"),
+            tapered(pen),
+            tapered(find("soft-airbrush")),
+            tapered(find("rough-spray")),
         ];
         for (mut history, brush) in brushes
             .into_iter()

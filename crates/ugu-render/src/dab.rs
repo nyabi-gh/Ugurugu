@@ -68,7 +68,8 @@ fn scaled(alpha: u8, factor: f64) -> u8 {
 /// A whole stroke's dabs on `frame` into `out`, for a stroke whose colour
 /// has `alpha`, sampled as the renderer samples them.
 pub fn stroke_dabs(points: &[Point], pen: &Pen, frame: u32, alpha: u8, out: &mut Vec<Dab>) {
-    let samples = stroke::Resampler::at_most(points, pen.dab_spacing(frame), MAX_DABS);
+    let samples =
+        stroke::Resampler::at_most(points, pen.dab_spacing(frame), MAX_DABS, pen.brush.fade);
     dabs_into(&samples, pen, frame, alpha, out);
 }
 
@@ -110,7 +111,7 @@ pub fn dabs_of(
                 let alpha = alpha_at(sample.pressure);
                 (alpha > 0).then(|| Dab {
                     center: center(index),
-                    diameter: (base * pen.pressure_scale(sample.pressure)).max(0.5),
+                    diameter: (base * pen.size_scale(sample)).max(0.5),
                     alpha,
                 })
             }));
@@ -134,8 +135,8 @@ pub fn dabs_of(
                     continue;
                 }
                 let [x, y] = center(index);
-                let size =
-                    base * f64::from(brush.particle_size) * pen.pressure_scale(sample.pressure);
+                let size = base * f64::from(brush.particle_size) * pen.size_scale(sample);
+                let scatter = scatter * pen.fade_scale(sample.arc);
                 for particle in 0..count {
                     let emitted = index * count + particle;
                     if emitted >= MAX_PARTICLES {
@@ -478,7 +479,7 @@ mod tests {
     }
 
     fn dabs(pen: &Pen, frame: u32) -> Vec<Dab> {
-        let samples = stroke::Resampler::at_most(&line(), pen.dab_spacing(frame), MAX_DABS);
+        let samples = stroke::Resampler::at_most(&line(), pen.dab_spacing(frame), MAX_DABS, 0.0);
         let mut out = Vec::new();
         dabs_into(&samples, pen, frame, 255, &mut out);
         out
@@ -619,12 +620,40 @@ mod tests {
     fn particles_land_within_the_scatter() {
         let pen = pen("rough-spray", 0.0);
         let reach = f64::from(pen.width) * 1.1 * 0.5;
-        let samples = stroke::Resampler::at_most(&line(), pen.dab_spacing(0), MAX_DABS);
+        let samples = stroke::Resampler::at_most(&line(), pen.dab_spacing(0), MAX_DABS, 0.0);
         let dabs = dabs(&pen, 0);
         for (index, dab) in dabs.iter().enumerate() {
             let [x, y] = samples[index / 6].position;
             let away = (dab.center[0] - x).hypot(dab.center[1] - y);
             assert!(away <= reach + 1e-9, "{away}");
         }
+    }
+
+    #[test]
+    fn a_fading_spray_narrows_its_spread_and_its_particles() {
+        let mut faded = pen("rough-spray", 0.0);
+        faded.brush.fade = 80.0;
+        let samples = stroke::Resampler::at_most(&line(), faded.dab_spacing(0), MAX_DABS, 80.0);
+        let mut out = Vec::new();
+        dabs_into(&samples, &faded, 0, 255, &mut out);
+        let of = |range: std::ops::Range<f64>| {
+            let dabs: Vec<&Dab> = out
+                .iter()
+                .filter(|dab| range.contains(&dab.center[0]))
+                .collect();
+            let spread = dabs
+                .iter()
+                .map(|dab| (dab.center[1] - 48.0).abs())
+                .fold(0.0, f64::max);
+            let size = dabs.iter().map(|dab| dab.diameter).sum::<f64>() / dabs.len() as f64;
+            (spread, size)
+        };
+        let (start_spread, start_size) = of(24.0..44.0);
+        let (end_spread, end_size) = of(84.0..104.0);
+        assert!(
+            end_spread < start_spread * 0.5,
+            "{end_spread} {start_spread}"
+        );
+        assert!(end_size < start_size * 0.5, "{end_size} {start_size}");
     }
 }

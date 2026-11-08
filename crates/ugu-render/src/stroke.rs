@@ -51,6 +51,8 @@ pub struct Resampler {
     last: Option<Sample>,
     /// Distance from the last sample along the raw points so far.
     carried: f64,
+    /// Where the samples end; 0 for nowhere.
+    fade: f64,
 }
 
 impl Resampler {
@@ -60,22 +62,45 @@ impl Resampler {
             samples: Vec::new(),
             last: None,
             carried: 0.0,
+            fade: 0.0,
         }
+    }
+
+    /// Ends the samples `fade` pixels along, so that every way of drawing
+    /// the stroke ends at the same place; 0 for no end.
+    pub fn fading(mut self, fade: f32) -> Self {
+        self.fade = f64::from(fade);
+        self
+    }
+
+    fn faded_out(&self, arc: f64) -> bool {
+        self.fade > 0.0 && arc >= self.fade
     }
 
     /// Samples for all of `points`, with a spacing widened if needed so that
     /// there are at most `MAX_SAMPLES`.
     pub fn whole(points: &[Point], base_spacing: f64) -> Vec<Sample> {
-        Self::at_most(points, base_spacing, MAX_SAMPLES)
+        Self::at_most(points, base_spacing, MAX_SAMPLES, 0.0)
     }
 
-    /// `whole` with at most `most` samples.
-    pub fn at_most(points: &[Point], base_spacing: f64, most: usize) -> Vec<Sample> {
+    /// `whole`, for a stroke that ends `fade` pixels along.
+    pub fn faded(points: &[Point], base_spacing: f64, fade: f32) -> Vec<Sample> {
+        Self::at_most(points, base_spacing, MAX_SAMPLES, fade)
+    }
+
+    /// `faded` with at most `most` samples.
+    pub fn at_most(points: &[Point], base_spacing: f64, most: usize, fade: f32) -> Vec<Sample> {
         let length: f64 = points
             .windows(2)
             .map(|pair| distance(position(&pair[0]), position(&pair[1])))
             .sum();
-        let mut resampler = Self::new(base_spacing.max(length / (most - 2) as f64));
+        let drawn = if fade > 0.0 {
+            length.min(f64::from(fade))
+        } else {
+            length
+        };
+        let spacing = base_spacing.max(drawn / (most - 2) as f64);
+        let mut resampler = Self::new(spacing).fading(fade);
         for point in points {
             resampler.push(*point);
         }
@@ -103,6 +128,13 @@ impl Resampler {
         // Distance along this segment of the next sample.
         let mut at = self.spacing - self.carried;
         while at <= length {
+            if self
+                .samples
+                .last()
+                .is_some_and(|sample| self.faded_out(sample.arc))
+            {
+                return;
+            }
             let t = at / length;
             let arc = self.samples.last().map_or(0.0, |sample| sample.arc) + self.spacing;
             self.samples.push(Sample {
@@ -121,6 +153,7 @@ impl Resampler {
         let mut samples = self.samples.clone();
         if let (Some(last), Some(sample)) = (self.last, self.samples.last())
             && distance(last.position, sample.position) > TAIL_EPSILON
+            && !self.faded_out(sample.arc)
         {
             samples.push(Sample {
                 arc: sample.arc + self.carried,
@@ -202,6 +235,21 @@ impl Pen {
 
     pub(crate) fn pressure_scale(&self, pressure: f64) -> f64 {
         pressure_scale(self.brush.size_dynamics, pressure)
+    }
+
+    /// The share of the width left at `arc` along the stroke.
+    pub(crate) fn fade_scale(&self, arc: f64) -> f64 {
+        if self.brush.fade > 0.0 {
+            (1.0 - arc / f64::from(self.brush.fade)).max(0.0)
+        } else {
+            1.0
+        }
+    }
+
+    /// The share of the width at `sample`, by pressure and by how far along
+    /// the stroke it is.
+    pub(crate) fn size_scale(&self, sample: &Sample) -> f64 {
+        self.pressure_scale(sample.pressure) * self.fade_scale(sample.arc)
     }
 
     /// The least width a line is drawn. An aliased line thinner than a
@@ -853,7 +901,7 @@ fn left_by_band(a: [f64; 2], b: [f64; 2], [ra, rb]: [f64; 2]) -> Option<Half> {
 }
 
 fn radius(base: f64, pen: &Pen, sample: &Sample) -> f64 {
-    (base * pen.pressure_scale(sample.pressure)).max(pen.thinnest()) * 0.5
+    (base * pen.size_scale(sample)).max(pen.thinnest()) * 0.5
 }
 
 /// Appends the part of the circle at `center` inside each of `keep`, wound
@@ -1515,5 +1563,55 @@ mod tests {
         let shape = outline(&samples, &pen, 0).unwrap().bounding_box();
         // 12 × (1 − 0.8 + 0.5 × 0.8) = 7.2
         assert!((shape.width() - 7.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_stroke_that_fades_ends_at_the_same_place_however_it_is_sampled() {
+        let points: Vec<Point> = (0..=60)
+            .map(|index| Point {
+                x: index as f32 * 5.0,
+                y: 10.0,
+                pressure: 1.0,
+            })
+            .collect();
+        let fade = 100.0;
+        let whole = Resampler::faded(&points, 2.0, fade);
+        let end = whole.last().unwrap();
+        assert!(end.arc >= f64::from(fade) && end.arc < f64::from(fade) + 2.0);
+        assert!(whole.iter().all(|sample| sample.position[0] <= 102.0));
+        let mut live = Resampler::new(2.0).fading(fade);
+        for point in &points {
+            live.push(*point);
+        }
+        assert_eq!(live.samples_with_tail(), whole);
+    }
+
+    #[test]
+    fn a_stroke_shorter_than_its_fade_keeps_its_end() {
+        let points: Vec<Point> = (0..=10)
+            .map(|index| Point {
+                x: index as f32 * 5.0,
+                y: 10.0,
+                pressure: 1.0,
+            })
+            .collect();
+        let plain = Resampler::whole(&points, 3.0);
+        assert_eq!(Resampler::faded(&points, 3.0, 500.0), plain);
+    }
+
+    #[test]
+    fn the_width_narrows_along_the_fade_and_not_without_one() {
+        let mut faded = pen(0.0, 0.0);
+        faded.brush.fade = 100.0;
+        let sample = |arc| Sample {
+            position: [0.0; 2],
+            pressure: 1.0,
+            arc,
+        };
+        assert_eq!(faded.size_scale(&sample(0.0)), 1.0);
+        assert_eq!(faded.size_scale(&sample(25.0)), 0.75);
+        assert_eq!(faded.size_scale(&sample(100.0)), 0.0);
+        assert_eq!(faded.size_scale(&sample(150.0)), 0.0);
+        assert_eq!(pen(0.0, 0.0).size_scale(&sample(150.0)), 1.0);
     }
 }

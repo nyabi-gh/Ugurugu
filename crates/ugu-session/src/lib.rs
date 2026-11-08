@@ -98,6 +98,8 @@ pub struct ToolSettings {
     /// How opaque the whole stroke is, in place of its preset's; a pixel
     /// brush draws opaque whatever it is.
     pub opacity: f32,
+    /// The brush tool's fade length, 0 for none; see `Brush::fade`.
+    pub fade: f32,
     /// What the stroke is drawn with.
     pub preset: &'static Preset,
 }
@@ -109,6 +111,7 @@ impl ToolSettings {
         antialias: false,
         stabilizer: 0.0,
         opacity: brush::BRUSHES[0].brush.opacity,
+        fade: 0.0,
         preset: &brush::BRUSHES[0],
     };
     /// 2.2.13's hard eraser.
@@ -117,6 +120,7 @@ impl ToolSettings {
         antialias: true,
         stabilizer: 0.0,
         opacity: brush::ERASERS[0].brush.opacity,
+        fade: 0.0,
         preset: &brush::ERASERS[0],
     };
 }
@@ -553,6 +557,12 @@ impl Session {
                     settings.preset.brush.opacity
                 } else {
                     settings.opacity.clamp(0.01, 1.0)
+                },
+                // Drawn by hand alone: a shape or an eraser stroke stays whole.
+                fade: if tools.tool == Tool::Pen && !pixel {
+                    settings.fade
+                } else {
+                    0.0
                 },
                 ..settings.preset.brush
             },

@@ -25,6 +25,8 @@ pub mod limits {
     pub const PARTICLE_SIZE: std::ops::RangeInclusive<f32> = 0.01..=1.0;
     /// Spray particles per sample, in sixes.
     pub const DENSITY: std::ops::RangeInclusive<f32> = 0.05..=4.0;
+    /// A stroke's fade length in pixels; 0 is none.
+    pub const FADE: std::ops::RangeInclusive<f32> = 0.0..=2000.0;
     pub const ASSET_PIXELS: u64 = 4096 * 4096;
     /// All images together. Opening a file decodes each in full to check
     /// it, so this bounds that work; the byte limit alone admits thousands
@@ -92,6 +94,9 @@ pub struct Brush {
     /// Multiplies the layer's wobble amount for this stroke.
     pub wobble_scale: f32,
     pub antialias: bool,
+    /// Over how many pixels from its start the stroke narrows to nothing,
+    /// and ends; 0 for a stroke that does not. See `limits::FADE`.
+    pub fade: f32,
 }
 
 impl Brush {
@@ -111,6 +116,7 @@ impl Brush {
         animated_jitter: false,
         wobble_scale: 1.0,
         antialias: false,
+        fade: 0.0,
     };
 
     /// Whether spray particles land elsewhere on each frame.
@@ -394,6 +400,9 @@ pub fn brush_in_range(brush: &Brush) -> bool {
         && unit.contains(&brush.opacity_dynamics)
         && unit.contains(&brush.size_jitter)
         && limits::WOBBLE_SCALE.contains(&brush.wobble_scale)
+        && limits::FADE.contains(&brush.fade)
+        // Its blocks are one size along the stroke, so it could only stop.
+        && (brush.engine != BrushEngine::Pixel || brush.fade == 0.0)
 }
 
 /// Every mask is a selection of the canvas it was made on, so it lies
@@ -644,5 +653,26 @@ mod tests {
             },
         );
         assert_eq!(store.validate(), Err(StoreError::AssetSize(id)));
+    }
+}
+
+#[cfg(test)]
+mod fade_range {
+    use super::*;
+
+    #[test]
+    fn a_fade_is_in_range_and_never_on_a_pixel_brush() {
+        let with = |engine, fade| Brush {
+            engine,
+            fade,
+            ..Brush::DEFAULT
+        };
+        assert!(brush_in_range(&with(BrushEngine::Line, 0.0)));
+        assert!(brush_in_range(&with(BrushEngine::Line, 2000.0)));
+        assert!(!brush_in_range(&with(BrushEngine::Line, 2000.5)));
+        assert!(!brush_in_range(&with(BrushEngine::Line, -1.0)));
+        assert!(!brush_in_range(&with(BrushEngine::Line, f32::NAN)));
+        assert!(brush_in_range(&with(BrushEngine::Pixel, 0.0)));
+        assert!(!brush_in_range(&with(BrushEngine::Pixel, 10.0)));
     }
 }

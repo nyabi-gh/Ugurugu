@@ -1076,6 +1076,7 @@ fn brush(dto: &BrushDto) -> Result<Brush, LegacyError> {
         animated_jitter: dto.animated_jitter,
         wobble_scale: dto.wobble_scale.unwrap_or(1.0) as f32,
         antialias: dto.antialiasing.unwrap_or(false),
+        fade: 0.0,
     })
 }
 

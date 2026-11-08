@@ -413,6 +413,7 @@ impl<R: Read + Seek> Entries<R> {
                     animated_jitter: stroke.brush.animated_jitter,
                     wobble_scale: stroke.brush.wobble_scale,
                     antialias: stroke.brush.antialias,
+                    fade: stroke.brush.fade,
                 },
                 seed: u64::from_be_bytes(seed),
             };

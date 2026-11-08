@@ -51,7 +51,7 @@ impl From<zip::result::ZipError> for WriteError {
 }
 
 /// The features `document` uses that older readers lack.
-fn required(document: &Document) -> Vec<String> {
+fn required(document: &Document, used: &Used) -> Vec<String> {
     let (keyed, folders) = document.is_animated();
     let long = document.frames > ugu_core::document::limits::FRAMES_BEFORE_3_3;
     [
@@ -60,6 +60,12 @@ fn required(document: &Document) -> Vec<String> {
         (long, FRAMES_FEATURE),
         (document.fades(), KEY_OPACITY_FEATURE),
         (fills_behind(&document.layers), FILL_BEHIND_FEATURE),
+        (
+            used.strokes
+                .iter()
+                .any(|id| document.store.strokes[id].brush.fade > 0.0),
+            BRUSH_FADE_FEATURE,
+        ),
     ]
     .into_iter()
     .filter(|(used, _)| *used)
@@ -131,7 +137,7 @@ pub fn write_with<W: Write + Seek>(
         schema: SCHEMA,
         render_revision: RENDER_REVISION,
         document_id: hex(&document_id),
-        required: required(document),
+        required: required(document, &used),
     };
     let dto = DocumentDto {
         canvas: document.canvas,
@@ -174,6 +180,7 @@ pub fn write_with<W: Write + Seek>(
                         animated_jitter: stroke.brush.animated_jitter,
                         wobble_scale: stroke.brush.wobble_scale,
                         antialias: stroke.brush.antialias,
+                        fade: stroke.brush.fade,
                     },
                     seed: format!("{:016x}", stroke.seed),
                 }

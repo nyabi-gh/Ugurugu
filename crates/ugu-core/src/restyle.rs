@@ -21,7 +21,7 @@ use crate::document::{Document, Layer, LayerId, LayerKind};
 use crate::edit::{Change, EditError};
 use crate::ops::{Affine, MaskId, Op, Rgba8, StrokeId};
 use crate::selection::{Selection, copy_bits};
-use crate::store::{BrushEngine, Mask, Store, Stroke};
+use crate::store::{Brush, BrushEngine, Mask, Store, Stroke};
 
 /// What to change; `None` leaves it as it is.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -430,18 +430,20 @@ fn any_in_row(mask: &Mask, y: i32, from: i32, to: i32) -> bool {
     })
 }
 
-/// How far from its line a stroke reaches at `pressure`: half its width,
-/// and for a spray as far as its particles land.
-fn reach(stroke: &Stroke, pressure: f32) -> f64 {
+/// How far from its line a stroke reaches at `pressure`, `along` pixels from
+/// its start: half its width, and for a spray as far as its particles land.
+fn reach(stroke: &Stroke, pressure: f32, along: f64) -> f64 {
     let brush = &stroke.brush;
     let dynamics = f64::from(brush.size_dynamics);
     let scale = 1.0 - dynamics + f64::from(pressure.clamp(0.0, 1.0)) * dynamics;
-    let width = f64::from(stroke.width);
+    let width = f64::from(stroke.width) * faded(brush, along);
     let line = (width * scale).max(0.5) * 0.5;
     match brush.engine {
         BrushEngine::Line | BrushEngine::Airbrush => line,
         // A block of whole pixels from the point's pixel, at any pressure.
-        BrushEngine::Pixel => width.round().max(1.0) * std::f64::consts::FRAC_1_SQRT_2 + 1.0,
+        BrushEngine::Pixel => {
+            f64::from(stroke.width).round().max(1.0) * std::f64::consts::FRAC_1_SQRT_2 + 1.0
+        }
         BrushEngine::Spray => {
             let particle =
                 f64::from(brush.particle_size) * (1.0 + 0.75 * f64::from(brush.size_jitter));
@@ -450,17 +452,37 @@ fn reach(stroke: &Stroke, pressure: f32) -> f64 {
     }
 }
 
+/// The share of a stroke's width left `along` pixels from its start.
+fn faded(brush: &Brush, along: f64) -> f64 {
+    if brush.fade > 0.0 {
+        (1.0 - along / f64::from(brush.fade)).max(0.0)
+    } else {
+        1.0
+    }
+}
+
+/// The points as far as the stroke is drawn, each with how far it reaches.
+fn drawn_points(stroke: &Stroke) -> Vec<([f64; 2], f64)> {
+    let fade = f64::from(stroke.brush.fade);
+    let mut along = 0.0;
+    let mut previous: Option<[f64; 2]> = None;
+    let mut drawn = Vec::new();
+    for point in stroke.points.iter() {
+        let at = [f64::from(point.x), f64::from(point.y)];
+        if let Some([x, y]) = previous {
+            along += (at[0] - x).hypot(at[1] - y);
+        }
+        drawn.push((at, reach(stroke, point.pressure, along)));
+        if fade > 0.0 && along >= fade {
+            break;
+        }
+        previous = Some(at);
+    }
+    drawn
+}
+
 fn stroke_touches(stroke: &Stroke, area: &Area) -> bool {
-    let points: Vec<([f64; 2], f64)> = stroke
-        .points
-        .iter()
-        .map(|point| {
-            (
-                [f64::from(point.x), f64::from(point.y)],
-                reach(stroke, point.pressure),
-            )
-        })
-        .collect();
+    let points = drawn_points(stroke);
     let farthest = points.iter().map(|(_, reach)| *reach).fold(0.0, f64::max);
     let (mut low, mut high) = ([f64::MAX; 2], [f64::MIN; 2]);
     for ([x, y], _) in &points {
@@ -815,5 +837,22 @@ mod tests {
         let changes = restyle(&document, layer, &all, style).expect("a paint layer");
         assert!(commit(&mut document, changes).is_err());
         assert_eq!(document, before);
+    }
+
+    #[test]
+    fn only_the_part_of_a_stroke_its_fade_draws_counts() {
+        let mut faded = stroke(
+            &[[0.0, 5.0], [40.0, 5.0], [80.0, 5.0], [120.0, 5.0]],
+            10.0,
+            [0; 4],
+        );
+        faded.brush.size_dynamics = 0.0;
+        faded.brush.fade = 40.0;
+        let drawn = drawn_points(&faded);
+        assert_eq!(drawn.len(), 2);
+        assert_eq!(drawn[0].1, 5.0);
+        assert_eq!(drawn[1].1, 0.25);
+        faded.brush.fade = 0.0;
+        assert_eq!(drawn_points(&faded).len(), 4);
     }
 }

@@ -20,12 +20,15 @@ pub const FRAMES_FEATURE: &str = "frames";
 pub const KEY_OPACITY_FEATURE: &str = "key-opacity";
 /// Fills laid behind the lines, which 3.2 would draw over them.
 pub const FILL_BEHIND_FEATURE: &str = "fill-behind";
-pub const FEATURES: [&str; 5] = [
+/// Strokes that fade along their length, which 3.5 would draw whole.
+pub const BRUSH_FADE_FEATURE: &str = "brush-fade";
+pub const FEATURES: [&str; 6] = [
     KEYS_FEATURE,
     CELS_FEATURE,
     FRAMES_FEATURE,
     KEY_OPACITY_FEATURE,
     FILL_BEHIND_FEATURE,
+    BRUSH_FADE_FEATURE,
 ];
 
 pub const MANIFEST: &str = "manifest.json";
@@ -283,6 +286,12 @@ pub struct BrushDto {
     pub animated_jitter: bool,
     pub wobble_scale: f32,
     pub antialias: bool,
+    #[serde(default, skip_serializing_if = "is_no_fade")]
+    pub fade: f32,
+}
+
+fn is_no_fade(fade: &f32) -> bool {
+    *fade == 0.0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

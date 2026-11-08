@@ -133,7 +133,7 @@ impl LiveStroke {
             line: [0; 4],
             erase,
             dabs,
-            resampler: Resampler::new(spacing),
+            resampler: Resampler::new(spacing).fading(pen.brush.fade),
             points: 0,
             settled: 0,
             coverage,

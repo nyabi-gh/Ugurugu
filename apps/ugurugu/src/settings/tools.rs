@@ -8,7 +8,7 @@
 use serde_json::{Map, Value, json};
 use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
-use ugu_core::store::limits::STROKE_WIDTH;
+use ugu_core::store::limits::{FADE, STROKE_WIDTH};
 use ugu_session::{
     Brushes, ColorHistory, Kept, Reads, Shape, ShapeKind, ShapePaint, ShapeSettings, TextSettings,
     Tool, ToolSettings, Tools, is_pixel,
@@ -173,6 +173,7 @@ fn read_brushes(value: &Value, mut brushes: Brushes, pixel_only: bool) -> Brushe
                 stabilizer: number(kept, "stabilizer", 0.0..=1.0).unwrap_or(own.stabilizer),
                 // Not in settings written before the opacity setting.
                 opacity: number(kept, "opacity", 0.01..=1.0).unwrap_or(own.opacity),
+                fade: number(kept, "fade", FADE).unwrap_or(own.fade),
             };
             brushes.remembered.insert(preset.id, kept);
         }
@@ -188,6 +189,7 @@ fn read_brushes(value: &Value, mut brushes: Brushes, pixel_only: bool) -> Brushe
             width: kept.width,
             stabilizer: kept.stabilizer,
             opacity: kept.opacity,
+            fade: kept.fade,
             ..base
         }
     };
@@ -349,6 +351,7 @@ fn brushes_to_json(brushes: &Brushes) -> Map<String, Value> {
                 "width": kept.width,
                 "stabilizer": kept.stabilizer,
                 "opacity": kept.opacity,
+                "fade": kept.fade,
             }),
         );
     }
@@ -458,6 +461,7 @@ mod tests {
             width: 33.5,
             stabilizer: 0.4,
             opacity: 0.45,
+            fade: 120.0,
             antialias: true,
         };
         tools.plain.eraser = ToolSettings {
@@ -465,6 +469,7 @@ mod tests {
             width: 80.0,
             stabilizer: 0.0,
             opacity: brush::ERASERS[2].brush.opacity,
+            fade: 0.0,
             // Not the preset's own.
             antialias: !brush::ERASERS[2].brush.antialias,
         };
@@ -474,6 +479,7 @@ mod tests {
                 width: 12.0,
                 stabilizer: 0.25,
                 opacity: 0.7,
+                fade: 300.0,
             },
         );
         tools.plain.remembered.insert(
@@ -482,6 +488,7 @@ mod tests {
                 width: 40.0,
                 stabilizer: 0.5,
                 opacity: 1.0,
+                fade: 0.0,
             },
         );
         tools.pixel.pen.width = 3.0;
