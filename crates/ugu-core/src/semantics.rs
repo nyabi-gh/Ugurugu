@@ -385,6 +385,7 @@ fn blend_over(mode: Blend, source: [f32; 4], backdrop: [f32; 4]) -> [f32; 4] {
 
 fn layer(ops: Vec<Op>, size: [u32; 2]) -> PaintLayer {
     PaintLayer {
+        outline: None,
         ops,
         opacity: 1.0,
         blend: Blend::Normal,

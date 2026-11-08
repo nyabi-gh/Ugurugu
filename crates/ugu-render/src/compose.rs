@@ -12,9 +12,9 @@
 
 use std::sync::Arc;
 
-use ugu_core::document::{Document, LayerId};
+use ugu_core::document::{Document, LayerId, LayerKind};
 use ugu_core::history::LayerRevisions;
-use ugu_core::ops::Wobble;
+use ugu_core::ops::{Outline, Wobble};
 use ugu_core::store::{BrushEngine, Mask, Stroke};
 use vello_common::geometry::RectU16;
 use vello_common::strip::{StripFillSegment, visit_strip_fill_segments};
@@ -30,6 +30,7 @@ use crate::dab::{self, Dab};
 use crate::document::{DocumentRenderer, Purpose, drawn_from, tiles_reached};
 use crate::live::LiveStroke;
 use crate::mask::Runs;
+use crate::outline::{Look, Scratch};
 use crate::pixel;
 use crate::plan::RenderPlan;
 use crate::raster::{PixelRect, document_level};
@@ -133,9 +134,56 @@ pub struct Split {
     /// full render now draws what was there before from elsewhere, which
     /// can round apart: the split is to be drawn again.
     pub redraw: bool,
+    /// The edited layer as it is shown, when it has an outline.
+    outline: Option<EditedOutline>,
+}
+
+/// The edited layer over its outline, kept up to date by
+/// `Split::refresh_outline`.
+struct EditedOutline {
+    look: Look,
+    surface: TiledSurface,
+    scratch: Scratch,
+    threads: usize,
 }
 
 impl Split {
+    /// Whether the edited layer has an outline, so changes to it are shown
+    /// through `refresh_outline`, once per frame as it is costly.
+    pub fn has_outline(&self) -> bool {
+        self.outline.is_some()
+    }
+
+    /// Brings the edited layer's outline up to date after the pixels `dirty`
+    /// changed, with `live` drawn on the layer. Returns the pixels of the
+    /// layer whose outlined look may differ.
+    pub fn refresh_outline(&mut self, live: &[&LiveStroke], dirty: PixelRect) -> PixelRect {
+        let (Some(line), Some(edited)) = (self.outline.as_mut(), self.edited) else {
+            return dirty;
+        };
+        let Held::Tiles(surface) = &self.sources[edited] else {
+            unreachable!("a paint layer's pixels are tiles");
+        };
+        let source = Source::Tiles(surface);
+        let paintings: Vec<_> = live.iter().map(|live| live.painting()).collect();
+        let read = |y: usize, left: usize, row: &mut [[u8; 4]]| {
+            source.parts_into(y, left, row);
+            for painting in &paintings {
+                for (index, pixel) in row.iter_mut().enumerate() {
+                    painting.apply(left + index, y, pixel);
+                }
+            }
+        };
+        crate::outline::redraw(
+            &read,
+            &mut line.surface,
+            dirty,
+            &line.look,
+            line.threads,
+            &mut line.scratch,
+        )
+    }
+
     /// Bytes of the pixels it holds.
     pub fn held_bytes(&self) -> usize {
         self.sources
@@ -146,7 +194,8 @@ impl Split {
                     usize::from(pixmap.width()) * usize::from(pixmap.height()) * 4
                 }
             })
-            .sum()
+            .sum::<usize>()
+            + self.outline.as_ref().map_or(0, |line| line.surface.bytes())
     }
 
     /// Adds a committed stroke to the edited layer as drawing it again would:
@@ -474,15 +523,34 @@ impl Split {
     fn sources(&self) -> Vec<Source<'_>> {
         self.sources
             .iter()
-            .map(|held| match held {
-                Held::Tiles(surface) => Source::Tiles(surface),
-                Held::Whole(pixmap) => Source::Whole(pixmap),
+            .enumerate()
+            .map(|(index, held)| match (held, &self.outline) {
+                (_, Some(line)) if Some(index) == self.edited => Source::Tiles(&line.surface),
+                (Held::Tiles(surface), _) => Source::Tiles(surface),
+                (Held::Whole(pixmap), _) => Source::Whole(pixmap),
             })
             .collect()
     }
 }
 
+/// The outline of paint layer `layer`, if it has one.
+fn line_of(document: &Document, layer: LayerId) -> Option<Outline> {
+    match &document.layer(layer)?.kind {
+        LayerKind::Paint(paint) => paint.outline,
+        LayerKind::Group(_) => None,
+    }
+}
+
 impl DocumentRenderer {
+    fn edited_outline(&self, line: Outline, surface: TiledSurface) -> EditedOutline {
+        EditedOutline {
+            look: Look::new(&line, 1),
+            surface,
+            scratch: Scratch::default(),
+            threads: self.thread_count(),
+        }
+    }
+
     /// Draws `frame` into `display`, which must have the canvas size, and
     /// keeps what it was made from for editing `layer`. With `revisions`,
     /// layers drawn before are reused. When the layers' own surfaces would
@@ -505,6 +573,17 @@ impl DocumentRenderer {
         });
         if self.over_budget(document, &plan, 1) {
             let program = self.reduced(document, &plan, cycle, layer)?;
+            let edited_line = line_of(document, layer);
+            let outline = match (program.edited, edited_line) {
+                (Some(at), Some(line)) => {
+                    let Held::Tiles(surface) = &program.sources[at] else {
+                        unreachable!("a paint layer's pixels are tiles");
+                    };
+                    let surface = self.outlined(surface, &line, 1);
+                    Some(self.edited_outline(line, surface))
+                }
+                _ => None,
+            };
             let split = Split {
                 moved,
                 layer,
@@ -516,6 +595,7 @@ impl DocumentRenderer {
                 edited: program.edited,
                 layers: None,
                 redraw: false,
+                outline,
             };
             let rect = [
                 0,
@@ -540,12 +620,24 @@ impl DocumentRenderer {
         let sources: Vec<Held> = plan
             .layers
             .iter()
-            .map(|(id, _)| Held::Tiles(self.surface(*id).expect("just drawn")))
+            .map(|(id, _)| {
+                let surface = if *id == layer {
+                    self.surface(*id)
+                } else {
+                    self.shown_surface(*id)
+                };
+                Held::Tiles(surface.expect("just drawn"))
+            })
             .collect();
+        let edited = plan.layers.iter().position(|(id, _)| *id == layer);
+        let shown = edited.and_then(|_| self.shown_surface(layer));
         // The edited layer's pixels change in place from now on, so this
         // renderer does not keep a share of them.
         self.forget(layer);
-        let edited = plan.layers.iter().position(|(id, _)| *id == layer);
+        let outline = line_of(document, layer).zip(shown).map(|(line, shown)| {
+            let surface = Arc::try_unwrap(shown).unwrap_or_else(|shared| (*shared).clone());
+            self.edited_outline(line, surface)
+        });
         Some(Split {
             moved,
             layer,
@@ -557,6 +649,7 @@ impl DocumentRenderer {
             sources,
             layers: Some(plan.layers.iter().map(|(id, _)| *id).collect()),
             redraw: false,
+            outline,
         })
     }
 }
@@ -589,7 +682,8 @@ pub fn composite(split: &Split, live: &[&LiveStroke], rect: PixelRect, out: &mut
         .filter(|painting| painting.reaches(rect))
         .collect();
     match split.edited {
-        Some(source) if !paintings.is_empty() => {
+        // With an outline, the strokes being drawn are in its surface.
+        Some(source) if !paintings.is_empty() && !split.has_outline() => {
             let apply = |x: usize, y: usize, pixel: &mut [u8; 4]| {
                 for painting in &paintings {
                     painting.apply(x, y, pixel);
@@ -2249,6 +2343,87 @@ mod tests {
         assert!(pieces.data_as_u8_slice() == whole_shown.data_as_u8_slice());
         let (_, without) = self::split(&history, first, 3);
         assert!(without.data_as_u8_slice() != whole_shown.data_as_u8_slice());
+    }
+
+    fn with_outlines(mut history: History) -> History {
+        for layer in paint_layers(&history) {
+            history
+                .edit("Outline", |document| {
+                    command::update_layer(document, layer, |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            paint.outline = Some(Outline {
+                                width: 7.0,
+                                color: Rgba8([255, 0, 0, 200]),
+                            });
+                        }
+                    })
+                    .unwrap()
+                })
+                .unwrap();
+        }
+        history
+    }
+
+    fn full(document: &Document, frame: i64) -> Pixmap {
+        let mut pixmap = canvas(document);
+        DocumentRenderer::new(0).render(document, frame, Purpose::Display, &mut pixmap);
+        pixmap
+    }
+
+    #[test]
+    fn an_outlined_layer_is_shown_and_edited_as_a_full_render_draws_it() {
+        let makers: [fn() -> History; 2] = [
+            || with_outlines(history()),
+            || with_outlines(animated(history())),
+        ];
+        for make in makers {
+            let layer = paint_layers(&make())[1];
+            for budget in [None, Some(0)] {
+                for frame in [0, 3] {
+                    let mut history = make();
+                    let mut renderer = DocumentRenderer::new(0);
+                    if let Some(budget) = budget {
+                        renderer.set_surface_budget(budget);
+                    }
+                    let mut display = canvas(history.document());
+                    let mut split = renderer
+                        .split(
+                            history.document(),
+                            layer,
+                            frame,
+                            Some(history.layer_revisions()),
+                            &mut display,
+                        )
+                        .expect("nothing stops it");
+                    assert!(split.has_outline());
+                    assert!(
+                        display.data_as_u8_slice()
+                            == full(history.document(), frame).data_as_u8_slice(),
+                        "budget {budget:?}, frame {frame}"
+                    );
+                    let line = stroke([20.0, 70.0], [100.0, 15.0], [10, 90, 200, 255], 77);
+                    let wobble = layer_wobble(history.document(), layer);
+                    let frames = history.document().frames;
+                    let rect = split
+                        .stamp(&mut Stamp::default(), &line, false, wobble, frames, None)
+                        .expect("it reaches the canvas");
+                    let changed = split.refresh_outline(&[], rect);
+                    let size = history.document().canvas;
+                    let shown = split.shown(changed, size).expect("it is shown");
+                    composite(&split, &[], shown, &mut display);
+                    history
+                        .edit("Draw", |document| {
+                            command::draw(document, layer, line.clone(), false, None)
+                        })
+                        .unwrap();
+                    let most = max_difference(&display, &full(history.document(), frame));
+                    assert!(
+                        most <= 2,
+                        "budget {budget:?}, frame {frame}: differs by {most}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

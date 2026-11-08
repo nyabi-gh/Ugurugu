@@ -13,9 +13,10 @@ use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, Ui, Vec2};
 use ugu_core::command;
+use ugu_core::document::limits::OUTLINE_WIDTH;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind};
 use ugu_core::edit::{EditError, Outcome};
-use ugu_core::ops::{Blend, MergeRefusal, Wobble};
+use ugu_core::ops::{Blend, MergeRefusal, Outline, Rgba8, Wobble};
 use ugu_session::Session;
 
 use crate::canvas::Canvas;
@@ -25,6 +26,11 @@ use crate::theme;
 use crate::widgets;
 
 const ROW: f32 = 56.0;
+/// As Photoshop starts a layer's Stroke, and seen on any picture.
+const NEW_OUTLINE: Outline = Outline {
+    width: 3.0,
+    color: Rgba8([255, 0, 0, 255]),
+};
 const INDENT: f32 = 14.0;
 /// `widgets::icon_button`'s side for a 16pt glyph.
 const DELETE_SIDE: f32 = 16.0 + 8.0;
@@ -43,6 +49,11 @@ pub struct LayerDock {
     renaming: Option<(LayerId, String)>,
     /// Opacity being dragged, committed when the drag ends.
     opacity: Option<(LayerId, f32)>,
+    /// Outline width being dragged, committed when the drag ends.
+    outline_width: Option<(LayerId, f32)>,
+    /// Outline colour being picked, committed when the pointer lets go.
+    outline_color: Option<(LayerId, [u8; 4])>,
+    outline_picking: bool,
     /// The layer being dragged in the list.
     dragging: Option<LayerId>,
     thumbnails: HashMap<LayerId, Thumbnail>,
@@ -155,7 +166,9 @@ fn flatten(
 /// Why `id` cannot be merged down, in 2.2.13's words, or `None`.
 fn merge_refusal(document: &Document, id: LayerId) -> Option<&'static str> {
     Some(match command::merge_down(document, id).err()? {
-        EditError::Merge(MergeRefusal::Blend | MergeRefusal::Clipping) => tr("merge-properties"),
+        EditError::Merge(MergeRefusal::Outline | MergeRefusal::Blend | MergeRefusal::Clipping) => {
+            tr("merge-properties")
+        }
         EditError::Merge(MergeRefusal::CanvasChange) => tr("merge-canvas-change"),
         EditError::Merge(MergeRefusal::CanvasEpoch) => tr("merge-epoch"),
         EditError::Merge(MergeRefusal::Animated) => tr("merge-animated"),
@@ -1056,6 +1069,105 @@ impl LayerDock {
                 }),
             );
             self.opacity = None;
+        }
+        self.outline_controls(ui, canvas, current, refusal);
+    }
+
+    /// A paint layer's outline: whether it has one, how wide and what colour.
+    fn outline_controls(
+        &mut self,
+        ui: &mut Ui,
+        canvas: &mut Canvas,
+        current: LayerId,
+        refusal: &mut Option<String>,
+    ) {
+        let Some(LayerKind::Paint(paint)) = canvas
+            .session()
+            .document()
+            .layer(current)
+            .map(|layer| &layer.kind)
+        else {
+            return;
+        };
+        let line = paint.outline;
+        let set = |canvas: &mut Canvas, refusal: &mut Option<String>, next: Option<Outline>| {
+            report(
+                refusal,
+                canvas.edit(|session| {
+                    session.update_layer(current, "Layer outline", |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            paint.outline = next;
+                        }
+                    })
+                }),
+            );
+        };
+        let mut on = line.is_some();
+        if widgets::checkbox(ui, &mut on, tr("layer-outline"))
+            .on_hover_text(tr("layer-outline-tip"))
+            .changed()
+        {
+            set(canvas, refusal, on.then_some(line.unwrap_or(NEW_OUTLINE)));
+            self.outline_picking = false;
+        }
+        let Some(line) = line else {
+            return;
+        };
+
+        if self.outline_width.is_none_or(|(id, _)| id != current) {
+            self.outline_width = Some((current, line.width));
+        }
+        let mut width = self.outline_width.expect("set").1;
+        let name = tr("layer-outline-width");
+        let slider = widgets::form_row(ui, name, |ui| {
+            let field = widgets::number(ui, &mut width, OUTLINE_WIDTH, " px", 0, 64.0, name);
+            let room = ui.available_width().max(40.0);
+            widgets::slider(ui, &mut width, OUTLINE_WIDTH, name, room).union(field)
+        });
+        let width = width
+            .round()
+            .clamp(*OUTLINE_WIDTH.start(), *OUTLINE_WIDTH.end());
+        self.outline_width = Some((current, width));
+        if (slider.drag_stopped() || (slider.changed() && !slider.dragged())) && width != line.width
+        {
+            set(canvas, refusal, Some(Outline { width, ..line }));
+            self.outline_width = None;
+        }
+
+        if self.outline_color.is_none_or(|(id, _)| id != current) {
+            self.outline_color = Some((current, line.color.0));
+        }
+        let [r, g, b, a] = self.outline_color.expect("set").1;
+        let mut color = Color32::from_rgba_unmultiplied(r, g, b, a);
+        widgets::form_row(ui, tr("layer-outline-color"), |ui| {
+            let swatch =
+                widgets::color_swatch(ui, color, tr("layer-outline-color"), self.outline_picking)
+                    .on_hover_text(tr("layer-outline-choose-color"));
+            if swatch.clicked() {
+                self.outline_picking = !self.outline_picking;
+            }
+        });
+        if self.outline_picking
+            && egui::color_picker::color_picker_color32(
+                ui,
+                &mut color,
+                egui::color_picker::Alpha::OnlyBlend,
+            )
+        {
+            self.outline_color = Some((current, color.to_srgba_unmultiplied()));
+        }
+        let picked = self.outline_color.expect("set").1;
+        // One undo step when the pointer lets go of the picker.
+        if picked != line.color.0 && !ui.input(|input| input.pointer.any_down()) {
+            set(
+                canvas,
+                refusal,
+                Some(Outline {
+                    color: Rgba8(picked),
+                    ..line
+                }),
+            );
+            self.outline_color = None;
         }
     }
 }

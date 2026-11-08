@@ -16,8 +16,8 @@ use sha2::{Digest, Sha256};
 use ugu_core::document::{Document, DocumentError, Group, Layer, LayerId, LayerKind};
 use ugu_core::keys::{Ease, Exposure, Key, Keys, Pose};
 use ugu_core::ops::{
-    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
-    StrokeId, Wobble,
+    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, Outline, PaintLayer, Rgba8, Sampling,
+    Section, StrokeId, Wobble,
 };
 use ugu_core::store::{self, Asset, Brush, BrushEngine, Mask, Point, Store, Stroke, TipShape};
 use zip::ZipArchive;
@@ -617,10 +617,18 @@ fn keys(dto: Option<&KeysDto>) -> Keys {
     })
 }
 
+fn outline(dto: &OutlineDto) -> Result<Outline, ReadError> {
+    Ok(Outline {
+        width: dto.width,
+        color: Rgba8(parse_color(&dto.color).ok_or_else(|| corrupt("outline colour"))?),
+    })
+}
+
 fn layer(dto: &LayerDto) -> Result<Layer, ReadError> {
     let kind = match (&dto.paint, &dto.group) {
         (Some(paint), None) => LayerKind::Paint(PaintLayer {
             ops: paint.ops.iter().map(op).collect::<Result<_, _>>()?,
+            outline: paint.outline.as_ref().map(outline).transpose()?,
             opacity: paint.opacity,
             blend: blend(paint.blend),
             clip_to_below: paint.clip_to_below,

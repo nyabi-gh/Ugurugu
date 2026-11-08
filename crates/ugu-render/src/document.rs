@@ -25,6 +25,7 @@ use vello_cpu::{Image, ImageSource, Pixmap, RasterizerSettings, RenderContext, R
 use crate::composite::{self, Source};
 use crate::dab::{self, Dab};
 use crate::mask::Runs;
+use crate::outline;
 use crate::pixel;
 use crate::plan::RenderPlan;
 use crate::raster::document_level;
@@ -67,6 +68,7 @@ pub struct DocumentRenderer {
     detail: u32,
     timings: Timings,
     masks: DrawCache,
+    outline_scratch: outline::Scratch,
 }
 
 /// Full detail for `DocumentRenderer::set_detail`.
@@ -80,6 +82,17 @@ struct Cached {
     frame: Option<u32>,
     detail: u32,
     surface: Arc<TiledSurface>,
+    /// `surface` over this outline, when the layer has one.
+    outlined: Option<(ops::Outline, Arc<TiledSurface>)>,
+}
+
+impl Cached {
+    /// What the layer shows.
+    fn shown(&self) -> &Arc<TiledSurface> {
+        self.outlined
+            .as_ref()
+            .map_or(&self.surface, |(_, outlined)| outlined)
+    }
 }
 
 /// A layer to draw, and the surface to draw it on.
@@ -104,6 +117,8 @@ pub struct Timings {
     pub rasterize: std::time::Duration,
     /// Putting the layer surfaces together.
     pub composite: std::time::Duration,
+    /// Drawing the lines around layers that have one.
+    pub layer_outlines: std::time::Duration,
 }
 
 impl std::ops::AddAssign for Timings {
@@ -112,6 +127,7 @@ impl std::ops::AddAssign for Timings {
         self.encode += other.encode;
         self.rasterize += other.rasterize;
         self.composite += other.composite;
+        self.layer_outlines += other.layer_outlines;
     }
 }
 
@@ -365,6 +381,7 @@ impl DocumentRenderer {
             tile_edge: TILE_EDGE,
             detail: FULL_DETAIL,
             timings: Timings::default(),
+            outline_scratch: outline::Scratch::default(),
             masks: DrawCache {
                 spare_count: usize::from(threads.max(1)),
                 ..DrawCache::default()
@@ -416,6 +433,49 @@ impl DocumentRenderer {
 
     pub(crate) fn thread_count(&self) -> usize {
         self.threads
+    }
+
+    /// Draws the outlines of the layers of `plan` whose surfaces were just
+    /// drawn, or whose outline changed.
+    fn outline_layers(&mut self, document: &Document, plan: &RenderPlan, shrink: u32) {
+        for (id, _) in &plan.layers {
+            let Some(LayerKind::Paint(paint)) = document.layer(*id).map(|layer| &layer.kind) else {
+                continue;
+            };
+            let Some(cached) = self.cache.get_mut(id) else {
+                continue;
+            };
+            if cached.outlined.as_ref().map(|(outline, _)| outline) == paint.outline.as_ref() {
+                continue;
+            }
+            if let Some((_, outlined)) = cached.outlined.take()
+                && let Ok(outlined) = Arc::try_unwrap(outlined)
+            {
+                self.outline_scratch.give_back(outlined);
+            }
+            if let Some(line) = paint.outline {
+                let look = outline::Look::new(&line, shrink);
+                let drawn = outline::around(
+                    &cached.surface,
+                    &look,
+                    self.threads,
+                    &mut self.outline_scratch,
+                );
+                cached.outlined = Some((line, Arc::new(drawn)));
+            }
+        }
+        self.outline_scratch.drop_spares();
+    }
+
+    /// `surface`, a paint layer's own pixels, over `line`.
+    pub(crate) fn outlined(
+        &mut self,
+        surface: &TiledSurface,
+        line: &ops::Outline,
+        shrink: u32,
+    ) -> TiledSurface {
+        let look = outline::Look::new(line, shrink);
+        outline::around(surface, &look, self.threads, &mut self.outline_scratch)
     }
 
     /// `paint`'s own pixels on a surface of its own, with every thread.
@@ -510,7 +570,13 @@ impl DocumentRenderer {
     pub fn surface_bytes(&self) -> usize {
         self.cache
             .values()
-            .map(|cached| cached.surface.bytes())
+            .map(|cached| {
+                cached.surface.bytes()
+                    + cached
+                        .outlined
+                        .as_ref()
+                        .map_or(0, |(_, outlined)| outlined.bytes())
+            })
             .sum()
     }
 
@@ -522,6 +588,12 @@ impl DocumentRenderer {
     /// The surface of `layer` from the last render.
     pub fn surface(&self, layer: LayerId) -> Option<Arc<TiledSurface>> {
         self.cache.get(&layer).map(|cached| cached.surface.clone())
+    }
+
+    /// What `layer` showed in the last render: its surface over its
+    /// outline, when it has one.
+    pub(crate) fn shown_surface(&self, layer: LayerId) -> Option<Arc<TiledSurface>> {
+        self.cache.get(&layer).map(|cached| cached.shown().clone())
     }
 
     /// Lets go of the surface of `layer`, so it is drawn again next time.
@@ -616,7 +688,14 @@ impl DocumentRenderer {
             let surface = self
                 .cache
                 .remove(id)
-                .and_then(|cached| Arc::try_unwrap(cached.surface).ok())
+                .and_then(|cached| {
+                    if let Some((_, outlined)) = cached.outlined
+                        && let Ok(outlined) = Arc::try_unwrap(outlined)
+                    {
+                        self.outline_scratch.give_back(outlined);
+                    }
+                    Arc::try_unwrap(cached.surface).ok()
+                })
                 .unwrap_or_else(|| TiledSurface::new(size, edge));
             work.push(Work {
                 id: *id,
@@ -650,6 +729,7 @@ impl DocumentRenderer {
                 frame: each.frame,
                 detail,
                 surface: Arc::new(each.surface),
+                outlined: None,
             };
             self.cache.insert(each.id, cached);
         }
@@ -657,13 +737,16 @@ impl DocumentRenderer {
             return false;
         }
         let started = std::time::Instant::now();
+        self.outline_layers(document, plan, shrink);
+        self.timings.layer_outlines = started.elapsed();
+        let started = std::time::Instant::now();
         let sources: Vec<Source<'_>> = plan
             .layers
             .iter()
             .map(|(id, _)| {
                 self.cache
                     .get(id)
-                    .map_or(Source::Empty, |cached| Source::Tiles(&cached.surface))
+                    .map_or(Source::Empty, |cached| Source::Tiles(cached.shown()))
             })
             .collect();
         let background = plan.background(document);
@@ -1757,7 +1840,10 @@ pub fn surface_estimate(document: &Document, plan: &RenderPlan, shrink: u32, edg
                 return 0;
             }
             let (_, extent) = empty.area(span);
-            usize::from(extent[0]) * usize::from(extent[1]) * 4
+            let own = usize::from(extent[0]) * usize::from(extent[1]) * 4;
+            own + paint.outline.map_or(0, |line| {
+                crate::outline::Look::new(&line, shrink).bytes_around(extent, empty.size())
+            })
         })
         .sum()
 }
@@ -2473,6 +2559,7 @@ mod tests {
 
     fn tree_layer(id: u32, ops: Vec<Op>, update: impl FnOnce(&mut PaintLayer)) -> Layer {
         let mut paint = PaintLayer {
+            outline: None,
             ops,
             opacity: 1.0,
             blend: Blend::Normal,
@@ -3807,6 +3894,65 @@ mod tests {
             .map(|frame| cached(&mut renderer, &document, frame, &revisions))
             .collect();
         assert_eq!(drawn, [2, 1, 1, 1]);
+    }
+
+    #[test]
+    fn an_outline_is_drawn_once_for_a_still_layer_and_again_only_when_it_changes() {
+        use ugu_core::command;
+        use ugu_core::history::History;
+
+        let set = |width| {
+            move |document: &Document| {
+                command::update_layer(document, LayerId(2), |layer| {
+                    if let LayerKind::Paint(paint) = &mut layer.kind {
+                        paint.outline = Some(ops::Outline {
+                            width,
+                            color: ops::Rgba8([0, 200, 0, 255]),
+                        });
+                    }
+                })
+                .unwrap()
+            }
+        };
+        let (document, below, mut above) = two_layers();
+        above.wobble = Some(Wobble::classic(0.0));
+        let mut history = History::new(with_layers(&document, &[below, above]), false);
+        history.edit("Outline", set(3.0)).unwrap();
+        let mut renderer = DocumentRenderer::new(0);
+        cached(
+            &mut renderer,
+            history.document(),
+            0,
+            history.layer_revisions(),
+        );
+        let first = renderer.shown_surface(LayerId(2)).unwrap();
+        assert_eq!(
+            cached(
+                &mut renderer,
+                history.document(),
+                1,
+                history.layer_revisions()
+            ),
+            1,
+            "only the wobbling layer is drawn"
+        );
+        assert!(Arc::ptr_eq(
+            &first,
+            &renderer.shown_surface(LayerId(2)).unwrap()
+        ));
+
+        history.edit("Outline", set(9.0)).unwrap();
+        let drawn = cached(
+            &mut renderer,
+            history.document(),
+            1,
+            history.layer_revisions(),
+        );
+        assert_eq!(drawn, 0, "a new outline needs no new pixels of a layer");
+        assert!(!Arc::ptr_eq(
+            &first,
+            &renderer.shown_surface(LayerId(2)).unwrap()
+        ));
     }
 
     #[test]

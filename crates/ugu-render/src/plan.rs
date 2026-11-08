@@ -355,6 +355,7 @@ mod tests {
             visible: true,
             reference: false,
             kind: LayerKind::Paint(PaintLayer {
+                outline: None,
                 ops: Vec::new(),
                 opacity: 1.0,
                 blend: Blend::Normal,

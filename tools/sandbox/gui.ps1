@@ -1255,6 +1255,58 @@ Step 'Fade narrows a stroke and ends it' {
     $detail
 }
 
+# A layer's outline, turned on in its properties: a line drawn afterwards has
+# the outline's colour beside it, and turning it off takes that away.
+Step 'An outline goes around what a layer shows' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $process = Start-App
+    # The default window scrolls the layer's properties out of reach.
+    [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle).GetCurrentPattern(
+        [Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState(
+        [Windows.Automation.WindowVisualState]::Maximized)
+    Start-Sleep -Milliseconds 800
+    $words = Read-Words 'en'
+    Send-Keys $process 'b'
+    Set-Field $process 'Brush size' '24'
+    Set-Field $process $words['canvas-zoom-percent'] '100'
+    Start-Sleep -Milliseconds 500
+    $paper = Find-Paper $process
+    $x = [Math]::Max($paper.Left + 40, 480)
+    $y = $paper.Top + [int](($paper.Bottom - $paper.Top) / 2)
+    $at = {
+        param($PixelX, $PixelY)
+        $bitmap = New-Object Drawing.Bitmap 1, 1
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($PixelX, $PixelY, 0, 0, (New-Object Drawing.Size 1, 1))
+        $c = $bitmap.GetPixel(0, 0)
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $c
+    }
+    $isRed = { param($c) $c.R -gt 200 -and $c.G -lt 90 -and $c.B -lt 90 }
+    Invoke-Named $process $words['layer-outline']
+    Set-Field $process $words['layer-outline-width'] '12'
+    Start-Sleep -Milliseconds 500
+    [Native]::Drag(@($x, ($x + 400)), @($y, $y))
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 800
+    $beside = & $at ($x + 200) ($y - 18)
+    $inside = & $at ($x + 200) $y
+    $far = & $at ($x + 200) ($y - 44)
+    $shot = Save-Screen 'outline-on'
+    Invoke-Named $process $words['layer-outline']
+    Start-Sleep -Milliseconds 800
+    $without = & $at ($x + 200) ($y - 18)
+    $offShot = Save-Screen 'outline-off'
+    Stop-Apps
+    $detail = "18px above the line: $beside; on the line: $inside; 44px above: $far; outline off, 18px above: $without; $shot; $offShot"
+    if (-not ((& $isRed $beside) -and -not (& $isRed $inside) -and -not (& $isRed $far) -and -not (& $isRed $without))) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'A pixel brush has no fade' {
     Stop-Apps
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue

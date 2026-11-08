@@ -17,6 +17,10 @@
 //!   stage, and editing splits, with the peak working set.
 //! - `ugu-doc pen-only <in.ugurugu> <out.ugurugu>`: makes brushes pens, keeping
 //!   everything else, to tell what brushes cost from the rest.
+//! - `ugu-doc outline <in.ugurugu> <out.ugurugu> <one|all> <width>`: gives the
+//!   layer with the most operations, or every paint layer, a white outline.
+//! - `ugu-doc outline-live <file.ugurugu> <line|air> <samples per frame>`: what
+//!   drawing on the layer with the most operations costs per frame.
 //! - `ugu-doc fade <in.ugurugu> <out.ugurugu> <length>`: gives every stroke
 //!   that can fade that fade length, to measure what the fade costs.
 //! - `ugu-doc reframe <in.ugurugu> <out.ugurugu> <crop|resample|both>`: makes
@@ -74,11 +78,13 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
-use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampling, StrokeId};
+use ugu_core::ops::{
+    Affine, AssetId, Blend, MaskId, Op, Outline, PaintLayer, Rgba8, Sampling, StrokeId,
+};
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | outline <in.ugurugu> <out.ugurugu> <one|all> <width> | outline-live <file.ugurugu> <line|air> <samples per frame> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -151,6 +157,14 @@ fn main() -> ExitCode {
             _ => Err(USAGE.to_owned()),
         },
         ["stop", file] => stop(Path::new(file)),
+        ["outline", from, to, which, width] => width
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|width| outline(Path::new(from), Path::new(to), which, width)),
+        ["outline-live", file, engine, per_frame] => per_frame
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|per_frame| outline_live(Path::new(file), engine, per_frame)),
         ["fade", from, to, length] => length
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -1216,7 +1230,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         renderer.set_tile_edge(tile);
     }
     let mut times = Vec::new();
-    let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     let mut first = 0.0;
     for round in 0..3 {
         for (frame, plan) in (0..).zip(&plans) {
@@ -1233,6 +1247,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
                     timings.encode,
                     timings.rasterize,
                     timings.composite,
+                    timings.layer_outlines,
                 ]) {
                     stage.push(time.as_secs_f64() * 1000.0);
                 }
@@ -1240,11 +1255,12 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         }
     }
     // Summed over threads when layers are drawn at once.
-    let [outlines, encode, rasterize, composite] = &mut stages;
+    let [outlines, encode, rasterize, composite, layer_outlines] = &mut stages;
     println!("  outlines  {}", percentiles(outlines));
     println!("  encode    {}", percentiles(encode));
     println!("  rasterize {}", percentiles(rasterize));
     println!("  composite {}", percentiles(composite));
+    println!("  layer outlines {}", percentiles(layer_outlines));
     println!(
         "layer surfaces: {:.0} MiB in the last frame",
         renderer.surface_bytes() as f64 / (1024.0 * 1024.0)
@@ -1445,6 +1461,174 @@ fn fade(from: &Path, to: &Path, length: f32) -> Result<(), String> {
     }
     document.validate().map_err(|error| error.to_string())?;
     save(&document, to)
+}
+
+fn most_operations(document: &mut Document) -> Option<LayerId> {
+    let mut most: Option<(usize, LayerId)> = None;
+    fn visit(layers: &[Layer], most: &mut Option<(usize, LayerId)>) {
+        for layer in layers {
+            match &layer.kind {
+                LayerKind::Paint(paint) => {
+                    if most.is_none_or(|(count, _)| paint.ops.len() > count) {
+                        *most = Some((paint.ops.len(), layer.id));
+                    }
+                }
+                LayerKind::Group(group) => visit(&group.children, most),
+            }
+        }
+    }
+    visit(&document.layers, &mut most);
+    most.map(|(_, id)| id)
+}
+
+fn outline(from: &Path, to: &Path, which: &str, width: f32) -> Result<(), String> {
+    fn set(layers: &mut [Layer], only: Option<LayerId>, line: Outline) {
+        for layer in layers {
+            match &mut layer.kind {
+                LayerKind::Paint(paint) => {
+                    if only.is_none_or(|id| id == layer.id) {
+                        paint.outline = Some(line);
+                    }
+                }
+                LayerKind::Group(group) => set(&mut group.children, only, line),
+            }
+        }
+    }
+    let mut document = open(from)?;
+    let only = match which {
+        "one" => Some(most_operations(&mut document).ok_or("no paint layer")?),
+        "all" => None,
+        _ => return Err(USAGE.to_owned()),
+    };
+    let line = Outline {
+        width,
+        color: Rgba8([255, 255, 255, 255]),
+    };
+    set(&mut document.layers, only, line);
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)
+}
+
+/// What a stroke drawn on the layer with the most operations costs per
+/// frame, `per_frame` samples at a time, in the way the app shows it.
+fn outline_live(path: &Path, engine: &str, per_frame: usize) -> Result<(), String> {
+    use ugu_core::history::History;
+    use ugu_render::compose::{Stamp, composite};
+    use ugu_render::document::DocumentRenderer;
+    use ugu_render::live::LiveStroke;
+    use ugu_render::stroke::Pen;
+
+    let mut document = open(path)?;
+    let layer = most_operations(&mut document).ok_or("no paint layer")?;
+    let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
+        return Err("no paint layer".to_owned());
+    };
+    let wobble = paint.wobble.unwrap_or(document.wobble);
+    let [width, height] = document.canvas;
+    let size = [width as u16, height as u16];
+    let history = History::new(document.clone(), true);
+    let mut display = vello_cpu::Pixmap::new(size[0], size[1]);
+    let mut renderer = DocumentRenderer::new(8);
+    set_budget(&mut renderer);
+    let mut split = renderer
+        .split(
+            history.document(),
+            layer,
+            0,
+            Some(history.layer_revisions()),
+            &mut display,
+        )
+        .ok_or("stopped")?;
+    let count = (960.0 * f64::from(width) / 2048.0) as usize;
+    let points: Vec<Point> = (0..count)
+        .map(|index| {
+            let t = index as f64 / (count - 1) as f64;
+            Point {
+                x: (100.0 + (f64::from(width) - 200.0) * t) as f32,
+                y: (f64::from(height) / 2.0
+                    + f64::from(height) * 0.3 * (t * std::f64::consts::TAU * 3.0).sin())
+                    as f32,
+                pressure: 0.8,
+            }
+        })
+        .collect();
+    let color = [20, 40, 200, 255];
+    let stroke = Stroke {
+        points: points.clone().into(),
+        color: Rgba8(color),
+        width: 40.0,
+        brush: Brush {
+            engine: if engine == "air" {
+                BrushEngine::Airbrush
+            } else {
+                BrushEngine::Line
+            },
+            opacity: 1.0,
+            hardness: if engine == "air" { 0.5 } else { 1.0 },
+            antialias: true,
+            size_dynamics: 0.8,
+            wobble_scale: 1.0,
+            ..Brush::default()
+        },
+        seed: 7,
+    };
+    let frames = document.frames;
+    let pen = Pen::new(&stroke, wobble, frames);
+    let mut live = LiveStroke::new(size, pen, split.frame, color, false, None);
+    let union = |a: Option<[u32; 4]>, b: Option<[u32; 4]>| match (a, b) {
+        (Some(a), Some(b)) => Some([
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]),
+        (a, None) => a,
+        (None, b) => b,
+    };
+    let (mut whole, mut outlines) = (Vec::new(), Vec::new());
+    let mut seen = 1;
+    for _ in 0..(count - 1) / per_frame {
+        let started = Instant::now();
+        let mut changed = None;
+        let mut spent = 0.0;
+        for _ in 0..per_frame {
+            seen += 1;
+            let dirty = live.update(&points[..seen]);
+            if split.has_outline() {
+                changed = union(changed, dirty);
+            } else if let Some(rect) = dirty {
+                composite(&split, &[&live], rect, &mut display);
+            }
+        }
+        if let Some(rect) = changed {
+            let line = Instant::now();
+            let rect = split.refresh_outline(&[&live], rect);
+            spent = line.elapsed().as_secs_f64() * 1000.0;
+            composite(&split, &[&live], rect, &mut display);
+        }
+        whole.push(started.elapsed().as_secs_f64() * 1000.0);
+        outlines.push(spent);
+    }
+    println!(
+        "frame {} | outline {}",
+        percentiles(&mut whole),
+        percentiles(&mut outlines)
+    );
+    let stroke = Stroke {
+        points: points[..seen].to_vec().into(),
+        ..stroke
+    };
+    let started = Instant::now();
+    if let Some(rect) = split.stamp(&mut Stamp::default(), &stroke, false, wobble, frames, None) {
+        let rect = if split.has_outline() {
+            split.refresh_outline(&[], rect)
+        } else {
+            rect
+        };
+        composite(&split, &[], rect, &mut display);
+    }
+    println!("pen-up {:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+    Ok(())
 }
 
 fn stop(path: &Path) -> Result<(), String> {
@@ -1766,6 +1950,7 @@ impl Builder {
         self.layer(
             name,
             LayerKind::Paint(PaintLayer {
+                outline: None,
                 ops,
                 opacity: 1.0,
                 blend: Blend::Normal,

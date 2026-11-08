@@ -16,6 +16,7 @@ const SECTIONS: [(&str, &[&str]); 5] = [
             "help-start-line",
             "help-start-size",
             "help-start-fade",
+            "help-start-outline",
             "help-start-pixel",
             "help-start-export",
         ],

@@ -130,6 +130,45 @@ impl TiledSurface {
         self.reached.iter().filter(|reached| **reached).count()
     }
 
+    /// The tiles that lie within `reach` pixels of the reached ones, as
+    /// their span and which of the grid they are; `None` when none is
+    /// reached.
+    pub(crate) fn reached_around(&self, reach: usize) -> Option<([u32; 4], Vec<bool>)> {
+        self.pixmap.as_ref()?;
+        let tiles = reach.div_ceil(self.edge as usize) as u32;
+        let mut around = vec![false; self.reached.len()];
+        let mut span: Option<[u32; 4]> = None;
+        for row in self.span[1]..self.span[3] {
+            for column in self.span[0]..self.span[2] {
+                if !self.reached[(row * self.grid[0] + column) as usize] {
+                    continue;
+                }
+                let [left, top] = [column.saturating_sub(tiles), row.saturating_sub(tiles)];
+                let right = (column + tiles + 1).min(self.grid[0]);
+                let bottom = (row + tiles + 1).min(self.grid[1]);
+                for y in top..bottom {
+                    let from = (y * self.grid[0]) as usize;
+                    around[from + left as usize..from + right as usize].fill(true);
+                }
+                span = Some(span.map_or([left, top, right, bottom], |was| {
+                    [
+                        was[0].min(left),
+                        was[1].min(top),
+                        was[2].max(right),
+                        was[3].max(bottom),
+                    ]
+                }));
+            }
+        }
+        span.map(|span| (span, around))
+    }
+
+    /// Every pixel held, over the span of tiles, one row after another.
+    pub(crate) fn pixels_mut(&mut self) -> Option<&mut [Pixel]> {
+        let pixmap = self.pixmap.as_mut()?;
+        Some(pixmap.data_as_u8_slice_mut().as_chunks_mut::<4>().0)
+    }
+
     /// The pixels of the reached tiles in `span` (tile left, top, right,
     /// bottom): where they start in the document and how large they are.
     pub fn area(&self, span: [u32; 4]) -> ([u32; 2], [u16; 2]) {

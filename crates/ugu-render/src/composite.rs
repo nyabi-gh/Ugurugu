@@ -147,6 +147,14 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// Copies row `y` from `left`, as wide as `row`, over it; what the
+    /// source does not hold stays as it was.
+    pub(crate) fn parts_into(self, y: usize, left: usize, row: &mut [Pixel]) {
+        self.parts(y, left, left + row.len(), |start, part| {
+            row[start..start + part.len()].copy_from_slice(part);
+        });
+    }
+
     /// Row `y` within `left..right`, transparent where there is nothing.
     fn row(self, y: usize, left: usize, right: usize) -> Vec<Pixel> {
         let mut row = vec![[0; 4]; right - left];

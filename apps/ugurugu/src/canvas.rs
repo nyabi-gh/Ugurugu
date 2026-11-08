@@ -201,6 +201,8 @@ struct Tab {
     file: crate::files::DocumentFile,
     cache: CacheWorker,
     split: Option<(Key, Split)>,
+    /// Pixels of the split's layer changed since its outline was last drawn.
+    outline_changed: Option<PixelRect>,
     /// A pending transform shown on the split's layer.
     preview: Option<transform::Preview>,
     /// Placed text shown on the split's layer.
@@ -255,6 +257,7 @@ impl Tab {
             file: crate::files::DocumentFile::new(),
             cache,
             split: None,
+            outline_changed: None,
             preview: None,
             text_preview: None,
             requested: None,
@@ -1283,11 +1286,36 @@ impl Canvas {
         let (Some(rect), Some((_, split))) = (rect, &self.tab.split) else {
             return;
         };
+        if split.has_outline() {
+            self.tab.outline_changed = union(self.tab.outline_changed, Some(rect));
+            return;
+        }
         let canvas = self.tab.session.document().canvas;
         let Some(rect) = split.shown(rect, canvas) else {
             return;
         };
         let drawn = drawn(&self.interaction);
+        composite(split, &drawn, rect, &mut self.tab.display);
+        self.tab.onion.cover(&mut self.tab.display, rect);
+        self.upload = union(self.upload, Some(rect));
+    }
+
+    /// Shows the changes `recomposite` set aside for a layer with an
+    /// outline: drawing it for each sample would fall behind the pen
+    /// (evidence.md section 112).
+    fn show_outline_changes(&mut self) {
+        let Some(changed) = self.tab.outline_changed.take() else {
+            return;
+        };
+        let Some((_, split)) = self.tab.split.as_mut() else {
+            return;
+        };
+        let drawn = drawn(&self.interaction);
+        let changed = split.refresh_outline(&drawn, changed);
+        let canvas = self.tab.session.document().canvas;
+        let Some(rect) = split.shown(changed, canvas) else {
+            return;
+        };
         composite(split, &drawn, rect, &mut self.tab.display);
         self.tab.onion.cover(&mut self.tab.display, rect);
         self.upload = union(self.upload, Some(rect));
@@ -2133,6 +2161,7 @@ impl Canvas {
     /// other pixels are shown than at the last call.
     pub fn take_upload(&mut self) -> Option<PixelRect> {
         self.show_shape();
+        self.show_outline_changes();
         let (pixels, shrink, origin) = self.shown();
         let size = [pixels.width(), pixels.height()];
         let now = Some((size, shrink, origin));
@@ -2400,7 +2429,8 @@ pub(crate) fn edit_reason(error: &EditError) -> &'static str {
         (EditError::Document(DocumentError::TooManyLayers(_)), _) => tr("edit-layer-limit"),
         (EditError::Document(DocumentError::TooDeep(_)), _) => tr("edit-too-deep"),
         (
-            EditError::CannotMerge | EditError::Merge(MergeRefusal::Blend | MergeRefusal::Clipping),
+            EditError::CannotMerge
+            | EditError::Merge(MergeRefusal::Outline | MergeRefusal::Blend | MergeRefusal::Clipping),
             _,
         ) => tr("merge-properties"),
         (EditError::Merge(MergeRefusal::CanvasChange), _) => tr("merge-canvas-change"),
@@ -3969,6 +3999,55 @@ mod tests {
                 canvas.edit(|session| session.undo()).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn a_stroke_on_an_outlined_layer_shows_it_and_ends_as_the_export_draws_it() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([200, 150]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 200, 150]);
+        let layer = canvas.session().current_layer();
+        canvas
+            .edit(|session| {
+                session.update_layer(layer, "Outline", |layer| {
+                    if let LayerKind::Paint(paint) = &mut layer.kind {
+                        paint.outline = Some(ugu_core::ops::Outline {
+                            width: 6.0,
+                            color: ugu_core::ops::Rgba8([255, 0, 0, 255]),
+                        });
+                    }
+                })
+            })
+            .unwrap();
+        settle(&mut canvas, &renders);
+        canvas.brushes_mut().pen.width = 8.0;
+        canvas.set_tool(Tool::Pen).unwrap();
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let begin = at(&canvas, 30.0, 70.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        for step in 1..=40 {
+            let sample = at(&canvas, 30.0 + 3.0 * f64::from(step), 70.0);
+            canvas.apply(CanvasInput::Extend(sample));
+        }
+        canvas.take_upload();
+        let drawn = canvas.display();
+        let pixel = (63 * usize::from(drawn.width()) + 90) * 4;
+        assert_eq!(
+            drawn.data_as_u8_slice()[pixel..pixel + 3],
+            [255, 0, 0],
+            "the line shows as it is drawn"
+        );
+        let end = at(&canvas, 150.0, 70.0);
+        canvas.apply(CanvasInput::End(end));
+        canvas.take_upload();
+        settle(&mut canvas, &renders);
+        canvas.take_upload();
+        assert!(canvas.display().data_as_u8_slice() == full_render(&canvas).data_as_u8_slice());
     }
 
     #[test]

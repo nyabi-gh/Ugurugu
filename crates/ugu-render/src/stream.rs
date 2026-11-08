@@ -185,8 +185,8 @@ impl DocumentRenderer {
             program.sources.push(kept.into());
         }
         match element {
-            Node::Paint(_, composite) => {
-                let kept = self.alone(run, element)?;
+            Node::Paint(id, composite) => {
+                let kept = Kept::Tiles(self.layer_own(run, *id)?);
                 program.edited = Some(program.sources.len());
                 program.puts.push(Put::Over(*composite));
                 program.sources.push(kept.into());
@@ -237,7 +237,19 @@ impl DocumentRenderer {
         }
     }
 
+    /// What paint layer `id` shows: its pixels over its outline.
     fn layer_alone(&mut self, run: &Run<'_>, id: LayerId) -> Option<TiledSurface> {
+        let own = self.layer_own(run, id)?;
+        let Some(LayerKind::Paint(paint)) = run.document.layer(id).map(|layer| &layer.kind) else {
+            panic!("the plan was made from another document");
+        };
+        Some(match &paint.outline {
+            Some(line) => self.outlined(&own, line, run.shrink),
+            None => own,
+        })
+    }
+
+    fn layer_own(&mut self, run: &Run<'_>, id: LayerId) -> Option<TiledSurface> {
         if self.is_stopped() {
             return None;
         }

@@ -346,6 +346,11 @@ clip | Clip to layer below | 아래 레이어에 클리핑 | 下のレイヤー�
 clip-tip | Limit this layer to the opacity of the base layer below it | 이 레이어를 아래 기준 레이어의 불투명 영역 안에 표시합니다 | このレイヤーを下の基準レイヤーの不透明領域内に表示します | 仅在下方基础图层的不透明区域内显示此图层
 reference | Reference layer | 참조 레이어 | 参照レイヤー | 参照图层
 reference-tip | Use this layer when a selection tool references marked layers | 표시한 레이어를 참조하는 선택 도구에서 이 레이어 사용 | マークしたレイヤーを参照する選択ツールでこのレイヤーを使用 | 当选择工具参照标记的图层时使用此图层
+layer-outline | Outline | 외곽선 | 輪郭線 | 描边
+layer-outline-tip | Draw a line around everything this layer shows | 이 레이어에 보이는 모든 것의 둘레에 선을 그립니다 | このレイヤーに見えているものすべての周りに線を描きます | 在此图层显示的所有内容周围绘制线条
+layer-outline-width | Outline width | 외곽선 굵기 | 輪郭線の太さ | 描边粗细
+layer-outline-color | Outline color | 외곽선 색 | 輪郭線の色 | 描边颜色
+layer-outline-choose-color | Choose the outline color | 외곽선 색 선택 | 輪郭線の色を選択 | 选择描边颜色
 layer-visible | Layer is visible | 레이어가 표시되어 있습니다 | レイヤーは表示されています | 图层可见
 layer-hidden | Layer is hidden | 레이어가 숨겨져 있습니다 | レイヤーは非表示です | 图层已隐藏
 layer-wobbles | Layer wobbles | 레이어가 우글거립니다 | レイヤーはゆらいでいます | 图层会抖动
@@ -542,6 +547,7 @@ help-start-draw | Draw a stroke, choose a motion in the Wobble panel and press P
 help-start-line | With the brush or the eraser, Shift+click draws a straight line from where the last stroke ended. | 브러시나 지우개로 Shift+클릭하면 마지막 획이 끝난 곳부터 직선을 긋습니다. | ブラシや消しゴムで Shift+クリックすると、最後のストロークの終わりから直線を引きます。 | 使用画笔或橡皮擦时，按 Shift+点击会从上一笔的终点画一条直线。
 help-start-size | Alt+right-drag on the canvas changes the size of the brush or the eraser. | 캔버스에서 Alt+오른쪽 버튼으로 끌면 브러시나 지우개의 크기가 바뀝니다. | キャンバス上で Alt+右ドラッグすると、ブラシや消しゴムのサイズが変わります。 | 在画布上按住 Alt 用右键拖动可改变画笔或橡皮擦的大小。
 help-start-fade | Fade in the brush settings narrows each stroke from where it starts until it ends, for hair or long tapered shapes. | 브러시 설정의 페이드는 획을 시작점부터 끝날 때까지 가늘게 줄입니다. 머리카락이나 길게 가늘어지는 모양에 씁니다. | ブラシ設定のフェードは、ストロークを始点から終わりまで細くしていきます。髪の毛や細長く先細る形に使えます。 | 画笔设置中的“渐隐”会让每一笔从起点开始逐渐变细直到结束，适合画头发或细长的尖形。
+help-start-outline | Outline under a paint layer's properties draws a line around everything the layer shows. | 페인트 레이어 속성의 외곽선은 레이어에 보이는 모든 것의 둘레에 선을 그립니다. | ペイントレイヤーのプロパティの輪郭線は、レイヤーに見えているものすべての周りに線を描きます。 | 绘画图层属性中的描边会在图层显示的所有内容周围绘制线条。
 help-start-pixel | For pixel art, turn on Pixel mode in the Edit menu, or when making a new project. | 픽셀 그림을 그리려면 편집 메뉴에서, 또는 새 프로젝트를 만들 때 픽셀 모드를 켜세요. | ピクセルアートを描くときは、編集メニューで、または新しい作業を作るときにピクセルモードをオンにします。 | 要画像素画，请在编辑菜单中或新建项目时打开像素模式。
 help-start-export | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。 | 在文件菜单中可以将动画导出为 GIF 或 WebP，或将当前帧导出为 PNG 或 JPEG。
 help-files | Projects | 프로젝트 | 作業ファイル | 项目

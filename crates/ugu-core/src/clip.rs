@@ -186,6 +186,7 @@ pub fn place_image(
             visible: true,
             reference: false,
             kind: LayerKind::Paint(PaintLayer {
+                outline: None,
                 ops: vec![Op::PlaceImage {
                     asset: id,
                     transform: Affine::translation(at[0] as f64, at[1] as f64),

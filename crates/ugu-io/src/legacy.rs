@@ -662,6 +662,7 @@ impl<'a> Importer<'a> {
             }
         }
         Ok(PaintLayer {
+            outline: None,
             ops,
             opacity: dto.opacity as f32,
             blend,

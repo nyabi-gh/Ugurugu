@@ -66,11 +66,20 @@ fn required(document: &Document, used: &Used) -> Vec<String> {
                 .any(|id| document.store.strokes[id].brush.fade > 0.0),
             BRUSH_FADE_FEATURE,
         ),
+        (outlines(&document.layers), LAYER_OUTLINE_FEATURE),
     ]
     .into_iter()
     .filter(|(used, _)| *used)
     .map(|(_, name)| name.to_owned())
     .collect()
+}
+
+/// Whether a layer in `layers`, inside groups too, has an outline.
+fn outlines(layers: &[ugu_core::document::Layer]) -> bool {
+    layers.iter().any(|layer| match &layer.kind {
+        LayerKind::Paint(paint) => paint.outline.is_some(),
+        LayerKind::Group(group) => outlines(&group.children),
+    })
 }
 
 /// Whether a fill in `layers`, inside groups and merged sections too, is
@@ -352,6 +361,10 @@ fn layer(layer: &Layer) -> LayerDto {
                 initial_size: paint.initial_size,
                 ops: paint.ops.iter().map(op).collect(),
                 keys: keys(&paint.keys),
+                outline: paint.outline.map(|outline| OutlineDto {
+                    width: outline.width,
+                    color: color_hex(outline.color.0),
+                }),
             }),
             None,
         ),

@@ -139,6 +139,7 @@ pub fn add_paint_layer(
         visible: true,
         reference: false,
         kind: LayerKind::Paint(PaintLayer {
+            outline: None,
             ops: Vec::new(),
             opacity: 1.0,
             blend: Blend::Normal,
@@ -784,6 +785,7 @@ mod tests {
             visible: true,
             reference: false,
             kind: LayerKind::Paint(PaintLayer {
+                outline: None,
                 ops: Vec::new(),
                 opacity: 1.0,
                 blend: Blend::Normal,
@@ -1018,6 +1020,30 @@ mod tests {
             let changes = move_to_group(&document, outer, Some(target)).unwrap();
             assert!(commit(&mut document, changes).is_err());
             assert_eq!(document, before);
+        }
+    }
+
+    #[test]
+    fn a_layer_with_an_outline_is_not_merged() {
+        let outline = ops::Outline {
+            width: 4.0,
+            color: ops::Rgba8([0, 0, 0, 255]),
+        };
+        for (layer, merged) in [(LayerId(2), LayerId(2)), (LayerId(1), LayerId(2))] {
+            let mut document = three_layers();
+            run(&mut document, |document| {
+                update_layer(document, layer, |layer| {
+                    if let LayerKind::Paint(paint) = &mut layer.kind {
+                        paint.outline = Some(outline);
+                    }
+                })
+                .unwrap()
+            })
+            .unwrap();
+            assert_eq!(
+                merge_down(&document, merged),
+                Err(EditError::Merge(ops::MergeRefusal::Outline))
+            );
         }
     }
 

@@ -254,9 +254,19 @@ pub enum Blend {
     Overlay,
 }
 
+/// A line of `color` around the outside of a paint layer's pixels, as wide
+/// as `width` document pixels (`limits::OUTLINE_WIDTH`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Outline {
+    pub width: f32,
+    pub color: Rgba8,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintLayer {
     pub ops: Vec<Op>,
+    /// A line around what the layer shows; see [`Outline`].
+    pub outline: Option<Outline>,
     pub opacity: f32,
     pub blend: Blend,
     pub clip_to_below: bool,
@@ -298,6 +308,8 @@ pub enum MergeRefusal {
     Blend,
     /// A clipping relation would change what is clipped.
     Clipping,
+    /// An outline goes around one layer's pixels, not the two together.
+    Outline,
     /// The upper layer starts on a different canvas than the lower one ends.
     CanvasEpoch,
     /// A crop or resample in the upper layer would also move the lower layer.
@@ -353,6 +365,9 @@ pub fn merge_down(
     if below.clip_to_below || above.clip_to_below {
         return Err(MergeRefusal::Clipping);
     }
+    if below.outline.is_some() || above.outline.is_some() {
+        return Err(MergeRefusal::Outline);
+    }
     if below.final_size() != above.initial_size {
         return Err(MergeRefusal::CanvasEpoch);
     }
@@ -389,6 +404,7 @@ pub fn merge_down(
     };
     ops.push(section(above, moves[1]));
     Ok(PaintLayer {
+        outline: None,
         ops,
         opacity: 1.0,
         blend: Blend::Normal,

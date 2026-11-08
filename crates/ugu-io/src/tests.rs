@@ -5,8 +5,8 @@ use std::io::{Cursor, Read};
 
 use ugu_core::document::{Document, Group, Layer, LayerId, LayerKind};
 use ugu_core::ops::{
-    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, PaintLayer, Rgba8, Sampling, Section,
-    StrokeId, Wobble,
+    Affine, AssetId, Blend, MaskId, Motion, MotionStyle, Op, Outline, PaintLayer, Rgba8, Sampling,
+    Section, StrokeId, Wobble,
 };
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
@@ -166,6 +166,7 @@ pub(crate) fn sample() -> Document {
                 visible: true,
                 reference: false,
                 kind: LayerKind::Paint(PaintLayer {
+                    outline: None,
                     ops: vec![Op::Paint {
                         stroke: StrokeId(3),
                         clip: None,
@@ -968,6 +969,45 @@ fn keys_past_the_last_frame_are_refused_as_corrupt() {
         })
         .collect::<Vec<_>>();
     assert!(read_bytes(archive(&late)).is_err());
+}
+
+fn first_paint(document: &mut Document) -> &mut PaintLayer {
+    document
+        .layers
+        .iter_mut()
+        .find_map(|layer| match &mut layer.kind {
+            LayerKind::Paint(paint) => Some(paint),
+            LayerKind::Group(_) => None,
+        })
+        .expect("the sample has a paint layer")
+}
+
+#[test]
+fn an_outline_reads_back_and_is_named_as_required() {
+    let mut document = sample();
+    let outline = Outline {
+        width: 12.0,
+        color: Rgba8([10, 20, 30, 128]),
+    };
+    first_paint(&mut document).outline = Some(outline);
+    let bytes = written(&document);
+    assert!(
+        manifest_of(&bytes).ends_with(r#""required":["layer-outline"]}"#),
+        "{}",
+        manifest_of(&bytes)
+    );
+    let mut read = read_bytes(bytes).unwrap().0;
+    assert_eq!(first_paint(&mut read).outline, Some(outline));
+}
+
+#[test]
+fn an_outline_outside_its_limits_is_refused() {
+    let mut document = sample();
+    first_paint(&mut document).outline = Some(Outline {
+        width: 251.0,
+        color: Rgba8([0, 0, 0, 255]),
+    });
+    assert!(read_bytes(written(&document)).is_err());
 }
 
 #[test]

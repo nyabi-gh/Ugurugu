@@ -21,14 +21,17 @@ pub const KEY_OPACITY_FEATURE: &str = "key-opacity";
 /// Fills laid behind the lines, which 3.2 would draw over them.
 pub const FILL_BEHIND_FEATURE: &str = "fill-behind";
 /// Strokes that fade along their length, which 3.5 would draw whole.
+/// A line around a layer, which 3.6 would leave out.
+pub const LAYER_OUTLINE_FEATURE: &str = "layer-outline";
 pub const BRUSH_FADE_FEATURE: &str = "brush-fade";
-pub const FEATURES: [&str; 6] = [
+pub const FEATURES: [&str; 7] = [
     KEYS_FEATURE,
     CELS_FEATURE,
     FRAMES_FEATURE,
     KEY_OPACITY_FEATURE,
     FILL_BEHIND_FEATURE,
     BRUSH_FADE_FEATURE,
+    LAYER_OUTLINE_FEATURE,
 ];
 
 pub const MANIFEST: &str = "manifest.json";
@@ -130,6 +133,16 @@ pub struct PaintDto {
     /// Left out without keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keys: Option<KeysDto>,
+    /// Left out without an outline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<OutlineDto>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutlineDto {
+    pub width: f32,
+    pub color: String,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

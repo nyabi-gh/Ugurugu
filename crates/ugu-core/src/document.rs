@@ -20,6 +20,7 @@ pub mod limits {
     pub const FRAMES_BEFORE_3_3: u32 = 60;
     pub const FRAMES_PER_SECOND: std::ops::RangeInclusive<f32> = 1.0..=50.0;
     pub const WOBBLE_AMOUNT: std::ops::RangeInclusive<f32> = 0.0..=12.0;
+    pub const OUTLINE_WIDTH: std::ops::RangeInclusive<f32> = 1.0..=250.0;
     /// Poses in a motion loop; a loop uses at most one per frame.
     pub const MOTION_POSES: std::ops::RangeInclusive<u32> = 1..=FRAMES_BEFORE_3_3;
     pub const MOTION_DETAIL: std::ops::RangeInclusive<u32> = 1..=24;
@@ -112,6 +113,7 @@ pub enum DocumentError {
     Wobble(f32),
     Motion(Motion),
     Opacity(LayerId, f32),
+    OutlineWidth(LayerId, f32),
     TooManyLayers(usize),
     TooDeep(LayerId),
     DuplicateLayer(LayerId),
@@ -151,6 +153,9 @@ impl std::fmt::Display for DocumentError {
             Self::Section(id) => write!(f, "layer {} has an invalid isolated section", id.0),
             Self::MissingData(id) => write!(f, "layer {} refers to data that is not stored", id.0),
             Self::Animation(id) => write!(f, "layer {} has invalid keys or exposures", id.0),
+            Self::OutlineWidth(id, width) => {
+                write!(f, "layer {} has outline width {width}", id.0)
+            }
             Self::Store(error) => error.fmt(f),
         }
     }
@@ -174,6 +179,7 @@ impl Document {
                 visible: true,
                 reference: false,
                 kind: LayerKind::Paint(PaintLayer {
+                    outline: None,
                     ops: Vec::new(),
                     opacity: 1.0,
                     blend: Blend::Normal,
@@ -295,6 +301,11 @@ impl Walk<'_> {
 
     fn paint(&mut self, id: LayerId, paint: &PaintLayer) -> Result<(), DocumentError> {
         check_opacity(id, paint.opacity)?;
+        if let Some(outline) = paint.outline
+            && !limits::OUTLINE_WIDTH.contains(&outline.width)
+        {
+            return Err(DocumentError::OutlineWidth(id, outline.width));
+        }
         if let Some(wobble) = paint.wobble {
             check_wobble(wobble)?;
         }
@@ -379,6 +390,7 @@ mod tests {
             visible: true,
             reference: false,
             kind: LayerKind::Paint(PaintLayer {
+                outline: None,
                 ops,
                 opacity: 1.0,
                 blend: Blend::Normal,
