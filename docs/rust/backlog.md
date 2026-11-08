@@ -125,6 +125,7 @@
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
 | B3-175 | macOS에서 끄는 중 Option+Esc | 캔버스에서 끄는 동안의 Esc는 수식키와 상관없이 끌기를 끝낸다(decisions.md 3절). Windows Sandbox의 합성 입력에서는 Alt를 쥔 채 누른 Esc가 창에 오지 않았고(evidence.md 107절), 실제 키보드로는 보지 않았다. macOS에서 Option+오른쪽 끌기·Control+Option+끌기 중 Option을 쥔 채 Esc가 크기를 되돌리는지는 보지 않았다(가설: 키가 앱에 와서 되돌린다) | `apps/ugurugu/src/ui/actions.rs` `take_pressed` | 2026-11-08 |
+| B3-176 | 페이드의 남은 확인 | Sandbox의 합성 마우스로 모양은 확인했다(evidence.md 110절). 실제 펜 압력을 건 획, 픽셀 연필을 골랐을 때 페이드 칸이 숨는 것은 실행 앱에서 보지 않았다. 구현한 코드에서 페이드를 켠 획의 프레임 시간도 재지 않았다(시제품 값은 108절) | `apps/ugurugu/src/ui/mod.rs`, `crates/ugu-render/src/stroke.rs` | 2026-11-08 이슈 #157 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
