@@ -17,6 +17,8 @@
 //!   stage, and editing splits, with the peak working set.
 //! - `ugu-doc pen-only <in.ugurugu> <out.ugurugu>`: makes brushes pens, keeping
 //!   everything else, to tell what brushes cost from the rest.
+//! - `ugu-doc fade <in.ugurugu> <out.ugurugu> <length>`: gives every stroke
+//!   that can fade that fade length, to measure what the fade costs.
 //! - `ugu-doc reframe <in.ugurugu> <out.ugurugu> <crop|resample|both>`: makes
 //!   brushes pens and puts in the middle of every layer a crop to 7/8 of the
 //!   canvas around its middle, a smooth resample to 3/4, or both one after
@@ -76,7 +78,7 @@ use ugu_core::ops::{Affine, AssetId, Blend, MaskId, Op, PaintLayer, Rgba8, Sampl
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -149,6 +151,10 @@ fn main() -> ExitCode {
             _ => Err(USAGE.to_owned()),
         },
         ["stop", file] => stop(Path::new(file)),
+        ["fade", from, to, length] => length
+            .parse()
+            .map_err(|_| USAGE.to_owned())
+            .and_then(|length| fade(Path::new(from), Path::new(to), length)),
         ["digest", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -1428,6 +1434,17 @@ fn layers(path: &Path, threads: usize) -> Result<(), String> {
         sum / threads as f64
     );
     Ok(())
+}
+
+fn fade(from: &Path, to: &Path, length: f32) -> Result<(), String> {
+    let mut document = open(from)?;
+    for stroke in document.store.strokes.values_mut() {
+        if stroke.brush.engine != BrushEngine::Pixel {
+            stroke.brush.fade = length;
+        }
+    }
+    document.validate().map_err(|error| error.to_string())?;
+    save(&document, to)
 }
 
 fn stop(path: &Path) -> Result<(), String> {

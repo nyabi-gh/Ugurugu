@@ -1255,6 +1255,50 @@ Step 'Fade narrows a stroke and ends it' {
     $detail
 }
 
+Step 'A pixel brush has no fade' {
+    Stop-Apps
+    Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $process = Start-App
+    $words = Read-Words 'en'
+    $field = $words['stroke-fade-name']
+    Send-Keys $process 'b'
+    Set-Field $process 'Brush size' '24'
+    Set-Field $process $words['canvas-zoom-percent'] '100'
+    Start-Sleep -Milliseconds 500
+    $paper = Find-Paper $process
+    $x = [Math]::Max($paper.Left + 20, 480)
+    $y = $paper.Top + [int](($paper.Bottom - $paper.Top) / 2)
+    $column = { param($At, $Line) [Native]::DarkIn($x + $At - 2, $Line - 30, 4, 60) }
+    $onPen = Test-Named $process $field
+    Set-Field $process $field '300'
+    Start-Sleep -Milliseconds 300
+    Invoke-Named $process $words['brush-pixel']
+    Invoke-Named $process $words['pixel-pencil']
+    $onPixel = Test-Named $process $field
+    $shot = Save-Screen 'fade-pixel-pencil'
+    [Native]::Drag(@($x, ($x + 600)), @($y, $y))
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $pixelPast = & $column 340 $y
+    Invoke-Named $process $words['brush-pen']
+    Invoke-Named $process $words['ink-pen']
+    $back = Test-Named $process $field
+    $line = $y - 90
+    [Native]::Drag(@($x, ($x + 600)), @($line, $line))
+    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+    Start-Sleep -Milliseconds 700
+    $penStart = & $column 30 $line
+    $penPast = & $column 340 $line
+    $backShot = Save-Screen 'fade-back-on-pen'
+    Stop-Apps
+    $detail = "field: ink pen $onPen, pixel pencil $onPixel, back $back; pixel stroke dark at 340px $pixelPast; ink pen again at 30px $penStart, 340px $penPast; $shot; $backShot"
+    if (-not ($onPen -and -not $onPixel -and $back -and $pixelPast -gt 0 -and $penStart -gt 0 -and $penPast -eq 0)) {
+        throw $detail
+    }
+    $detail
+}
+
 Step 'Navigator' {
     Stop-Apps
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
