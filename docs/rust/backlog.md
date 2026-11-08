@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-11-05 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-11-08 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -18,7 +18,7 @@
 
 | ID | gate | 지금 근거 | 닫는 방법 | 출처 |
 |---|---|---|---|---|
-| B3-06 | 실제 펜·터치 장치 | Windows Sandbox 합성 입력(`InjectSyntheticPointerInput` PT_PEN·PT_TOUCH): 압력·barrel·hover·창 밖 해제·1000개/초, 두 손가락 팬·핀치·회전. 지우개 끝은 Windows가 합성 플래그를 넘기지 않아 단위 시험만(`canvas.rs` `a_pens_eraser_end_erases_whatever_tool_is_chosen`) | 태블릿 드라이버에서 **Windows Ink를 켠다**(3.0은 Windows Pointer만 읽고 WinTab은 읽지 않는다). 압력 곡선, 지우개 끝, barrel, hover 링, 창 밖 해제, 터치 두 손가락 제스처와 펜 우선을 확인한다. 같이 볼 가설: `frameId`·`PerformanceCount`를 0으로 보내는 장치는 샘플 순서가 뒤집힐 수 있다. 닫으면 릴리스 노트의 펜 문장을 고친다 | m6-plan 2절 10, 6절 M6-9·M6-10, 7절, 8절 |
+| B3-06 | 실제 펜·터치 장치 | Windows Sandbox 합성 입력(`InjectSyntheticPointerInput` PT_PEN·PT_TOUCH): 압력·barrel·hover·창 밖 해제·1000개/초, 두 손가락 팬·핀치·회전. 지우개 끝은 Windows가 합성 플래그를 넘기지 않아 단위 시험만(`canvas.rs` `a_pens_eraser_end_erases_whatever_tool_is_chosen`) | 태블릿 드라이버에서 **Windows Ink를 켠다**(3.0은 Windows Pointer만 읽고 WinTab은 읽지 않는다). 압력 곡선, 지우개 끝, barrel, hover 링, 창 밖 해제, 터치 두 손가락 제스처와 펜 우선을 확인한다. 같이 볼 가설: `frameId`·`PerformanceCount`를 0으로 보내는 장치는 샘플 순서가 뒤집힐 수 있다. Shift+누름 직선은 누른 첫 표본의 압력이라 펜으로는 가늘 수 있고, barrel을 누른 접촉은 오른쪽 버튼으로 와서 Alt와 함께면 브러시 크기를 바꿀 것이다(decisions.md 3절, 둘 다 가설). 닫으면 릴리스 노트의 펜 문장을 고친다 | m6-plan 2절 10, 6절 M6-9·M6-10, 7절, 8절 |
 | B3-07 | RTX 5080·WARP 밖의 GPU | 이 PC의 RTX 5080(DX12)과 `UGURUGU_ADAPTER=warp`. GPU가 없는 경우의 자연 WARP 전환은 CI smoke(windows-2025)만. 하드웨어 실패 → WARP(`gpu::with_warp_fallback`)는 Sandbox가 호스트 GPU를 보여 줘서 실제로 만들지 못했다. Intel iGPU·AMD는 고를 수 없었다 | 사용자 보고(로그의 `selected GPU adapter`, 정보 탭의 진단 정보 복사). 다른 PC에서 실행하거나 B3-10의 진단 옵션을 만든 뒤 iGPU로 실행 | m6-plan 7절, 8절, analysis-3.0 A-03·6절 |
 
 ## 3. 출시 뒤로 미룬 결정
@@ -74,6 +74,8 @@
 | B3-34 | egui TextEdit의 UIA `SetValue` | egui가 지원하지 않아 일부 보조 기술이 제한된다. 수용했고 egui를 올릴 때 다시 본다 | egui | m0-close 64행 |
 | B3-35 | Pedantic Clippy 정리 | workspace 정책은 `clippy::all = warn`. pedantic 경고 블록 1,749개(`cast_possible_truncation` 433 등). 좌표·바이트·픽셀 변환의 범위 검증부터 | `Cargo.toml` `[workspace.lints]` | analysis-3.0 3.4, 4절 13, 6절 |
 | B3-130 | Sandbox 둥근 픽셀 점 단계의 확대율 | "Round pixel dots at several zooms"가 확대율 칸에 100을 넣었는데 500%로 찍혔다(evidence 60). 단계는 넣은 값을 확인하지 않아 통과했다. 왜 100이 들어가지 않았는지 찾고, 찍기 전에 확대율을 확인하게 한다 | `tools/sandbox/gui.ps1` | evidence 60, 70, 73 |
+| B3-171 | 레이어 외곽선(Photoshop 혼합 옵션의 Stroke) | 이슈 #157 제안 3(크기 1~250px). 3.x에는 레이어 효과가 없다. 레이어 효과로 하면 합성 단계에 레이어마다 알파를 넓히는 계산(거리 변환)과 `.ugurugu` 필드(`required`)가 들고, 캔버스·재생·내보내기가 같은 바이트여야 한다. 우글거림으로 프레임마다 모양이 바뀌어 프레임마다 다시 계산해야 하고, 비용은 재지 않았다(가설: ②·⑤에서 크다). 싼 대안은 획마다 외곽선(넓힌 획을 아래에 한 번 더 그림)이지만, 겹친 획끼리 테두리가 서로를 덮어 Photoshop과 모양이 다르다. 어느 쪽인지 사용자가 정한다 | `crates/ugu-render/src/plan.rs`·`composite.rs`, `crates/ugu-io` 형식 | 2026-11-08 이슈 #157 |
+| B3-172 | 길이를 따라 가늘어지는 획(Photoshop 모양 역학의 Fade) | 이슈 #157 제안 4(머리카락·뱀처럼 긴 모양). `Brush`에는 필압 계수(`size_dynamics`·`opacity_dynamics`)만 있고 길이에 따른 감쇠가 없다. 넣으려면 `Brush`에 새 필드가 들어 형식이 바뀌고(`required`), 그리는 중인 획·펜을 뗄 때 찍는 획·전체 렌더가 같은 계산을 써야 한다. 정할 것: Photoshop처럼 시작에서 N만큼 가며 줄어들지, 끝을 가늘게 할지(끝은 펜을 뗄 때 모양이 바뀜), 단위(px 또는 표본 수), 불투명도도 줄일지, 1px 하한(`Pen::thinnest`, decisions.md 2절)과의 관계 | `crates/ugu-core/src/store.rs` `Brush`, `crates/ugu-render/src/stroke.rs` | 2026-11-08 이슈 #157 |
 
 ## 6. 검토 보고서에서 남은 것
 
@@ -123,6 +125,7 @@
 | B3-72 | `vello_cpu`·`vello_common` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다. 펜을 뗄 때 찍는 선은 Vello의 strip 생성기를 직접 돌리고 coarse 단계의 채우기 규칙을 따라 하므로(decisions.md 2절), 판을 올리면 `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`가 전체 렌더와 바이트가 같은지 본다 | `Cargo.toml`, `crates/ugu-render/src/compose.rs` `Stamp::line_coverage` | evidence.md 렌더러·92절 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
+| B3-173 | Shift 직선·Alt+오른쪽 끌기를 Windows 화면에서 보지 않음 | 2026-11-08 macOS release 빌드에서 사용자가 화면으로 확인했고, Windows는 CI의 시험(세션·라우터·캔버스)만 통과했다. Windows에서는 오른쪽 버튼이 `WM_POINTER`의 `SECONDBUTTON`으로 오고 Alt만 눌렀다 떼면 메뉴가 열리므로, 끈 뒤 Alt를 뗄 때 메뉴가 열리지 않는지가 macOS와 다를 수 있다(가설, `render.rs` `alt_tap`). 데스크톱에서 사용자가 보거나 Sandbox `gui` 단계(합성 마우스로 점 뒤 Shift+클릭, Alt+오른쪽 끌기 뒤 크기 슬라이더 값과 메뉴가 닫혀 있는지)를 더한다 | `tools/sandbox/gui.ps1`, `apps/ugurugu/src/input.rs` | 2026-11-08 이슈 #157 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
