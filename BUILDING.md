@@ -39,8 +39,9 @@ To keep a development run apart from an installed Ugurugu 3, point
 
 CI (`.github/workflows/ci.yml`) runs these jobs before anything is merged.
 "Sources and release metadata" checks that every tracked `.rs`, `.js`,
-`.py`, `.ps1` and `.sh` file has the `SPDX-License-Identifier` line, runs
-`tools/check_docs.py` and the download badge test (`node --test
+`.py`, `.ps1` and `.sh` file outside `third_party/` has the
+`SPDX-License-Identifier` line, runs `tools/check_docs.py` and the download
+badge test (`node --test
 .github/scripts/update-download-badge.test.js`), checks that the `.ftl` files
 are what `tools/strings_to_ftl.py` makes, and checks that the workspace
 version has release notes in `release-notes/<version>.en.md`. The others run

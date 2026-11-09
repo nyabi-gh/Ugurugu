@@ -134,9 +134,9 @@ x86을 SSE4.2로 고정한 이유도 FMA다(`raster::document_level`: AVX2는 mu
 
 정하기 전에 앱 렌더러로 다시 잰다: 1단계에서 `ugu-doc digest`를 fixture ①~⑤·회귀 fixture로 NEON·스칼라·C의 판으로 돌려 Windows PC의 digest(`digests.txt`)와 비교하고, `ugu-doc render <file> 8`로 시간을 비교한다. C의 비교가 FMA 가설을 바로 확인한다. `f64` `sin`·`cos`·`hypot`이 OS의 libm마다 다를 수 있다는 점(backlog B3-71)도 그때 같이 본다. 그쪽이 다르면 B·C를 골라도 OS 사이 바이트가 같지 않다.
 
-잰 것(evidence.md 101절, Apple M4): C는 fixture ①~⑤에서 B·x86 SSE4.2(Rosetta)와 digest가 같고, 지금의 NEON은 ③~⑤에서 다르다. 그래서 차이는 FMA다. `render 8`의 p50은 NEON 대비 C가 −4~+8%, B가 +6~45%다. Windows PC(Intel, UCRT)에서 만들고 그린 ①~⑤의 digest도 C·B·x86(Rosetta)과 같다(evidence.md 104절). 그래서 2026-11-05 사용자가 C를 골랐다. 구현은 1단계에 남았다.
+잰 것(evidence.md 101절, Apple M4): C는 fixture ①~⑤에서 B·x86 SSE4.2(Rosetta)와 digest가 같고, 지금의 NEON은 ③~⑤에서 다르다. 그래서 차이는 FMA다. `render 8`의 p50은 NEON 대비 C가 −4~+8%, B가 +6~45%다. Windows PC(Intel, UCRT)에서 만들고 그린 ①~⑤의 digest도 C·B·x86(Rosetta)과 같다(evidence.md 104절). 그래서 2026-11-05 사용자가 C를 골랐고, `third_party/fearless_simd`로 구현했다(decisions.md 11절, evidence.md 115절).
 
-ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 비교하는 것이 없다: `levels()`에 aarch64 분기가 없어 baseline 하나만 돈다. ARM에서 문서를 그리는 수준은 어느 안이든 하나뿐이라 그것이 맞지만, ARM의 바이트는 회귀 digest만 지킨다.
+ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 비교하는 것이 없다: `levels()`에 aarch64 분기가 없어 baseline 하나만 돈다. ARM에서 문서를 그리는 수준은 어느 안이든 하나뿐이라 그것이 맞다. ARM의 바이트는 x86에서 쓴 digest를 세 OS의 CI에서 비교하는 시험 `antialiased_edges_come_out_the_same_on_every_cpu`가 지킨다(회귀 digest는 FMA가 있어도 통과한다).
 
 ## 7. 단계
 
@@ -187,7 +187,6 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
 - `association`·`recent`·`session`은 2단계.
-- 6절의 C(FMA를 뺀 NEON): `fearless_simd` 0.7.0의 `generated/neon.rs`에서 `mul_add`·`mul_sub`(f32x4·f64x2) 네 곳을 곱한 뒤 더하기·빼기로 바꾼 사본을 `[patch.crates-io]`로 두고, ARM의 바이트가 x86과 같은지를 macOS CI의 시험으로 지킨다(지금의 회귀 digest는 NEON으로도 통과해 그 차이를 잡지 못한다, evidence.md 101절). 그때 decisions.md 2절의 SSE4.2 행에 ARM을 더한다.
 
 배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 

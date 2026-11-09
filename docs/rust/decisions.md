@@ -29,7 +29,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 
 | 결정 | 2.2.13 | 이유 | 출처 |
 |---|---|---|---|
-| 문서 래스터화는 Vello CPU 0.3.0(`u8_pipeline`), SIMD SSE4.2 고정. 스레드 수와 관계없이 바이트 동일이라 화면·재생·내보내기가 한 경로다 | QPainter | tiny-skia 3.4배 느림, Vello GPU는 8스레드 CPU보다 5배 느림. skia-safe·Direct2D 기각(evidence.md의 렌더러 비교) | m0-close 1절, scope 3.1 |
+| 문서 래스터화는 Vello CPU 0.3.0(`u8_pipeline`), SIMD는 x86에서 SSE4.2 고정, ARM에서 FMA를 뺀 NEON(11절). 스레드 수와 관계없이 바이트 동일이라 화면·재생·내보내기가 한 경로다. 잰 문서에서 ARM도 x86과 같은 바이트다(evidence.md 101·104·115절) | QPainter | tiny-skia 3.4배 느림, Vello GPU는 8스레드 CPU보다 5배 느림. skia-safe·Direct2D 기각(evidence.md의 렌더러 비교) | m0-close 1절, scope 3.1 |
 | 표시는 wgpu DX12만(Vulkan 기능 없음). 창 전체 swapchain 하나에 바뀐 사각형만 올리고 확대·회전·오버레이만 GPU | QRhi D3D11 자식 창 | Vulkan이 있으면 wgpu가 Vulkan을 고른다. 자식 창 swapchain 기각 | port 4.3, m0-close 1절 |
 | 렌더 가속에 GPU를 쓰지 않고, 내보내기는 언제나 CPU 결과다 | — | ②p cold 8스레드의 단계 스레드 시간 합 467ms 중 CPU 윤곽 75 + 인코딩 293 = 368ms, 약 79%다(evidence.md 10절) | M3-13 |
 | 어댑터·장치·swapchain 중 하나라도 실패하면 WARP로 다시 열고(시작·복구 모두) 상태 표시줄에 늘 안내한다. `UGURUGU_ADAPTER=warp`로 강제 | D3D11 | 문서 쪽은 CPU라 그대로 동작. WARP 지연 60~75ms는 받아들인다 | scope 3.2, A-03 |
@@ -333,6 +333,7 @@ Ugurugu 3.0(Rust)의 설계 결정과 2.2.13(C++)과 일부러 다르게 한 점
 |---|---|---|---|
 | 툴체인은 `rust-toolchain.toml`의 1.99.0(`x86_64-pc-windows-msvc`), edition 2024, nightly 없음 | C++23·CMake·Qt 6.10+ | — | port 4.2, m0-close 2절 |
 | 외부 crate는 모두 `=` 판, 필요한 기능만(`default-features = false`). `Cargo.lock` 커밋, CI `--locked`, `cargo deny` | — | 기능 합산으로 쓰지 않는 backend·C 코덱이 켜지지 않게 | port 10.3, m0-close 2절 |
+| `fearless_simd` 0.7.0은 저장소 안 사본(`third_party/fearless_simd`)을 `[patch.crates-io]`로 쓴다. crates.io 판과 다른 곳은 `generated/neon.rs`의 `mul_add`·`mul_sub`(f32x4·f64x2) 네 곳과 그것을 알리는 머리 주석뿐이고, x86 코드는 같다. 사본은 `ci.yml`의 SPDX 검사에서 뺀다 | — | NEON의 `mul_add`는 FMA라 반올림이 한 번이고 SSE4.2·스칼라는 두 번이어서, ARM이 x86과 다른 바이트를 그렸다(evidence.md 101·115절). 0.7.0에는 FMA를 끄는 기능이 없고 `vello_cpu` 0.3.0(최신)이 `^0.7`을 요구한다. 스칼라는 ①~③·⑤가 30~45% 길다(101절). 별도 저장소의 fork는 `deny.toml`의 git 출처 허용과 저장소 관리가 더 든다 | plan-cross-platform 6절, 2026-11-09 |
 | macOS 서비스는 objc2 0.6.5·objc2-foundation·objc2-app-kit 0.3.2·block2 0.6.2·dispatch2 0.3.1(arboard·wgpu-hal이 이미 쓰는 판)과 새 objc2-uniform-type-identifiers 0.3.2. Unix 신호 구조는 libc 0.2.190 | — | 패널의 형식은 UTType으로만 정하고(`allowedFileTypes`는 macOS 12부터 deprecated), winit이 쓰는 objc2 0.5 계열 UTType 0.2.2는 0.6 계열 AppKit과 맞지 않는다. sigaction·siginfo의 배치는 OS마다 달라 직접 적지 않는다 | 2026-10-28 macOS 1단계 |
 | 판 올리기는 따로 PR로 하고 다음이 같거나 나아야 받는다: `latency-probe`, `ime_probe.py ko/ja`, `uia_probe.ps1`, 장치 손실(F9), `render-bench`(Vello 바이트 동일), 회귀 fixture digest | — | 렌더 결과가 판마다 바뀌지 않게 | m0-close 2절 |
 | egui·egui-winit·egui-wgpu 0.36.2, winit 0.30.13, wgpu 30.0.1(`dx12`만)은 egui-wgpu가 정한 조합으로 함께 올린다. `windows`는 wgpu-hal과 같은 0.62.2 | — | major를 따로 섞지 않는다 | port 4.2 |

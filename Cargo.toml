@@ -86,6 +86,11 @@ unsafe_op_in_unsafe_fn = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# NEON without fused multiply-adds, so that ARM draws the bytes x86 does
+# (third_party/README.md).
+[patch.crates-io]
+fearless_simd = { path = "third_party/fearless_simd" }
+
 # Coding WebP in tests is too slow unoptimised.
 [profile.dev.package.libwebp-sys]
 opt-level = 3

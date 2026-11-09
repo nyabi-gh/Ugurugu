@@ -22,7 +22,7 @@ GPL without collecting permission from every past contributor.
 
 ## License headers
 
-Every tracked `.rs` and `.js` file starts with:
+Every tracked `.rs` and `.js` file outside `third_party/` starts with:
 
 ```
 // SPDX-License-Identifier: GPL-3.0-or-later

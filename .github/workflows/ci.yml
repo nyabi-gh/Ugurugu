@@ -92,7 +92,7 @@ jobs:
             if ! head -n 3 "$file" | grep -qF "$identifier"; then
               missing+=("$file")
             fi
-          done < <(git ls-files -- '*.js' '*.ps1' '*.py' '*.rs' '*.sh')
+          done < <(git ls-files -- '*.js' '*.ps1' '*.py' '*.rs' '*.sh' ':!third_party')
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "Sources missing the '$identifier' header:"
             printf '  %s\n' "${missing[@]}"

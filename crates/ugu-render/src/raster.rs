@@ -9,7 +9,9 @@ pub type PixelRect = [u32; 4];
 /// The SIMD level every document is drawn with, so that all CPUs give the
 /// same pixels. Vello's AVX2 path fuses multiply-adds (FMA), which rounds
 /// gradient colours differently; SSE4.2, which Windows 11 requires, has no FMA
-/// and draws the same bytes as plain SSE2. It costs no measured speed.
+/// and draws the same bytes as plain SSE2. It costs no measured speed. ARM's
+/// one level is NEON, whose fused multiply-adds `third_party/fearless_simd`
+/// takes out for the same reason.
 pub fn document_level() -> vello_cpu::Level {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     if let Some(sse) = vello_cpu::Level::new().as_sse4_2() {
@@ -36,10 +38,13 @@ pub fn context(level: vello_cpu::Level, threads: u16) -> vello_cpu::RenderContex
 mod tests {
     use std::sync::Arc;
 
+    use sha2::{Digest, Sha256};
     use ugu_core::document::{Document, LayerKind};
     use ugu_core::ops::{Op, Rgba8, StrokeId, Wobble};
     use ugu_core::store::{Brush, BrushEngine, Point, Stroke};
-    use vello_cpu::Pixmap;
+    use vello_cpu::color::AlphaColor;
+    use vello_cpu::kurbo::BezPath;
+    use vello_cpu::{Pixmap, RasterizerSettings, RenderContext, RenderSettings, Resources};
 
     use crate::document::{DocumentRenderer, Purpose};
 
@@ -135,5 +140,52 @@ mod tests {
                 "{name} draws differently from {reference_name}"
             );
         }
+    }
+
+    /// One digest for every CPU, written on x86. So many edges at fractional
+    /// positions because a fused multiply-add changes only a few coverage
+    /// bytes; the regression fixtures and the scene above do not reach one.
+    /// Only straight edges and plain arithmetic, so that no OS's libm takes
+    /// part.
+    #[test]
+    fn antialiased_edges_come_out_the_same_on_every_cpu() {
+        const X86: &str = "559d2212aeded4487ec733016f27bac0d1fa5f878a459fc4fb538279e50a9649";
+        let mut context = RenderContext::new_with(
+            256,
+            256,
+            RenderSettings {
+                level: super::document_level(),
+                num_threads: 0,
+            },
+        );
+        for index in 0..1000u32 {
+            let [x0, y0, x1, y1] = [97, 193, 151, 59]
+                .map(|step| f64::from(index * step % 251) + f64::from(index) * 0.013 + 0.37);
+            let mut edges = BezPath::new();
+            edges.move_to((x0, y0));
+            edges.line_to((x1, y1));
+            edges.line_to((x1 + 1.7, y1 + 0.9));
+            edges.line_to((x0 + 1.7, y0 + 0.9));
+            edges.close_path();
+            context.set_paint(AlphaColor::from_rgba8(
+                (index * 6 % 256) as u8,
+                (200 + index * 5 % 56) as u8,
+                90,
+                (110 + index * 3 % 140) as u8,
+            ));
+            context.fill_path(&edges);
+        }
+        context.flush();
+        let mut pixmap = Pixmap::new(256, 256);
+        context.render_with(
+            &mut pixmap,
+            &mut Resources::new(),
+            RasterizerSettings::default(),
+        );
+        let digest = Sha256::digest(pixmap.data_as_u8_slice());
+        let digest = digest
+            .iter()
+            .fold(String::new(), |out, byte| out + &format!("{byte:02x}"));
+        assert_eq!(digest, X86);
     }
 }
