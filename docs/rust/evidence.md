@@ -2277,3 +2277,24 @@ FMA의 차이는 바이트 몇 개로만 나타나고 어느 장면에서 나타
 중앙값의 차이는 −0.5~+4.7%이고 범위가 겹친다. 두 판 모두 뒤 round로 갈수록 길어져(⑤ 고치기 전 105.4 → 128.4) 101절보다 흩어졌다(**가설**: 발열). 다른 일을 멈춘 상태를 확인하지는 않았다.
 
 **결론:** 네 곳을 고치면 잰 문서와 장면에서 ARM이 x86과 같은 바이트를 그리고, 8스레드 시간은 p50 기준 5% 안에서 늘거나 같다. x86 코드는 crates.io 판과 같아 Windows PC의 전후 측정은 다시 하지 않았다. x86에서 고정한 digest를 Windows·Linux·macOS CI가 함께 비교한다.
+
+## 116. macOS 개발용 번들의 실행 (2026-11-09)
+
+**질문:** `tools/macos_app.py`가 만든 `Ugurugu 3.app`이 LaunchServices로 뜨나. `.ugurugu`가 이 앱의 문서 형식으로 등록되나. 번들이 그리는 크기를 바꾸나.
+
+**방법:** Apple M4, macOS 27.2, release, main `aa2f9b7`에 도구만 더한 트리. `plutil -lint`, `codesign --verify --strict`. `lsregister -f` 전후로 Swift의 `UTType(filenameExtension:)`과 `NSWorkspace.urlForApplication(toOpen:)`을 봤다. 실행은 `open -g --env …`로 설정·복구·로그를 빈 폴더에 두고 띄워 로그(`UGURUGU_LOG=debug`)와 `lsappinfo`·`ps`로 확인한 뒤 SIGTERM으로 끝냈다. 같은 방식으로 번들 없는 실행 파일도 띄웠다. 화면은 보지 않았다.
+
+**결과:**
+
+| 확인 | 결과 |
+|---|---|
+| `Info.plist`, 서명 | `OK`, `valid on disk`. `Identifier=dev.ugurugu.app3`, ad-hoc, 봉인한 자원 1개(아이콘) |
+| 등록 전 `.ugurugu`의 형식 | `dyn.ah62d4rv4ge81n35zsm40s7k`(이름 없는 임시 형식) |
+| 등록 뒤 | `dev.ugurugu.document`, `public.data`를 따름, 기본 앱이 이 번들 |
+| 번들 실행 | `bundleID="dev.ugurugu.app3"`, Metal(Apple M4), swap chain `Bgra8Unorm` 3420×1900 |
+| 번들 없는 실행 | swap chain 3420×1900 |
+| 번들 실행의 경고 | `cannot hear the session end` 하나(종료 hook, 2단계) |
+
+`open -g`로 띄워도 `lsappinfo`는 앱을 맨 앞으로 적었다. Velopack은 번들 안에서 `UpdateMac`을 찾지 못해 설치되지 않은 것으로 끝나고(`locator.rs`를 읽은 것), 실행을 막지 않았다.
+
+**결론:** 번들은 LaunchServices로 뜨고 `.ugurugu`의 문서 형식을 가지며, `NSPrincipalClass` 없이도 번들 없는 실행과 같은 크기로 그린다. Dock 아이콘과 메뉴 이름은 보지 않았다. Finder에서 파일을 열면 앱이 `application:openURLs:`를 받지 않아 문서가 열리지 않을 것이다(**가설**, 다음 일이다).

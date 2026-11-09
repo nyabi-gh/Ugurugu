@@ -115,6 +115,30 @@ Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
 commit and no advisory is open; the release workflow runs no tests of its own.
 
+## Ugurugu 3 (macOS, in development)
+
+There is no macOS release of 3.x yet. It builds on Apple Silicon with macOS
+14 or later, [rustup](https://rustup.rs/), Xcode or its command line tools,
+and Python 3. The checks are the ones above, with `python3` for `python`.
+
+```sh
+cargo build --package ugurugu --release --locked
+python3 tools/macos_app.py target/release/ugurugu target/release
+open "target/release/Ugurugu 3.app"
+```
+
+`tools/macos_app.py` makes an ad-hoc signed `Ugurugu 3.app` with the icon and
+the `.ugurugu` document type, and macOS then takes it as the app for those
+files. Finder and the Dock start it without your shell's variables, so give
+a development run its own settings, recovery and log folders through `open`:
+
+```sh
+open --env UGURUGU_SETTINGS_PATH=/tmp/ugu/settings.json \
+  --env UGURUGU_RECOVERY_PATH=/tmp/ugu/recovery \
+  --env UGURUGU_LOG_PATH=/tmp/ugu/logs \
+  "target/release/Ugurugu 3.app"
+```
+
 ## Ugurugu 2.x
 
 The C++ and Qt app (2.2.13 and earlier) and its browser build are no longer

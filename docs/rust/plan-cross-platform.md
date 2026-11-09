@@ -71,7 +71,7 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 앱 쪽에 더 고칠 것:
 
 - **창 아이콘·클래스**(`app.rs`): Windows는 리소스 1. macOS는 번들 아이콘, Linux는 PNG `Icon::from_rgba`와 app_id(`with_name`).
-- **`build.rs`**: `.rc` 리소스는 Windows에서만. macOS 번들의 `Info.plist`·`.icns`는 패키지 단계에서 만든다.
+- **`build.rs`**: `.rc` 리소스는 Windows에서만. macOS 번들의 `Info.plist`·`.icns`는 `tools/macos_app.py`가 만든다.
 - **글꼴**: `ugu-text` `Fonts::new`의 대체 순서와 `theme.rs`의 중국어 UI 글꼴(`msyh.ttc`)을 OS마다. macOS는 Apple SD Gothic Neo·Hiragino Sans·PingFang SC, Linux는 Noto Sans CJK(fontconfig). 글꼴이 없을 때의 안내도 둔다.
 - **단축키**(`shortcuts.rs`): `ctrl || command`(macOS에서는 ⌘와 Control)를 한 주 수정자로 보고, 저장은 OS와 무관하게 "Ctrl+", 메뉴 표시는 macOS에서 ⌘ 기호로 한다. Space 끌기 확대도 같은 주 수정자다. `clipboard_chord`는 egui-winit의 OS별 판정을 따른다(decisions.md 9절, 2026-10-28).
 - **메뉴**: 처음에는 지금의 창 안 메뉴를 그대로 쓴다. macOS 메뉴 막대(`muda`)는 macOS 전용 의존으로 나중에 본다(Linux 쪽이 GTK를 끌어온다). winit이 만드는 기본 메뉴는 3.4절.
@@ -196,7 +196,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ### 2단계: macOS 펜과 OS 연동
 
-- 개발용 `.app` 번들(`Info.plist`의 `CFBundleDocumentTypes`·UTI, `resources/icons/Ugurugu.icns`). Finder·Dock에서 여는 경로는 번들 없이 시험할 수 없어 4단계에서 앞으로 당겼다.
+- 개발용 `.app` 번들: `tools/macos_app.py`(decisions.md 10절, evidence.md 116절). Finder·Dock에서 여는 경로는 번들 없이 시험할 수 없어 4단계에서 앞으로 당겼다.
 - NSEvent 펜(필압·근접 이벤트로 아는 지우개 끝·hover·barrel, 4절).
 - Finder·Dock에서 파일 열기(`application:openURLs:`), 최근 문서, 종료 hook(`applicationShouldTerminate:`, `NSTerminateLater`). winit의 delegate를 바꾸지 않는 방법으로 받는다(3.4절).
 - 펜은 장치로 확인하기 전까지 열린 gate다. 합성 입력(`CGEventCreateMouseEvent`에 tablet 필드)으로 경로를 시험할 수 있는지 본다.
