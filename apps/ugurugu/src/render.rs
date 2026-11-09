@@ -47,9 +47,10 @@ pub enum ToRender {
     Clipboard(Box<ClipboardEvent>),
     /// The user asked to close the window; unsaved changes come first.
     CloseRequested,
-    /// Another start of the app handed over a document to open in a tab.
+    /// Another start of the app, or Finder or the Dock on macOS, handed over
+    /// a document to open in a tab.
     Open(std::path::PathBuf),
-    /// Windows is ending the session; the sender hears once unsaved work is
+    /// The OS is ending the session; the sender hears once unsaved work is
     /// on disk for recovery.
     SessionEnding(std::sync::mpsc::Sender<()>),
 }
@@ -625,7 +626,7 @@ impl RenderThread {
                 self.files.keep_for_session_end(&mut self.canvas, written);
             }
             ToRender::Open(path) => {
-                tracing::info!("opening a document handed over by another start");
+                tracing::info!("opening a document handed over from outside");
                 self.files.open_path(path, &mut self.canvas);
                 self.needs_frame = true;
             }

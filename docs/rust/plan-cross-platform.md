@@ -83,8 +83,8 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 winit 0.30.13의 macOS 코드를 읽은 것이다(8절). AppKit은 창과 앱 객체를 메인 스레드에서만 다루게 한다.
 
 - **창 호출**: `Window`의 메서드를 메인 스레드가 아닌 곳에서 부르면 메인 스레드가 그것을 실행할 때까지 기다린다. 큐에 넣는다는 `request_redraw`·`set_cursor`도 이 판에서는 기다린다(`maybe_queue_on_main`). 메인 스레드 밖에서는 창 핸들도 받을 수 없다(`raw_window_handle`이 `Unavailable`). 이 앱은 egui-winit `State`와 창 호출을 "render" 스레드에서 한다(`app.rs`의 render 스레드, `render.rs`의 `on_window_event`). 그래서 macOS에서는 창 호출마다 메인 스레드를 한 번 오가고, 메인 스레드가 render 스레드의 답을 기다리는 동안 render 스레드가 창을 부르면 둘이 서로 기다린다. 1단계에서 잰 왕복은 p50 9µs, 최대 6.9ms였고, macOS 앱 코드에는 메인 스레드가 render 스레드를 기다리는 곳이 없어(종료는 render 스레드가 끝난 뒤 `join`, 기다리는 세션 끝은 Windows에만) `State`는 render 스레드에 둔다(evidence.md 100절). 2단계의 종료 hook도 메인 스레드를 막지 않게 한다.
-- **앱 delegate**: winit은 자기 `NSApplicationDelegate`를 등록하고, delegate가 다른 것으로 바뀌면 panic한다. winit의 문서(`platform/macos.rs`)는 delegate를 등록하지 않는다고 적었지만 이 판의 코드와 다르다. 그래서 `application:openURLs:`·`applicationShouldTerminate:`는 delegate를 바꾸지 않고 받는다: winit의 delegate 클래스에 실행 중에 메서드를 더하거나, Apple Event(`kAEOpenDocuments`·`kAEQuitApplication`) 처리기를 직접 등록한다. 처리기를 AppKit보다 늦게, 첫 파일 열기 이벤트보다 먼저 등록할 수 있는지는 2단계에서 확인한다.
-- **Cmd+Q**: winit의 기본 메뉴는 Cmd+Q를 `terminate:`에, Cmd+H를 `hide:`에 묶는다. winit delegate에는 `applicationShouldTerminate:`가 없고 `applicationWillTerminate:`는 창을 닫고 이벤트 루프를 끝낼 뿐이라, Cmd+Q는 앱의 "저장하지 않은 변경 먼저" 흐름(`render.rs` `CloseRequested`)을 거치지 않고 끝낼 것이다(**가설**). 그래서 1단계에서 기본 메뉴를 끄거나(`with_default_menu(false)`) Cmd+Q를 앱의 끝내기로 보낸다. 2단계의 종료 hook은 `NSTerminateLater`로 답하고 저장 확인이 끝난 뒤 `replyToApplicationShouldTerminate:`로 끝내, 그동안 메인 스레드를 막지 않는다.
+- **앱 delegate**: winit은 자기 `NSApplicationDelegate`를 등록하고, delegate가 다른 것으로 바뀌면 panic한다. winit의 문서(`platform/macos.rs`)는 delegate를 등록하지 않는다고 적었지만 이 판의 코드와 다르다. 그래서 `application:openURLs:`·`applicationShouldTerminate:`는 delegate를 바꾸지 않고 받는다: winit의 delegate 클래스에 실행 중에 메서드를 더하거나, Apple Event(`kAEOpenDocuments`·`kAEQuitApplication`) 처리기를 직접 등록한다. 메서드를 더하는 쪽을 골랐고(decisions.md 9절), 이벤트 루프를 돌리기 전에 더해 첫 파일 열기 이벤트를 받는다(evidence.md 117절).
+- **Cmd+Q**: winit의 기본 메뉴는 Cmd+Q를 `terminate:`에, Cmd+H를 `hide:`에 묶는다. winit delegate에는 `applicationShouldTerminate:`가 없고 `applicationWillTerminate:`는 창을 닫고 이벤트 루프를 끝낼 뿐이라, Cmd+Q는 앱의 "저장하지 않은 변경 먼저" 흐름(`render.rs` `CloseRequested`)을 거치지 않고 끝낼 것이다(**가설**). 그래서 1단계에서 기본 메뉴를 끄거나(`with_default_menu(false)`) Cmd+Q를 앱의 끝내기로 보낸다. 2단계의 종료 hook은 decisions.md 9절이다. 메인 스레드를 막지 않는다.
 
 ## 4. 펜·터치 입력
 
@@ -186,7 +186,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 - `Occluded` 변경 전후의 최소화 중 CPU 측정. scratchpad에 비교용 바이너리와 기록 스크립트가 있었으나 세션 밖에서는 남지 않는다. 변경 전은 `render.rs`의 `if self.minimized || self.occluded`를 `if self.minimized`로 바꿔 빌드한다.
 - 표시 시각: wgpu-hal 30.0.1로는 drawable에 닿지 않는다. 드라이버가 일으킨 장치 손실 뒤 `nextDrawable`이 막히는지는 확인할 방법이 없다(decisions.md 2절, evidence.md 99절).
-- `association`·`recent`·`session`은 2단계.
+- `recent`는 2단계.
 
 배포 대상과 측정(`platform/mac-target`): `.cargo/config.toml`의 `[env]`에 `MACOSX_DEPLOYMENT_TARGET=14.0`을 두어 rustc와 C 의존(libwebp, ring)의 cc 빌드가 함께 읽는다. 앱과 `ugu-doc`의 `LC_BUILD_VERSION` `minos`가 11.0에서 14.0이 됐고, libwebp 객체도 14.0이다. 쓰는 AppKit API(`NSOpenPanel`·`NSSavePanel`·`NSPasteboard`·`UTType` 등)는 macOS 11 이하에 있다. macOS 14 기계에서 실행해 보지는 않았다. `ugu-doc`·`render-bench`의 최대 메모리를 Unix에서 `getrusage`의 `ru_maxrss`로 읽는다(전에는 NaN). fixture ①~⑤의 `render 8`과 SIMD 판의 digest는 evidence.md 101절.
 
@@ -198,7 +198,8 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 - 개발용 `.app` 번들: `tools/macos_app.py`(decisions.md 10절, evidence.md 116절). Finder·Dock에서 여는 경로는 번들 없이 시험할 수 없어 4단계에서 앞으로 당겼다.
 - NSEvent 펜(필압·근접 이벤트로 아는 지우개 끝·hover·barrel, 4절).
-- Finder·Dock에서 파일 열기(`application:openURLs:`), 최근 문서, 종료 hook(`applicationShouldTerminate:`, `NSTerminateLater`). winit의 delegate를 바꾸지 않는 방법으로 받는다(3.4절).
+- Finder·Dock에서 파일 열기와 종료 hook: `crates/ugu-platform/src/macos/requests.rs`(decisions.md 9절, evidence.md 117절).
+- 최근 문서.
 - 펜은 장치로 확인하기 전까지 열린 gate다. 합성 입력(`CGEventCreateMouseEvent`에 tablet 필드)으로 경로를 시험할 수 있는지 본다.
 
 ### 3단계: Linux

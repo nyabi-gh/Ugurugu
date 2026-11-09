@@ -91,8 +91,10 @@ struct Session {
     // pointer subclasses (comctl32) sit on top of AccessKit's, which replaces
     // the window procedure directly, and all go before the window.
     _documents: DocumentReceiver,
-    /// Keeps unsaved work for recovery when Windows ends the session.
+    /// Keeps unsaved work for recovery when the session ends.
     _session_end: Option<SessionEnd>,
+    #[cfg(target_os = "macos")]
+    _quit_requests: ugu_platform::session::QuitRequests,
     #[cfg(windows)]
     pointer: PointerInput,
     #[cfg(not(windows))]
@@ -291,6 +293,18 @@ impl Session {
         let session_end = unsafe { SessionEnd::install(hwnd, ending) }
             .inspect_err(|error| tracing::warn!(error, "cannot hear the session end"))
             .ok();
+        #[cfg(target_os = "macos")]
+        let quit_requests = {
+            let to_close = to_render.clone();
+            ugu_platform::session::QuitRequests::install(move || {
+                tracing::info!("macOS asked the app to quit");
+                // The question about unsaved changes is drawn in the window.
+                // SAFETY: requests arrive on the window's thread, and this
+                // is dropped before the window.
+                unsafe { ugu_platform::instance::bring_to_front(hwnd) };
+                let _ = to_close.send(ToRender::CloseRequested);
+            })
+        };
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -329,6 +343,8 @@ impl Session {
         Ok(Self {
             _documents: documents,
             _session_end: session_end,
+            #[cfg(target_os = "macos")]
+            _quit_requests: quit_requests,
             pointer,
             accessibility,
             window,

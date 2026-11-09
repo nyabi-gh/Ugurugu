@@ -81,6 +81,14 @@ pub mod recent {
     pub use crate::os::recent::add;
 }
 
+/// The requests macOS makes of the app as a whole.
+#[cfg(target_os = "macos")]
+pub mod requests {
+    pub use crate::os::requests::listen;
+}
+
 pub mod session {
+    #[cfg(target_os = "macos")]
+    pub use crate::os::session::QuitRequests;
     pub use crate::os::session::SessionEnd;
 }

@@ -612,7 +612,7 @@ impl Files {
         self.keep_recovery_now(canvas, now, false);
     }
 
-    /// Writes each tab's work not yet on disk at once, as Windows ends the
+    /// Writes each tab's work not yet on disk at once, as the OS ends the
     /// session without the window closing; `written` hears once it is on
     /// disk, or is dropped when there is nowhere to write it.
     pub fn keep_for_session_end(&mut self, canvas: &mut Canvas, written: Sender<()>) {

@@ -119,6 +119,8 @@ fn run(
     let event_loop = event_loop
         .build()
         .map_err(|error| format!("cannot create the event loop: {error}"))?;
+    #[cfg(target_os = "macos")]
+    ugu_platform::requests::listen();
     let mut app = app::App::new(
         event_loop.create_proxy(),
         early_gpu,

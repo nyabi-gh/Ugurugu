@@ -10,10 +10,13 @@ pub mod clipboard;
 pub mod clock;
 pub mod dialog;
 pub mod folder;
+pub mod instance;
 pub mod locale;
 pub mod memory;
+pub mod requests;
+pub mod session;
 
-pub use crate::unsupported::{association, crash, file, instance, recent, session};
+pub use crate::unsupported::{association, crash, file, recent};
 
 unsafe extern "C" {
     fn sysctlbyname(

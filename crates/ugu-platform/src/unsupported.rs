@@ -122,7 +122,9 @@ pub mod folder {
 }
 
 pub mod instance {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    #[cfg(not(target_os = "macos"))]
+    use std::path::PathBuf;
 
     pub enum StartLock {}
 
@@ -138,11 +140,14 @@ pub mod instance {
 
     /// # Safety
     /// None; unsafe to match the OSes that have it.
+    #[cfg(not(target_os = "macos"))]
     pub unsafe fn bring_to_front(_hwnd: isize) {}
 
     /// Receives nothing: no start hands a document over here.
+    #[cfg(not(target_os = "macos"))]
     pub struct DocumentReceiver;
 
+    #[cfg(not(target_os = "macos"))]
     impl DocumentReceiver {
         /// # Safety
         /// None; unsafe to match the OSes that have it.
@@ -183,6 +188,7 @@ pub mod recent {
     pub fn add(_path: &Path) {}
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod session {
     pub enum SessionEnd {}
 

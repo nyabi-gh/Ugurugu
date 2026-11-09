@@ -2298,3 +2298,26 @@ FMA의 차이는 바이트 몇 개로만 나타나고 어느 장면에서 나타
 `open -g`로 띄워도 `lsappinfo`는 앱을 맨 앞으로 적었다. Velopack은 번들 안에서 `UpdateMac`을 찾지 못해 설치되지 않은 것으로 끝나고(`locator.rs`를 읽은 것), 실행을 막지 않았다.
 
 **결론:** 번들은 LaunchServices로 뜨고 `.ugurugu`의 문서 형식을 가지며, `NSPrincipalClass` 없이도 번들 없는 실행과 같은 크기로 그린다. Dock 아이콘과 메뉴 이름은 보지 않았다. Finder에서 파일을 열면 앱이 `application:openURLs:`를 받지 않아 문서가 열리지 않을 것이다(**가설**, 다음 일이다).
+
+## 117. macOS에서 파일 열기와 끝내기 요청 (2026-11-09)
+
+**질문:** winit의 delegate 클래스에 더한 `application:openURLs:`·`applicationShouldTerminate:`가 실제 앱에서 불리나. 앱이 뜨는 도중에 온 문서를 놓치지 않나. 끝내기가 앱의 닫기 길로 가고, 세션 끝은 복구를 쓴 뒤 프로세스를 끝내나.
+
+**방법:** Apple M4, macOS 27.2, release, `tools/macos_app.py`로 만든 번들. `open -g --env …`로 설정·복구·로그를 빈 폴더에 두고, 로그(`UGURUGU_LOG=debug`)와 프로세스 상태만 봤다. 화면은 보지 않았다. 끝내기는 다른 프로세스에서 `NSRunningApplication.terminate()`로 보냈다. 세션 끝은 다른 앱에 Apple Event를 보내려면 자동화 권한이 필요해, 저장소에 넣지 않은 시험 코드로 앱이 자기에게 `kAEQuitApplication`을 `kAEQuitReason`과 함께 보냈다. 저장 안 한 변경이 없는 문서로만 봤다.
+
+**결과:**
+
+| 요청 | 결과 |
+|---|---|
+| 앱이 꺼진 채 문서 열기(`open -a … f1.ugurugu`) | 첫 실행이 문서를 받아 `document opened` 1번 |
+| 도는 앱에 다른 문서 열기 | 같은 프로세스, 프로세스 1개, `document opened` 2번 |
+| 다른 프로세스의 끝내기, 저장 안 한 변경 없음 | `macOS asked the app to quit` → `the window closes` → 프로세스 끝 |
+| 번들 없이 명령줄로 문서 지정 | `document opened` 1번, 넘겨받은 문서 0번(AppKit이 인수를 두 번 열지 않음) |
+| Apple Event, 이유 없음(`quit`) | 닫기 길로 가서 종료 코드 0 |
+| Apple Event, 이유 `rlgo`·`shut` | `unsaved work kept for recovery as the session ends` 뒤 종료 코드 0, 시작부터 4~5초(그중 4초는 시험 코드의 대기) |
+
+세션 끝을 처음 시험할 때는 프로세스가 끝나지 않았다. `sample`로 보니 시험 코드가 Apple Event를 메인 디스패치 큐의 블록 안에서 보내, 앱의 답(메인 큐에 넣음)이 그 블록이 끝나기를 기다리고 있었다. 다른 스레드에서 보내면 이벤트가 처리되지 않았다. 메인 런 루프의 블록에서 보내자 끝났다. 진짜 Apple Event는 메인 큐 블록이 아니라 런 루프의 포트로 온다.
+
+시험 `macos::requests::tests::a_delegate_given_the_methods_answers_appkit`은 메서드를 더하지 않으면 `method not found`로 실패한다.
+
+**결론:** 문서 열기와 끝내기는 앱의 기존 길로 간다. 앱이 뜨는 도중에 온 문서도 받는다. 실제 로그아웃·재시동으로는 보지 않았고, 저장 안 한 변경이 있을 때의 질문과 최소화한 창에서의 끝내기는 화면으로 보지 않았다.
