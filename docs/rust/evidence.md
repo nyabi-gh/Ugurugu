@@ -2061,7 +2061,7 @@ winit 0.30.13의 사용자 이벤트 창은 `WS_VISIBLE | WS_POPUP`인 투명 �
 
 **바꾼 것:** 캔버스에서 끄는 동안 Esc는 수식키와 상관없이 끌기를 끝낸다(`ui::actions::take_pressed`, `Canvas::dragging`). 전에는 단축키가 Alt까지 같아야 맞아서, Alt+오른쪽 끌기 중 Alt를 쥔 채 누른 Esc가 아무 동작에도 닿지 않았다(106절). 시험 `escape_ends_a_drag_whatever_modifiers_the_drag_holds`는 고치기 전에 실패했다.
 
-**결과(Sandbox):** 고친 release 빌드로 "Alt and a right-drag size the brush"를 다시 돌렸어도 Alt를 쥔 채 Esc는 63 → 106 → 106으로 106절과 같았다. 그래서 임시 단계(커밋하지 않음)로 빈 WinForms 창(`KeyPreview`)에 같은 `keybd_event`를 보냈다: Esc만 → `Escape`가 왔고, Alt를 쥔 채 Esc → `Menu`(Alt)만 오고 Esc는 오지 않았다. 창은 앞에 남았다. Windows가 Alt+Esc를 시스템 단축키로 먼저 가져간다고 본다(가설). 본 것은 Sandbox에서 `keybd_event`로 넣은 합성 입력뿐이고 실제 키보드로는 보지 않았다. Alt를 먼저 떼고 누른 Esc는 106절에서 되돌렸다. 이 바꿈이 macOS의 Option+Esc에 듣는지도 보지 않았다(backlog B3-175).
+**결과(Sandbox):** 고친 release 빌드로 "Alt and a right-drag size the brush"를 다시 돌렸어도 Alt를 쥔 채 Esc는 63 → 106 → 106으로 106절과 같았다. 그래서 임시 단계(커밋하지 않음)로 빈 WinForms 창(`KeyPreview`)에 같은 `keybd_event`를 보냈다: Esc만 → `Escape`가 왔고, Alt를 쥔 채 Esc → `Menu`(Alt)만 오고 Esc는 오지 않았다. 창은 앞에 남았다. Windows가 Alt+Esc를 시스템 단축키로 먼저 가져간다고 본다(가설). 본 것은 Sandbox에서 `keybd_event`로 넣은 합성 입력뿐이고 실제 키보드로는 보지 않았다. Alt를 먼저 떼고 누른 Esc는 106절에서 되돌렸다. 이 바꿈이 macOS의 Option+Esc에 듣는지도 보지 않았다(backlog B3-13).
 
 **시험 스크립트:** 위 실행은 "Esc with Alt"를 실패 조건에 넣은 판으로 FAIL이었다. 그 뒤 이 조건을 기록만 하도록 뺐고, 뺀 판의 `gui.ps1`은 다시 돌리지 않았다(남은 조건은 위 실행의 기록값으로 통과에 해당한다).
 

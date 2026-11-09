@@ -1,6 +1,8 @@
 # macOS·Linux 지원 계획
 
-2026-10-28 작성. 사용자 요청: Windows만 지원하는 3.x에 macOS와 Linux 지원을 더한다. 이 문서는 계획이다. 정한 것은 구현하면서 decisions.md로, 측정은 evidence.md로 옮기고, 이 문서는 일이 끝나면 지운다(애니메이션 계획과 같은 방식). backlog B3-13(macOS 3.x)은 이 계획이 끝날 때 닫는다.
+2026-10-28 작성. 사용자 요청: Windows만 지원하는 3.x에 macOS와 Linux 지원을 더한다. 이 문서는 계획이다. 정한 것은 구현하면서 decisions.md로, 측정은 evidence.md로 옮기고, 이 문서는 일이 끝나면 지운다(애니메이션 계획과 같은 방식).
+
+**2026-11-09 macOS 중단:** 사용자 결정으로 macOS는 이어서 만들지 않는다(decisions.md 10절). 아래 macOS 항목은 그때까지의 기록이고, 다시 할 때 남은 일은 backlog B3-13에 있다. Linux 단계는 이 결정에 들지 않는다.
 
 코드 위치는 main `843b5a4`를 읽은 것이다. 바깥 crate의 상태는 2026-10-28에 crates.io와 각 저장소에서 확인했다(8절 출처). winit·wgpu-hal·arboard가 macOS·Linux에서 하는 일은 고정한 판의 소스를 읽은 것이고, 앱이 아직 그 OS에서 빌드되지 않아 실행해 보지 않았다. 측정하거나 실행해 보지 않은 비용·원인·동작은 **가설**로 적는다.
 
@@ -195,7 +197,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 획 지연(`platform/mac-measure`): `latency-probe`의 macOS 판으로 2.2.13 macOS 판과 번갈아 쟀다. 3.x p50 14.3ms, 2.2.13 23.4ms(evidence.md 103절).
 
-### 2단계: macOS 펜과 OS 연동
+### 2단계: macOS 펜과 OS 연동 (중단)
 
 - NSEvent 펜(필압·근접 이벤트로 아는 지우개 끝·hover·barrel, 4절).
 - Finder·Dock에서 파일 열기(`application:openURLs:`), 최근 문서, 종료 hook(`applicationShouldTerminate:`, `NSTerminateLater`). winit의 delegate를 바꾸지 않는 방법으로 받는다(3.4절).
@@ -211,7 +213,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 ### 4단계: 패키지·업데이트·릴리스
 
 - Velopack 1.2.161(지금 판)은 macOS `.app`·`.pkg`·`.zip`과 Linux `.AppImage`를 만든다. 채널은 `osx-arm64`·`linux-x64`처럼 나누고, 패키지 ID는 `Ugurugu3` 그대로(**확인 필요**: 한 피드에 여러 채널을 두는 방식).
-- macOS 서명: 9절 결정 1에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
+- macOS 서명(중단): Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
 - Linux: AppImage 하나. Ubuntu 22.04에서 빌드해 glibc 2.35를 하한으로 둔다(decisions.md 10절).
 - 제3자 고지(`tools/third_party_notices.py`)를 OS마다 링크되는 crate로.
 - `release-3.yml`에 macOS·Linux job, 다운로드 배지·릴리스 노트의 파일 이름.
@@ -231,5 +233,4 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ## 9. 남은 사용자 결정
 
-1. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
-2. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
+1. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
