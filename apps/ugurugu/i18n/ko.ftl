@@ -660,3 +660,12 @@ help-animate-cels = 프레임마다 새로 그리려면 레이어로 애니메�
 help-animate-onion = 어니언 스킨(O)은 앞뒤 프레임을 흐리게, 앞은 붉게 뒤는 푸르게 보여 줍니다. 다음 동작을 그릴 때 참고하세요.
 layer-keyed = 키로 움직임
 layer-animation-folder = 애니메이션 폴더
+
+# The macOS menu bar
+mac-services = 서비스
+mac-hide = Ugurugu 3 가리기
+mac-hide-others = 기타 가리기
+mac-show-all = 모두 보기
+mac-minimize = 최소화
+mac-zoom = 확대/축소
+mac-bring-to-front = 모두 앞으로 가져오기

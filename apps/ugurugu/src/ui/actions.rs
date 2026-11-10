@@ -171,6 +171,142 @@ pub const MENUS: [(&str, egui::Key, &[Entry]); 9] = [
     ("menu-help", egui::Key::H, HELP),
 ];
 
+/// The menus as the macOS menu bar holds them: About, Settings and Quit in
+/// the app's own menu, where every Mac app has them, with the system's
+/// items. `modal`: a dialog is up, which the window's menus would be
+/// behind.
+#[cfg(target_os = "macos")]
+pub fn native_bar(canvas: &Canvas, panels: &Panels, modal: bool) -> ugu_platform::menu::Bar {
+    use ugu_platform::menu::{Bar, Entry as Native, Menu, MenuRole, SystemItem};
+
+    let action = |action: Action| {
+        Native::Action(ugu_platform::menu::Action {
+            id: action.index() as u32,
+            title: label(action, canvas).to_owned(),
+            enabled: !modal && enabled(action, canvas, &panels.layout),
+            checked: checked(action, canvas, &panels.layout) == Some(true),
+            key: panels.keys.key(action).map(Chord::menu_key),
+            edit: edit_role(action),
+        })
+    };
+    let system = |item, key: &'static str| Native::System {
+        item,
+        title: tr(key).to_owned(),
+    };
+    let mut menus = vec![Menu {
+        title: "Ugurugu 3".to_owned(),
+        role: MenuRole::App,
+        entries: vec![
+            action(A::About),
+            Native::Gap,
+            action(A::Settings),
+            Native::Gap,
+            system(SystemItem::Services, "mac-services"),
+            Native::Gap,
+            system(SystemItem::Hide, "mac-hide"),
+            system(SystemItem::HideOthers, "mac-hide-others"),
+            system(SystemItem::ShowAll, "mac-show-all"),
+            Native::Gap,
+            action(A::Quit),
+        ],
+    }];
+    for &(title, _, entries) in &MENUS {
+        let mut list: Vec<Native> = entries
+            .iter()
+            .filter_map(|entry| match *entry {
+                Gap => Some(Native::Gap),
+                Do(A::About | A::Settings | A::Quit) => None,
+                Do(each) => shown(each, &panels.layout).then(|| action(each)),
+            })
+            .collect();
+        let role = match title {
+            "menu-window" => MenuRole::Window,
+            "menu-help" => MenuRole::Help,
+            _ => MenuRole::Plain,
+        };
+        if role == MenuRole::Window {
+            list.splice(
+                0..0,
+                [
+                    system(SystemItem::Minimize, "mac-minimize"),
+                    system(SystemItem::Zoom, "mac-zoom"),
+                    Native::Gap,
+                ],
+            );
+            list.push(Native::Gap);
+            list.push(system(SystemItem::BringAllToFront, "mac-bring-to-front"));
+        }
+        menus.push(Menu {
+            title: without_access_key(tr(title)).to_owned(),
+            role,
+            entries: without_stray_gaps(list),
+        });
+    }
+    Bar { menus }
+}
+
+#[cfg(target_os = "macos")]
+fn edit_role(action: Action) -> Option<ugu_platform::menu::EditRole> {
+    use ugu_platform::menu::EditRole;
+    Some(match action {
+        A::Undo => EditRole::Undo,
+        A::Redo => EditRole::Redo,
+        A::Cut => EditRole::Cut,
+        A::Copy => EditRole::Copy,
+        A::Paste => EditRole::Paste,
+        A::SelectAll => EditRole::SelectAll,
+        _ => return None,
+    })
+}
+
+/// A title without the "(F)" of Korean, Japanese and Chinese menus, whose
+/// letter opens the window's menu with Alt and means nothing in the system's.
+#[cfg(target_os = "macos")]
+fn without_access_key(title: &str) -> &str {
+    title
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once('('))
+        .filter(|(_, letter)| letter.len() == 1 && letter.chars().all(|c| c.is_ascii_alphabetic()))
+        .map_or(title, |(name, _)| name.trim_end())
+}
+
+/// Without gaps at either end or side by side, which taking entries out
+/// leaves.
+#[cfg(target_os = "macos")]
+fn without_stray_gaps(entries: Vec<ugu_platform::menu::Entry>) -> Vec<ugu_platform::menu::Entry> {
+    use ugu_platform::menu::Entry as Native;
+    let mut kept: Vec<Native> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if entry != Native::Gap || kept.last().is_some_and(|last| *last != Native::Gap) {
+            kept.push(entry);
+        }
+    }
+    if kept.last() == Some(&Native::Gap) {
+        kept.pop();
+    }
+    kept
+}
+
+/// Runs what was chosen in the macOS menu bar, unless it can no longer run:
+/// the bar holds what the last frame could do.
+#[cfg(target_os = "macos")]
+pub fn run_native(
+    id: u32,
+    modal: bool,
+    canvas: &mut Canvas,
+    files: &mut Files,
+    clipboard: &mut Clipboard,
+    panels: &mut Panels,
+) {
+    let Some(&action) = Action::ALL.get(id as usize) else {
+        return;
+    };
+    if !modal && enabled(action, canvas, &panels.layout) {
+        tracing::debug!("menu bar {}", action.id());
+        run(action, canvas, files, clipboard, panels);
+    }
+}
+
 pub fn tool(action: Action) -> Option<Tool> {
     Some(match action {
         A::Brush => Tool::Pen,
@@ -729,6 +865,14 @@ fn was_typing(ctx: &egui::Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_system_menu_titles_lose_the_windows_access_letter() {
+        assert_eq!(super::without_access_key("파일(F)"), "파일");
+        assert_eq!(super::without_access_key("File"), "File");
+        assert_eq!(super::without_access_key("Zoom (100%)"), "Zoom (100%)");
+    }
 
     #[test]
     fn no_two_actions_show_the_same_glyph() {

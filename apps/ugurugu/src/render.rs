@@ -50,6 +50,9 @@ pub enum ToRender {
     /// Another start of the app, or Finder or the Dock on macOS, handed over
     /// a document to open in a tab.
     Open(std::path::PathBuf),
+    /// An action chosen in the macOS menu bar.
+    #[cfg(target_os = "macos")]
+    Menu(u32),
     /// The OS is ending the session; the sender hears once unsaved work is
     /// on disk for recovery.
     SessionEnding(std::sync::mpsc::Sender<()>),
@@ -104,6 +107,8 @@ pub enum WindowChange {
     Title(String),
     /// `None` hides the pointer.
     Cursor(Option<winit::window::CursorIcon>),
+    #[cfg(target_os = "macos")]
+    Menu(ugu_platform::menu::Bar),
 }
 
 pub type WindowSink = Box<dyn Fn(WindowChange) + Send>;
@@ -171,6 +176,9 @@ pub struct RenderThread {
     canvas: Canvas,
     ime: ImeProbe,
     panels: Panels,
+    /// What the macOS menu bar was last told to show.
+    #[cfg(target_os = "macos")]
+    menu_bar: Option<ugu_platform::menu::Bar>,
     files: Files,
     settings: Store,
     clipboard: Clipboard,
@@ -408,7 +416,9 @@ impl RenderThread {
             title: String::new(),
             cursor: None,
             ime: ImeProbe::default(),
-            panels: Panels::default(),
+            panels: Panels::with_native_menu(cfg!(target_os = "macos")),
+            #[cfg(target_os = "macos")]
+            menu_bar: None,
             present_latency: LatencyLog::default(),
             display_latency: LatencyLog::default(),
             needs_frame: true,
@@ -616,10 +626,38 @@ impl RenderThread {
         true
     }
 
+    #[cfg(target_os = "macos")]
+    fn dialog_is_up(&self) -> bool {
+        self.egui_ctx
+            .memory(|memory| memory.top_modal_layer().is_some())
+    }
+
+    /// Tells the macOS menu bar what this frame shows, when that changed.
+    #[cfg(target_os = "macos")]
+    fn show_menu_bar(&mut self) {
+        let bar = ui::native_bar(&self.canvas, &self.panels, self.dialog_is_up());
+        if self.menu_bar.as_ref() != Some(&bar) {
+            (self.window_sink)(WindowChange::Menu(bar.clone()));
+            self.menu_bar = Some(bar);
+        }
+    }
+
     fn apply(&mut self, message: ToRender) -> bool {
         match message {
             ToRender::CloseRequested => {
                 self.files.request(Action::Close, &mut self.canvas);
+                self.needs_frame = true;
+            }
+            #[cfg(target_os = "macos")]
+            ToRender::Menu(id) => {
+                ui::run_native(
+                    id,
+                    self.dialog_is_up(),
+                    &mut self.canvas,
+                    &mut self.files,
+                    &mut self.clipboard,
+                    &mut self.panels,
+                );
                 self.needs_frame = true;
             }
             ToRender::SessionEnding(written) => {
@@ -842,6 +880,8 @@ impl RenderThread {
             let layout = self.panels.layout.clone();
             self.settings.change(|settings| settings.layout = layout);
         }
+        #[cfg(target_os = "macos")]
+        self.show_menu_bar();
         if let Some(error) = self.settings.write_failure() {
             self.files.fail(crate::i18n::tr_with(
                 "settings-not-written",

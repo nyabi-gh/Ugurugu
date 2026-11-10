@@ -660,3 +660,12 @@ help-animate-cels = フレームごとに描き直すには、レイヤーから
 help-animate-onion = オニオンスキン（O）は前後のフレームを薄く、前を赤く後ろを青く表示します。次のポーズを描くときの目安にします。
 layer-keyed = キーで動く
 layer-animation-folder = アニメーションフォルダー
+
+# The macOS menu bar
+mac-services = サービス
+mac-hide = Ugurugu 3を隠す
+mac-hide-others = ほかを隠す
+mac-show-all = すべてを表示
+mac-minimize = しまう
+mac-zoom = 拡大/縮小
+mac-bring-to-front = すべてを手前に移動

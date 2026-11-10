@@ -660,3 +660,12 @@ help-animate-cels = To draw each frame anew, make an animation folder from the l
 help-animate-onion = Onion skin (O) shows the frames before and after faintly, red before and blue after, to draw the next pose against.
 layer-keyed = Moved by keys
 layer-animation-folder = Animation folder
+
+# The macOS menu bar
+mac-services = Services
+mac-hide = Hide Ugurugu 3
+mac-hide-others = Hide Others
+mac-show-all = Show All
+mac-minimize = Minimize
+mac-zoom = Zoom
+mac-bring-to-front = Bring All to Front

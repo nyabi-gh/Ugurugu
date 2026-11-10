@@ -83,12 +83,14 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
             .fill(fill)
             .inner_margin(egui::Margin::symmetric(x, y))
     };
-    egui::Panel::top("menu")
-        .frame(bar(theme::chrome(), 6, 2))
-        .show_separator_line(false)
-        .show(ui, |ui| {
-            super::menu_bar(ui, canvas, files, clipboard, panels)
-        });
+    if !panels.native_menu {
+        egui::Panel::top("menu")
+            .frame(bar(theme::chrome(), 6, 2))
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                super::menu_bar(ui, canvas, files, clipboard, panels)
+            });
+    }
     egui::Panel::bottom("status")
         .frame(bar(theme::status(), 8, 2))
         .show_separator_line(false)
@@ -133,7 +135,13 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
         .exact_size(48.0)
         .frame(bar(theme::chrome(), 4, 8))
         .show(ui, |ui| {
-            super::rail(ui, canvas, &panels.keys, panels.layout.animation_tools)
+            super::rail(
+                ui,
+                canvas,
+                &panels.keys,
+                panels.layout.animation_tools,
+                panels.native_menu,
+            )
         });
     super::dock_areas(ui, canvas, panels, probe);
     if panels.layout.animation_bar {
@@ -429,6 +437,80 @@ mod tests {
                 bounds(&output, tr(key)).is_some(),
                 "{key} with a smooth broken line"
             );
+        }
+    }
+
+    #[test]
+    fn with_the_menus_in_the_os_undo_and_redo_sit_at_the_foot_of_the_rail() {
+        use crate::i18n::tr;
+        let mut shown = Shown::new();
+        shown.panels.native_menu = true;
+        let output = shown.frames([1600.0, 900.0]);
+        assert!(bounds(&output, tr("menu-file")).is_none(), "no menus");
+        assert!(bounds(&output, tr("panels-tip")).is_none(), "no panels");
+        let status = egui::containers::panel::PanelState::load(&shown.ctx, egui::Id::new("status"))
+            .expect("the status bar")
+            .outer_rect;
+        let (undo, redo) = (
+            bounds(&output, tr("edit-undo")).expect("undo"),
+            bounds(&output, tr("edit-redo")).expect("redo"),
+        );
+        assert!(undo.y1 <= redo.y0, "undo above redo: {undo:?} {redo:?}");
+        assert!(redo.y1 <= f64::from(status.top()), "above the status bar");
+        assert!(
+            redo.y1 >= f64::from(status.top()) - 24.0,
+            "at the foot: {redo:?}"
+        );
+        assert!(undo.x1 <= 48.0, "in the rail: {undo:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_native_bar_has_the_apps_own_menu_and_no_access_letters() {
+        use ugu_platform::menu::{Entry, MenuRole};
+
+        use crate::shortcuts::Action;
+        let shown = Shown::new();
+        let bar = super::super::native_bar(&shown.canvas, &shown.panels, false);
+        assert_eq!(bar.menus.len(), super::super::actions::MENUS.len() + 1);
+        assert_eq!(bar.menus[0].role, MenuRole::App);
+        let id = |action: Action| action.index() as u32;
+        let has = |entries: &[Entry], action: Action| {
+            entries
+                .iter()
+                .any(|entry| matches!(entry, Entry::Action(item) if item.id == id(action)))
+        };
+        for moved in [Action::About, Action::Settings, Action::Quit] {
+            assert!(has(&bar.menus[0].entries, moved));
+            assert!(!bar.menus[1..].iter().any(|menu| has(&menu.entries, moved)));
+        }
+        assert!(bar.menus.iter().all(|menu| !menu.title.ends_with(')')));
+        for menu in &bar.menus {
+            assert_ne!(menu.entries.first(), Some(&Entry::Gap), "{}", menu.title);
+            assert_ne!(menu.entries.last(), Some(&Entry::Gap), "{}", menu.title);
+            assert!(
+                !menu
+                    .entries
+                    .windows(2)
+                    .any(|pair| pair[0] == Entry::Gap && pair[1] == Entry::Gap),
+                "{}",
+                menu.title
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_dialog_turns_off_everything_the_native_bar_holds() {
+        use ugu_platform::menu::Entry;
+        let shown = Shown::new();
+        let bar = super::super::native_bar(&shown.canvas, &shown.panels, true);
+        for menu in &bar.menus {
+            for entry in &menu.entries {
+                if let Entry::Action(item) = entry {
+                    assert!(!item.enabled, "{}", item.title);
+                }
+            }
         }
     }
 

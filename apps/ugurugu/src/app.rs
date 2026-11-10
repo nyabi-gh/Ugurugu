@@ -95,6 +95,9 @@ struct Session {
     _session_end: Option<SessionEnd>,
     #[cfg(target_os = "macos")]
     _quit_requests: ugu_platform::session::QuitRequests,
+    /// Dropped before the window, whose view it reads.
+    #[cfg(target_os = "macos")]
+    menus: ugu_platform::menu::Menus,
     #[cfg(windows)]
     pointer: PointerInput,
     #[cfg(not(windows))]
@@ -305,6 +308,17 @@ impl Session {
                 let _ = to_close.send(ToRender::CloseRequested);
             })
         };
+        #[cfg(target_os = "macos")]
+        let menus = {
+            let to_choose = to_render.clone();
+            // SAFETY: this runs on the window's thread, and `Session` drops
+            // the menus before the window.
+            unsafe {
+                ugu_platform::menu::Menus::install(hwnd, move |id| {
+                    let _ = to_choose.send(ToRender::Menu(id));
+                })
+            }
+        };
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -345,6 +359,8 @@ impl Session {
             _session_end: session_end,
             #[cfg(target_os = "macos")]
             _quit_requests: quit_requests,
+            #[cfg(target_os = "macos")]
+            menus,
             pointer,
             accessibility,
             window,
@@ -451,9 +467,11 @@ impl ApplicationHandler<UiEvent> for App {
                 return;
             }
             UiEvent::Window(change) => {
-                if let Some(session) = self.session.as_ref() {
+                if let Some(session) = self.session.as_mut() {
                     match change {
                         WindowChange::Title(title) => session.window.set_title(&title),
+                        #[cfg(target_os = "macos")]
+                        WindowChange::Menu(bar) => session.menus.show(bar),
                         WindowChange::Cursor(Some(icon)) => {
                             session.window.set_cursor(icon);
                             session.window.set_cursor_visible(true);

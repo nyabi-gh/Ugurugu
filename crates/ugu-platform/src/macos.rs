@@ -13,6 +13,7 @@ pub mod folder;
 pub mod instance;
 pub mod locale;
 pub mod memory;
+pub mod menu;
 pub mod requests;
 pub mod session;
 

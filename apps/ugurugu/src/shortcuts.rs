@@ -20,6 +20,12 @@ pub fn primary(modifiers: egui::Modifiers) -> bool {
     modifiers.ctrl || modifiers.command
 }
 
+/// The number of a function key from its name, as 12 from "F12".
+#[cfg(target_os = "macos")]
+fn function_key_number(name: &str) -> Option<u32> {
+    name.strip_prefix('F')?.parse().ok()
+}
+
 /// A key pressed with exactly these modifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Chord {
@@ -144,6 +150,45 @@ impl Chord {
             self.mac_text()
         } else {
             self.text()
+        }
+    }
+
+    /// As a macOS menu item takes it. ⌘Tab belongs to the system, as in
+    /// [`Self::shown`].
+    #[cfg(target_os = "macos")]
+    pub fn menu_key(self) -> ugu_platform::menu::Key {
+        let key = match self.key {
+            Key::Enter => "\r".to_owned(),
+            Key::Tab => "\t".to_owned(),
+            Key::Escape => "\u{1b}".to_owned(),
+            Key::Backspace => "\u{8}".to_owned(),
+            Key::Delete => "\u{f728}".to_owned(),
+            Key::Insert => "\u{f727}".to_owned(),
+            Key::Home => "\u{f729}".to_owned(),
+            Key::End => "\u{f72b}".to_owned(),
+            Key::PageUp => "\u{f72c}".to_owned(),
+            Key::PageDown => "\u{f72d}".to_owned(),
+            Key::ArrowUp => "\u{f700}".to_owned(),
+            Key::ArrowDown => "\u{f701}".to_owned(),
+            Key::ArrowLeft => "\u{f702}".to_owned(),
+            Key::ArrowRight => "\u{f703}".to_owned(),
+            _ => match function_key_number(self.key.name()) {
+                Some(number) => char::from_u32(0xf703 + number)
+                    .expect("in the Unicode private use area")
+                    .to_string(),
+                None => self.key_name().to_lowercase(),
+            },
+        };
+        let (control, command) = match self.key {
+            Key::Tab => (self.ctrl, false),
+            _ => (false, self.ctrl),
+        };
+        ugu_platform::menu::Key {
+            key,
+            command,
+            control,
+            option: self.alt,
+            shift: self.shift,
         }
     }
 
@@ -465,7 +510,7 @@ impl Action {
         Self::ALL.iter().copied().find(|action| action.id() == id)
     }
 
-    fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self as usize
     }
 }
@@ -939,6 +984,24 @@ mod tests {
         } else {
             assert_eq!(shown, "Ctrl+Shift+S");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn menu_items_get_the_key_and_modifiers_macos_expects() {
+        let key = ctrl_shift(Key::S).menu_key();
+        assert_eq!(key.key, "s");
+        assert!(key.command && key.shift && !key.control && !key.option);
+        // The system has ⌘Tab.
+        let tab = ctrl(Key::Tab).menu_key();
+        assert_eq!(tab.key, "\t");
+        assert!(tab.control && !tab.command);
+        assert_eq!(plain(Key::F1).menu_key().key, "\u{f704}");
+        assert_eq!(plain(Key::F12).menu_key().key, "\u{f70f}");
+        assert_eq!(plain(Key::Delete).menu_key().key, "\u{f728}");
+        assert_eq!(ctrl(Key::Minus).menu_key().key, "-");
+        assert_eq!(ctrl(Key::Comma).menu_key().key, ",");
+        assert_eq!(ctrl(Key::Num1).menu_key().key, "1");
     }
 
     #[test]

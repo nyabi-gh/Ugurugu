@@ -8,5 +8,6 @@ pub mod clipboard;
 pub mod clock;
 pub mod dialog;
 pub mod memory;
+pub mod menu;
 pub mod placement;
 pub mod pointer;

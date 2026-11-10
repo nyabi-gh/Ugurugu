@@ -88,6 +88,8 @@ pub struct Panels {
     focus: focus::Return,
     /// The menu titles' ids, from the last frame.
     menus: [Option<egui::Id>; actions::MENUS.len()],
+    /// Whether the OS's menu bar holds the menus, so the window shows none.
+    pub native_menu: bool,
     /// The generation of the document the panels last showed.
     document: u64,
     /// The document tab being dragged, by where it is now.
@@ -120,6 +122,13 @@ impl Panels {
         self.refusal = None;
     }
 
+    pub fn with_native_menu(native_menu: bool) -> Self {
+        Self {
+            native_menu,
+            ..Self::default()
+        }
+    }
+
     /// Puts `layout` in place of the one shown.
     pub fn set_layout(&mut self, layout: Layout) {
         self.layout = layout;
@@ -140,6 +149,8 @@ impl Panels {
 }
 
 pub use actions::shortcuts;
+#[cfg(target_os = "macos")]
+pub use actions::{native_bar, run_native};
 use dock::{areas as dock_areas, floating as dock_floating};
 pub use window::{Parts, Shown, window};
 
@@ -311,23 +322,35 @@ fn quick_buttons(
         actions::run(action, canvas, files, clipboard, panels);
     }
     ui.add_space(GROUP_GAP);
+    undo_and_redo(ui, canvas, GLYPH);
+}
+
+/// One click to undo and redo, for a hand on a pen.
+fn undo_and_redo(ui: &mut egui::Ui, canvas: &mut Canvas, glyph: f32) {
     let session = canvas.session();
     let (can_undo, can_redo) = (
         session.undo_label().is_some(),
         session.redo_label().is_some(),
     );
     let undo = actions::button_glyph(Action::Undo);
-    if widgets::icon_button(ui, undo, GLYPH, tr("edit-undo"), can_undo).clicked() {
+    if widgets::icon_button(ui, undo, glyph, tr("edit-undo"), can_undo).clicked() {
         report_bool("undo", canvas.edit(Session::undo));
     }
     let redo = actions::button_glyph(Action::Redo);
-    if widgets::icon_button(ui, redo, GLYPH, tr("edit-redo"), can_redo).clicked() {
+    if widgets::icon_button(ui, redo, glyph, tr("edit-redo"), can_redo).clicked() {
         report_bool("redo", canvas.edit(Session::redo));
     }
 }
 
-/// The tool rail; the move layer tool only with the animation tools.
-pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap, animation_tools: bool) {
+/// The tool rail; the move layer tool only with the animation tools. With
+/// no menu bar in the window, undo and redo sit at its foot.
+pub fn rail(
+    ui: &mut egui::Ui,
+    canvas: &mut Canvas,
+    keys: &Keymap,
+    animation_tools: bool,
+    undo_buttons: bool,
+) {
     ui.spacing_mut().item_spacing.y = 2.0;
     let tool = canvas.tool();
     for (each, action, key) in [
@@ -350,6 +373,12 @@ pub fn rail(ui: &mut egui::Ui, canvas: &mut Canvas, keys: &Keymap, animation_too
         if widgets::tool_button(ui, glyph, tr(key), &shortcut, tool == each).clicked() {
             canvas.choose_tool(each);
         }
+    }
+    if undo_buttons {
+        const GLYPH: f32 = 20.0;
+        let height = 2.0 * (GLYPH + 8.0) + ui.spacing().item_spacing.y;
+        ui.add_space((ui.available_height() - height).max(0.0));
+        ui.vertical_centered(|ui| undo_and_redo(ui, canvas, GLYPH));
     }
 }
 

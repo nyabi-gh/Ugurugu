@@ -81,6 +81,14 @@ pub mod recent {
     pub use crate::os::recent::add;
 }
 
+#[cfg(target_os = "macos")]
+pub mod menu {
+    pub use crate::os::menu::Menus;
+    pub use ugu_platform_types::menu::{
+        Action, Bar, EditRole, Entry, Key, Menu, MenuRole, SystemItem,
+    };
+}
+
 /// The requests macOS makes of the app as a whole.
 #[cfg(target_os = "macos")]
 pub mod requests {

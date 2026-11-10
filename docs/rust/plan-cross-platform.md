@@ -74,7 +74,7 @@ evidence.md 97절이 macOS에서 확인한 것이다. 요약:
 - **`build.rs`**: `.rc` 리소스는 Windows에서만. macOS 번들의 `Info.plist`·`.icns`는 `tools/macos_app.py`가 만든다.
 - **글꼴**: `ugu-text` `Fonts::new`의 대체 순서와 `theme.rs`의 중국어 UI 글꼴(`msyh.ttc`)을 OS마다. macOS는 Apple SD Gothic Neo·Hiragino Sans·PingFang SC, Linux는 Noto Sans CJK(fontconfig). 글꼴이 없을 때의 안내도 둔다.
 - **단축키**(`shortcuts.rs`): `ctrl || command`(macOS에서는 ⌘와 Control)를 한 주 수정자로 보고, 저장은 OS와 무관하게 "Ctrl+", 메뉴 표시는 macOS에서 ⌘ 기호로 한다. Space 끌기 확대도 같은 주 수정자다. `clipboard_chord`는 egui-winit의 OS별 판정을 따른다(decisions.md 9절, 2026-10-28).
-- **메뉴**: 처음에는 지금의 창 안 메뉴를 그대로 쓴다. macOS 메뉴 막대(`muda`)는 macOS 전용 의존으로 나중에 본다(Linux 쪽이 GTK를 끌어온다). winit이 만드는 기본 메뉴는 3.4절.
+- **메뉴**: macOS는 시스템 메뉴 막대다(decisions.md 9절). Linux는 창 안 메뉴를 그대로 쓴다. winit이 만드는 기본 메뉴는 3.4절.
 - **파일 끌어놓기**: 앱은 `WindowEvent::DroppedFile`로 연다(`render.rs`). winit 0.30.13은 이 이벤트를 Windows·macOS·X11에서만 내고 Wayland에서는 내지 않는다. Wayland는 `wl_data_device`로 직접 받거나, 안 되는 기능으로 안내한다(3단계).
 - **도구**: `ugu-doc`·`render-bench`의 최대 메모리는 `getrusage(RUSAGE_SELF).ru_maxrss`(Linux KiB, macOS 바이트, 2026-10-29). `render-bench`의 최대 private 바이트는 Unix에 맞는 값이 없어 NaN이다. `latency-probe`는 Windows에서 PresentMon·`SendInput`, macOS에서 ScreenCaptureKit·`CGEventPost`로 재고(evidence.md 103절), 다른 OS에서는 안내만 낸다.
 

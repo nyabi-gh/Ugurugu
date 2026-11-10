@@ -660,3 +660,12 @@ help-animate-cels = 要逐帧重画，请从图层创建动画文件夹（动画
 help-animate-onion = 洋葱皮 (O) 会淡淡地显示前后的帧，之前为红色，之后为蓝色，方便对照着画下一个姿态。
 layer-keyed = 由关键帧移动
 layer-animation-folder = 动画文件夹
+
+# The macOS menu bar
+mac-services = 服务
+mac-hide = 隐藏 Ugurugu 3
+mac-hide-others = 隐藏其他
+mac-show-all = 全部显示
+mac-minimize = 最小化
+mac-zoom = 缩放
+mac-bring-to-front = 前置全部窗口
