@@ -389,8 +389,10 @@ impl LiveStroke {
             if let Some(rect) = clamp(dab::bounds(&self.placed), self.size()) {
                 let width = usize::from(self.coverage.width());
                 let pixels = self.coverage.data_as_u8_slice_mut();
+                // The newly settled dabs reach only a few rows of a buffer
+                // the size of the canvas.
                 self.painter
-                    .paint(pixels, width, &self.placed, look, [r, g, b]);
+                    .paint(pixels, width, &self.placed, look, [r, g, b], 1);
                 self.written = union(self.written, Some(rect));
                 dirty = Some(rect);
             }
@@ -426,6 +428,7 @@ impl LiveStroke {
                 &self.placed,
                 look,
                 [r, g, b],
+                1,
             );
             self.tail = Some((rect, tail));
             dirty = union(dirty, Some(rect));
@@ -970,7 +973,7 @@ mod tests {
             }
             let mut whole = vec![0; 200 * 120 * 4];
             let look = dab::look(&pen.brush);
-            dab::Painter::default().paint(&mut whole, 200, &dabs, look, [30, 120, 200]);
+            dab::Painter::default().paint(&mut whole, 200, &dabs, look, [30, 120, 200], 1);
             let [left, top, right, bottom] = seen.unwrap();
             for y in 0..120 {
                 for x in 0..200 {

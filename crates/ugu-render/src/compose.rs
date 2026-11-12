@@ -219,7 +219,7 @@ impl Split {
             unreachable!("a paint layer's pixels are tiles");
         };
         let surface = Arc::make_mut(surface);
-        stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip, drawn)
+        stamp.apply_stroke(surface, stroke, erase, &pen, self.frame, clip, drawn, 1)
     }
 
     /// Takes note that a full render of the edited layer draws what lies in
@@ -321,6 +321,7 @@ impl Split {
         let lines: Vec<usize> = (0..strokes.len())
             .filter(|&index| strokes[index].0.brush.engine == BrushEngine::Line)
             .collect();
+        let dab_threads = threads.max(1);
         let threads = threads.clamp(1, lines.len().max(1));
         let mut drawn: Vec<Option<(PixelRect, Pixmap)>> = vec![None; strokes.len()];
         if threads > 1 {
@@ -382,7 +383,16 @@ impl Split {
             } else {
                 lay_lines(surface, &run, threads);
                 run.clear();
-                stamp.apply_stroke(surface, stroke, erase, &pens[index], frame, clip, area)
+                stamp.apply_stroke(
+                    surface,
+                    stroke,
+                    erase,
+                    &pens[index],
+                    frame,
+                    clip,
+                    area,
+                    dab_threads,
+                )
             };
             changed = match (changed, rect) {
                 (Some(a), Some(b)) => Some([
@@ -771,7 +781,8 @@ impl Stamp {
     /// Adds a committed stroke to `surface`, of which a full render draws
     /// the pixels in `drawn`, as drawing the layer again would: painted
     /// over, or erased from, what is there, only inside `clip` when there is
-    /// one. Returns the pixels it may have changed.
+    /// one. Returns the pixels it may have changed. An airbrush or spray
+    /// stroke is painted on up to `threads` threads.
     #[allow(clippy::too_many_arguments)]
     pub fn apply_stroke(
         &mut self,
@@ -782,12 +793,13 @@ impl Stamp {
         frame: u32,
         clip: Option<&Mask>,
         drawn: PixelRect,
+        threads: usize,
     ) -> Option<PixelRect> {
         match stroke.brush.engine {
             BrushEngine::Line => {}
             BrushEngine::Pixel => return apply_pixels(surface, stroke, erase, pen, frame, clip),
             BrushEngine::Airbrush | BrushEngine::Spray => {
-                return self.apply_dabs(surface, stroke, erase, pen, frame, clip);
+                return self.apply_dabs(surface, stroke, erase, pen, frame, clip, threads);
             }
         }
         let rect = self.line_coverage(stroke, pen, frame, surface.size(), drawn)?;
@@ -876,6 +888,7 @@ impl Stamp {
     /// `apply_stroke` for an airbrush or spray: its dabs painted over each
     /// other, then over, or erased from, what is there, as the renderer lays
     /// them.
+    #[allow(clippy::too_many_arguments)]
     fn apply_dabs(
         &mut self,
         surface: &mut TiledSurface,
@@ -884,6 +897,7 @@ impl Stamp {
         pen: &Pen,
         frame: u32,
         clip: Option<&Mask>,
+        threads: usize,
     ) -> Option<PixelRect> {
         dab::stroke_dabs(
             &stroke.points,
@@ -905,22 +919,44 @@ impl Stamp {
         self.buffer.resize(width * (rect[3] - top) as usize * 4, 0);
         let [r, g, b, _] = if erase { [0; 4] } else { stroke.color.0 };
         let look = dab::look(&stroke.brush);
-        self.painter
-            .paint(&mut self.buffer, width, &self.dabs, look, [r, g, b]);
+        self.painter.paint(
+            &mut self.buffer,
+            width,
+            &self.dabs,
+            look,
+            [r, g, b],
+            threads,
+        );
         surface.ensure(rect);
-        for (y, line) in surface.rows_mut(rect) {
-            let from = (y - top) as usize * width;
-            for (x, target) in line.iter_mut().enumerate() {
-                let source = &self.buffer[(from + x) * 4..(from + x) * 4 + 4];
-                if source[3] == 0 || !inside(clip, left as usize + x, y as usize) {
-                    continue;
-                }
-                if erase {
-                    dest_out(target, source[3]);
-                } else {
-                    src_over(target, source);
+        let buffer = &self.buffer;
+        let lay = |rows: &mut [(u32, &mut [[u8; 4]])]| {
+            for (y, line) in rows {
+                let from = (*y - top) as usize * width;
+                for (x, target) in line.iter_mut().enumerate() {
+                    let source = &buffer[(from + x) * 4..(from + x) * 4 + 4];
+                    if source[3] == 0 || !inside(clip, left as usize + x, *y as usize) {
+                        continue;
+                    }
+                    if erase {
+                        dest_out(target, source[3]);
+                    } else {
+                        src_over(target, source);
+                    }
                 }
             }
+        };
+        let mut rows: Vec<(u32, &mut [[u8; 4]])> = surface.rows_mut(rect).collect();
+        // Thread start-up outweighs laying about this many pixels, as for
+        // `lay_lines`.
+        if threads <= 1 || buffer.len() / 4 <= 65_536 {
+            lay(&mut rows);
+        } else {
+            let per_thread = rows.len().div_ceil(threads).max(1);
+            std::thread::scope(|scope| {
+                for part in rows.chunks_mut(per_thread) {
+                    scope.spawn(|| lay(part));
+                }
+            });
         }
         Some(rect)
     }

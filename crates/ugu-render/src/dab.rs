@@ -170,7 +170,9 @@ pub struct Painter {
 
 impl Painter {
     /// Paints `dabs`, given in the buffer's pixels, in `rgb` over what
-    /// `buffer` holds; it is `width` pixels wide.
+    /// `buffer` holds; it is `width` pixels wide. A large buffer is shared
+    /// out among up to `threads` threads by rows, each painting every dab
+    /// in order over its own rows, so the pixels are the same on any count.
     pub fn paint(
         &mut self,
         buffer: &mut [u8],
@@ -178,37 +180,29 @@ impl Painter {
         dabs: &[Dab],
         look: Look,
         rgb: [u8; 3],
+        threads: usize,
     ) {
         let height = buffer.len() / 4 / width.max(1);
-        let size = [width, height];
-        match look {
-            Look::Solid {
-                square: false,
-                antialias: false,
-            } => dabs.iter().for_each(|dab| round(buffer, size, dab, rgb)),
-            Look::Solid {
-                square: true,
-                antialias: false,
-            } => dabs.iter().for_each(|dab| square(buffer, size, dab, rgb)),
-            Look::Solid {
-                square: false,
-                antialias: true,
-            } => dabs
-                .iter()
-                .for_each(|dab| smooth_round(buffer, size, dab, rgb)),
-            Look::Solid {
-                square: true,
-                antialias: true,
-            } => dabs
-                .iter()
-                .for_each(|dab| smooth_square(buffer, size, dab, rgb)),
-            Look::Soft { hardness } => {
-                self.prepare(hardness);
-                for dab in dabs {
-                    soft(buffer, size, dab, rgb, &self.falloff);
-                }
-            }
+        if height == 0 {
+            return;
         }
+        if let Look::Soft { hardness } = look {
+            self.prepare(hardness);
+        }
+        let falloff = &self.falloff[..];
+        // Thread start-up outweighs painting about this many pixels, as for
+        // `compose::lay_lines`.
+        let threads = if width * height > 65_536 { threads } else { 1 };
+        let per_thread = height.div_ceil(threads.max(1));
+        if per_thread >= height {
+            return paint_band(buffer, width, 0..height, dabs, look, rgb, falloff);
+        }
+        std::thread::scope(|scope| {
+            for (index, pixels) in buffer.chunks_mut(per_thread * width * 4).enumerate() {
+                let rows = index * per_thread..index * per_thread + pixels.len() / 4 / width;
+                scope.spawn(move || paint_band(pixels, width, rows, dabs, look, rgb, falloff));
+            }
+        });
     }
 
     /// 2.2.13's radial gradient: the full alpha to `hardness` of the radius,
@@ -228,6 +222,63 @@ impl Painter {
             };
             (left * 255.0).round() as u8
         }));
+    }
+}
+
+/// `dabs` over `rows` of a buffer `width` pixels wide, of which `pixels`
+/// holds those rows.
+fn paint_band(
+    pixels: &mut [u8],
+    width: usize,
+    rows: std::ops::Range<usize>,
+    dabs: &[Dab],
+    look: Look,
+    rgb: [u8; 3],
+    falloff: &[u8],
+) {
+    let band = &mut Band {
+        pixels,
+        width,
+        rows,
+    };
+    match look {
+        Look::Solid {
+            square: false,
+            antialias: false,
+        } => dabs.iter().for_each(|dab| round(band, dab, rgb)),
+        Look::Solid {
+            square: true,
+            antialias: false,
+        } => dabs.iter().for_each(|dab| square(band, dab, rgb)),
+        Look::Solid {
+            square: false,
+            antialias: true,
+        } => dabs.iter().for_each(|dab| smooth_round(band, dab, rgb)),
+        Look::Solid {
+            square: true,
+            antialias: true,
+        } => dabs.iter().for_each(|dab| smooth_square(band, dab, rgb)),
+        Look::Soft { .. } => dabs.iter().for_each(|dab| soft(band, dab, rgb, falloff)),
+    }
+}
+
+/// Some rows of a buffer, painted in the whole buffer's coordinates.
+struct Band<'a> {
+    pixels: &'a mut [u8],
+    width: usize,
+    rows: std::ops::Range<usize>,
+}
+
+impl Band<'_> {
+    /// The rows of `range` this band holds.
+    fn within(&self, range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+        let first = range.start.max(self.rows.start);
+        first..range.end.min(self.rows.end).max(first)
+    }
+
+    fn row(&mut self, y: usize) -> &mut [u8] {
+        let at = (y - self.rows.start) * self.width * 4;
+        &mut self.pixels[at..at + self.width * 4]
     }
 }
 
@@ -292,15 +343,12 @@ fn centres(left: f64, right: f64, width: usize) -> std::ops::Range<usize> {
     first as usize..last as usize
 }
 
-fn row(buffer: &mut [u8], width: usize, y: usize) -> &mut [u8] {
-    &mut buffer[y * width * 4..(y + 1) * width * 4]
-}
-
-fn round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+fn round(band: &mut Band, dab: &Dab, rgb: [u8; 3]) {
+    let width = band.width;
     let radius = dab.diameter * 0.5;
     let [x, y] = dab.center;
     let source = premultiplied(rgb, dab.alpha.into());
-    for line in rows(y - radius, y + radius, height) {
+    for line in band.within(rows(y - radius, y + radius, band.rows.end)) {
         let dy = line as f64 + 0.5 - y;
         let reach = radius * radius - dy * dy;
         if reach < 0.0 {
@@ -308,29 +356,24 @@ fn round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]
         }
         let half = reach.sqrt();
         let span = centres(x - half, x + half, width);
-        over_run(
-            &mut row(buffer, width, line)[span.start * 4..span.end * 4],
-            source,
-        );
+        over_run(&mut band.row(line)[span.start * 4..span.end * 4], source);
     }
 }
 
-fn square(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+fn square(band: &mut Band, dab: &Dab, rgb: [u8; 3]) {
     let half = dab.diameter * 0.5;
     let [x, y] = dab.center;
     let source = premultiplied(rgb, dab.alpha.into());
-    let span = centres(x - half, x + half, width);
-    for line in centres(y - half, y + half, height) {
-        over_run(
-            &mut row(buffer, width, line)[span.start * 4..span.end * 4],
-            source,
-        );
+    let span = centres(x - half, x + half, band.width);
+    for line in band.within(centres(y - half, y + half, band.rows.end)) {
+        over_run(&mut band.row(line)[span.start * 4..span.end * 4], source);
     }
 }
 
 /// A round dab whose edge pixels are covered by how far inside it their
 /// centres are, up to half a pixel either way.
-fn smooth_round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+fn smooth_round(band: &mut Band, dab: &Dab, rgb: [u8; 3]) {
+    let width = band.width;
     let radius = dab.diameter * 0.5;
     let [x, y] = dab.center;
     let alpha = u16::from(dab.alpha);
@@ -339,7 +382,7 @@ fn smooth_round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: 
     let most = (std::f64::consts::PI * radius * radius).min(1.0);
     let outer = radius + 0.5;
     let inner = radius - 0.5;
-    for line in rows(y - outer, y + outer, height) {
+    for line in band.within(rows(y - outer, y + outer, band.rows.end)) {
         let dy = line as f64 + 0.5 - y;
         let reach = outer * outer - dy * dy;
         if reach <= 0.0 {
@@ -357,7 +400,7 @@ fn smooth_round(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: 
         } else {
             span.start..span.start
         };
-        let pixels = row(buffer, width, line);
+        let pixels = band.row(line);
         over_run(&mut pixels[inside.start * 4..inside.end * 4], full);
         for column in span.clone().filter(|column| !inside.contains(column)) {
             let dx = column as f64 + 0.5 - x;
@@ -380,15 +423,15 @@ fn overlap(start: f64, low: f64, high: f64) -> f64 {
 }
 
 /// A square dab whose edge pixels are covered by the area of them it covers.
-fn smooth_square(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3]) {
+fn smooth_square(band: &mut Band, dab: &Dab, rgb: [u8; 3]) {
     let half = dab.diameter * 0.5;
     let [x, y] = dab.center;
     let alpha = f64::from(dab.alpha);
     let [left, right, top, bottom] = [x - half, x + half, y - half, y + half];
-    let columns = rows(left, right, width);
-    for line in rows(top, bottom, height) {
+    let columns = rows(left, right, band.width);
+    for line in band.within(rows(top, bottom, band.rows.end)) {
         let tall = overlap(line as f64, top, bottom);
-        let pixels = row(buffer, width, line);
+        let pixels = band.row(line);
         for column in columns.clone() {
             let covered = tall * overlap(column as f64, left, right);
             let alpha = (alpha * covered).round() as u16;
@@ -402,16 +445,16 @@ fn smooth_square(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb:
     }
 }
 
-fn soft(buffer: &mut [u8], [width, height]: [usize; 2], dab: &Dab, rgb: [u8; 3], falloff: &[u8]) {
+fn soft(band: &mut Band, dab: &Dab, rgb: [u8; 3], falloff: &[u8]) {
     let radius = dab.diameter * 0.5;
     let [x, y] = dab.center;
     let alpha = u16::from(dab.alpha);
     let step = FALLOFF_STEPS as f64 / (radius * radius);
-    let columns = rows(x - radius, x + radius, width);
-    for line in rows(y - radius, y + radius, height) {
+    let columns = rows(x - radius, x + radius, band.width);
+    for line in band.within(rows(y - radius, y + radius, band.rows.end)) {
         let dy = line as f64 + 0.5 - y;
         let dy2 = dy * dy;
-        let pixels = row(buffer, width, line);
+        let pixels = band.row(line);
         for column in columns.clone() {
             let dx = column as f64 + 0.5 - x;
             let Some(&left) = falloff.get(((dx * dx + dy2) * step) as usize) else {
@@ -515,7 +558,7 @@ mod tests {
     /// `dab` alone on a clear buffer of `size`.
     fn painted(dab: Dab, look: Look, size: usize) -> Vec<u8> {
         let mut buffer = vec![0; size * size * 4];
-        Painter::default().paint(&mut buffer, size, &[dab], look, [255, 255, 255]);
+        Painter::default().paint(&mut buffer, size, &[dab], look, [255, 255, 255], 1);
         buffer
     }
 
@@ -608,12 +651,60 @@ mod tests {
             antialias: false,
         };
         let mut buffer = vec![0; 8 * 8 * 4];
-        Painter::default().paint(&mut buffer, 8, &[dab, dab], look, [255, 0, 0]);
+        Painter::default().paint(&mut buffer, 8, &[dab, dab], look, [255, 0, 0], 1);
         // 128 + 128 × 127 / 255.
         assert_eq!(
             &buffer[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 4],
             [192, 0, 0, 192]
         );
+    }
+
+    #[test]
+    fn dabs_shared_out_by_rows_paint_the_same_bytes() {
+        // Uneven sizes and centres across the band edges, wider than the
+        // buffer at its corners.
+        let dabs: Vec<Dab> = (0..60)
+            .map(|index| {
+                let t = f64::from(index);
+                Dab {
+                    center: [(t * 37.3) % 420.0 - 10.0, (t * 53.7) % 340.0 - 10.0],
+                    diameter: 4.0 + (t * 17.1) % 150.0,
+                    alpha: (40 + index * 3) as u8,
+                }
+            })
+            .collect();
+        let looks = [
+            Look::Solid {
+                square: false,
+                antialias: false,
+            },
+            Look::Solid {
+                square: true,
+                antialias: false,
+            },
+            Look::Solid {
+                square: false,
+                antialias: true,
+            },
+            Look::Solid {
+                square: true,
+                antialias: true,
+            },
+            Look::Soft { hardness: 0.3 },
+        ];
+        let [width, height] = [400, 320];
+        for look in looks {
+            let paint = |threads| {
+                let mut buffer = vec![0; width * height * 4];
+                Painter::default().paint(&mut buffer, width, &dabs, look, [200, 90, 30], threads);
+                buffer
+            };
+            let one = paint(1);
+            assert!(one.iter().any(|&byte| byte > 0));
+            for threads in [3, 8] {
+                assert!(paint(threads) == one, "{look:?} on {threads} threads");
+            }
+        }
     }
 
     #[test]

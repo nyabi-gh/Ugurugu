@@ -1413,6 +1413,8 @@ impl Raster {
             tasks.push(std::sync::Mutex::new(task));
         }
         let threads = self.threads.min(tasks.len()).max(1);
+        // Fewer strokes than threads share the rest out by rows.
+        let per_task = (self.threads / tasks.len().max(1)).max(1);
         self.painters
             .resize_with(threads.max(self.painters.len()), Default::default);
         let next = std::sync::atomic::AtomicUsize::new(0);
@@ -1423,7 +1425,7 @@ impl Raster {
                 let width = usize::from(pixels.width());
                 let bytes = pixels.data_as_u8_slice_mut();
                 bytes.fill(0);
-                painter.paint(bytes, width, placed, *look, *rgb);
+                painter.paint(bytes, width, placed, *look, *rgb, per_task);
             }
         };
         if threads == 1 {
