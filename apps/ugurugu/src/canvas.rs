@@ -120,8 +120,9 @@ enum Interaction {
         /// Dragged out with the shape tool, its points all replaced as it
         /// changes.
         shape: bool,
-        /// The shape was dragged since `live` was made; it is made again
-        /// once per frame, as only the last drag shows.
+        /// The session's points changed since `live` last drew them. A
+        /// shape is made again once a frame, as only the last drag shows;
+        /// a stroke draws the points taken since.
         moved: bool,
     },
     Panning {
@@ -1963,18 +1964,32 @@ impl Canvas {
         self.recomposite(union(was, rect));
     }
 
+    /// Adds `sample` to the stroke; the next frame shows it.
     fn extend_stroke(&mut self, sample: &PointerSample) {
         let point = self.input_point(sample);
-        if !self.tab.session.extend_stroke(point) {
-            return;
+        if self.tab.session.extend_stroke(point)
+            && let Interaction::Drawing { moved, .. } = &mut self.interaction
+        {
+            *moved = true;
         }
-        let session = self.tab.session.live().expect("drawing");
+    }
+
+    /// Draws the points the stroke took since the last frame, all at once:
+    /// a sample redraws the stroke's end as wide as the brush, and Windows
+    /// hands over every sample of a 1000 Hz mouse (evidence.md section 121).
+    fn show_stroke(&mut self) {
         let Interaction::Drawing {
-            live, copies, rect, ..
+            live,
+            copies,
+            rect,
+            shape: false,
+            moved: moved @ true,
         } = &mut self.interaction
         else {
             return;
         };
+        *moved = false;
+        let session = self.tab.session.live().expect("drawing");
         // The ruler's strokes change pixels far apart: each is put together
         // on its own, not the box around them all.
         let changed: Vec<_> = std::iter::once(live.update(&session.points))
@@ -2161,6 +2176,7 @@ impl Canvas {
     /// other pixels are shown than at the last call.
     pub fn take_upload(&mut self) -> Option<PixelRect> {
         self.show_shape();
+        self.show_stroke();
         self.show_outline_changes();
         let (pixels, shrink, origin) = self.shown();
         let size = [pixels.width(), pixels.height()];
@@ -4077,6 +4093,7 @@ mod tests {
             let sample = at(&canvas, x, 25.0);
             canvas.apply(CanvasInput::Extend(sample));
         }
+        canvas.take_upload();
         let pixel = |shown: &Pixmap, x: usize, y: usize| {
             shown.data_as_u8_slice()[(y * 120 + x) * 4..][..4].to_vec()
         };
@@ -4107,6 +4124,107 @@ mod tests {
         canvas.edit(|session| session.undo()).unwrap();
         settle(&mut canvas, &renders);
         assert!(canvas.display().data_as_u8_slice() == blank.data_as_u8_slice());
+    }
+
+    /// Issue #157: at 512 px a sample's update covers the whole brush, and
+    /// Windows hands over every sample of a 1000 Hz mouse, so drawing each
+    /// on arrival fell behind the pointer.
+    #[test]
+    fn samples_of_a_stroke_are_drawn_once_a_frame_as_one_a_frame_draws_them() {
+        let draw = |samples_per_frame: usize| {
+            let (to_test, renders) = std::sync::mpsc::channel();
+            // Without wobble, as each stroke's seed differs.
+            let document = Document {
+                wobble: ugu_core::ops::Wobble::classic(0.0),
+                ..Document::new([200, 150])
+            };
+            let mut canvas = super::Canvas::new(document, move |rendered| {
+                let _ = to_test.send(rendered);
+            });
+            canvas.set_area([0, 0, 200, 150]);
+            settle(&mut canvas, &renders);
+            canvas.brushes_mut().pen.width = 40.0;
+            let at = |canvas: &super::Canvas, x: f64| {
+                let [x, y] = canvas.to_client([x, 75.0 + (x / 15.0).sin() * 30.0]);
+                press(x, y)
+            };
+            let begin = at(&canvas, 20.0);
+            canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+            canvas.take_upload();
+            let xs: Vec<f64> = (1..=48).map(|step| 20.0 + f64::from(step) * 3.0).collect();
+            for frame in xs.chunks(samples_per_frame) {
+                let before = canvas.display().clone();
+                for &x in frame {
+                    let sample = at(&canvas, x);
+                    canvas.apply(CanvasInput::Extend(sample));
+                }
+                assert!(
+                    canvas.display().data_as_u8_slice() == before.data_as_u8_slice(),
+                    "drawn before the frame took it"
+                );
+                assert!(canvas.take_upload().is_some());
+            }
+            canvas.display().clone()
+        };
+        assert!(draw(16).data_as_u8_slice() == draw(1).data_as_u8_slice());
+    }
+
+    /// Issue #157: what a frame of a wide stroke across a 4096 px canvas
+    /// costs at one sample a frame and at sixteen (a 1000 Hz mouse at
+    /// 60 Hz), and the pen-up after it.
+    #[test]
+    #[ignore = "measurement; run with --release --ignored --nocapture"]
+    fn wide_stroke_frame_cost() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([4096, 4096]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.set_area([0, 0, 4096, 4096]);
+        settle(&mut canvas, &renders);
+        let at = |canvas: &super::Canvas, t: f64| {
+            let [x, y] = canvas.to_client([
+                100.0 + 3896.0 * t,
+                2048.0 + 1228.8 * (t * std::f64::consts::TAU * 3.0).sin(),
+            ]);
+            press(x, y)
+        };
+        for brush in ["ink-pen", "soft-airbrush"] {
+            canvas.choose_preset(Tool::Pen, ugu_core::brush::find(brush).unwrap());
+            for width in [128.0, 512.0] {
+                canvas.brushes_mut().pen.width = width;
+                for per_frame in [1u32, 16] {
+                    settle(&mut canvas, &renders);
+                    let begin = at(&canvas, 0.0);
+                    canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+                    let frames = 120;
+                    let mut times = Vec::new();
+                    for frame in 0..frames {
+                        let started = std::time::Instant::now();
+                        for sample in 1..=per_frame {
+                            let t = f64::from(frame * per_frame + sample)
+                                / f64::from(frames * per_frame);
+                            let sample = at(&canvas, t);
+                            canvas.apply(CanvasInput::Extend(sample));
+                        }
+                        canvas.take_upload();
+                        times.push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    let started = std::time::Instant::now();
+                    canvas.apply(CanvasInput::End(at(&canvas, 1.0)));
+                    canvas.take_upload();
+                    let up = started.elapsed().as_secs_f64() * 1000.0;
+                    times.sort_by(f64::total_cmp);
+                    println!(
+                        "{brush} {width} px, {per_frame}/frame: median {:.2} ms, \
+                         p95 {:.2} ms, max {:.2} ms, pen-up {up:.2} ms",
+                        times[times.len() / 2],
+                        times[times.len() * 95 / 100],
+                        times[times.len() - 1]
+                    );
+                    canvas.edit(|session| session.undo()).unwrap();
+                }
+            }
+        }
     }
 
     /// What a stroke costs a frame with the symmetry ruler off and with

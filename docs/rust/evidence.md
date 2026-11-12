@@ -2388,3 +2388,29 @@ FMA의 차이는 바이트 몇 개로만 나타나고 어느 장면에서 나타
 **CI:** PR #178 5분 24초, main(`e38eb37`) 4분 41초, 둘 다 통과.
 
 **출시:** 태그 `v3.6.1`(annotated, `e38eb37`) → `release-3.yml` 실행 43136629653 성공(12분 18초). `v3.6.1`에는 `Ugurugu-3.6.1-Windows-x64-Setup.exe`(23,980,723바이트)만, 본문 끝에 "What's Changed"(#170~#178)와 비교 링크가 붙었고 Latest다. `updates`에 `Ugurugu3-3.6.1-win-x64-full.nupkg`(16,415,411바이트)가 더해지고 `releases.win-x64.json`이 3.6.1을 가리킨다. 다운로드 배지 실행(43138003273)도 성공했다. macOS판은 없다.
+
+## 121. 굵은 획의 샘플을 프레임마다 한 번 그리기 (2026-11-12)
+
+**질문:** 이슈 #157에서 3.6.1을 쓴 제안자가 128px보다 굵으면 그리는 중에 지연이 생기고, 굵을수록 지연과 CPU 사용이 커진다고 알렸다. 기계와 도구는 밝히지 않았다.
+
+**원인:** 앱은 획의 샘플이 올 때마다 `LiveStroke::update`로 획의 끝(꼬리)을 브러시 너비만큼 다시 그리고 그 사각형을 합성했다. 펜의 샘플 간격은 5px 이하라 샘플 하나가 조금만 움직여도 일은 굵기의 제곱에 비례한다. `ugu-doc live 4096 <브러시> <굵기> 1`에 임시 계측을 넣어 잰 샘플당 p50(119절의 Mac, 1 round): 다시 합성한 사각형은 ink-pen 128px 2.1만·512px 27.7만 화소, soft-airbrush 3.7만·55.3만 화소이고, 갱신+합성은 ink-pen 128px 약 0.1 ms·512px 약 1.3 ms, soft-airbrush 약 0.4 ms·약 2.2 ms였다. Windows판은 펜 history와 `GetMouseMovePointsEx`로 1000Hz 마우스의 샘플을 모두 받으므로(이 문서 표의 `historyCount` 행) 60Hz 화면에서 프레임당 약 16개를 그렸다. macOS판은 winit이 모은 이동만 받아 119절 앱 확인에서 보이지 않았다는 것은 **가설**이다(Mac에서 프레임당 샘플 수는 재지 않았다).
+
+**고침:** 도형 끌기(58절)처럼 `Extend`는 세션에 점만 더하고, 화면이 프레임을 가져갈 때(`Canvas::take_upload`) `show_stroke`가 그 사이의 점을 한 번에 그린다. 프레임당 16샘플을 한 번에 그린 화면이 한 샘플씩 그린 화면과 바이트가 같다는 것은 `canvas::tests::samples_of_a_stroke_are_drawn_once_a_frame_as_one_a_frame_draws_them`(우글거림 없음, 40px 펜)이 본다. 이 시험은 고치기 전 코드에서 "drawn before the frame took it"으로 실패했다.
+
+**방법:** `canvas::tests::wide_stroke_frame_cost`(ignored), release, `UGU_WORKER_THREADS=8`, 119절의 Mac. 4096² 문서(기본 우글거림), 119절과 같은 사인 곡선을 120프레임에 걸쳐 그리고, 프레임마다 샘플 1개 또는 16개를 적용한 뒤 `take_upload`까지 잰다. 펜 떼기는 `End`부터 `take_upload`까지. 고치기 전(`8f67f6a`에 이 시험만 더함)과 뒤를 2 round씩 쟀고 round마다 값을 적는다.
+
+| 브러시·굵기 | 샘플/프레임 | 전 중앙값 (ms) | 뒤 중앙값 (ms) |
+|---|---|---|---|
+| ink-pen 128 | 1 | 0.57 · 0.58 | 0.59 · 0.53 |
+| ink-pen 128 | 16 | 2.81 · 2.95 | 0.49 · 0.49 |
+| ink-pen 512 | 1 | 1.55 · 1.28 | 1.23 · 1.32 |
+| ink-pen 512 | 16 | 20.55 · 12.63 | 1.47 · 1.41 |
+| soft-airbrush 128 | 1 | 1.00 · 0.58 | 0.63 · 0.62 |
+| soft-airbrush 128 | 16 | 6.44 · 4.01 | 0.60 · 0.58 |
+| soft-airbrush 512 | 1 | 3.59 · 2.57 | 2.93 · 2.70 |
+| soft-airbrush 512 | 16 | 32.28 · 24.98 | 2.67 · 2.87 |
+
+전의 두 round는 값이 크게 달랐다(첫 round가 높음, 까닭은 보지 않았다). 어느 쪽이든 512px 프레임당 16샘플은 60Hz 예산(16.7 ms)을 넘거나 가까웠고, 고친 뒤는 샘플 수와 무관하게 한 샘플 분량이다. 고친 뒤의 최대는 ink-pen 512px 16샘플 10.05·2.45 ms, soft-airbrush 512px 16샘플 4.10·5.33 ms였다. 펜 떼기는 바꾸지 않았고 512px 에어브러시 긴 획에서 134~208 ms였다(backlog B3-177).
+
+**재지 않은 것:** 환경 절의 Windows PC와 그 앱, Windows Sandbox의 1000Hz 끌기, 실제 펜.
+
