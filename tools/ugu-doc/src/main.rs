@@ -1689,7 +1689,16 @@ fn live(
         ..stroke
     };
     let started = Instant::now();
-    if let Some(rect) = split.stamp(&mut Stamp::default(), &stroke, false, wobble, frames, None) {
+    // As the app commits a stroke, on the renderer's threads.
+    let committed = split.stamp_strokes(
+        &mut Stamp::default(),
+        &mut Vec::new(),
+        &[(&stroke, false, None)],
+        wobble,
+        frames,
+        8,
+    );
+    if let Some(rect) = committed {
         let rect = if split.has_outline() {
             split.refresh_outline(&[], rect)
         } else {
@@ -1783,7 +1792,7 @@ fn splits(document: &Document, threads: u16) {
         &mut display,
     );
     let first = started.elapsed().as_secs_f64() * 1000.0;
-    let mut stamp = Stamp::default();
+    let (mut stamp, mut helpers) = (Stamp::default(), Vec::new());
     let (mut later, mut pen_ups) = (Vec::new(), Vec::new());
     let mut held: Vec<f64> = Vec::new();
     for layer in layers {
@@ -1818,7 +1827,14 @@ fn splits(document: &Document, threads: u16) {
         let started = Instant::now();
         let frames = history.document().frames;
         if let Some(rect) = split
-            .stamp(&mut stamp, &stroke, false, wobble, frames, None)
+            .stamp_strokes(
+                &mut stamp,
+                &mut helpers,
+                &[(&stroke, false, None)],
+                wobble,
+                frames,
+                usize::from(threads),
+            )
             .and_then(|rect| split.shown(rect, history.document().canvas))
         {
             composite(&split, &[], rect, &mut display);
