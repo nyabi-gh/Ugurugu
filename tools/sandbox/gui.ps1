@@ -2020,14 +2020,23 @@ Step 'A wide brush keeps up with the pointer' {
             }
             Set-Field $process $words[$field] '4096'
         }
+        # Invoking OK through UI Automation left the dialog open in one run,
+        # so it is clicked.
         if (Test-Named $process $words['canvas-size-height']) {
-            Invoke-Named $process 'OK'
+            $box = (Find-Element $process { param($n) $n -eq 'OK' } 15 "'OK'").Current.BoundingRectangle
+            [Native]::Glide([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2))
+            [Native]::Down()
+            [Native]::Up()
         }
         Start-Sleep -Seconds 1
         $paper = Find-Paper $process
         $w = $paper.Right - $paper.Left
         $h = $paper.Bottom - $paper.Top
         $canvasShot = Save-Screen 'wide-brush-canvas'
+        if ([Math]::Abs($w - $h) -gt 2) {
+            Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+            throw "${brush}: the paper is $w x $h, not 4096 px square; $canvasShot"
+        }
         Send-Keys $process 'b'
         # The pen's tab is the one shown at first.
         if ($tab) {
