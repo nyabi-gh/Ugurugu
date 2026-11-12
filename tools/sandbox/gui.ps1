@@ -132,8 +132,9 @@ public static class Native
         Up();
     }
 
-    // Dark pixels in the screen rectangle, as fast as the screen can be read.
-    static int Dark(System.Drawing.Bitmap bitmap, System.Drawing.Graphics graphics, int x, int y)
+    // Pixels in the screen rectangle whose channels average under `limit`,
+    // as fast as the screen can be read.
+    static int Dark(System.Drawing.Bitmap bitmap, System.Drawing.Graphics graphics, int x, int y, int limit = 96)
     {
         graphics.CopyFromScreen(x, y, 0, 0, bitmap.Size);
         var area = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
@@ -143,14 +144,14 @@ public static class Native
         bitmap.UnlockBits(data);
         int dark = 0;
         for (int i = 0; i < bytes.Length; i += 4)
-            if (bytes[i] + bytes[i + 1] + bytes[i + 2] < 3 * 96) dark++;
+            if (bytes[i] + bytes[i + 1] + bytes[i + 2] < 3 * limit) dark++;
         return dark;
     }
 
     // Drags from (x0, y0) to (x1, y1) in `moves` moves about 1 ms apart, as
     // a 1000 Hz mouse reports, holds, and returns the ms from the last move
     // until the rectangle shows dark pixels, or -1 after `timeoutMs`.
-    public static long DragAndWait(int x0, int y0, int x1, int y1, int moves, int x, int y, int w, int h, int timeoutMs)
+    public static long DragAndWait(int x0, int y0, int x1, int y1, int moves, int x, int y, int w, int h, int timeoutMs, int limit = 96)
     {
         var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         var graphics = System.Drawing.Graphics.FromImage(bitmap);
@@ -167,7 +168,7 @@ public static class Native
         long shown = -1;
         while (clock.ElapsedMilliseconds < timeoutMs)
         {
-            if (Dark(bitmap, graphics, x, y) > 0)
+            if (Dark(bitmap, graphics, x, y, limit) > 0)
             {
                 shown = clock.ElapsedMilliseconds;
                 break;
@@ -180,11 +181,11 @@ public static class Native
         return shown;
     }
 
-    public static int DarkIn(int x, int y, int w, int h)
+    public static int DarkIn(int x, int y, int w, int h, int limit = 96)
     {
         using (var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
         using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
-            return Dark(bitmap, graphics, x, y);
+            return Dark(bitmap, graphics, x, y, limit);
     }
 
     // Counts of dark pixels in the rectangle while playing: before, then
@@ -1995,6 +1996,74 @@ Step 'Canvas size by dragging the frame' {
     $close = { param($a, $b, $share) [Math]::Abs($a - $b) -le $b * $share }
     if (-not ($cursor -eq 'sizewe' -and (& $close $dragged $wanted 0.03) -and $paperShown -and
             (& $close $ratio ($dragged / $height) 0.02))) {
+        throw $detail
+    }
+    $detail
+}
+
+# Issue #157: a 512 px stroke dragged across a 4096 px canvas at 1000 Hz
+# fell behind the pointer when each sample was drawn on its own.
+Step 'A wide brush keeps up with the pointer' {
+    $words = Read-Words 'en'
+    $results = foreach ($pair in @(@($null, 'Ink Pen', 0.5), @('Airbrush', 'Soft Airbrush', 0))) {
+        $tab, $brush, $ahead = $pair
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+        Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+        $process = Start-App 2400 1500
+        # Set-Field's Enter has left the dialog open in one run and gone
+        # without the height field in the next, so the dialog is opened again
+        # or confirmed as it is found.
+        foreach ($field in 'canvas-size-width', 'canvas-size-height') {
+            if (-not (Test-Named $process $words[$field])) {
+                Invoke-Word $process $words 'menu-edit'
+                Invoke-Word $process $words 'edit-canvas-size'
+            }
+            Set-Field $process $words[$field] '4096'
+        }
+        if (Test-Named $process $words['canvas-size-height']) {
+            Invoke-Named $process 'OK'
+        }
+        Start-Sleep -Seconds 1
+        $paper = Find-Paper $process
+        $w = $paper.Right - $paper.Left
+        $h = $paper.Bottom - $paper.Top
+        $canvasShot = Save-Screen 'wide-brush-canvas'
+        Send-Keys $process 'b'
+        # The pen's tab is the one shown at first.
+        if ($tab) {
+            Invoke-Named $process $tab
+        }
+        Invoke-Named $process $brush
+        Set-Field $process 'Brush size' '512'
+        $size = Get-Value $process 'Brush size'
+        $radius = [int](256 * $w / 4096)
+        $y = [int](($paper.Top + $paper.Bottom) / 2)
+        $x0 = $paper.Left + $radius + 10
+        $x1 = $paper.Right - $radius - 10
+        # Ahead of the last sample by a share of the radius, which the
+        # samples before it reach only as they near it: half for the pen, none
+        # for the airbrush, whose soft edge stays light.
+        $lead = [int]($radius * $ahead)
+        $edge = @(($x1 + $lead - 2), ($y - 2), 4, 4)
+        # The soft airbrush's grey is far from black.
+        $limit = 200
+        $before = [Native]::DarkIn($edge[0], $edge[1], $edge[2], $edge[3], $limit)
+        $times = foreach ($run in 1..3) {
+            $ms = [Native]::DragAndWait($x0, $y, $x1, $y, 1500, $edge[0], $edge[1], $edge[2], $edge[3], 10000, $limit)
+            Start-Sleep -Milliseconds 500
+            $shot = Save-Screen "wide-brush-$run"
+            Send-Keys $process '^z'
+            Start-Sleep -Milliseconds 500
+            $ms
+        }
+        Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+        [pscustomobject]@{
+            Detail = "$brush ${size}px: paper $w x $h, $lead px ahead of the end, dark before $before, end shown after (ms): $($times -join ', '); $canvasShot; $shot"
+            Failed = $before -gt 0 -or $size -ne 512 -or ($times | Where-Object { $_ -lt 0 -or $_ -gt 150 })
+        }
+    }
+    $detail = ($results | ForEach-Object Detail) -join '; '
+    if ($results | Where-Object Failed) {
         throw $detail
     }
     $detail
