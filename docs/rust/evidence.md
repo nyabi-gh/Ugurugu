@@ -2522,7 +2522,7 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 
 **담은 것:** 이슈 #157의 3.6.1 제보(128px보다 굵은 브러시의 지연)에 대한 고침 둘: 그리는 중의 샘플을 프레임마다 한 번 그리기(#181, 121·122절)와 dab 획을 여러 스레드로 칠하기(#182, 123절). #179·#180은 문서다.
 
-**방법:** 판 번호, 릴리스 노트 첫 문단, `docs/README.md`의 판 목록만 바꾼 준비 커밋 `0ae9fee`(PR #183)에 BUILDING.md의 검사(서식, `cargo deny`, clippy, debug·release 시험, `native_deps.py`, release 빌드)와 `check_docs.py`를 돌려 실패가 없었다. 그 release 빌드로 Sandbox를 돌렸다: GUI 43/43(약 50분), pointer 13/13, 수용 11/11. GUI의 새 단계 "A wide brush keeps up with the pointer"는 이 실행에서 잉크 펜 쪽의 캔버스 크기 대화 상자가 UI Automation의 OK로 닫히지 않아 1024×768 캔버스에서 재고도 통과했다. OK를 마우스로 누르고 종이가 정사각형이 아니면 실패하게 고쳐 그 단계만 다시 돌렸다: 종이 1219×1219, 잉크 펜 31·47·36 ms, 에어브러시 45·31·22 ms. 실제 펜으로는 보지 않았다(B3-177).
+**방법:** 판 번호, 릴리스 노트 첫 문단, `docs/README.md`의 판 목록만 바꾼 준비 커밋 `0ae9fee`(PR #183)에 BUILDING.md의 검사(서식, `cargo deny`, clippy, debug·release 시험, `native_deps.py`, release 빌드)와 `check_docs.py`를 돌려 실패가 없었다. 그 release 빌드로 Sandbox를 돌렸다: GUI 43/43, pointer 13/13, 수용 11/11. GUI의 새 단계 "A wide brush keeps up with the pointer"는 이 실행에서 잉크 펜 쪽의 캔버스 크기 대화 상자가 UI Automation의 OK로 닫히지 않아 1024×768 캔버스에서 재고도 통과했다. OK를 마우스로 누르고 종이가 정사각형이 아니면 실패하게 고쳐 그 단계만 다시 돌렸다: 종이 1219×1219, 잉크 펜 31·47·36 ms, 에어브러시 45·31·22 ms. 실제 펜으로는 보지 않았다(B3-177).
 
 **CI:** PR #183 약 5분, main(`0ae9fee`) 실행 43194436700 5분 28초, 둘 다 통과.
 
