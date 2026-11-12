@@ -84,7 +84,7 @@ use ugu_core::ops::{
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | outline <in.ugurugu> <out.ugurugu> <one|all> <width> | outline-live <file.ugurugu> <line|air> <samples per frame> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | outline <in.ugurugu> <out.ugurugu> <one|all> <width> | outline-live <file.ugurugu> <line|air> <samples per frame> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu> | wide <edge> <brush id> <width> <strokes> | live <file.ugurugu or edge> <brush id> <width> <samples per frame>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -169,6 +169,16 @@ fn main() -> ExitCode {
             .parse()
             .map_err(|_| USAGE.to_owned())
             .and_then(|length| fade(Path::new(from), Path::new(to), length)),
+        ["wide", edge, brush, width, strokes] => {
+            match (edge.parse(), width.parse(), strokes.parse()) {
+                (Ok(edge), Ok(width), Ok(strokes)) => wide(edge, brush, width, strokes),
+                _ => Err(USAGE.to_owned()),
+            }
+        }
+        ["live", file, brush, width, per_frame] => match (width.parse(), per_frame.parse()) {
+            (Ok(width), Ok(per_frame)) => live_brush(file, brush, width, per_frame),
+            _ => Err(USAGE.to_owned()),
+        },
         ["digest", file, threads] => threads
             .parse()
             .map_err(|_| USAGE.to_owned())
@@ -1206,12 +1216,44 @@ fn percentiles(times: &mut [f64]) -> String {
 /// first frame's time and p50 and max per frame of the later rounds.
 /// `UGU_SHRINK` (2, 4, 8) draws the frames smaller, as playback does.
 fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
+    render_document(&open(path)?, threads, tile)
+}
+
+/// Frame times of one layer of `strokes` strokes `width` wide, drawn with
+/// the built-in brush `brush` at full pressure as a mouse draws them. The
+/// document is not saved, so a width no file may hold can be measured.
+fn wide(edge: u32, brush: &str, width: f32, strokes: usize) -> Result<(), String> {
+    let preset = ugu_core::brush::find(brush).ok_or("no such brush")?;
+    let mut builder = Builder::new([edge, edge]);
+    let layer = builder.paint("Wide", strokes, |_| Shape {
+        reach: 0.5,
+        ..Shape::plain(100)
+    });
+    builder.document.layers.push(layer);
+    let mut document = builder.document;
+    document.pixel = preset.brush.engine == BrushEngine::Pixel;
+    for stroke in document.store.strokes.values_mut() {
+        stroke.width = width;
+        stroke.brush = preset.brush;
+        stroke.color.0[3] = 255;
+        stroke.points = stroke
+            .points
+            .iter()
+            .map(|point| Point {
+                pressure: 1.0,
+                ..*point
+            })
+            .collect();
+    }
+    render_document(&document, 8, None)
+}
+
+fn render_document(document: &Document, threads: u16, tile: Option<u32>) -> Result<(), String> {
     use ugu_render::document::{
         DocumentRenderer, Purpose, TILE_EDGE, scaled_size, surface_estimate,
     };
     use ugu_render::plan::RenderPlan;
 
-    let document = open(path)?;
     let shrink = std::env::var("UGU_SHRINK")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
@@ -1219,7 +1261,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
         .unwrap_or(1);
     // Made ahead, so the times are of drawing alone.
     let plans: Vec<RenderPlan> = (0..i64::from(document.frames))
-        .map(|frame| RenderPlan::new(&document, Purpose::Display, frame))
+        .map(|frame| RenderPlan::new(document, Purpose::Display, frame))
         .collect();
     let plan = &plans[0];
     let [width, height] = scaled_size(document.canvas, shrink).map(|edge| edge as u16);
@@ -1235,7 +1277,7 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     for round in 0..3 {
         for (frame, plan) in (0..).zip(&plans) {
             let started = Instant::now();
-            renderer.render_scaled(&document, plan, frame, None, shrink, &mut pixmap);
+            renderer.render_scaled(document, plan, frame, None, shrink, &mut pixmap);
             let ms = started.elapsed().as_secs_f64() * 1000.0;
             if round == 0 && frame == 0 {
                 first = ms;
@@ -1267,13 +1309,13 @@ fn render(path: &Path, threads: u16, tile: Option<u32>) -> Result<(), String> {
     );
     let estimates: Vec<String> = [1, 2, 4, 8]
         .map(|shrink| {
-            let bytes = surface_estimate(&document, plan, shrink, TILE_EDGE);
+            let bytes = surface_estimate(document, plan, shrink, TILE_EDGE);
             format!("1/{shrink} {:.0}", bytes as f64 / (1024.0 * 1024.0))
         })
         .into();
     println!("layer surface estimate (MiB): {}", estimates.join(", "));
     let whole_peak = peak_working_set_mib();
-    splits(&document, threads);
+    splits(document, threads);
     println!(
         "peak working set: {whole_peak:.0} MiB after whole frames, {:.0} MiB in the end",
         peak_working_set_mib()
@@ -1512,13 +1554,53 @@ fn outline(from: &Path, to: &Path, which: &str, width: f32) -> Result<(), String
 /// What a stroke drawn on the layer with the most operations costs per
 /// frame, `per_frame` samples at a time, in the way the app shows it.
 fn outline_live(path: &Path, engine: &str, per_frame: usize) -> Result<(), String> {
+    let brush = Brush {
+        engine: if engine == "air" {
+            BrushEngine::Airbrush
+        } else {
+            BrushEngine::Line
+        },
+        opacity: 1.0,
+        hardness: if engine == "air" { 0.5 } else { 1.0 },
+        antialias: true,
+        size_dynamics: 0.8,
+        wobble_scale: 1.0,
+        ..Brush::default()
+    };
+    live(open(path)?, brush, 40.0, 0.8, per_frame)
+}
+
+/// `live` with the built-in brush `brush` at full pressure, on the file or,
+/// for a number, on an empty canvas of that edge.
+fn live_brush(file: &str, brush: &str, width: f32, per_frame: usize) -> Result<(), String> {
+    let preset = ugu_core::brush::find(brush).ok_or("no such brush")?;
+    let document = match file.parse::<u32>() {
+        Ok(edge) => {
+            let mut document = Document::new([edge, edge]);
+            document.pixel = preset.brush.engine == BrushEngine::Pixel;
+            document
+        }
+        Err(_) => open(Path::new(file))?,
+    };
+    live(document, preset.brush, width, 1.0, per_frame)
+}
+
+/// What a stroke `stroke_width` wide drawn with `brush` on the layer with
+/// the most operations costs per frame, `per_frame` samples at a time, in
+/// the way the app shows it, and what ending it costs.
+fn live(
+    mut document: Document,
+    brush: Brush,
+    stroke_width: f32,
+    pressure: f32,
+    per_frame: usize,
+) -> Result<(), String> {
     use ugu_core::history::History;
     use ugu_render::compose::{Stamp, composite};
     use ugu_render::document::DocumentRenderer;
     use ugu_render::live::LiveStroke;
     use ugu_render::stroke::Pen;
 
-    let mut document = open(path)?;
     let layer = most_operations(&mut document).ok_or("no paint layer")?;
     let Some(LayerKind::Paint(paint)) = document.layer(layer).map(|layer| &layer.kind) else {
         return Err("no paint layer".to_owned());
@@ -1548,7 +1630,7 @@ fn outline_live(path: &Path, engine: &str, per_frame: usize) -> Result<(), Strin
                 y: (f64::from(height) / 2.0
                     + f64::from(height) * 0.3 * (t * std::f64::consts::TAU * 3.0).sin())
                     as f32,
-                pressure: 0.8,
+                pressure,
             }
         })
         .collect();
@@ -1556,20 +1638,8 @@ fn outline_live(path: &Path, engine: &str, per_frame: usize) -> Result<(), Strin
     let stroke = Stroke {
         points: points.clone().into(),
         color: Rgba8(color),
-        width: 40.0,
-        brush: Brush {
-            engine: if engine == "air" {
-                BrushEngine::Airbrush
-            } else {
-                BrushEngine::Line
-            },
-            opacity: 1.0,
-            hardness: if engine == "air" { 0.5 } else { 1.0 },
-            antialias: true,
-            size_dynamics: 0.8,
-            wobble_scale: 1.0,
-            ..Brush::default()
-        },
+        width: stroke_width,
+        brush,
         seed: 7,
     };
     let frames = document.frames;
