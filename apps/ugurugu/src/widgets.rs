@@ -329,12 +329,71 @@ pub fn form_row<R>(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui) -> R)
     .inner
 }
 
+/// How a slider's length is shared out over its range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scale {
+    Even,
+    /// Equal lengths multiply the value by equal amounts, for a range whose
+    /// high end is hundreds of times its low one: evenly shared, the brush
+    /// sizes below 16 would have 3% of the slider. The low end is above
+    /// zero.
+    Ratio,
+}
+
+impl Scale {
+    /// The value `along` (0 to 1) the slider.
+    fn value(self, along: f32, low: f32, high: f32) -> f32 {
+        match self {
+            Self::Even => low + along * (high - low),
+            Self::Ratio => (low * (high / low).powf(along)).clamp(low, high),
+        }
+    }
+
+    /// How far along (0 to 1) the slider `value` is.
+    fn along(self, value: f32, low: f32, high: f32) -> f32 {
+        if high <= low {
+            return 0.0;
+        }
+        let along = match self {
+            Self::Even => (value - low) / (high - low),
+            Self::Ratio => (value.max(low) / low).ln() / (high / low).ln(),
+        };
+        along.clamp(0.0, 1.0)
+    }
+
+    /// `value` an arrow key further: a hundredth of the slider, and for
+    /// `Ratio` a whole unit at least, since its values show no decimals and
+    /// a hundredth near the low end is less than one.
+    fn stepped(self, value: f32, up: bool, low: f32, high: f32) -> f32 {
+        let way = if up { 1.0 } else { -1.0 };
+        let next = self.value(self.along(value, low, high) + way * 0.01, low, high);
+        let next = match self {
+            Self::Even => next,
+            Self::Ratio if up => next.max(value + 1.0),
+            Self::Ratio => next.min(value - 1.0),
+        };
+        next.clamp(low, high)
+    }
+}
+
 /// A slider: a 5-point groove filled with the accent up to the value and a
 /// round handle that turns amber when the pointer is on it.
 pub fn slider(
     ui: &mut Ui,
     value: &mut f32,
     range: std::ops::RangeInclusive<f32>,
+    name: &str,
+    width: f32,
+) -> Response {
+    slider_scaled(ui, value, range, Scale::Even, name, width)
+}
+
+/// `slider` with its length shared out as `scale` says.
+pub fn slider_scaled(
+    ui: &mut Ui,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    scale: Scale,
     name: &str,
     width: f32,
 ) -> Response {
@@ -347,30 +406,23 @@ pub fn slider(
     let span = (rect.width() - 2.0 * handle).max(1.0);
     if let Some(pointer) = response.interact_pointer_pos() {
         let t = ((pointer.x - left) / span).clamp(0.0, 1.0);
-        let new = low + t * (high - low);
+        let new = scale.value(t, low, high);
         if new != *value {
             *value = new;
             response.mark_changed();
         }
     }
     if response.has_focus() {
-        let step = (high - low) / 100.0;
         let delta = ui.input(|input| {
-            f32::from(
-                i8::from(input.key_pressed(egui::Key::ArrowRight))
-                    - i8::from(input.key_pressed(egui::Key::ArrowLeft)),
-            )
+            i8::from(input.key_pressed(egui::Key::ArrowRight))
+                - i8::from(input.key_pressed(egui::Key::ArrowLeft))
         });
-        if delta != 0.0 {
-            *value = (*value + delta * step).clamp(low, high);
+        if delta != 0 {
+            *value = scale.stepped(*value, delta > 0, low, high);
             response.mark_changed();
         }
     }
-    let t = if high > low {
-        ((*value - low) / (high - low)).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
+    let t = scale.along(*value, low, high);
     let x = left + t * span;
     let painter = ui.painter();
     let groove = Rect::from_min_max(
@@ -1068,6 +1120,49 @@ pub fn menu_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ratio_slider_gives_every_doubling_the_same_length() {
+        let (low, high) = (1.0, 512.0);
+        let along = |value| Scale::Ratio.along(value, low, high);
+        assert_eq!(along(1.0), 0.0);
+        assert_eq!(along(512.0), 1.0);
+        for doubled in [2.0, 16.0, 128.0, 512.0] {
+            let length = along(doubled) - along(doubled / 2.0);
+            assert!((length - 1.0 / 9.0).abs() < 1e-5, "{doubled}: {length}");
+        }
+        for value in [1.0, 6.0, 37.5, 128.0, 512.0] {
+            let back = Scale::Ratio.value(along(value), low, high);
+            assert!((back - value).abs() < value * 1e-4, "{value}: {back}");
+        }
+        assert_eq!(Scale::Ratio.value(0.0, low, high), 1.0);
+        assert_eq!(Scale::Ratio.value(1.0, low, high), 512.0);
+        // Evenly shared, the same sizes are where they were.
+        assert_eq!(Scale::Even.along(64.5, 1.0, 128.0), 0.5);
+        assert_eq!(Scale::Even.value(0.5, 1.0, 128.0), 64.5);
+    }
+
+    #[test]
+    fn an_arrow_key_moves_a_ratio_slider_a_whole_unit_at_least() {
+        let (low, high) = (1.0, 512.0);
+        let step = |value, up| Scale::Ratio.stepped(value, up, low, high);
+        assert_eq!(step(1.0, true), 2.0);
+        assert_eq!(step(2.0, false), 1.0);
+        assert_eq!(step(1.0, false), 1.0);
+        assert_eq!(step(512.0, true), 512.0);
+        // Further up, a hundredth of the slider is more than one.
+        let up = step(256.0, true);
+        assert!((up / 256.0 - 512f32.powf(0.01)).abs() < 1e-4, "{up}");
+        let mut value = low;
+        let mut presses = 0;
+        while value < high {
+            value = step(value, true);
+            presses += 1;
+        }
+        assert!(presses < 100, "{presses}");
+        // Evenly shared, a key is a hundredth of the range.
+        assert_eq!(Scale::Even.stepped(50.0, true, 0.0, 100.0), 51.0);
+    }
 
     #[test]
     fn a_colour_code_names_the_alpha_only_when_translucent() {

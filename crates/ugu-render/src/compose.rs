@@ -1610,6 +1610,73 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_widest_stroke_drawn_and_committed_is_within_a_level_of_a_full_render() {
+        let find = |id| ugu_core::brush::find(id).unwrap().brush;
+        let smooth = Brush {
+            antialias: true,
+            ..find("ink-pen")
+        };
+        let brushes = [
+            ("ink-pen", find("ink-pen")),
+            ("antialiased pen", smooth),
+            ("opaque-marker", find("opaque-marker")),
+            ("soft-airbrush", find("soft-airbrush")),
+            ("rough-spray", find("rough-spray")),
+        ];
+        let frame = 4;
+        for (name, brush) in brushes {
+            let mut history = History::new(Document::new([900, 760]), true);
+            let layer = paint_layers(&history)[0];
+            let mut wide = stroke([230.0, 370.0], [680.0, 400.0], [90, 20, 150, 255], 31);
+            wide.width = *ugu_core::store::limits::STROKE_WIDTH.end();
+            wide.brush = brush;
+            let document = history.document();
+            let wobble = layer_wobble(document, layer);
+            let (mut split, _) = split(&history, layer, frame);
+            let pen = crate::stroke::Pen::new(&wide, wobble, document.frames);
+            let mut live = LiveStroke::new([900, 760], pen, split.frame, wide.color.0, false, None);
+            for seen in 1..=wide.points.len() {
+                live.update(&wide.points[..seen]);
+            }
+            let mut drawing = canvas(document);
+            composite(&split, &[&live], whole(document), &mut drawing);
+            split
+                .stamp(
+                    &mut Stamp::default(),
+                    &wide,
+                    false,
+                    wobble,
+                    document.frames,
+                    None,
+                )
+                .unwrap();
+            let mut committed = canvas(document);
+            composite(&split, &[], whole(document), &mut committed);
+            history
+                .edit("Draw", |document| {
+                    command::draw(document, layer, wide, false, None)
+                })
+                .unwrap();
+            let full = render(history.document(), frame);
+            let inked_rows = full
+                .data_as_u8_slice()
+                .chunks(900 * 4)
+                .filter(|row| row.chunks(4).any(|pixel| pixel[..3] != [255; 3]))
+                .count();
+            assert!(inked_rows > 400, "{name}: {inked_rows} rows drawn on");
+            let most = max_difference(&committed, &full);
+            assert!(most <= 1, "{name}: committed differs by {most}");
+            // An aliased line is shown from antialiased coverage cut at the
+            // threshold while it is drawn, which rounds some edge pixels
+            // the other way at any width (`LiveStroke::line`).
+            if brush.engine != BrushEngine::Line || brush.antialias {
+                let most = max_difference(&drawing, &full);
+                assert!(most <= 1, "{name}: while drawn differs by {most}");
+            }
+        }
+    }
+
     /// The pen of a fresh install, aliased and 6 wide, in a wave across a
     /// 390×300 canvas as `files::end_to_end` draws it.
     fn ink(seed: u64) -> Stroke {

@@ -9,10 +9,12 @@ use ugu_session::Tool;
 use super::{Canvas, Interaction};
 
 /// The sizes `[` and `]` step through, closer together where a pixel more
-/// shows; their ends bound the size slider and the drag.
-pub const BRUSH_SIZES: [f32; 24] = [
+/// shows; their ends bound the size slider and the drag. The last is the
+/// widest stroke a document holds (`store::limits::STROKE_WIDTH`).
+pub const BRUSH_SIZES: [f32; 32] = [
     1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 28.0, 32.0, 40.0,
-    48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0,
+    48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0, 160.0, 192.0, 224.0, 256.0, 320.0, 384.0, 448.0,
+    512.0,
 ];
 
 impl Canvas {
@@ -135,12 +137,27 @@ mod tests {
         canvas.apply(CanvasInput::Extend(at(100.0 - 1000.0 * scale, 80.0)));
         assert_eq!(canvas.brushes().pen.width, 1.0);
         canvas.apply(CanvasInput::Extend(at(100.0 + 1000.0 * scale, 80.0)));
-        assert_eq!(canvas.brushes().pen.width, 128.0);
+        assert_eq!(canvas.brushes().pen.width, 512.0);
         canvas.apply(CanvasInput::End(at(100.0 + 3.0 * scale, 80.0)));
         assert_eq!(canvas.brushes().pen.width, 13.0);
         assert_eq!(canvas.brush_size_dragged(), None);
         // The drag drew nothing.
         assert!(canvas.session().document().store.strokes.is_empty());
+    }
+
+    #[test]
+    fn the_sizes_rise_to_the_widest_stroke_a_document_holds() {
+        assert!(BRUSH_SIZES.windows(2).all(|pair| pair[0] < pair[1]));
+        let widest = *ugu_core::store::limits::STROKE_WIDTH.end();
+        assert_eq!(BRUSH_SIZES[BRUSH_SIZES.len() - 1], widest);
+        let mut canvas = canvas();
+        canvas.brushes_mut().pen.width = 128.0;
+        canvas.step_brush_size(true);
+        assert_eq!(canvas.brushes().pen.width, 160.0);
+        for _ in 0..BRUSH_SIZES.len() {
+            canvas.step_brush_size(true);
+        }
+        assert_eq!(canvas.brushes().pen.width, widest);
     }
 
     #[test]

@@ -444,15 +444,12 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         | Tool::Symmetry => tr("brush-size"),
     };
     let range = BRUSH_SIZES[0]..=BRUSH_SIZES[BRUSH_SIZES.len() - 1];
-    slider_row(
-        ui,
-        tr("size"),
-        size_name,
-        &mut settings.width,
-        range,
-        " px",
-        0,
-    );
+    widgets::form_row(ui, tr("size"), |ui| {
+        let width = &mut settings.width;
+        widgets::number(ui, width, range.clone(), " px", 0, 64.0, size_name);
+        let length = ui.available_width().max(40.0);
+        widgets::slider_scaled(ui, width, range, widgets::Scale::Ratio, size_name, length);
+    });
     let pixel = settings.preset.brush.engine == ugu_core::store::BrushEngine::Pixel;
     if pixel {
         settings.width = settings.width.round().max(1.0);

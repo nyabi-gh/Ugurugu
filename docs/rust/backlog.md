@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-11-09 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-11-12 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -124,6 +124,7 @@
 | B3-72 | `vello_cpu`·`vello_common` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다. 펜을 뗄 때 찍는 선은 Vello의 strip 생성기를 직접 돌리고 coarse 단계의 채우기 규칙을 따라 하므로(decisions.md 2절), 판을 올리면 `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`가 전체 렌더와 바이트가 같은지 본다 | `Cargo.toml`, `crates/ugu-render/src/compose.rs` `Stamp::line_coverage` | evidence.md 렌더러·92절 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
+| B3-177 | 128px보다 굵은 브러시의 그리는 중·펜을 뗄 때 비용 | 크기 상한을 512px로 올렸다(decisions.md 3절). Apple M4에서만 쟀고 환경 절의 Windows PC와 실제 앱에서는 보지 않았다(evidence.md 119절). 그 값으로 512px 에어브러시는 프레임당 16샘플에서 프레임 24.7 ms로 60Hz 예산을 넘고, 캔버스를 가로지르는 긴 획은 펜을 뗄 때 135~150 ms다(128px에서도 48~52 ms). 앱은 샘플마다 갱신하고 합성하므로 프레임당 한 번으로 모으면 줄 것이다(**가설**, 외곽선이 있는 레이어는 이미 그렇게 한다). 할 일: Windows PC에서 `ugu-doc wide`·`live`로 같은 표, 앱에서 512px 획과 크기 슬라이더를 화면으로 확인, 느리면 합성을 모으는 쪽을 잰다. 이슈 #157이 바란 750px은 형식의 획 굵기 상한(512)을 올려야 해 하지 않았다 | `apps/ugurugu/src/canvas.rs` `extend_stroke`, `canvas/brush_size.rs` `BRUSH_SIZES`, `crates/ugu-render/src/compose.rs` `Split::stamp` | 2026-11-12 이슈 #157 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
