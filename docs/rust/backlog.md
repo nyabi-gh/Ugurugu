@@ -12,6 +12,7 @@
 |---|---|---|---|---|
 | B3-142 | 간체 중국어 번역을 읽어 본다 | 2.2.13 번역이 없어 새로 옮겼고 중국어를 읽는 사람의 검토를 받지 않았다(decisions.md 9절). 용어와 어색한 문장을 고친다 | `apps/ugurugu/i18n/strings.txt`의 다섯째 열 | 2026-10-16 간체 중국어 |
 | B3-176 | 실제 펜으로 페이드 획을 그어 보고, 외곽선을 켠 레이어에도 그어 본다 | Sandbox의 합성 마우스로 모양과 픽셀 연필의 칸 숨김을 확인했고, 켠 경로의 프레임 시간도 쟀다(evidence.md 110·111절). 합성 입력에는 압력이 없어, 압력이 굵기와 곱해진 획은 실행 앱에서 보지 않았다. 3.6.0은 이 확인 없이 냈다(114절) | 브러시의 페이드 칸, 레이어 속성의 외곽선, `crates/ugu-render/src/stroke.rs` | 2026-11-08 이슈 #157 |
+| B3-177 | 굵은 브러시를 실제 펜으로 그어 본다 | 크기 상한을 512px로 올렸고(decisions.md 3절), 그리는 중에 샘플마다 다시 그리던 것을 프레임마다 한 번 그리게(evidence.md 121·122절), 펜을 뗄 때 dab 획을 여러 스레드로 칠하게 고쳤다(123절). 모두 마우스 입력(시험, `ugu-doc`, Sandbox의 1000Hz 끌기)으로만 쟀고, 3.6.2는 이 확인 없이 냈다(124절). 할 일: 압력이 있는 펜으로 512px 잉크 펜과 에어브러시를 4096² 캔버스에 그어, 포인터를 따라가는지 보고 펜 떼기를 앱 로그(`pen-up shown`)로 읽는다. 이슈 #157이 바란 750px은 형식의 획 굵기 상한(512)을 올려야 해 하지 않았다 | `apps/ugurugu/src/canvas.rs` `show_stroke`·`end_drawing`, `crates/ugu-render/src/dab.rs` `Painter::paint` | 2026-11-12 이슈 #157 |
 
 ## 2. 열린 gate
 
@@ -124,7 +125,6 @@
 | B3-72 | `vello_cpu`·`vello_common` 0.x API 위험 | 0.x라서 판을 올릴 때 API가 바뀔 수 있다. 판 고정과 회귀 시험으로 막고 있다. 펜을 뗄 때 찍는 선은 Vello의 strip 생성기를 직접 돌리고 coarse 단계의 채우기 규칙을 따라 하므로(decisions.md 2절), 판을 올리면 `compose::tests::an_aliased_stroke_stamped_lays_the_pixels_a_full_render_draws`가 전체 렌더와 바이트가 같은지 본다 | `Cargo.toml`, `crates/ugu-render/src/compose.rs` `Stamp::line_coverage` | evidence.md 렌더러·92절 |
 | B3-73 | 떠 있는 패널의 Tab 순서 | 떠 있는 `egui::Window` 패널 사이의 키보드 이동 순서를 확인하지 않았다 | `apps/ugurugu/src/ui` | evidence.md IME·글꼴·접근성·키보드 |
 | B3-76 | 시작 직후 제목의 `*` | 2026-10-12 사용자 실행에서 새 문서 제목이 `제목 없음*`로 떴다. 다음 실행에서는 없었다. 원인 미확인(가설: 복구 또는 픽셀 모드 상태) | `apps/ugurugu/src/files.rs` | 2026-10-12 사용자 실행 |
-| B3-177 | 굵은 브러시를 실제 펜으로 확인 | 크기 상한을 512px로 올렸고(decisions.md 3절), 그리는 중에 샘플마다 다시 그리던 것을 프레임마다 한 번 그리게(evidence.md 121·122절), 펜을 뗄 때 dab 획을 여러 스레드로 칠하게 고쳤다(123절). 모두 마우스 입력(시험, `ugu-doc`, Sandbox의 1000Hz 끌기)으로만 쟀다. 할 일: 압력이 있는 펜으로 512px 잉크 펜과 에어브러시를 4096² 캔버스에 그려 포인터를 따라가는지와 펜 떼기를 앱 로그(`pen-up shown`)로 본다. 이슈 #157이 바란 750px은 형식의 획 굵기 상한(512)을 올려야 해 하지 않았다 | `apps/ugurugu/src/canvas.rs` `show_stroke`·`end_drawing`, `crates/ugu-render/src/dab.rs` `Painter::paint` | 2026-11-12 이슈 #157 |
 
 ## 9. 3.0.0 출시 뒤 코드 검토에서 남은 것
 
