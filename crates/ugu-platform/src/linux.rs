@@ -8,8 +8,10 @@ pub mod clipboard;
 pub mod clock;
 pub mod dialog;
 pub mod folder;
+pub mod instance;
 pub mod locale;
 pub mod memory;
+pub mod session;
 pub mod window;
 
-pub use crate::unsupported::{association, crash, file, instance, recent, session};
+pub use crate::unsupported::{association, crash, file, recent};

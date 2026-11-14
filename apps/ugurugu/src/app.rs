@@ -62,6 +62,10 @@ pub enum UiEvent {
     /// egui's accessibility tree changed.
     AccessibilityTree(egui::accesskit::TreeUpdate),
     Window(WindowChange),
+    #[cfg(target_os = "linux")]
+    LinuxWake,
+    #[cfg(target_os = "linux")]
+    DroppedFile(std::path::PathBuf),
 }
 
 impl From<accesskit_winit::Event> for UiEvent {
@@ -196,8 +200,21 @@ fn linux_window_attributes(
 }
 
 #[cfg(target_os = "linux")]
-fn install_linux_window(window: &Window, hwnd: isize) -> Option<ugu_platform::window::LinuxWindow> {
+fn install_linux_window(
+    window: &Window,
+    hwnd: isize,
+    proxy: &EventLoopProxy<UiEvent>,
+) -> Option<ugu_platform::window::LinuxWindow> {
     use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+
+    let wake_proxy = proxy.clone();
+    let wake = move || {
+        let _ = wake_proxy.send_event(UiEvent::LinuxWake);
+    };
+    let drop_proxy = proxy.clone();
+    let on_drop = move |path| {
+        let _ = drop_proxy.send_event(UiEvent::DroppedFile(path));
+    };
 
     let display = window.display_handle().ok()?;
     let win_handle = window.window_handle().ok()?;
@@ -209,6 +226,8 @@ fn install_linux_window(window: &Window, hwnd: isize) -> Option<ugu_platform::wi
                     hwnd,
                     disp.display.as_ptr(),
                     win.surface.as_ptr(),
+                    wake,
+                    on_drop,
                 )
             }
             .inspect_err(|error| tracing::warn!(%error, "cannot start Wayland window services"))
@@ -216,10 +235,11 @@ fn install_linux_window(window: &Window, hwnd: isize) -> Option<ugu_platform::wi
         }
         (_, RawWindowHandle::Xlib(win)) => u32::try_from(win.window)
             .ok()
-            .map(|xid| ugu_platform::window::LinuxWindow::install_x11(hwnd, xid)),
+            .map(|xid| ugu_platform::window::LinuxWindow::install_x11(hwnd, xid, wake)),
         (_, RawWindowHandle::Xcb(win)) => Some(ugu_platform::window::LinuxWindow::install_x11(
             hwnd,
             win.window.get(),
+            wake,
         )),
         _ => None,
     }
@@ -323,7 +343,7 @@ impl Session {
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
         #[cfg(target_os = "linux")]
-        let linux_window = install_linux_window(&window, hwnd);
+        let linux_window = install_linux_window(&window, hwnd, &proxy);
         let to_open = to_render.clone();
         let open = move |path: Option<std::path::PathBuf>| {
             let taken = match path {
@@ -541,6 +561,20 @@ impl ApplicationHandler<UiEvent> for App {
                         }
                         WindowChange::Cursor(None) => session.window.set_cursor_visible(false),
                     }
+                }
+                return;
+            }
+            #[cfg(target_os = "linux")]
+            UiEvent::LinuxWake => {
+                ugu_platform::instance::poll_current_thread_receivers();
+                return;
+            }
+            #[cfg(target_os = "linux")]
+            UiEvent::DroppedFile(path) => {
+                if let Some(session) = self.session.as_ref() {
+                    let _ = session
+                        .to_render
+                        .send(ToRender::Window(WindowEvent::DroppedFile(path)));
                 }
                 return;
             }

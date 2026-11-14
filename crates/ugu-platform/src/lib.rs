@@ -59,6 +59,8 @@ pub mod folder {
 }
 
 pub mod instance {
+    #[cfg(target_os = "linux")]
+    pub use crate::os::instance::poll_current_thread_receivers;
     pub use crate::os::instance::{DocumentReceiver, StartLock, bring_to_front, hand_over};
 }
 

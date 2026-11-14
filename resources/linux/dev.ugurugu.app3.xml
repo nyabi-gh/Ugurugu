@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-ugurugu">
+    <comment>Ugurugu document</comment>
+    <comment xml:lang="ko">Ugurugu 문서</comment>
+    <comment xml:lang="ja">Ugurugu ドキュメント</comment>
+    <comment xml:lang="zh_CN">Ugurugu 文档</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.ugurugu"/>
+    <icon name="dev.ugurugu.app3"/>
+  </mime-type>
+</mime-info>

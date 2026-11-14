@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Ugurugu 3
+GenericName=Drawing and Animation
+GenericName[ko]=드로잉 및 애니메이션
+GenericName[ja]=ペイント・アニメーション
+GenericName[zh_CN]=绘画与动画
+Comment=Draw wobbling lines and frame-by-frame animation
+Comment[ko]=우글거리는 선과 프레임별 애니메이션을 그립니다
+Comment[ja]=揺れる線とコマ撮りアニメーションを描きます
+Comment[zh_CN]=绘制抖动线条与逐帧动画
+Exec=ugurugu %f
+Icon=dev.ugurugu.app3
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=application/x-ugurugu;image/png;image/jpeg;image/webp;image/bmp;image/gif;
+StartupWMClass=dev.ugurugu.app3
+StartupNotify=true

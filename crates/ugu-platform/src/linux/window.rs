@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
@@ -22,7 +23,7 @@ use ugu_platform_types::clipboard::{Encoded, ReadError};
 use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::protocol::{
     wl_data_device::{self, WlDataDevice},
-    wl_data_device_manager::WlDataDeviceManager,
+    wl_data_device_manager::{DndAction, WlDataDeviceManager},
     wl_data_offer::{self, WlDataOffer},
     wl_data_source::{self, WlDataSource},
     wl_keyboard::{self, WlKeyboard},
@@ -33,6 +34,10 @@ use wayland_client::protocol::{
     wl_touch::{self, WlTouch},
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
+use wayland_protocols::xdg::activation::v1::client::{
+    xdg_activation_token_v1::{self, XdgActivationTokenV1},
+    xdg_activation_v1::XdgActivationV1,
+};
 use wayland_protocols::xdg::foreign::zv2::client::{
     zxdg_exported_v2::{self, ZxdgExportedV2},
     zxdg_exporter_v2::ZxdgExporterV2,
@@ -40,11 +45,16 @@ use wayland_protocols::xdg::foreign::zv2::client::{
 
 const PNG_MIME: &str = "image/png";
 const TIFF_MIME: &str = "image/tiff";
+const URI_LIST_MIME: &str = "text/uri-list";
 const PIPE_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_URI_LIST_BYTES: usize = 256 * 1024;
+
+type WakeFn = Arc<dyn Fn() + Send + Sync>;
+type DropFileFn = Arc<dyn Fn(PathBuf) + Send + Sync>;
 
 enum Entry {
-    Wayland { worker: WaylandHandle },
-    X11 { window: u32 },
+    Wayland { worker: WaylandHandle, wake: WakeFn },
+    X11 { window: u32, wake: WakeFn },
 }
 
 struct Registry {
@@ -78,20 +88,25 @@ impl LinuxWindow {
         hwnd: isize,
         display: *mut c_void,
         surface: *mut c_void,
+        wake: impl Fn() + Send + Sync + 'static,
+        on_drop: impl Fn(PathBuf) + Send + Sync + 'static,
     ) -> Result<Self, String> {
+        let wake: WakeFn = Arc::new(wake);
+        let on_drop: DropFileFn = Arc::new(on_drop);
         // SAFETY: forwarded from the caller; `Session` drops `LinuxWindow`
         // (and joins its thread) before dropping `Arc<Window>`.
-        let worker = unsafe { WaylandHandle::spawn(display, surface)? };
+        let worker = unsafe { WaylandHandle::spawn(display, surface, on_drop)? };
         let mut reg = registry().lock().expect("window registry poisoned");
-        reg.by_hwnd.insert(hwnd, Entry::Wayland { worker });
+        reg.by_hwnd.insert(hwnd, Entry::Wayland { worker, wake });
         reg.active = Some(hwnd);
         Ok(Self { hwnd })
     }
 
     /// Registers an X11 window XID (`Xlib` or `Xcb`).
-    pub fn install_x11(hwnd: isize, window: u32) -> Self {
+    pub fn install_x11(hwnd: isize, window: u32, wake: impl Fn() + Send + Sync + 'static) -> Self {
+        let wake: WakeFn = Arc::new(wake);
         let mut reg = registry().lock().expect("window registry poisoned");
-        reg.by_hwnd.insert(hwnd, Entry::X11 { window });
+        reg.by_hwnd.insert(hwnd, Entry::X11 { window, wake });
         reg.active = Some(hwnd);
         Self { hwnd }
     }
@@ -106,7 +121,7 @@ impl Drop for LinuxWindow {
             }
             reg.by_hwnd.remove(&self.hwnd)
         };
-        if let Some(Entry::Wayland { mut worker }) = removed {
+        if let Some(Entry::Wayland { mut worker, .. }) = removed {
             worker.shutdown();
         }
     }
@@ -139,6 +154,93 @@ pub(crate) fn active_display_kind() -> DisplayKind {
     }
 }
 
+/// Wakes the `winit` event loop for `hwnd` (or the active window when `hwnd == 0`).
+pub(crate) fn wake_ui(hwnd: isize) {
+    let wake = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { wake, .. } | Entry::X11 { wake, .. } => Some(wake.clone()),
+        })
+    };
+    if let Some(wake) = wake {
+        wake();
+    }
+}
+
+/// Records an `XDG_ACTIVATION_TOKEN` / `DESKTOP_STARTUP_ID` forwarded from a
+/// second start so [`bring_to_front`] can activate the Wayland surface.
+pub(crate) fn set_activation_token(hwnd: isize, token: String) {
+    let sender = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { worker, .. } => Some(worker.sender.clone()),
+            Entry::X11 { .. } => None,
+        })
+    };
+    if let Some(sender) = sender
+        && sender.send(Command::SetActivationToken(token)).is_ok()
+    {
+        let _ = sender.wake();
+    }
+}
+
+/// Raises and activates `hwnd` on Wayland (`xdg_activation_v1`) or X11
+/// (`_NET_ACTIVE_WINDOW` + `MapWindow`).
+pub(crate) fn bring_to_front(hwnd: isize) {
+    let target = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { worker, .. } => Some(Ok(worker.sender.clone())),
+            Entry::X11 { window, .. } => Some(Err(*window)),
+        })
+    };
+    match target {
+        Some(Ok(sender)) => {
+            if sender.send(Command::Activate).is_ok() {
+                let _ = sender.wake();
+            }
+        }
+        Some(Err(xid)) => x11_bring_to_front(xid),
+        None => {}
+    }
+}
+
+fn x11_bring_to_front(window: u32) {
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::{
+        ClientMessageEvent, ConfigureWindowAux, ConnectionExt as _, EventMask, StackMode,
+    };
+
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        return;
+    };
+    let Some(screen) = conn.setup().roots.get(screen_num) else {
+        return;
+    };
+    let root = screen.root;
+    let _ = conn.map_window(window);
+    let _ = conn.configure_window(
+        window,
+        &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+    );
+    if let Ok(cookie) = conn.intern_atom(false, b"_NET_ACTIVE_WINDOW")
+        && let Ok(reply) = cookie.reply()
+    {
+        let msg =
+            ClientMessageEvent::new(32, window, reply.atom, [1, x11rb::CURRENT_TIME, 0, 0, 0]);
+        let _ = conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            msg,
+        );
+    }
+    let _ = conn.flush();
+}
+
 /// Formats `parent_window` for `org.freedesktop.portal.FileChooser` (`"wayland:<handle>"`,
 /// `"x11:<hex>"`, or `""` when unattached).
 pub(crate) fn portal_parent_window(owner: isize) -> String {
@@ -146,8 +248,8 @@ pub(crate) fn portal_parent_window(owner: isize) -> String {
         let reg = registry().lock().expect("window registry poisoned");
         let key = if owner != 0 { Some(owner) } else { reg.active };
         key.and_then(|k| match reg.by_hwnd.get(&k)? {
-            Entry::Wayland { worker } => Some(Ok(worker.sender.clone())),
-            Entry::X11 { window } => Some(Err(*window)),
+            Entry::Wayland { worker, .. } => Some(Ok(worker.sender.clone())),
+            Entry::X11 { window, .. } => Some(Err(*window)),
         })
     };
     match worker_or_x11 {
@@ -204,7 +306,7 @@ fn active_wayland_sender() -> Option<CommandSender> {
     let reg = registry().lock().expect("window registry poisoned");
     let hwnd = reg.active?;
     match reg.by_hwnd.get(&hwnd)? {
-        Entry::Wayland { worker } => Some(worker.sender.clone()),
+        Entry::Wayland { worker, .. } => Some(worker.sender.clone()),
         Entry::X11 { .. } => None,
     }
 }
@@ -233,6 +335,9 @@ enum Command {
     BeginRead {
         reply: Sender<Result<Option<(OwnedFd, ImageMime)>, ReadError>>,
     },
+    SetActivationToken(String),
+    Activate,
+    FinishDnd(WlDataOffer),
     Shutdown,
 }
 
@@ -271,7 +376,11 @@ impl WaylandHandle {
     /// # Safety
     /// `display` and `surface` must be live Wayland client pointers for the
     /// lifetime of the spawned worker.
-    unsafe fn spawn(display: *mut c_void, surface: *mut c_void) -> Result<Self, String> {
+    unsafe fn spawn(
+        display: *mut c_void,
+        surface: *mut c_void,
+        on_drop: DropFileFn,
+    ) -> Result<Self, String> {
         // SAFETY: `EFD_CLOEXEC | EFD_NONBLOCK` creates a fresh kernel eventfd.
         let raw_efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         if raw_efd < 0 {
@@ -294,9 +403,12 @@ impl WaylandHandle {
             tx,
             wake_fd: wake_fd.clone(),
         };
+        let worker_sender = sender.clone();
         let thread = std::thread::Builder::new()
             .name("wayland-services".to_owned())
-            .spawn(move || run_wayland_worker(conn, wl_surface, rx, wake_fd))
+            .spawn(move || {
+                run_wayland_worker(conn, wl_surface, rx, wake_fd, worker_sender, on_drop)
+            })
             .map_err(|error| error.to_string())?;
 
         Ok(Self {
@@ -323,14 +435,19 @@ struct SeatSlot {
     latest_serial: u32,
     has_focus: bool,
     selection_offer: Option<ObjectId>,
+    dnd_offer: Option<(ObjectId, bool)>,
 }
 
 struct WaylandState {
     surface: WlSurface,
+    sender: CommandSender,
+    on_drop: DropFileFn,
     data_manager: Option<WlDataDeviceManager>,
     exporter: Option<ZxdgExporterV2>,
     exported: Option<ZxdgExportedV2>,
     exported_handle: Option<String>,
+    activation: Option<XdgActivationV1>,
+    pending_token: Option<String>,
     seats: HashMap<ObjectId, (WlSeat, SeatSlot)>,
     latest_seat: Option<ObjectId>,
     offer_mimes: HashMap<ObjectId, (WlDataOffer, Vec<String>)>,
@@ -339,13 +456,17 @@ struct WaylandState {
 }
 
 impl WaylandState {
-    fn new(surface: WlSurface) -> Self {
+    fn new(surface: WlSurface, sender: CommandSender, on_drop: DropFileFn) -> Self {
         Self {
             surface,
+            sender,
+            on_drop,
             data_manager: None,
             exporter: None,
             exported: None,
             exported_handle: None,
+            activation: None,
+            pending_token: None,
             seats: HashMap::new(),
             latest_seat: None,
             offer_mimes: HashMap::new(),
@@ -372,6 +493,19 @@ impl WaylandState {
             .values_mut()
             .map(|(_, slot)| slot)
             .find(|slot| slot.has_focus || slot.data_device.is_some())
+    }
+
+    fn active_seat_with_serial(&self) -> Option<(&WlSeat, u32)> {
+        if let Some(id) = &self.latest_seat
+            && let Some((seat, slot)) = self.seats.get(id)
+            && slot.latest_serial != 0
+        {
+            return Some((seat, slot.latest_serial));
+        }
+        self.seats
+            .values()
+            .find(|(_, slot)| slot.latest_serial != 0)
+            .map(|(seat, slot)| (seat, slot.latest_serial))
     }
 
     fn cleanup(&mut self) {
@@ -409,6 +543,9 @@ impl WaylandState {
         if let Some(exporter) = self.exporter.take() {
             exporter.destroy();
         }
+        if let Some(activation) = self.activation.take() {
+            activation.destroy();
+        }
     }
 }
 
@@ -417,10 +554,12 @@ fn run_wayland_worker(
     surface: WlSurface,
     rx: Receiver<Command>,
     wake_fd: Arc<OwnedFd>,
+    sender: CommandSender,
+    on_drop: DropFileFn,
 ) {
     let mut queue: EventQueue<WaylandState> = conn.new_event_queue();
     let qh = queue.handle();
-    let mut state = WaylandState::new(surface);
+    let mut state = WaylandState::new(surface, sender, on_drop);
 
     let _registry = conn.display().get_registry(&qh, ());
     // Two roundtrips bind globals (`wl_seat`, `wl_data_device_manager`,
@@ -569,6 +708,35 @@ fn handle_command(
             })();
             let _ = reply.send(result);
         }
+        Command::SetActivationToken(token) => {
+            if !token.is_empty() {
+                state.pending_token = Some(token);
+            }
+        }
+        Command::Activate => {
+            let Some(activation) = state.activation.as_ref().cloned() else {
+                return;
+            };
+            if let Some(token) = state.pending_token.take() {
+                activation.activate(token, &state.surface);
+                let _ = conn.flush();
+                return;
+            }
+            if let Some((seat, serial)) = state.active_seat_with_serial() {
+                let req = activation.get_activation_token(qh, ());
+                req.set_serial(serial, seat);
+                req.set_surface(&state.surface);
+                req.commit();
+                let _ = conn.flush();
+            }
+        }
+        Command::FinishDnd(offer) => {
+            if offer.version() >= 3 {
+                offer.finish();
+            }
+            offer.destroy();
+            let _ = conn.flush();
+        }
         Command::Shutdown => {
             state.exit = true;
         }
@@ -658,6 +826,48 @@ fn spawn_pipe_writer(write_fd: OwnedFd, bytes: Arc<[u8]>) {
         });
 }
 
+fn spawn_dnd_reader(
+    read_fd: OwnedFd,
+    offer: WlDataOffer,
+    sender: CommandSender,
+    on_drop: DropFileFn,
+) {
+    let _ = std::thread::Builder::new()
+        .name("wayland-dnd-read".to_owned())
+        .spawn(move || {
+            let paths = read_pipe_bounded(read_fd, MAX_URI_LIST_BYTES)
+                .ok()
+                .map(|bytes| parse_uri_list(&bytes))
+                .unwrap_or_default();
+            if sender.send(Command::FinishDnd(offer)).is_ok() {
+                let _ = sender.wake();
+            }
+            for path in paths {
+                on_drop(path);
+            }
+        });
+}
+
+/// Decodes an RFC 2483 `text/uri-list` payload into local filesystem paths,
+/// ignoring `#` comments, blank lines, and non-`file://` URIs.
+pub(crate) fn parse_uri_list(bytes: &[u8]) -> Vec<PathBuf> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(|line| line.trim_end_matches('\r').trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(super::folder::file_uri_to_path)
+        .collect()
+}
+
+fn supports_uri_list(mimes: &[String]) -> bool {
+    mimes.iter().any(|mime| {
+        let base = mime.split(';').next().unwrap_or(mime).trim();
+        base.eq_ignore_ascii_case(URI_LIST_MIME)
+    })
+}
+
 impl Dispatch<WlRegistry, ()> for WaylandState {
     fn event(
         state: &mut Self,
@@ -703,6 +913,10 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
                 state.exporter = Some(exporter);
                 state.exported = Some(exported);
             }
+            "xdg_activation_v1" if state.activation.is_none() => {
+                state.activation =
+                    Some(registry.bind::<XdgActivationV1, _, _>(name, version.min(1), qh, ()));
+            }
             _ => {}
         }
     }
@@ -743,6 +957,37 @@ impl Dispatch<ZxdgExportedV2, ()> for WaylandState {
     ) {
         if let zxdg_exported_v2::Event::Handle { handle } = event {
             state.exported_handle = Some(handle);
+        }
+    }
+}
+
+impl Dispatch<XdgActivationV1, ()> for WaylandState {
+    fn event(
+        _: &mut Self,
+        _: &XdgActivationV1,
+        _: <XdgActivationV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<XdgActivationTokenV1, ()> for WaylandState {
+    fn event(
+        state: &mut Self,
+        token_obj: &XdgActivationTokenV1,
+        event: xdg_activation_token_v1::Event,
+        _: &(),
+        conn: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done { token } = event {
+            if let Some(activation) = &state.activation {
+                activation.activate(token, &state.surface);
+            }
+            token_obj.destroy();
+            let _ = conn.flush();
         }
     }
 }
@@ -863,7 +1108,7 @@ impl Dispatch<WlDataDevice, ObjectId> for WaylandState {
         _: &WlDataDevice,
         event: wl_data_device::Event,
         seat_id: &ObjectId,
-        _: &Connection,
+        conn: &Connection,
         _: &QueueHandle<Self>,
     ) {
         match event {
@@ -881,13 +1126,81 @@ impl Dispatch<WlDataDevice, ObjectId> for WaylandState {
                     old_offer.destroy();
                 }
             }
-            // Drag-and-drop offers not adopted by `Selection` (until Slice 2 hooks
-            // `Enter`/`Drop`) are cleaned up on `Leave` so proxies do not leak.
             wl_data_device::Event::Enter {
-                id: Some(offer), ..
+                serial,
+                surface,
+                id,
+                ..
             } => {
-                offer.destroy();
-                state.offer_mimes.remove(&offer.id());
+                state.record_serial(seat_id, serial);
+                if let Some((old_id, _)) = state
+                    .seats
+                    .get_mut(seat_id)
+                    .and_then(|(_, slot)| slot.dnd_offer.take())
+                    && let Some((old_offer, _)) = state.offer_mimes.remove(&old_id)
+                {
+                    old_offer.destroy();
+                }
+                let Some(offer) = id else {
+                    return;
+                };
+                let offer_id = offer.id();
+                if surface != state.surface {
+                    offer.destroy();
+                    state.offer_mimes.remove(&offer_id);
+                    return;
+                }
+                let accepted = state
+                    .offer_mimes
+                    .get(&offer_id)
+                    .is_some_and(|(_, mimes)| supports_uri_list(mimes));
+                if offer.version() >= 3 {
+                    let action = if accepted {
+                        DndAction::Copy
+                    } else {
+                        DndAction::None
+                    };
+                    offer.set_actions(action, action);
+                }
+                offer.accept(serial, accepted.then(|| URI_LIST_MIME.to_owned()));
+                if let Some((_, slot)) = state.seats.get_mut(seat_id) {
+                    slot.dnd_offer = Some((offer_id, accepted));
+                }
+                let _ = conn.flush();
+            }
+            wl_data_device::Event::Leave => {
+                if let Some((offer_id, _)) = state
+                    .seats
+                    .get_mut(seat_id)
+                    .and_then(|(_, slot)| slot.dnd_offer.take())
+                    && let Some((offer, _)) = state.offer_mimes.remove(&offer_id)
+                {
+                    offer.destroy();
+                }
+            }
+            wl_data_device::Event::Drop => {
+                let Some((offer_id, accepted)) = state
+                    .seats
+                    .get_mut(seat_id)
+                    .and_then(|(_, slot)| slot.dnd_offer.take())
+                else {
+                    return;
+                };
+                let Some((offer, _)) = state.offer_mimes.remove(&offer_id) else {
+                    return;
+                };
+                if !accepted {
+                    offer.destroy();
+                    return;
+                }
+                let Ok((read_fd, write_fd)) = make_pipe() else {
+                    offer.destroy();
+                    return;
+                };
+                offer.receive(URI_LIST_MIME.to_owned(), write_fd.as_fd());
+                let _ = conn.flush();
+                drop(write_fd);
+                spawn_dnd_reader(read_fd, offer, state.sender.clone(), state.on_drop.clone());
             }
             _ => {}
         }
@@ -954,5 +1267,40 @@ impl Dispatch<WlDataSource, ()> for WaylandState {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{parse_uri_list, supports_uri_list};
+
+    #[test]
+    fn uri_list_decodes_percent_encoded_local_files_and_skips_comments_and_web_urls() {
+        let payload = concat!(
+            "# Dolphin drag payload\r\n",
+            "file:///tmp/%EA%B3%A0%EC%96%91%EC%9D%B4%201.ugurugu\r\n",
+            "\r\n",
+            "https://ugurugu.dev/ignored.png\r\n",
+            "file://localhost/var/tmp/frame%232.png\n",
+        );
+        assert_eq!(
+            parse_uri_list(payload.as_bytes()),
+            vec![
+                PathBuf::from("/tmp/고양이 1.ugurugu"),
+                PathBuf::from("/var/tmp/frame#2.png"),
+            ]
+        );
+    }
+
+    #[test]
+    fn uri_list_mime_matches_charset_parameters() {
+        assert!(supports_uri_list(&["text/uri-list".to_owned()]));
+        assert!(supports_uri_list(&[
+            "text/plain".to_owned(),
+            "text/uri-list;charset=utf-8".to_owned(),
+        ]));
+        assert!(!supports_uri_list(&["image/png".to_owned()]));
     }
 }

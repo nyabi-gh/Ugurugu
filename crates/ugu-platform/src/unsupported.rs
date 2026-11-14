@@ -122,6 +122,7 @@ pub mod folder {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 pub mod instance {
     use std::path::Path;
     #[cfg(not(target_os = "macos"))]
@@ -189,7 +190,7 @@ pub mod recent {
     pub fn add(_path: &Path) {}
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod session {
     pub enum SessionEnd {}
 
