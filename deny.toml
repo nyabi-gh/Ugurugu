@@ -21,6 +21,17 @@ ignore = [
     { id = "RUSTSEC-2026-0368", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
     { id = "RUSTSEC-2026-0369", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
     { id = "RUSTSEC-2026-0429", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
+    # Unmaintained, not vulnerabilities, and Linux only. zvariant, zbus_names
+    # and zvariant_derive became part of zbus 6; AccessKit (accesskit_unix
+    # 0.21.1, which egui-winit 0.36.2 fixes) needs zbus 5, so moving our own
+    # zbus calls to 6 would add a second zbus and remove none of the three.
+    { id = "RUSTSEC-2026-0370", reason = "part of zbus 5, which accesskit_unix 0.21.1 needs" },
+    { id = "RUSTSEC-2026-0371", reason = "part of zbus 5, which accesskit_unix 0.21.1 needs" },
+    { id = "RUSTSEC-2026-0372", reason = "part of zbus 5, which accesskit_unix 0.21.1 needs" },
+    # ttf-parser draws the title of the window frame winit makes where the
+    # compositor has none (GNOME), through sctk-adwaita 0.10.1. winit's
+    # other choices are a frame without a title or FreeType (backlog B3-185).
+    { id = "RUSTSEC-2026-0192", reason = "title text of winit's Wayland frame, through sctk-adwaita" },
 ]
 
 [licenses]
