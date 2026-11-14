@@ -27,6 +27,16 @@ static LAST_SIGNAL: AtomicI32 = AtomicI32::new(0);
 static ACTIVE_LISTENERS: AtomicI32 = AtomicI32::new(0);
 
 extern "C" fn term_handler(signal: c_int) {
+    // SAFETY: `__errno_location` is async-signal-safe and gives the `errno`
+    // of this thread, which the code this signal interrupted may be about
+    // to read.
+    let errno = unsafe { *libc::__errno_location() };
+    handle_term(signal);
+    // SAFETY: as above.
+    unsafe { *libc::__errno_location() = errno };
+}
+
+fn handle_term(signal: c_int) {
     // If no `SessionEnd` guard is currently active, restore default behavior
     // and re-raise immediately using async-signal-safe calls only.
     if ACTIVE_LISTENERS.load(Ordering::Relaxed) <= 0 {
@@ -69,8 +79,15 @@ fn ensure_signal_pipe() -> Result<i32, &'static str> {
             action.sa_sigaction = term_handler as *const () as usize;
             action.sa_flags = libc::SA_RESTART;
             libc::sigemptyset(&mut action.sa_mask);
-            libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
-            libc::sigaction(libc::SIGHUP, &action, std::ptr::null_mut());
+            for signal in [libc::SIGTERM, libc::SIGHUP] {
+                // One the process was started to ignore (`nohup`) stays
+                // ignored.
+                let mut before: libc::sigaction = std::mem::zeroed();
+                libc::sigaction(signal, std::ptr::null(), &mut before);
+                if before.sa_sigaction != libc::SIG_IGN {
+                    libc::sigaction(signal, &action, std::ptr::null_mut());
+                }
+            }
         }
     }
     Ok(SIGNAL_PIPE.get().map_or(fd, |p| p.efd.as_raw_fd()))
@@ -98,10 +115,12 @@ impl SessionEnd {
         // Drain any stale count left before this `SessionEnd` was installed.
         drain_eventfd(sig_fd);
         LAST_SIGNAL.store(0, Ordering::SeqCst);
-        ACTIVE_LISTENERS.fetch_add(1, Ordering::SeqCst);
 
         let stop_efd = Arc::new(new_eventfd()?);
         let logind_efd = Arc::new(new_eventfd()?);
+        // Counted only once nothing before the thread can fail: a count
+        // left behind would have the handler swallow every later signal.
+        ACTIVE_LISTENERS.fetch_add(1, Ordering::SeqCst);
         let inhibitor: Arc<Mutex<Option<zbus::zvariant::OwnedFd>>> = Arc::new(Mutex::new(None));
         let stopped = Arc::new(AtomicBool::new(false));
 
@@ -331,9 +350,122 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(10));
     }
 
+    /// This test binary running only `test`, with `variable` set to `value`,
+    /// once it has printed `READY`.
+    fn ready_child(test: &str, variable: &str, value: &Path) -> std::process::Child {
+        use std::io::BufRead;
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--nocapture", "--test-threads=1"])
+            .env(variable, value)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut reader = io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap() > 0 {
+            if line.contains("READY") {
+                break;
+            }
+            line.clear();
+        }
+        child
+    }
+
+    #[test]
+    fn child_that_ignores_sighup() {
+        let Some(path) = std::env::var_os("UGU_SIGHUP_CHILD") else {
+            return;
+        };
+        let target = std::path::PathBuf::from(path);
+        // SAFETY: test-only; ignoring a signal has no preconditions.
+        unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
+        // SAFETY: test-only `SessionEnd` installation.
+        let _guard = unsafe {
+            SessionEnd::install(0, move || {
+                let _ = std::fs::write(&target, "saved");
+            })
+        }
+        .unwrap();
+
+        println!("READY");
+        let _ = io::Write::flush(&mut io::stdout());
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_sighup_the_process_was_started_to_ignore_stays_ignored() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let folder =
+            std::env::temp_dir().join(format!("ugu-platform-sighup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let marker = folder.join("recovery-marker.txt");
+        let mut child = ready_child(
+            "linux::session::tests::child_that_ignores_sighup",
+            "UGU_SIGHUP_CHILD",
+            &marker,
+        );
+
+        // SAFETY: `child.id()` is a live child process spawned above.
+        unsafe { libc::kill(child.id() as i32, libc::SIGHUP) };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let after_hangup = (child.try_wait().unwrap(), marker.exists());
+        // SAFETY: as above.
+        unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+        let status = child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(&folder);
+
+        assert_eq!(after_hangup, (None, false));
+        assert_eq!(status.signal(), Some(libc::SIGTERM), "{status:?}");
+    }
+
+    #[test]
+    fn child_whose_session_end_cannot_start() {
+        if std::env::var_os("UGU_NO_FD_CHILD").is_none() {
+            return;
+        }
+        ensure_signal_pipe().unwrap();
+        // SAFETY: test-only; a limit of no descriptors makes the next
+        // `eventfd` fail, and the old limit is put back at once.
+        let installed = unsafe {
+            let mut before: libc::rlimit = std::mem::zeroed();
+            libc::getrlimit(libc::RLIMIT_NOFILE, &mut before);
+            let none = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: before.rlim_max,
+            };
+            libc::setrlimit(libc::RLIMIT_NOFILE, &none);
+            let installed = SessionEnd::install(0, || {});
+            libc::setrlimit(libc::RLIMIT_NOFILE, &before);
+            installed
+        };
+        assert!(installed.is_err());
+
+        println!("READY");
+        let _ = io::Write::flush(&mut io::stdout());
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_session_end_that_could_not_start_leaves_sigterm_ending_the_process() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut child = ready_child(
+            "linux::session::tests::child_whose_session_end_cannot_start",
+            "UGU_NO_FD_CHILD",
+            Path::new("1"),
+        );
+        // SAFETY: `child.id()` is a live child process spawned above.
+        unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGTERM), "{status:?}");
+    }
+
     #[test]
     fn a_sigterm_runs_session_end_and_exits_with_sigterm() {
-        use std::io::BufRead;
         use std::os::unix::process::ExitStatusExt;
 
         let folder =
@@ -342,28 +474,11 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let marker = folder.join("recovery-marker.txt");
 
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "linux::session::tests::child_that_waits_for_sigterm",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env("UGU_SIGTERM_CHILD", &marker)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-
-        let stdout = child.stdout.take().unwrap();
-        let mut reader = io::BufReader::new(stdout);
-        let mut line = String::new();
-        while reader.read_line(&mut line).unwrap() > 0 {
-            if line.contains("READY") {
-                break;
-            }
-            line.clear();
-        }
+        let mut child = ready_child(
+            "linux::session::tests::child_that_waits_for_sigterm",
+            "UGU_SIGTERM_CHILD",
+            &marker,
+        );
 
         // SAFETY: `child.id()` is a live child process spawned above.
         unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
