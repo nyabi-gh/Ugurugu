@@ -82,6 +82,8 @@ fn registry() -> &'static Mutex<Registry> {
     })
 }
 
+pub use super::wayland_icon::shrink_square_rgba;
+
 /// RAII registration of the active Linux window on the UI thread.
 pub struct LinuxWindow {
     hwnd: isize,
@@ -92,12 +94,15 @@ impl LinuxWindow {
     /// dedicated `EventQueue` worker thread.
     ///
     /// # Safety
-    /// `display` and `surface` must be valid Wayland client pointers that
-    /// outlive the returned [`LinuxWindow`].
+    /// `display`, `surface`, and `toplevel` (when `Some`) must be valid Wayland
+    /// client pointers that outlive the returned [`LinuxWindow`].
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn install_wayland(
         hwnd: isize,
         display: *mut c_void,
         surface: *mut c_void,
+        toplevel: Option<*mut c_void>,
+        icon_rgba: Option<(u32, Vec<u8>)>,
         scale_factor: f64,
         wake: impl Fn() + Send + Sync + 'static,
         on_drop: impl Fn(PathBuf) + Send + Sync + 'static,
@@ -107,8 +112,17 @@ impl LinuxWindow {
         let pen = super::wayland_tablet::PenQueue::new(wake.clone());
         // SAFETY: forwarded from the caller; `Session` drops `LinuxWindow`
         // (and joins its thread) before dropping `Arc<Window>`.
-        let worker =
-            unsafe { WaylandHandle::spawn(display, surface, scale_factor, on_drop, pen.clone())? };
+        let worker = unsafe {
+            WaylandHandle::spawn(
+                display,
+                surface,
+                toplevel,
+                icon_rgba,
+                scale_factor,
+                on_drop,
+                pen.clone(),
+            )?
+        };
         let mut reg = registry().lock().expect("window registry poisoned");
         reg.by_hwnd
             .insert(hwnd, Entry::Wayland { worker, wake, pen });
@@ -466,11 +480,13 @@ struct WaylandHandle {
 
 impl WaylandHandle {
     /// # Safety
-    /// `display` and `surface` must be live Wayland client pointers for the
-    /// lifetime of the spawned worker.
+    /// `display`, `surface`, and `toplevel` (when `Some`) must be live Wayland
+    /// client pointers for the lifetime of the spawned worker.
     unsafe fn spawn(
         display: *mut c_void,
         surface: *mut c_void,
+        toplevel: Option<*mut c_void>,
+        icon_rgba: Option<(u32, Vec<u8>)>,
         scale_factor: f64,
         on_drop: DropFileFn,
         pen: Arc<super::wayland_tablet::PenQueue>,
@@ -491,8 +507,11 @@ impl WaylandHandle {
             .map_err(|error| error.to_string())?;
         let wl_surface =
             WlSurface::from_id(&conn, surface_id).map_err(|error| error.to_string())?;
+        // SAFETY: `toplevel`, when `Some`, is winit's live `xdg_toplevel` on `display`.
+        let icon = unsafe { super::wayland_icon::WaylandIcon::new(&conn, toplevel, icon_rgba) };
 
         let (tx, rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
         let sender = CommandSender {
             tx,
             wake_fd: wake_fd.clone(),
@@ -504,8 +523,10 @@ impl WaylandHandle {
                 run_wayland_worker(
                     conn,
                     wl_surface,
+                    icon,
                     scale_factor,
                     rx,
+                    ready_tx,
                     wake_fd,
                     worker_sender,
                     on_drop,
@@ -513,6 +534,10 @@ impl WaylandHandle {
                 )
             })
             .map_err(|error| error.to_string())?;
+
+        // Wait for the initial roundtrips (`xdg_toplevel_icon_v1`, `zxdg_exporter_v2`,
+        // `zwp_tablet_v2`) to flush before the render thread presents frame 1.
+        let _ = ready_rx.recv_timeout(Duration::from_secs(1));
 
         Ok(Self {
             sender,
@@ -555,6 +580,7 @@ pub(crate) struct WaylandState {
     latest_seat: Option<ObjectId>,
     offer_mimes: HashMap<ObjectId, (WlDataOffer, Vec<String>)>,
     active_sources: Vec<(WlDataSource, Arc<[u8]>)>,
+    icon: super::wayland_icon::WaylandIcon,
     pub(crate) tablet: super::wayland_tablet::WaylandTablet,
     exit: bool,
 }
@@ -562,6 +588,7 @@ pub(crate) struct WaylandState {
 impl WaylandState {
     fn new(
         surface: WlSurface,
+        icon: super::wayland_icon::WaylandIcon,
         scale_factor: f64,
         sender: CommandSender,
         on_drop: DropFileFn,
@@ -581,6 +608,7 @@ impl WaylandState {
             latest_seat: None,
             offer_mimes: HashMap::new(),
             active_sources: Vec::new(),
+            icon,
             tablet: super::wayland_tablet::WaylandTablet::new(pen, scale_factor),
             exit: false,
         }
@@ -673,6 +701,7 @@ impl WaylandState {
         if let Some(activation) = self.activation.take() {
             activation.destroy();
         }
+        self.icon.cleanup();
         self.tablet.cleanup();
     }
 }
@@ -681,8 +710,10 @@ impl WaylandState {
 fn run_wayland_worker(
     conn: Connection,
     surface: WlSurface,
+    icon: super::wayland_icon::WaylandIcon,
     scale_factor: f64,
     rx: Receiver<Command>,
+    ready_tx: Sender<()>,
     wake_fd: Arc<OwnedFd>,
     sender: CommandSender,
     on_drop: DropFileFn,
@@ -690,14 +721,17 @@ fn run_wayland_worker(
 ) {
     let mut queue: EventQueue<WaylandState> = conn.new_event_queue();
     let qh = queue.handle();
-    let mut state = WaylandState::new(surface, scale_factor, sender, on_drop, pen);
+    let mut state = WaylandState::new(surface, icon, scale_factor, sender, on_drop, pen);
 
     let _registry = conn.display().get_registry(&qh, ());
     // Two roundtrips bind globals (`wl_seat`, `wl_data_device_manager`,
-    // `zxdg_exporter_v2`) and receive initial seat capabilities + exported
-    // window handle.
+    // `zxdg_exporter_v2`, `xdg_toplevel_icon_manager_v1`) and receive initial
+    // seat capabilities + exported window handle.
     let _ = queue.roundtrip(&mut state);
     let _ = queue.roundtrip(&mut state);
+    state.icon.apply(&qh);
+    let _ = queue.roundtrip(&mut state);
+    let _ = ready_tx.send(());
 
     while !state.exit {
         let _ = queue.dispatch_pending(&mut state);
@@ -1058,9 +1092,11 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
                     Some(registry.bind::<XdgActivationV1, _, _>(name, version.min(1), qh, ()));
             }
             other => {
-                state
-                    .tablet
-                    .bind_global(other, name, version, registry, &state.seats, qh);
+                if !state.icon.bind_global(other, name, version, registry, qh) {
+                    state
+                        .tablet
+                        .bind_global(other, name, version, registry, &state.seats, qh);
+                }
             }
         }
     }

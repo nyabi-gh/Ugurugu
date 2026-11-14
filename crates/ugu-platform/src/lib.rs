@@ -115,5 +115,6 @@ pub mod session {
 pub mod window {
     pub use crate::os::window::{
         LinuxWindow, drain_pen_events, pen_in_proximity, set_scale_factor, set_tablet_cursor,
+        shrink_square_rgba,
     };
 }

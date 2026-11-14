@@ -12,6 +12,7 @@ pub mod instance;
 pub mod locale;
 pub mod memory;
 pub mod session;
+pub(crate) mod wayland_icon;
 pub(crate) mod wayland_tablet;
 pub mod window;
 pub(crate) mod x11_tablet;

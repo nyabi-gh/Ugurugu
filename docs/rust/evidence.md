@@ -2557,6 +2557,8 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 - Wayland(`RADV NAVI31`): 시작→어댑터 선택 45ms, `Bgra8Unorm` swapchain 구성 95ms, `tests/fixtures/ugu13/motion.ugu` 가져오기 열기 `1.45ms`(시작부터 약 197ms), 유휴 `VmRSS` 97.6MiB. `UGURUGU_ADAPTER=fallback`(`llvmpipe`)에서는 유휴 `VmRSS` 161.3MiB.
 - 하드웨어→소프트웨어 자동 전환(B3-07): `Xvfb`(X11)와 `WLR_RENDERER=pixman`(dmabuf가 없는 Wayland)에서 시작 스레드가 먼저 연 `RADV NAVI31`이 창 표면을 보이지 못하자(`the adapter opened early cannot show the window`) 스스로 `llvmpipe`로 다시 열어 `Bgra8Unorm` swapchain과 문서를 띄웠다.
 - 단일 실행과 세션 끝 복구: 떠 있는 첫 프로세스에 둘째 `./target/release/ugurugu f1.ugurugu`를 실행하자 둘째는 종료 코드 0으로 끝나고 첫 프로세스가 Unix 소켓으로 경로를 받아 열었다(`opening a document handed over from outside`, `ms=1.69 ok=true`). 3초 유휴 복구 타이머가 돌기 전에 `SIGTERM`을 보내자 `tab-1/1.json`(129바이트)과 `tab-1/1.ugurugu`(39,613바이트)를 `1.53ms`에 쓰고(`unsaved work kept for recovery as the session ends`) 종료 코드 0으로 끝났다.
-- 데스크톱 통합 파일: `desktop-file-validate resources/linux/dev.ugurugu.app3.desktop`이 경고 없이 통과했고, 임시 `XDG_DATA_HOME`에 `tools/linux_desktop.py install`·`uninstall`을 돌려 `.desktop`·512px 아이콘·MIME 정의의 설치와 제거를 확인했다.
+- 데스크톱 통합 파일: `desktop-file-validate resources/linux/dev.ugurugu.app3.desktop`이 경고 없이 통과했고, 임시 `XDG_DATA_HOME`에 `tools/linux_desktop.py install`·`uninstall`을 돌려 `.desktop`·아이콘·MIME 정의의 설치와 제거를 확인했다.
 
-**재지 않은 것:** 실제 펜 태블릿 장치(Wayland `zwp_tablet_v2`와 X11 `XInput2`, B3-06), 실제 데스크톱 창에서의 입력→표시 지연, 포털 파일 대화상자·클립보드·파일 끌어놓기의 대화형 화면 확인.
+**대화형 KDE Wayland 확인과 창 아이콘(`xdg_toplevel_icon_v1`) 고침:** KDE Plasma Wayland 세션에서 실제 펜 태블릿의 그리기·필압, `.ugurugu` 저장, GIF·애니메이션 WebP 내보내기, 설정 저장·복원이 동작함을 사용자가 확인했다. 다만 `.desktop`을 설치하지 않고 `./target/release/ugurugu`를 바로 실행했을 때 창 아이콘이 Wayland 기본 아이콘으로 나왔는데, `winit` 0.30.13의 Wayland `set_window_icon`이 빈 구현이기 때문이었다. `wayland_icon.rs`가 첫 프레임 commit 전에 `xdg_toplevel_icon_manager_v1`로 256~16px premultiplied `Argb8888` `wl_shm` 버퍼(`1x`·`2x`)를 winit의 `xdg_toplevel`에 붙이게 고쳤고, 격리한 `kwin_wayland --virtual`(`WAYLAND_DEBUG=client`)에서 `icon_size(96)` 수신 뒤 `set_icon`이 첫 swapchain 구성보다 먼저 프로토콜 오류 없이 처리되는 것을 확인했다.
+
+**재지 않은 것:** 펜의 지우개 끝·barrel 버튼·X11 `XInput2` 실제 태블릿(B3-06), 실제 데스크톱 창에서의 입력→표시 지연, 클립보드·파일 끌어놓기의 대화형 화면 확인.

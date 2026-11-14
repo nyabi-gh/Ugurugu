@@ -179,6 +179,18 @@ pub fn hwnd_of(window: &Window) -> Result<isize, String> {
 }
 
 #[cfg(target_os = "linux")]
+fn linux_window_icon_rgba() -> Option<(u32, Vec<u8>)> {
+    let decoded =
+        image::load_from_memory(include_bytes!("../../../resources/icons/Ugurugu.png")).ok()?;
+    let rgba = decoded.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width != height {
+        return None;
+    }
+    ugu_platform::window::shrink_square_rgba(width, rgba.into_raw(), 256)
+}
+
+#[cfg(target_os = "linux")]
 fn linux_window_attributes(
     attributes: winit::window::WindowAttributes,
 ) -> winit::window::WindowAttributes {
@@ -187,14 +199,8 @@ fn linux_window_attributes(
 
     // Matches macOS's `dev.ugurugu.app3` so 3.x installs alongside 2.x.
     const APP_ID: &str = "dev.ugurugu.app3";
-    let icon = image::load_from_memory(include_bytes!("../../../resources/icons/Ugurugu.png"))
-        .ok()
-        .map(|decoded| {
-            let rgba = decoded.into_rgba8();
-            let (width, height) = rgba.dimensions();
-            winit::window::Icon::from_rgba(rgba.into_raw(), width, height)
-        })
-        .and_then(Result::ok);
+    let icon = linux_window_icon_rgba()
+        .and_then(|(edge, rgba)| winit::window::Icon::from_rgba(rgba, edge, edge).ok());
 
     let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "ugurugu");
     let attributes = WindowAttributesExtX11::with_name(attributes, APP_ID, "ugurugu");
@@ -207,6 +213,7 @@ fn install_linux_window(
     hwnd: isize,
     proxy: &EventLoopProxy<UiEvent>,
 ) -> Option<ugu_platform::window::LinuxWindow> {
+    use winit::platform::wayland::WindowExtWayland;
     use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
     let wake_proxy = proxy.clone();
@@ -222,12 +229,15 @@ fn install_linux_window(
     let win_handle = window.window_handle().ok()?;
     match (display.as_raw(), win_handle.as_raw()) {
         (RawDisplayHandle::Wayland(disp), RawWindowHandle::Wayland(win)) => {
-            // SAFETY: `window` owns both handles and outlives `_linux_window` on `Session`.
+            let toplevel = window.xdg_toplevel().map(std::ptr::NonNull::as_ptr);
+            // SAFETY: `window` owns these handles and outlives `_linux_window` on `Session`.
             unsafe {
                 ugu_platform::window::LinuxWindow::install_wayland(
                     hwnd,
                     disp.display.as_ptr(),
                     win.surface.as_ptr(),
+                    toplevel,
+                    linux_window_icon_rgba(),
                     window.scale_factor(),
                     wake,
                     on_drop,
@@ -699,6 +709,14 @@ mod tests {
         assert_eq!(place(Some([1280.0, 720.0])), ([1152.0, 576.0], true));
         assert_eq!(place(Some([1920.0, 1080.0])), ([1600.0, 864.0], true));
         assert_eq!(place(Some([1366.0, 768.0])), ([1229.0, 614.0], true));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn embedded_linux_window_icon_decodes_to_256px_square_rgba() {
+        let (edge, rgba) = linux_window_icon_rgba().expect("embedded Ugurugu.png decodes");
+        assert_eq!(edge, 256);
+        assert_eq!(rgba.len(), 256 * 256 * 4);
     }
 
     #[cfg(windows)]

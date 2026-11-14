@@ -1,6 +1,6 @@
 # 3.x 백로그
 
-2026-10-12 정리, 2026-11-12 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
+2026-10-12 정리, 2026-11-14 갱신. 3.x(Rust, `apps/ugurugu`, `crates/*`)에 아직 열려 있는 일을 모은다. M0~M6 계획과 검토 보고서를 지우기 전에 거기서 뽑았다. 지운 문서는 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md` 등). 출처 칸의 줄 번호는 그 커밋 기준이다. 어디 칸은 줄 번호가 아니라 함수 이름으로 가리킨다(줄 번호는 코드가 바뀌면 어긋난다).
 
 - C++ 2.x와 웹 판은 더 유지하지 않는다(사용자 결정). 2.x 전용 항목과 2.x 릴리스는 버렸다. 2.2.13 소스는 `v2.2.13` 태그에만 있고(2026-10-13 저장소에서 지움), 비교 기준과 `.ugu` fixture 생성기가 필요하면 그 태그를 빌드한다.
 - 각 항목은 지금 코드에서 싸게 확인할 수 있는 것은 확인했다. 확인하지 않은 영향·원인은 **가설**로 적는다.
@@ -20,7 +20,7 @@
 
 | ID | gate | 지금 근거 | 닫는 방법 | 출처 |
 |---|---|---|---|---|
-| B3-06 | 실제 펜·터치 장치 | Windows Sandbox 합성 입력(`InjectSyntheticPointerInput` PT_PEN·PT_TOUCH): 압력·barrel·hover·창 밖 해제·1000개/초, 두 손가락 팬·핀치·회전. 지우개 끝은 Windows가 합성 플래그를 넘기지 않아 단위 시험만(`canvas.rs` `a_pens_eraser_end_erases_whatever_tool_is_chosen`). Linux(Wayland `zwp_tablet_v2`·X11 `XInput2`)는 파서·근접 마우스 억제 단위 시험만 있고 실제 태블릿으로는 보지 않았다(evidence.md 125절) | Windows는 태블릿 드라이버에서 **Windows Ink를 켜고**(WinTab은 읽지 않는다), Linux는 Wayland와 X11 세션 각각에서 압력 곡선, 지우개 끝, barrel, hover 링·커서(`wp_cursor_shape_v1`), 창 밖 해제, 근접 중 코어 마우스 억제(획이 두 번 그어지지 않는지), 터치 두 손가락 제스처와 펜 우선을 확인한다. 같이 볼 가설: Windows에서 `frameId`·`PerformanceCount`를 0으로 보내는 장치는 샘플 순서가 뒤집힐 수 있다. Shift+누름 직선은 누른 첫 표본의 압력이라 펜으로는 가늘 수 있고, barrel을 누른 접촉은 오른쪽 버튼으로 와서 Alt와 함께면 브러시 크기를 바꿀 것이다(decisions.md 3절, 둘 다 가설). 닫으면 릴리스 노트의 펜 문장을 고친다 | m6-plan 2절 10, 6절 M6-9·M6-10, 7절, 8절, 2026-11-14 Linux 3단계 |
+| B3-06 | 실제 펜·터치 장치 | Windows Sandbox 합성 입력(`InjectSyntheticPointerInput` PT_PEN·PT_TOUCH): 압력·barrel·hover·창 밖 해제·1000개/초, 두 손가락 팬·핀치·회전. 지우개 끝은 Windows가 합성 플래그를 넘기지 않아 단위 시험만(`canvas.rs` `a_pens_eraser_end_erases_whatever_tool_is_chosen`). Linux는 KDE Plasma Wayland에서 실제 펜 태블릿의 그리기·필압을 확인했고(evidence.md 125절), 지우개 끝·barrel과 X11 `XInput2`는 단위 시험만 있다 | Windows는 태블릿 드라이버에서 **Windows Ink를 켜고**(WinTab은 읽지 않는다), Linux는 Wayland의 지우개 끝·barrel·hover 커서(`wp_cursor_shape_v1`)·창 밖 해제와 X11 세션의 압력·지우개·barrel·근접 마우스 억제, 터치 두 손가락 제스처와 펜 우선을 확인한다. 같이 볼 가설: Windows에서 `frameId`·`PerformanceCount`를 0으로 보내는 장치는 샘플 순서가 뒤집힐 수 있다. Shift+누름 직선은 누른 첫 표본의 압력이라 펜으로는 가늘 수 있고, barrel을 누른 접촉은 오른쪽 버튼으로 와서 Alt와 함께면 브러시 크기를 바꿀 것이다(decisions.md 3절, 둘 다 가설). 닫으면 릴리스 노트의 펜 문장을 고친다 | m6-plan 2절 10, 6절 M6-9·M6-10, 7절, 8절, 2026-11-14 Linux 3단계 |
 | B3-07 | RTX 5080·WARP 밖의 GPU | Windows PC의 RTX 5080(DX12)·`UGURUGU_ADAPTER=warp`, macOS의 Apple M4(Metal), Linux 헤드리스의 AMD Radeon RX 7900 XTX(`RADV NAVI31`, Vulkan)와 Mesa `llvmpipe`(`UGURUGU_ADAPTER=fallback`). 하드웨어 표면 실패 → 소프트웨어 대체 자동 전환은 Linux `Xvfb`·`WLR_RENDERER=pixman`에서 `RADV` → `llvmpipe`로 확인했고(evidence.md 125절), Windows에서는 Sandbox가 호스트 GPU를 보여 줘서 만들지 못했다. Intel iGPU와 Linux 실제 데스크톱 창의 여러 드라이버(NVIDIA 독점·ANV 등)는 보지 않았다 | 사용자 보고(로그의 `selected GPU adapter`, 정보 탭의 진단 정보 복사). 다른 PC에서 실행하거나 B3-10의 진단 옵션을 만든 뒤 iGPU로 실행 | m6-plan 7절, 8절, analysis-3.0 A-03·6절, 2026-11-14 Linux 3단계 |
 
 ## 3. 출시 뒤로 미룬 결정
