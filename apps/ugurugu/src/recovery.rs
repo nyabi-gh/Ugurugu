@@ -217,8 +217,10 @@ fn is_held(error: &io::Error) -> bool {
 }
 
 /// Held by a window for as long as it runs with the recovery root `root`;
-/// `None` while another window holds it. Outside Windows no start hands its
-/// document to a running window yet, so a second start ends instead.
+/// `None` while another window holds it. A start gets here only when it
+/// could not hand its document to that window (`instance::hand_over`: macOS
+/// outside a bundle, Linux without a runtime directory or with a window
+/// that did not answer), and ends instead.
 #[cfg(not(windows))]
 pub fn take_running(root: &Path) -> io::Result<Option<File>> {
     std::fs::create_dir_all(root)?;

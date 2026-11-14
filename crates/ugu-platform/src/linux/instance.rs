@@ -208,6 +208,12 @@ pub fn poll_current_thread_receivers() {
 
 /// Receives documents handed over to one window until dropped.
 pub struct DocumentReceiver {
+    /// `None` where there is no directory to listen in: later starts then
+    /// end at the running lock without handing their documents over.
+    _listening: Option<Listening>,
+}
+
+struct Listening {
     id: u64,
     sock_path: PathBuf,
     stop_efd: Arc<OwnedFd>,
@@ -226,9 +232,27 @@ impl DocumentReceiver {
         key: &str,
         receive: impl FnMut(Option<PathBuf>) -> bool + 'static,
     ) -> Result<Self, &'static str> {
+        Self::install_in(runtime_dir(), hwnd, key, receive)
+    }
+
+    fn install_in(
+        dir: io::Result<PathBuf>,
+        hwnd: isize,
+        key: &str,
+        receive: impl FnMut(Option<PathBuf>) -> bool + 'static,
+    ) -> Result<Self, &'static str> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-        let dir = runtime_dir().map_err(|_| "cannot prepare runtime directory")?;
+        let dir = match dir {
+            Ok(dir) => dir,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "no runtime directory; later starts cannot hand their documents over"
+                );
+                return Ok(Self { _listening: None });
+            }
+        };
         let (sock_path, lock_path) = instance_paths(&dir, key);
         let lock_file = open_lock_file(&lock_path).map_err(|_| "cannot open instance lock")?;
         if !try_flock_exclusive(&lock_file).map_err(|_| "cannot lock instance socket")? {
@@ -272,16 +296,18 @@ impl DocumentReceiver {
             .map_err(|_| "cannot spawn instance listener thread")?;
 
         Ok(Self {
-            id,
-            sock_path,
-            stop_efd,
-            accept_thread: Some(accept_thread),
-            _lock_file: lock_file,
+            _listening: Some(Listening {
+                id,
+                sock_path,
+                stop_efd,
+                accept_thread: Some(accept_thread),
+                _lock_file: lock_file,
+            }),
         })
     }
 }
 
-impl Drop for DocumentReceiver {
+impl Drop for Listening {
     fn drop(&mut self) {
         // Unlink the socket while still holding `_lock_file` so later starts
         // never connect to a closing socket.
@@ -558,6 +584,39 @@ mod tests {
         drop(receiver);
         assert!(!hand_over("Ugurugu 3", &key, Some(document)));
         assert!(!hand_over("Ugurugu 3", &key, None));
+    }
+
+    #[test]
+    fn a_window_without_a_runtime_directory_still_starts() {
+        let key = format!("ugurugu-no-runtime-test-{}", std::process::id());
+        let unusable = Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        let receiver = DocumentReceiver::install_in(unusable, 0, &key, |_| true);
+        assert!(receiver.is_ok());
+        assert!(!hand_over("Ugurugu 3", &key, None));
+    }
+
+    #[test]
+    fn a_runtime_directory_must_be_a_real_directory_of_this_user() {
+        // SAFETY: `geteuid` has no preconditions.
+        let euid = unsafe { libc::geteuid() };
+        let folder = std::env::temp_dir().join(format!("ugu-private-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+
+        let real = folder.join("real");
+        assert_eq!(ensure_private_dir(&real, euid).unwrap(), real);
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+
+        let link = folder.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(ensure_private_dir(&link, euid).is_err());
+        let file = folder.join("file");
+        std::fs::write(&file, b"").unwrap();
+        assert!(ensure_private_dir(&file, euid).is_err());
+        assert!(ensure_private_dir(&real, euid.wrapping_add(1)).is_err());
+
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]
