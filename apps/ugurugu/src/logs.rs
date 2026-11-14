@@ -33,16 +33,17 @@ static GPU: Mutex<String> = Mutex::new(String::new());
 /// Records left by earlier runs, not yet told about.
 static EARLIER: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// `%LOCALAPPDATA%\Ugurugu Data\3`, for what stays on this PC. Not under
-/// `%LOCALAPPDATA%\Ugurugu`: that is the 2.2.13 install, which its
-/// uninstaller removes whole. Velopack package ids cannot hold a space, so
-/// no install of either version can be this folder.
+/// `%LOCALAPPDATA%\Ugurugu Data\3` on Windows (`~/Library/Application Support/Ugurugu Data/3`
+/// on macOS, `$XDG_STATE_HOME/ugurugu/3` on Linux), for what stays on this PC.
+/// On Windows, `%LOCALAPPDATA%\Ugurugu` is the 2.2.13 install, which its
+/// uninstaller removes whole; Velopack package ids cannot hold a space, so no
+/// install of either version can be `Ugurugu Data`.
 pub fn local_data() -> Option<PathBuf> {
-    Some(
-        ugu_platform::folder::local_app_data()?
-            .join("Ugurugu Data")
-            .join("3"),
-    )
+    #[cfg(target_os = "linux")]
+    const APP: &str = "ugurugu";
+    #[cfg(not(target_os = "linux"))]
+    const APP: &str = "Ugurugu Data";
+    Some(ugu_platform::folder::local_app_data()?.join(APP).join("3"))
 }
 
 /// `UGURUGU_LOG_PATH`, else `logs` in [`local_data`].

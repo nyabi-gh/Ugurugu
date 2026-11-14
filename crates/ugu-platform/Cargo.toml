@@ -12,6 +12,19 @@ ugu-platform-types.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard.workspace = true
+futures-lite.workspace = true
+percent-encoding.workspace = true
+png.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+wayland-backend.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+x11rb.workspace = true
+zbus.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard.workspace = true
 block2.workspace = true

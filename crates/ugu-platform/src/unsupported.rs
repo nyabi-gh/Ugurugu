@@ -32,7 +32,7 @@ pub mod association {
     pub fn unregister(_classes: &str) {}
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod clipboard {
     use ugu_platform_types::clipboard::{Encoded, Image, ReadError};
 
@@ -53,6 +53,7 @@ pub mod clipboard {
 /// Nanoseconds of the standard library's monotonic clock since its first
 /// reading here. Which clock each OS stamps its input with is chosen with
 /// its pointer input.
+#[cfg(not(target_os = "linux"))]
 pub mod clock {
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
@@ -85,7 +86,7 @@ pub mod crash {
     pub use crate::unix::crash::note_crashes;
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod dialog {
     use std::path::PathBuf;
 
@@ -100,7 +101,7 @@ pub mod file {
     pub use crate::unix::file::{remove_stale_temporaries, replace_file};
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod folder {
     use std::path::{Path, PathBuf};
 
@@ -161,7 +162,7 @@ pub mod instance {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod locale {
     pub fn preferred_ui_languages() -> Vec<String> {
         Vec::new()
@@ -173,7 +174,7 @@ pub mod locale {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub mod memory {
     use ugu_platform_types::memory::Memory;
 

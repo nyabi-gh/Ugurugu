@@ -33,10 +33,21 @@ pub enum AdapterChoice {
 }
 
 impl AdapterChoice {
-    /// `UGURUGU_ADAPTER=warp` forces WARP; anything else is the default.
+    /// `UGURUGU_ADAPTER=warp` (or `fallback` / `software`) forces the CPU
+    /// fallback adapter; anything else uses hardware first.
     pub fn from_env() -> Self {
-        match std::env::var("UGURUGU_ADAPTER") {
-            Ok(value) if value.eq_ignore_ascii_case("warp") => Self::Warp,
+        Self::parse(std::env::var("UGURUGU_ADAPTER").ok().as_deref())
+    }
+
+    fn parse(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some(value)
+                if value.eq_ignore_ascii_case("warp")
+                    || value.eq_ignore_ascii_case("fallback")
+                    || value.eq_ignore_ascii_case("software") =>
+            {
+                Self::Warp
+            }
             _ => Self::Hardware,
         }
     }
@@ -286,5 +297,15 @@ mod tests {
         });
         assert_eq!(opened, Ok(AdapterChoice::Hardware));
         assert_eq!(tried, [AdapterChoice::Hardware]);
+    }
+
+    #[test]
+    fn adapter_choice_accepts_warp_fallback_and_software() {
+        for name in ["warp", "WARP", "fallback", "Fallback", "software"] {
+            assert_eq!(AdapterChoice::parse(Some(name)), AdapterChoice::Warp);
+        }
+        for name in [None, Some(""), Some("hardware"), Some("vulkan")] {
+            assert_eq!(AdapterChoice::parse(name), AdapterChoice::Hardware);
+        }
     }
 }

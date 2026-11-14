@@ -31,6 +31,9 @@ velopack.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+
 [target.'cfg(windows)'.build-dependencies]
 embed-resource.workspace = true
 

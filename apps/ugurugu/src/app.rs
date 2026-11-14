@@ -98,6 +98,9 @@ struct Session {
     /// Dropped before the window, whose view it reads.
     #[cfg(target_os = "macos")]
     menus: ugu_platform::menu::Menus,
+    /// Dropped before the window, whose Wayland/X11 handles it holds.
+    #[cfg(target_os = "linux")]
+    _linux_window: Option<ugu_platform::window::LinuxWindow>,
     #[cfg(windows)]
     pointer: PointerInput,
     #[cfg(not(windows))]
@@ -161,10 +164,64 @@ pub fn hwnd_of(window: &Window) -> Result<isize, String> {
         RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get()),
         RawWindowHandle::AppKit(handle) => Ok(handle.ns_view.as_ptr() as isize),
         RawWindowHandle::Xlib(handle) => Ok(handle.window as isize),
+        RawWindowHandle::Xcb(handle) => Ok(handle.window.get() as isize),
         RawWindowHandle::Wayland(handle) => Ok(handle.surface.as_ptr() as isize),
         other => Err(format!(
             "the window has a handle of no known kind: {other:?}"
         )),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_window_attributes(
+    attributes: winit::window::WindowAttributes,
+) -> winit::window::WindowAttributes {
+    use winit::platform::wayland::WindowAttributesExtWayland;
+    use winit::platform::x11::WindowAttributesExtX11;
+
+    // Matches macOS's `dev.ugurugu.app3` so 3.x installs alongside 2.x.
+    const APP_ID: &str = "dev.ugurugu.app3";
+    let icon = image::load_from_memory(include_bytes!("../../../resources/icons/Ugurugu.png"))
+        .ok()
+        .map(|decoded| {
+            let rgba = decoded.into_rgba8();
+            let (width, height) = rgba.dimensions();
+            winit::window::Icon::from_rgba(rgba.into_raw(), width, height)
+        })
+        .and_then(Result::ok);
+
+    let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "ugurugu");
+    let attributes = WindowAttributesExtX11::with_name(attributes, APP_ID, "ugurugu");
+    attributes.with_window_icon(icon)
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_window(window: &Window, hwnd: isize) -> Option<ugu_platform::window::LinuxWindow> {
+    use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+
+    let display = window.display_handle().ok()?;
+    let win_handle = window.window_handle().ok()?;
+    match (display.as_raw(), win_handle.as_raw()) {
+        (RawDisplayHandle::Wayland(disp), RawWindowHandle::Wayland(win)) => {
+            // SAFETY: `window` owns both handles and outlives `_linux_window` on `Session`.
+            unsafe {
+                ugu_platform::window::LinuxWindow::install_wayland(
+                    hwnd,
+                    disp.display.as_ptr(),
+                    win.surface.as_ptr(),
+                )
+            }
+            .inspect_err(|error| tracing::warn!(%error, "cannot start Wayland window services"))
+            .ok()
+        }
+        (_, RawWindowHandle::Xlib(win)) => u32::try_from(win.window)
+            .ok()
+            .map(|xid| ugu_platform::window::LinuxWindow::install_x11(hwnd, xid)),
+        (_, RawWindowHandle::Xcb(win)) => Some(ugu_platform::window::LinuxWindow::install_x11(
+            hwnd,
+            win.window.get(),
+        )),
+        _ => None,
     }
 }
 
@@ -196,6 +253,8 @@ impl Session {
                 .with_window_icon(icon.clone())
                 .with_taskbar_icon(icon)
         };
+        #[cfg(target_os = "linux")]
+        let attributes = linux_window_attributes(attributes);
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -263,6 +322,8 @@ impl Session {
         let (to_render, messages) = mpsc::channel();
         let to_self = to_render.clone();
         let hwnd = hwnd_of(&window)?;
+        #[cfg(target_os = "linux")]
+        let linux_window = install_linux_window(&window, hwnd);
         let to_open = to_render.clone();
         let open = move |path: Option<std::path::PathBuf>| {
             let taken = match path {
@@ -361,6 +422,8 @@ impl Session {
             _quit_requests: quit_requests,
             #[cfg(target_os = "macos")]
             menus,
+            #[cfg(target_os = "linux")]
+            _linux_window: linux_window,
             pointer,
             accessibility,
             window,

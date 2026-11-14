@@ -270,15 +270,21 @@ mod tests {
 
     #[test]
     fn characters_a_font_lacks_come_from_the_fallback() {
-        let latin_only = if cfg!(any(windows, target_os = "macos")) {
-            "Arial"
-        } else {
-            "DejaVu Sans"
-        };
         let mut fonts = Fonts::new("ko");
+        let families = fonts.families();
+        let candidates: &[&str] = if cfg!(any(windows, target_os = "macos")) {
+            &["Arial"]
+        } else {
+            &["DejaVu Sans", "Noto Sans", "Liberation Sans"]
+        };
+        let latin_only = candidates
+            .iter()
+            .copied()
+            .find(|candidate| families.iter().any(|family| family == candidate))
+            .unwrap_or(candidates[0]);
         let latin = fonts.outline("A", Some(latin_only), 40.0);
         let both = fonts.outline("A한", Some(latin_only), 40.0);
         assert!(both.contours.len() > latin.contours.len());
-        assert!(fonts.families().iter().any(|family| family == latin_only));
+        assert!(families.iter().any(|family| family == latin_only));
     }
 }

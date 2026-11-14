@@ -153,6 +153,9 @@ const PROGRESS_DELAY: Duration = Duration::from_millis(300);
 pub enum FileEvent {
     /// A dialog closed: the chosen path, or `None` when cancelled.
     Picked(Purpose, Option<PathBuf>),
+    /// Opening a file dialog failed (for example, when no desktop portal is
+    /// available).
+    DialogFailed,
     Opened(PathBuf, Result<Opened, String>),
     /// How save `number` of document `document` ended.
     Saved {
@@ -1248,11 +1251,13 @@ impl Files {
                     }
                     _ => {}
                 }
-                let path = ugu_platform::dialog::pick(owner, &dialog).unwrap_or_else(|error| {
-                    tracing::error!(%error, "the file dialog failed");
-                    None
-                });
-                events(FileEvent::Picked(purpose, path));
+                match ugu_platform::dialog::pick(owner, &dialog) {
+                    Ok(path) => events(FileEvent::Picked(purpose, path)),
+                    Err(error) => {
+                        tracing::error!(%error, "the file dialog failed");
+                        events(FileEvent::DialogFailed);
+                    }
+                }
             });
         if let Err(error) = started {
             tracing::error!(%error, "cannot start the dialog thread");
@@ -1780,6 +1785,13 @@ impl Files {
     /// Takes an event from a dialog or the file thread.
     pub fn handle(&mut self, event: FileEvent, canvas: &mut Canvas) {
         match event {
+            FileEvent::DialogFailed => {
+                self.busy_dialog = false;
+                self.forget_after_save();
+                self.animation_job = None;
+                self.image_times = None;
+                self.fail(tr("dialog-failed").to_owned());
+            }
             FileEvent::Picked(purpose, path) => {
                 self.busy_dialog = false;
                 let Some(path) = path else {
