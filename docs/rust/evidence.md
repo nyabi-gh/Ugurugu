@@ -2564,3 +2564,21 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **대화형 KDE Wayland 확인과 창 아이콘(`xdg_toplevel_icon_v1`) 고침:** KDE Plasma Wayland 세션에서 실제 펜 태블릿의 그리기·필압, `.ugurugu` 저장, GIF·애니메이션 WebP 내보내기, 설정 저장·복원이 동작함을 사용자가 확인했다. 다만 `.desktop`을 설치하지 않고 `./target/release/ugurugu`를 바로 실행했을 때 창 아이콘이 Wayland 기본 아이콘으로 나왔는데, `winit` 0.30.13의 Wayland `set_window_icon`이 빈 구현이기 때문이었다. `wayland_icon.rs`가 첫 프레임 commit 전에 `xdg_toplevel_icon_manager_v1`로 256~16px premultiplied `Argb8888` `wl_shm` 버퍼(`1x`·`2x`)를 winit의 `xdg_toplevel`에 붙이게 고쳤고, 격리한 `kwin_wayland --virtual`(`WAYLAND_DEBUG=client`)에서 `icon_size(96)` 수신 뒤 `set_icon`이 첫 swapchain 구성보다 먼저 프로토콜 오류 없이 처리되는 것을 확인했다.
 
 **재지 않은 것:** 펜의 지우개 끝·barrel 버튼·X11 `XInput2` 실제 태블릿(B3-06), 실제 데스크톱 창에서의 입력→표시 지연, 클립보드·파일 끌어놓기의 대화형 화면 확인.
+
+## 126. #187 검토에서 찾은 결함 다섯 묶음의 수정과 시험 (2026-11-14)
+
+**환경:** 환경 절의 Windows PC 안의 WSL 2(Ubuntu 26.04.1, 커널 `6.18.58.1-microsoft-standard-WSL2`), Rust 1.99.0, debug 빌드. 빌드 폴더는 WSL 안(`CARGO_TARGET_DIR=$HOME/ugu-target`)에 두었다. `libfontconfig-dev`가 없어 `pkg-config`에 시스템의 `libfontconfig.so.1`만 가리키는 `.pc` 파일을 주었다(링크만 하고 헤더는 쓰지 않는다). 창을 띄우거나 펜·클립보드를 실제로 쓰지 않았다: 아래는 단위 시험이다.
+
+**고친 것과 시험:**
+
+- 펜이 근접할 때 마우스가 쥔 버튼(`winit_pointer.rs` `set_pen_in_proximity`): 버튼을 비우기만 하던 것을, 마지막 자리에서 버튼을 놓은 마우스 표본을 내게 했다. `forward_pointer_input`은 그 표본을 펜 표본 앞에 보낸다. 시험 `a_pen_arriving_lets_go_of_the_buttons_the_mouse_holds`.
+- 복사가 실패한 뒤의 붙여넣기(`apps/ugurugu/src/clipboard.rs`): Linux의 `Stamp`를 "복사한 뒤 시스템 클립보드에 있던 이미지의 크기와 화소 해시"로 바꿨다. 복사가 닿았으면 우리 화소, 닿지 못했으면 그때 거기 있던 것(없으면 없음)이다. 붙여넣기는 늘 시스템 클립보드를 읽어 그것과 비교한다. 시험 `a_copy_that_was_not_shared_is_pasted_only_while_the_clipboard_holds_the_same`은 붙여넣기가 곧바로 붙이지 않고 읽기를 청하는지, 그대로라는 답에 붙이는지 본다.
+- 런타임 폴더가 없을 때의 시작(`linux/instance.rs` `DocumentReceiver::install`): 폴더를 만들 수 없으면 오류 대신 듣지 않는 수신기를 돌려준다. 시험 `a_window_without_a_runtime_directory_still_starts`, 그리고 소유자·symlink·파일 검사를 보는 `a_runtime_directory_must_be_a_real_directory_of_this_user`.
+- `.desktop`의 `MimeType`에서 이미지 형식을 뺐다(시험 없음, 파일 한 줄).
+- 세션 끝(`linux/session.rs`): `ACTIVE_LISTENERS`를 `eventfd` 둘을 만든 뒤에 올리고, 물려받은 무시(`SIG_IGN`)는 그대로 두고, 처리기가 `errno`를 저장·복원한다. 시험 `a_session_end_that_could_not_start_leaves_sigterm_ending_the_process`(자식이 `RLIMIT_NOFILE`을 0으로 낮춰 `eventfd`를 실패시킨다)와 `a_sighup_the_process_was_started_to_ignore_stays_ignored`.
+
+**결과:** `cargo test -p ugu-platform -p ugurugu --locked`가 `ugu-platform` 46개(1개 ignored), 앱 322개(6개 ignored)를 통과했다. 고치기 전 main(`6913cbd`)은 같은 방법으로 40개와 320개였다. `cargo clippy -p ugu-platform -p ugurugu --all-targets --locked -- -D warnings`는 경고가 없었다.
+
+**고치기 전에 실패하는지:** 세션 끝의 두 시험은 고친 두 곳(`SIG_IGN` 검사, `ACTIVE_LISTENERS`를 올리는 자리)만 되돌린 코드에서 실패했다: 무시해야 할 SIGHUP에 자식이 SIGHUP으로 끝나며 복구 표시를 남겼고(`(Some(ExitStatus(1)), true)`), 시작에 실패한 뒤의 SIGTERM에 자식이 신호로 끝나지 않고 10초 뒤 정상 종료했다. 나머지 시험은 고치기 전 코드에 없는 함수·값을 쓰므로 그 코드에서는 컴파일되지 않는다. errno 저장·복원에는 시험이 없다.
+
+**보지 않은 것:** 실제 Wayland·X11 세션에서의 동작 전부. 근접 때 놓는 마우스 표본이 X11의 펜 누름 경쟁(backlog B3-178 ③)을 점 하나로 끝내는지는 가설이다.
