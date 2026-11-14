@@ -20,7 +20,7 @@ use crate::linux::window::{self, DisplayKind};
 const X11_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Wayland and X11 expose no global clipboard change counter; callers on Linux
-/// compare content hashes via [`pixel_sha256`] and [`png_pixel_sha256`].
+/// compare content hashes via [`pixel_sha256`] and [`png_pixels`].
 pub fn sequence() -> u32 {
     0
 }
@@ -69,10 +69,11 @@ pub fn pixel_sha256(image: &Image) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Streams `png_bytes` row-by-row to compute the same `(width, height, RGBA8)`
-/// SHA-256 as [`pixel_sha256`], surviving zlib re-compression by X11 clipboard
-/// managers or KDE Klipper while allocating only a single scanline.
-pub fn png_pixel_sha256(png_bytes: &[u8], expected_size: [u32; 2]) -> Option<[u8; 32]> {
+/// The size of the image in `png_bytes` and the SHA-256 [`pixel_sha256`]
+/// gives its pixels, read row by row so that only one scanline is allocated.
+/// It survives the zlib re-compression of X11 clipboard managers and KDE
+/// Klipper. `None` for what is not a PNG of RGBA8 rows.
+pub fn png_pixels(png_bytes: &[u8]) -> Option<([u32; 2], [u8; 32])> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
     let mut reader = decoder.read_info().ok()?;
@@ -81,16 +82,17 @@ pub fn png_pixel_sha256(png_bytes: &[u8], expected_size: [u32; 2]) -> Option<[u8
         return None;
     }
     let info = reader.info();
-    if [info.width, info.height] != expected_size || info.interlaced {
+    if info.interlaced {
         return None;
     }
+    let size = [info.width, info.height];
     let mut hasher = Sha256::new();
-    hasher.update(info.width.to_le_bytes());
-    hasher.update(info.height.to_le_bytes());
+    hasher.update(size[0].to_le_bytes());
+    hasher.update(size[1].to_le_bytes());
     while let Some(row) = reader.next_row().ok()? {
         hasher.update(row.data());
     }
-    Some(hasher.finalize().into())
+    Some((size, hasher.finalize().into()))
 }
 
 pub(crate) fn encode_png(image: &Image) -> Result<Vec<u8>, String> {
@@ -332,7 +334,7 @@ mod tests {
         };
         let expected = pixel_sha256(&image);
         let fast_png = encode_png(&image).unwrap();
-        assert_eq!(png_pixel_sha256(&fast_png, [2, 2]), Some(expected));
+        assert_eq!(png_pixels(&fast_png), Some(([2, 2], expected)));
 
         // Simulate a clipboard manager (such as Klipper) re-encoding the same
         // pixels with maximum zlib compression.
@@ -346,14 +348,13 @@ mod tests {
             writer.write_image_data(&image.straight).unwrap();
         }
         assert_ne!(fast_png, recompressed);
-        assert_eq!(png_pixel_sha256(&recompressed, [2, 2]), Some(expected));
+        assert_eq!(png_pixels(&recompressed), Some(([2, 2], expected)));
 
-        // Wrong dimensions or altered pixels must not match.
-        assert_eq!(png_pixel_sha256(&recompressed, [4, 1]), None);
+        // Altered pixels must not match.
         let mut altered = image.clone();
         altered.straight[0] ^= 1;
         let altered_png = encode_png(&altered).unwrap();
-        assert_ne!(png_pixel_sha256(&altered_png, [2, 2]), Some(expected));
+        assert_ne!(png_pixels(&altered_png), Some(([2, 2], expected)));
     }
 
     #[test]
@@ -367,7 +368,7 @@ mod tests {
         let Some(Encoded::Png(bytes)) = read_encoded(1 << 20).unwrap() else {
             panic!("expected PNG from live clipboard");
         };
-        assert_eq!(png_pixel_sha256(&bytes, [2, 2]), Some(pixel_sha256(&image)));
+        assert_eq!(png_pixels(&bytes), Some(([2, 2], pixel_sha256(&image))));
         assert_eq!(read_encoded(4), Err(ReadError::TooLarge));
     }
 }

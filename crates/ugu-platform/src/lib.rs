@@ -29,7 +29,7 @@ pub mod association {
 
 pub mod clipboard {
     #[cfg(target_os = "linux")]
-    pub use crate::os::clipboard::{pixel_sha256, png_pixel_sha256};
+    pub use crate::os::clipboard::{pixel_sha256, png_pixels};
     pub use crate::os::clipboard::{read_encoded, sequence, write_image};
     pub use ugu_platform_types::clipboard::{Encoded, Image, ReadError};
 }
