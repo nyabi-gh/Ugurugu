@@ -113,5 +113,7 @@ pub mod session {
 
 #[cfg(target_os = "linux")]
 pub mod window {
-    pub use crate::os::window::LinuxWindow;
+    pub use crate::os::window::{
+        LinuxWindow, drain_pen_events, pen_in_proximity, set_scale_factor, set_tablet_cursor,
+    };
 }

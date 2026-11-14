@@ -19,9 +19,20 @@ pub struct WinitPointer {
     position: Option<[f64; 2]>,
     buttons: Buttons,
     frame: u32,
+    /// Suppresses synthesized core-pointer mouse events while a native pen
+    /// stylus (`zwp_tablet_v2` or `XInput2`) is in proximity.
+    pen_in_proximity: bool,
 }
 
 impl WinitPointer {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn set_pen_in_proximity(&mut self, in_proximity: bool) {
+        if in_proximity && !self.pen_in_proximity {
+            self.buttons = Buttons::empty();
+        }
+        self.pen_in_proximity = in_proximity;
+    }
+
     /// The pointer events `event` makes, or `None` when it is not pointer
     /// input and belongs to egui-winit.
     pub fn translate(&mut self, event: &WindowEvent) -> Option<Vec<PointerEvent>> {
@@ -32,21 +43,36 @@ impl WinitPointer {
         let events = match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.position = Some([position.x, position.y]);
-                self.mouse(time)
+                if self.pen_in_proximity {
+                    Vec::new()
+                } else {
+                    self.mouse(time)
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let Some(button) = buttons_of(*button) else {
                     return Some(Vec::new());
                 };
-                self.buttons = match state {
-                    ElementState::Pressed => self.buttons.union(button),
-                    ElementState::Released => self.buttons.difference(button),
-                };
-                self.mouse(time)
+                if self.pen_in_proximity {
+                    if *state == ElementState::Released {
+                        self.buttons = self.buttons.difference(button);
+                    }
+                    Vec::new()
+                } else {
+                    self.buttons = match state {
+                        ElementState::Pressed => self.buttons.union(button),
+                        ElementState::Released => self.buttons.difference(button),
+                    };
+                    self.mouse(time)
+                }
             }
             WindowEvent::CursorLeft { .. } => {
                 self.position = None;
-                vec![PointerEvent::Leave { pointer: MOUSE }]
+                if self.pen_in_proximity {
+                    Vec::new()
+                } else {
+                    vec![PointerEvent::Leave { pointer: MOUSE }]
+                }
             }
             WindowEvent::CursorEntered { .. } => Vec::new(),
             WindowEvent::MouseWheel { delta, .. } => {
@@ -324,6 +350,43 @@ mod tests {
         assert_eq!(
             pointer.translate_at(&WindowEvent::Focused(true), Ticks(1)),
             None
+        );
+    }
+
+    #[test]
+    fn pen_proximity_suppresses_synthesized_mouse_moves_and_clicks_until_cleared() {
+        let mut pointer = WinitPointer::default();
+        pointer.set_pen_in_proximity(true);
+        assert_eq!(
+            pointer.translate_at(&moved(40.0, 50.0), Ticks(1)),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            pointer.translate_at(&button(ElementState::Pressed, MouseButton::Left), Ticks(2)),
+            Some(Vec::new())
+        );
+        // Wheel events still use the tracked cursor location while pen hovers.
+        let wheel = WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta: MouseScrollDelta::LineDelta(0.0, 1.0),
+            phase: TouchPhase::Moved,
+        };
+        assert_eq!(
+            pointer.translate_at(&wheel, Ticks(3)),
+            Some(vec![PointerEvent::Wheel {
+                position: [40.0, 50.0],
+                delta: 1.0,
+                horizontal: false,
+                time: Ticks(3),
+            }])
+        );
+
+        // Once the pen leaves proximity, real mouse moves emit clean samples
+        // with no stuck button from the suppressed press.
+        pointer.set_pen_in_proximity(false);
+        assert_eq!(
+            mouse_samples(pointer.translate_at(&moved(60.0, 70.0), Ticks(4)).unwrap()),
+            [([60.0, 70.0], Buttons::empty())]
         );
     }
 }

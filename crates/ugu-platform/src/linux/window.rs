@@ -20,6 +20,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ugu_platform_types::clipboard::{Encoded, ReadError};
+use ugu_platform_types::pointer::PointerEvent;
 use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::protocol::{
     wl_data_device::{self, WlDataDevice},
@@ -53,8 +54,17 @@ type WakeFn = Arc<dyn Fn() + Send + Sync>;
 type DropFileFn = Arc<dyn Fn(PathBuf) + Send + Sync>;
 
 enum Entry {
-    Wayland { worker: WaylandHandle, wake: WakeFn },
-    X11 { window: u32, wake: WakeFn },
+    Wayland {
+        worker: WaylandHandle,
+        wake: WakeFn,
+        pen: Arc<super::wayland_tablet::PenQueue>,
+    },
+    X11 {
+        window: u32,
+        wake: WakeFn,
+        pen: Arc<super::wayland_tablet::PenQueue>,
+        tablet: Option<super::x11_tablet::X11TabletHandle>,
+    },
 }
 
 struct Registry {
@@ -88,25 +98,39 @@ impl LinuxWindow {
         hwnd: isize,
         display: *mut c_void,
         surface: *mut c_void,
+        scale_factor: f64,
         wake: impl Fn() + Send + Sync + 'static,
         on_drop: impl Fn(PathBuf) + Send + Sync + 'static,
     ) -> Result<Self, String> {
         let wake: WakeFn = Arc::new(wake);
         let on_drop: DropFileFn = Arc::new(on_drop);
+        let pen = super::wayland_tablet::PenQueue::new(wake.clone());
         // SAFETY: forwarded from the caller; `Session` drops `LinuxWindow`
         // (and joins its thread) before dropping `Arc<Window>`.
-        let worker = unsafe { WaylandHandle::spawn(display, surface, on_drop)? };
+        let worker =
+            unsafe { WaylandHandle::spawn(display, surface, scale_factor, on_drop, pen.clone())? };
         let mut reg = registry().lock().expect("window registry poisoned");
-        reg.by_hwnd.insert(hwnd, Entry::Wayland { worker, wake });
+        reg.by_hwnd
+            .insert(hwnd, Entry::Wayland { worker, wake, pen });
         reg.active = Some(hwnd);
         Ok(Self { hwnd })
     }
 
-    /// Registers an X11 window XID (`Xlib` or `Xcb`).
+    /// Registers an X11 window XID (`Xlib` or `Xcb`) and starts XInput2 pen discovery.
     pub fn install_x11(hwnd: isize, window: u32, wake: impl Fn() + Send + Sync + 'static) -> Self {
         let wake: WakeFn = Arc::new(wake);
+        let pen = super::wayland_tablet::PenQueue::new(wake.clone());
+        let tablet = super::x11_tablet::X11TabletHandle::spawn(window, pen.clone());
         let mut reg = registry().lock().expect("window registry poisoned");
-        reg.by_hwnd.insert(hwnd, Entry::X11 { window, wake });
+        reg.by_hwnd.insert(
+            hwnd,
+            Entry::X11 {
+                window,
+                wake,
+                pen,
+                tablet,
+            },
+        );
         reg.active = Some(hwnd);
         Self { hwnd }
     }
@@ -121,8 +145,13 @@ impl Drop for LinuxWindow {
             }
             reg.by_hwnd.remove(&self.hwnd)
         };
-        if let Some(Entry::Wayland { mut worker, .. }) = removed {
-            worker.shutdown();
+        match removed {
+            Some(Entry::Wayland { mut worker, .. }) => worker.shutdown(),
+            Some(Entry::X11 {
+                tablet: Some(mut tablet),
+                ..
+            }) => tablet.shutdown(),
+            _ => {}
         }
     }
 }
@@ -165,6 +194,67 @@ pub(crate) fn wake_ui(hwnd: isize) {
     };
     if let Some(wake) = wake {
         wake();
+    }
+}
+
+/// Drains queued native Wayland (`zwp_tablet_v2`) or X11 (`XInput2`) pen events.
+pub fn drain_pen_events(hwnd: isize) -> Vec<PointerEvent> {
+    let pen = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { pen, .. } | Entry::X11 { pen, .. } => Some(pen.clone()),
+        })
+    };
+    pen.map_or_else(Vec::new, |q| q.drain())
+}
+
+/// Reports whether a pen stylus is currently in proximity over `hwnd`, so
+/// `WinitPointer` can suppress synthesized core-pointer mouse events.
+pub fn pen_in_proximity(hwnd: isize) -> bool {
+    let pen = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { pen, .. } | Entry::X11 { pen, .. } => Some(pen.clone()),
+        })
+    };
+    pen.is_some_and(|q| q.in_proximity())
+}
+
+/// Updates the window's HiDPI scale factor used to convert Wayland surface-local
+/// tablet coordinates into physical client pixels.
+pub fn set_scale_factor(hwnd: isize, scale_factor: f64) {
+    let sender = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { worker, .. } => Some(worker.sender.clone()),
+            Entry::X11 { .. } => None,
+        })
+    };
+    if let Some(sender) = sender
+        && sender.send(Command::SetScaleFactor(scale_factor)).is_ok()
+    {
+        let _ = sender.wake();
+    }
+}
+
+/// Updates the Wayland `zwp_tablet_tool_v2` cursor shape (or hides it when
+/// `cursor_name` is `None` over the canvas).
+pub fn set_tablet_cursor(hwnd: isize, cursor_name: Option<&'static str>) {
+    let sender = {
+        let reg = registry().lock().expect("window registry poisoned");
+        let key = if hwnd != 0 { Some(hwnd) } else { reg.active };
+        key.and_then(|k| match reg.by_hwnd.get(&k)? {
+            Entry::Wayland { worker, .. } => Some(worker.sender.clone()),
+            Entry::X11 { .. } => None,
+        })
+    };
+    if let Some(sender) = sender
+        && sender.send(Command::SetTabletCursor(cursor_name)).is_ok()
+    {
+        let _ = sender.wake();
     }
 }
 
@@ -337,6 +427,8 @@ enum Command {
     },
     SetActivationToken(String),
     Activate,
+    SetScaleFactor(f64),
+    SetTabletCursor(Option<&'static str>),
     FinishDnd(WlDataOffer),
     Shutdown,
 }
@@ -379,7 +471,9 @@ impl WaylandHandle {
     unsafe fn spawn(
         display: *mut c_void,
         surface: *mut c_void,
+        scale_factor: f64,
         on_drop: DropFileFn,
+        pen: Arc<super::wayland_tablet::PenQueue>,
     ) -> Result<Self, String> {
         // SAFETY: `EFD_CLOEXEC | EFD_NONBLOCK` creates a fresh kernel eventfd.
         let raw_efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
@@ -407,7 +501,16 @@ impl WaylandHandle {
         let thread = std::thread::Builder::new()
             .name("wayland-services".to_owned())
             .spawn(move || {
-                run_wayland_worker(conn, wl_surface, rx, wake_fd, worker_sender, on_drop)
+                run_wayland_worker(
+                    conn,
+                    wl_surface,
+                    scale_factor,
+                    rx,
+                    wake_fd,
+                    worker_sender,
+                    on_drop,
+                    pen,
+                )
             })
             .map_err(|error| error.to_string())?;
 
@@ -427,7 +530,7 @@ impl WaylandHandle {
 }
 
 #[derive(Default)]
-struct SeatSlot {
+pub(crate) struct SeatSlot {
     keyboard: Option<WlKeyboard>,
     pointer: Option<WlPointer>,
     touch: Option<WlTouch>,
@@ -438,8 +541,8 @@ struct SeatSlot {
     dnd_offer: Option<(ObjectId, bool)>,
 }
 
-struct WaylandState {
-    surface: WlSurface,
+pub(crate) struct WaylandState {
+    pub(crate) surface: WlSurface,
     sender: CommandSender,
     on_drop: DropFileFn,
     data_manager: Option<WlDataDeviceManager>,
@@ -452,11 +555,18 @@ struct WaylandState {
     latest_seat: Option<ObjectId>,
     offer_mimes: HashMap<ObjectId, (WlDataOffer, Vec<String>)>,
     active_sources: Vec<(WlDataSource, Arc<[u8]>)>,
+    pub(crate) tablet: super::wayland_tablet::WaylandTablet,
     exit: bool,
 }
 
 impl WaylandState {
-    fn new(surface: WlSurface, sender: CommandSender, on_drop: DropFileFn) -> Self {
+    fn new(
+        surface: WlSurface,
+        scale_factor: f64,
+        sender: CommandSender,
+        on_drop: DropFileFn,
+        pen: Arc<super::wayland_tablet::PenQueue>,
+    ) -> Self {
         Self {
             surface,
             sender,
@@ -471,6 +581,7 @@ impl WaylandState {
             latest_seat: None,
             offer_mimes: HashMap::new(),
             active_sources: Vec::new(),
+            tablet: super::wayland_tablet::WaylandTablet::new(pen, scale_factor),
             exit: false,
         }
     }
@@ -479,6 +590,22 @@ impl WaylandState {
         if let Some((_, slot)) = self.seats.get_mut(seat_id) {
             slot.latest_serial = serial;
             self.latest_seat = Some(seat_id.clone());
+        }
+    }
+
+    pub(crate) fn record_any_seat_serial(&mut self, serial: u32) {
+        if serial == 0 {
+            return;
+        }
+        if let Some(id) = &self.latest_seat
+            && let Some((_, slot)) = self.seats.get_mut(id)
+        {
+            slot.latest_serial = serial;
+            return;
+        }
+        if let Some((id, (_, slot))) = self.seats.iter_mut().next() {
+            slot.latest_serial = serial;
+            self.latest_seat = Some(id.clone());
         }
     }
 
@@ -546,20 +673,24 @@ impl WaylandState {
         if let Some(activation) = self.activation.take() {
             activation.destroy();
         }
+        self.tablet.cleanup();
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_wayland_worker(
     conn: Connection,
     surface: WlSurface,
+    scale_factor: f64,
     rx: Receiver<Command>,
     wake_fd: Arc<OwnedFd>,
     sender: CommandSender,
     on_drop: DropFileFn,
+    pen: Arc<super::wayland_tablet::PenQueue>,
 ) {
     let mut queue: EventQueue<WaylandState> = conn.new_event_queue();
     let qh = queue.handle();
-    let mut state = WaylandState::new(surface, sender, on_drop);
+    let mut state = WaylandState::new(surface, scale_factor, sender, on_drop, pen);
 
     let _registry = conn.display().get_registry(&qh, ());
     // Two roundtrips bind globals (`wl_seat`, `wl_data_device_manager`,
@@ -737,6 +868,14 @@ fn handle_command(
             offer.destroy();
             let _ = conn.flush();
         }
+        Command::SetScaleFactor(scale_factor) => {
+            if scale_factor > 0.0 {
+                state.tablet.scale_factor = scale_factor;
+            }
+        }
+        Command::SetTabletCursor(cursor_name) => {
+            state.tablet.set_cursor(cursor_name, conn);
+        }
         Command::Shutdown => {
             state.exit = true;
         }
@@ -902,6 +1041,7 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
                 if let Some(mgr) = &state.data_manager {
                     slot.data_device = Some(mgr.get_data_device(&seat, qh, seat_id.clone()));
                 }
+                state.tablet.on_seat_added(seat_id.clone(), &seat, qh);
                 if state.latest_seat.is_none() {
                     state.latest_seat = Some(seat_id.clone());
                 }
@@ -917,7 +1057,11 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
                 state.activation =
                     Some(registry.bind::<XdgActivationV1, _, _>(name, version.min(1), qh, ()));
             }
-            _ => {}
+            other => {
+                state
+                    .tablet
+                    .bind_global(other, name, version, registry, &state.seats, qh);
+            }
         }
     }
 }

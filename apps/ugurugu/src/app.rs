@@ -105,6 +105,8 @@ struct Session {
     /// Dropped before the window, whose Wayland/X11 handles it holds.
     #[cfg(target_os = "linux")]
     _linux_window: Option<ugu_platform::window::LinuxWindow>,
+    #[cfg(target_os = "linux")]
+    hwnd: isize,
     #[cfg(windows)]
     pointer: PointerInput,
     #[cfg(not(windows))]
@@ -226,6 +228,7 @@ fn install_linux_window(
                     hwnd,
                     disp.display.as_ptr(),
                     win.surface.as_ptr(),
+                    window.scale_factor(),
                     wake,
                     on_drop,
                 )
@@ -444,6 +447,8 @@ impl Session {
             menus,
             #[cfg(target_os = "linux")]
             _linux_window: linux_window,
+            #[cfg(target_os = "linux")]
+            hwnd,
             pointer,
             accessibility,
             window,
@@ -453,16 +458,28 @@ impl Session {
     }
 
     #[cfg(windows)]
-    fn forward_pointer_input(&self) {
+    fn forward_pointer_input(&mut self) {
         let events = self.pointer.drain();
         if !events.is_empty() {
             let _ = self.to_render.send(ToRender::Pointer(events));
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn forward_pointer_input(&mut self) {
+        self.pointer
+            .set_pen_in_proximity(ugu_platform::window::pen_in_proximity(self.hwnd));
+        let events = ugu_platform::window::drain_pen_events(self.hwnd);
+        if !events.is_empty() {
+            let _ = self.to_render.send(ToRender::Pointer(events));
+            self.pointer
+                .set_pen_in_proximity(ugu_platform::window::pen_in_proximity(self.hwnd));
+        }
+    }
+
     /// Elsewhere pointer input comes with each window event instead.
-    #[cfg(not(windows))]
-    fn forward_pointer_input(&self) {}
+    #[cfg(not(any(windows, target_os = "linux")))]
+    fn forward_pointer_input(&mut self) {}
 }
 
 impl ApplicationHandler<UiEvent> for App {
@@ -499,6 +516,10 @@ impl ApplicationHandler<UiEvent> for App {
             return;
         };
         session.forward_pointer_input();
+        #[cfg(target_os = "linux")]
+        if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
+            ugu_platform::window::set_scale_factor(session.hwnd, *scale_factor);
+        }
         #[cfg(not(windows))]
         if let Some(events) = session.pointer.translate(&event) {
             if !events.is_empty() {
@@ -558,8 +579,17 @@ impl ApplicationHandler<UiEvent> for App {
                         WindowChange::Cursor(Some(icon)) => {
                             session.window.set_cursor(icon);
                             session.window.set_cursor_visible(true);
+                            #[cfg(target_os = "linux")]
+                            ugu_platform::window::set_tablet_cursor(
+                                session.hwnd,
+                                Some(icon.name()),
+                            );
                         }
-                        WindowChange::Cursor(None) => session.window.set_cursor_visible(false),
+                        WindowChange::Cursor(None) => {
+                            session.window.set_cursor_visible(false);
+                            #[cfg(target_os = "linux")]
+                            ugu_platform::window::set_tablet_cursor(session.hwnd, None);
+                        }
                     }
                 }
                 return;
@@ -567,6 +597,9 @@ impl ApplicationHandler<UiEvent> for App {
             #[cfg(target_os = "linux")]
             UiEvent::LinuxWake => {
                 ugu_platform::instance::poll_current_thread_receivers();
+                if let Some(session) = self.session.as_mut() {
+                    session.forward_pointer_input();
+                }
                 return;
             }
             #[cfg(target_os = "linux")]
@@ -595,7 +628,7 @@ impl ApplicationHandler<UiEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(session) = self.session.as_ref() {
+        if let Some(session) = self.session.as_mut() {
             session.forward_pointer_input();
         }
         event_loop.set_control_flow(ControlFlow::Wait);
