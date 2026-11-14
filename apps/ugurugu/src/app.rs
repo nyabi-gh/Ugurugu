@@ -477,13 +477,14 @@ impl Session {
 
     #[cfg(target_os = "linux")]
     fn forward_pointer_input(&mut self) {
-        self.pointer
+        let pen = ugu_platform::window::drain_pen_events(self.hwnd);
+        // The mouse lets go first, so the pen's samples find the canvas free.
+        let mut events = self
+            .pointer
             .set_pen_in_proximity(ugu_platform::window::pen_in_proximity(self.hwnd));
-        let events = ugu_platform::window::drain_pen_events(self.hwnd);
+        events.extend(pen);
         if !events.is_empty() {
             let _ = self.to_render.send(ToRender::Pointer(events));
-            self.pointer
-                .set_pen_in_proximity(ugu_platform::window::pen_in_proximity(self.hwnd));
         }
     }
 

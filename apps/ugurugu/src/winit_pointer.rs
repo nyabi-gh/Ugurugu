@@ -25,12 +25,23 @@ pub struct WinitPointer {
 }
 
 impl WinitPointer {
+    /// The mouse events the pen's arrival makes: buttons the mouse holds are
+    /// let go, since their releases will be suppressed and whatever they
+    /// were dragging would never end.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub fn set_pen_in_proximity(&mut self, in_proximity: bool) {
-        if in_proximity && !self.pen_in_proximity {
-            self.buttons = Buttons::empty();
-        }
+    pub fn set_pen_in_proximity(&mut self, in_proximity: bool) -> Vec<PointerEvent> {
+        self.set_pen_in_proximity_at(in_proximity, clock::now())
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn set_pen_in_proximity_at(&mut self, in_proximity: bool, time: Ticks) -> Vec<PointerEvent> {
+        let arrived = in_proximity && !self.pen_in_proximity;
         self.pen_in_proximity = in_proximity;
+        if arrived && !self.buttons.is_empty() {
+            self.buttons = Buttons::empty();
+            return self.mouse(time);
+        }
+        Vec::new()
     }
 
     /// The pointer events `event` makes, or `None` when it is not pointer
@@ -351,6 +362,23 @@ mod tests {
             pointer.translate_at(&WindowEvent::Focused(true), Ticks(1)),
             None
         );
+    }
+
+    #[test]
+    fn a_pen_arriving_lets_go_of_the_buttons_the_mouse_holds() {
+        let mut pointer = WinitPointer::default();
+        pointer.translate_at(&moved(10.0, 20.0), Ticks(1));
+        pointer.translate_at(&button(ElementState::Pressed, MouseButton::Left), Ticks(2));
+        assert_eq!(
+            mouse_samples(pointer.set_pen_in_proximity_at(true, Ticks(3))),
+            [([10.0, 20.0], Buttons::empty())]
+        );
+        assert!(pointer.set_pen_in_proximity_at(true, Ticks(4)).is_empty());
+        assert!(pointer.set_pen_in_proximity_at(false, Ticks(5)).is_empty());
+
+        let mut idle = WinitPointer::default();
+        idle.translate_at(&moved(10.0, 20.0), Ticks(1));
+        assert!(idle.set_pen_in_proximity_at(true, Ticks(2)).is_empty());
     }
 
     #[test]
