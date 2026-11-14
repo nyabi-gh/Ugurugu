@@ -498,7 +498,7 @@ settings-shortcuts-search | Search shortcuts | 단축키 검색 | ショート�
 settings-shortcuts-no-match | No shortcut matches. | 맞는 단축키가 없습니다. | 一致するショートカットはありません。 | 没有匹配的快捷键。
 settings-theme-dark | Dark | 어둡게 | ダーク | 深色
 settings-theme-light | Light | 밝게 | ライト | 浅色
-settings-theme-system | Same as Windows | Windows 설정과 같게 | Windowsの設定に合わせる | 跟随 Windows
+settings-theme-system | Same as system | 시스템 설정과 같게 | システムの設定に合わせる | 跟随系统
 settings-theme-color | Theme color | 테마 색상 | テーマカラー | 主题色
 settings-restart | Restart Ugurugu to apply language changes. | 언어 변경 사항을 적용하려면 Ugurugu를 다시 시작하세요. | 言語の変更を適用するには Ugurugu を再起動してください。 | 重新启动 Ugurugu 以应用语言更改。
 settings-drawing | Drawing | 그리기 | 描画 | 绘图
@@ -552,7 +552,7 @@ help-start-pixel | For pixel art, turn on Pixel mode in the Edit menu, or when m
 help-start-export | Export the animation as GIF or WebP, or the current frame as PNG or JPEG, from the File menu. | 파일 메뉴에서 애니메이션을 GIF·WebP로, 현재 프레임을 PNG·JPEG로 내보낼 수 있습니다. | ファイルメニューから、アニメーションを GIF・WebP に、現在のフレームを PNG・JPEG に書き出せます。 | 在文件菜单中可以将动画导出为 GIF 或 WebP，或将当前帧导出为 PNG 或 JPEG。
 help-files | Projects | 프로젝트 | 作業ファイル | 项目
 help-files-format | Ugurugu 3 saves projects as .ugurugu files. | Ugurugu 3은 프로젝트를 .ugurugu 파일로 저장합니다. | Ugurugu 3 は作業を .ugurugu ファイルに保存します。 | Ugurugu 3 将项目保存为 .ugurugu 文件。
-help-files-tabs | Each project opens in a tab above the canvas, and a project opened from File Explorer opens as a tab of the window already open. Ctrl+Tab moves to the next tab and Ctrl+W closes one. | 프로젝트마다 캔버스 위의 탭으로 열리고, 파일 탐색기에서 연 프로젝트도 이미 열린 창의 탭으로 열립니다. Ctrl+Tab으로 다음 탭으로 가고 Ctrl+W로 탭을 닫습니다. | 作業はキャンバスの上のタブで開き、エクスプローラーから開いた作業もすでに開いているウィンドウのタブで開きます。Ctrl+Tab で次のタブへ移り、Ctrl+W でタブを閉じます。 | 每个项目在画布上方的标签页中打开，从文件资源管理器打开的项目也会作为已打开窗口的标签页打开。Ctrl+Tab 切换到下一个标签页，Ctrl+W 关闭标签页。
+help-files-tabs | Each project opens in a tab above the canvas, and a project opened from your file manager opens as a tab of the window already open. Ctrl+Tab moves to the next tab and Ctrl+W closes one. | 프로젝트마다 캔버스 위의 탭으로 열리고, 파일 관리자에서 연 프로젝트도 이미 열린 창의 탭으로 열립니다. Ctrl+Tab으로 다음 탭으로 가고 Ctrl+W로 탭을 닫습니다. | 作業はキャンバスの上のタブで開き、ファイルマネージャーから開いた作業もすでに開いているウィンドウのタブで開きます。Ctrl+Tab で次のタブへ移り、Ctrl+W でタブを閉じます。 | 每个项目在画布上方的标签页中打开，从文件管理器打开的项目也会作为已打开窗口的标签页打开。Ctrl+Tab 切换到下一个标签页，Ctrl+W 关闭标签页。
 help-files-import | Projects saved as .ugu by Ugurugu 2.1.0 or later open as new projects and are saved as .ugurugu. The .ugu file is not changed. | Ugurugu 2.1.0 이후에 저장한 .ugu 파일은 새 프로젝트로 열리고 .ugurugu로 저장됩니다. 원래 .ugu 파일은 바뀌지 않습니다. | Ugurugu 2.1.0 以降で保存した .ugu ファイルは新しい作業として開き、.ugurugu に保存されます。元の .ugu ファイルは変更されません。 | Ugurugu 2.1.0 及以后版本保存的 .ugu 项目会作为新项目打开，并保存为 .ugurugu。原 .ugu 文件不会改变。
 help-files-older | Older .ugu files and .wagle, .wobble and .wawa files open in Ugurugu 2.2.13. Save older .ugu files there again to open them here. | 그보다 오래된 .ugu와 .wagle·.wobble·.wawa 파일은 Ugurugu 2.2.13에서 열 수 있습니다. 오래된 .ugu는 2.2.13에서 다시 저장하면 여기서 열립니다. | それより古い .ugu と .wagle・.wobble・.wawa ファイルは Ugurugu 2.2.13 で開けます。古い .ugu は 2.2.13 で保存し直すとここで開けます。 | 更早的 .ugu 文件以及 .wagle、.wobble、.wawa 文件可在 Ugurugu 2.2.13 中打开。在那里重新保存较旧的 .ugu 文件后即可在这里打开。
 help-install | Installing and updates | 설치와 업데이트 | インストールとアップデート | 安装与更新

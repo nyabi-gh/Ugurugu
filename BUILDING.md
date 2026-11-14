@@ -1,6 +1,6 @@
 # Building Ugurugu
 
-Ugurugu 3 for Windows is written in Rust.
+Ugurugu 3 is written in Rust.
 
 ## Ugurugu 3 (Windows)
 
@@ -138,6 +138,33 @@ open --env UGURUGU_SETTINGS_PATH=/tmp/ugu/settings.json \
   --env UGURUGU_LOG_PATH=/tmp/ugu/logs \
   "target/release/Ugurugu 3.app"
 ```
+
+## Ugurugu 3 (Linux, in development)
+
+There is no Linux release of 3.x yet. It builds on x86_64 Linux (releases
+target glibc 2.35 or later) with [rustup](https://rustup.rs/), a C compiler,
+`pkg-config`, the `fontconfig` development files (`libfontconfig-dev` on
+Debian and Ubuntu, `fontconfig-devel` on Fedora), and Python 3. The checks
+are the ones above, with `python3` for `python`.
+
+```sh
+cargo build --package ugurugu --release --locked
+./target/release/ugurugu
+```
+
+Wayland, X11, xkbcommon and Vulkan are opened at run time, file dialogs go
+through `xdg-desktop-portal`, and `UGURUGU_ADAPTER=fallback` picks a software
+Vulkan driver such as Mesa's lavapipe. `tools/linux_desktop.py` registers the
+launcher entry, icons and `.ugurugu` MIME type under `$XDG_DATA_HOME`
+(`uninstall` removes them):
+
+```sh
+python3 tools/linux_desktop.py install target/release/ugurugu
+```
+
+To keep a development run apart from `~/.config/ugurugu/3` and
+`~/.local/state/ugurugu/3`, set `UGURUGU_SETTINGS_PATH`,
+`UGURUGU_RECOVERY_PATH` and `UGURUGU_LOG_PATH`.
 
 ## Ugurugu 2.x
 

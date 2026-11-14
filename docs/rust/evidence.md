@@ -2527,3 +2527,36 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **CI:** PR #183 약 5분, main(`0ae9fee`) 실행 43194436700 5분 28초, 둘 다 통과.
 
 **출시:** 태그 `v3.6.2`(annotated, `0ae9fee`) → `release-3.yml` 실행 43196301145 성공(12분 28초). `v3.6.2`에는 `Ugurugu-3.6.2-Windows-x64-Setup.exe`(23,984,420바이트)만, 본문 끝에 "What's Changed"(#179~#183)와 비교 링크가 붙었고 Latest다. `updates`에 `Ugurugu3-3.6.2-win-x64-full.nupkg`(16,419,108바이트)가 더해지고 `releases.win-x64.json`이 3.6.2를 가리킨다. 다운로드 배지 실행(43198181324)도 성공했다. macOS판은 없다.
+
+## 125. Linux 3단계 구현의 소화·렌더·오프스크린 실행 확인 (2026-11-14)
+
+**환경:** AMD Ryzen 9 5900X(12코어 24스레드), RAM 31 GiB, AMD Radeon RX 7900 XTX(`RADV NAVI31`, Mesa 26.2.6), Bazzite 45(Linux `7.3.3-ogc1.1.fc45.x86_64`, glibc 2.44), release 빌드(`--locked`). `ldd target/release/ugurugu`의 직접 동적 의존(`DT_NEEDED`)은 `libfontconfig.so.1`·`libgcc_s.so.1`·`libm.so.6`·`libc.so.6` 넷뿐이고, Wayland·X11·xkbcommon·Vulkan은 실행 중에 `dlopen`으로 연다.
+
+**CPU·OS 간 화소 동일성 (`ugu-doc fixture`·`digest 8`):** 이 기계(AMD Zen 3 SSE4.2, glibc 2.44 `libm`)에서 새로 만든 fixture ①~⑤의 파일 크기(`161,986`·`1,187,150`·`1,758,985`·`1,576,290`·`1,008,164`바이트)와 8스레드 렌더 SHA-256 digest 다섯 개가 모두 104절(Windows Intel, UCRT) 및 101·115절(macOS Apple M4, FMA를 뺀 NEON, macOS `libm`)과 바이트까지 같았다(B3-71):
+
+- ① `ccd396597b04213640e4388883863217a4a9456f8fee27c2effc00ac8152750a`
+- ② `9d90bb30f920379cc15a8635495697e308560d94c6fe4313b8a24a63f5533340`
+- ③ `e06d18d0f05f55f31aeac5905ec4f5aecdb2f4527e631989e15d5eac088dc049`
+- ④ `1948db8835fbc0892ab0a6cb18efcd1739c841c0bdc91094a0e01cf767de6165`
+- ⑤ `10d33f3b71ba26e0acafb1a1f360f7bf97001b15affb2478933446adfb716dc9`
+
+**8 작업자 렌더 (`ugu-doc render <file> 8`, 60프레임, 3 round 번갈아 실행):**
+
+| fixture | 프레임 p50 (ms) | 프레임 p95 (ms) | 프레임 max (ms) | pen-up p50 / max (ms) | `ru_maxrss` 프레임 / 끝 (MiB) |
+|---|---|---|---|---|---|
+| ① 1024² 단순 | 3.2 · 3.3 · 3.4 | 4.3 · 3.6 · 3.7 | 8.2 · 3.9 · 4.1 | 0.2~0.3 / 0.3~0.4 | 32~33 / 50~51 |
+| ② 2048² 16레이어 혼합 | 73.6 · 73.1 · 72.4 | 88.0 · 75.5 · 74.3 | 107.6 · 76.2 · 74.6 | 1.2~1.4 / 2.3~2.5 | 492~497 / 931~937 |
+| ③ 2,000획 20만 점 | 34.2 · 33.6 · 33.9 | 38.9 · 38.4 · 38.3 | 39.6 · 39.3 · 41.6 | 0.8~0.9 / 1.0 | 338~341 / 590~609 |
+| ④ 짧은 획 2만 개 | 35.0 · 34.3 · 34.6 | 37.2 · 36.8 · 38.8 | 39.8 · 37.7 · 40.1 | 0.1 / 0.1 | 124~127 / 232~235 |
+| ⑤ 4096² 이미지·마스크·클리핑 | 139.2 · 138.5 · 138.7 | 143.8 · 143.9 · 143.7 | 159.5 · 148.4 · 149.4 | 1.4~1.5 / 3.3~3.6 | 988~998 / 1861~1881 |
+
+**GPU 시험과 Wayland 표면 형식 고침:** `UGU_REQUIRE_ADAPTER=1 cargo test -p ugu-render --release --locked`의 154개 시험이 하드웨어 Vulkan(`RADV NAVI31`, 3.22초)과 `UGURUGU_ADAPTER=fallback`으로 강제한 소프트웨어 Vulkan(`llvmpipe`, LLVM 23.1.2, 3.20초) 모두에서 건너뛰지 않고 통과했다. 첫 오프스크린 Wayland 실행에서 Mesa RADV가 표면 형식 목록 앞에 `Rgba16Float`를 내놓아 기존 `find(|f| !f.is_srgb())`가 `Rgba16Float`를 고르는 것을 로그에서 찾았다: `egui-wgpu` 0.36.2는 타깃이 `Rgba8Unorm`·`Bgra8Unorm`이 아니면 UI 색만 선형으로 바꾸므로 감마 인코딩 sRGB를 쓰는 앱 화면에서 UI가 두 번 어두워지고 swapchain 메모리가 두 배가 된다. `present::choose_surface_format`이 8비트 비 sRGB(`Rgba8Unorm`·`Bgra8Unorm`)를 먼저 고르게 고친 뒤 `RADV NAVI31` Wayland에서도 `swap chain format=Bgra8Unorm`으로 열렸다.
+
+**오프스크린 Wayland·X11 실행 확인 (격리 경로):** 사용자 세션을 건드리지 않고 헤드리스 Wayland(`WLR_BACKENDS=headless cage -d`)와 헤드리스 X11(`Xvfb`)에 `UGURUGU_SETTINGS_PATH`·`UGURUGU_RECOVERY_PATH`·`UGURUGU_LOG_PATH`를 주어 확인했다.
+
+- Wayland(`RADV NAVI31`): 시작→어댑터 선택 45ms, `Bgra8Unorm` swapchain 구성 95ms, `tests/fixtures/ugu13/motion.ugu` 가져오기 열기 `1.45ms`(시작부터 약 197ms), 유휴 `VmRSS` 97.6MiB. `UGURUGU_ADAPTER=fallback`(`llvmpipe`)에서는 유휴 `VmRSS` 161.3MiB.
+- 하드웨어→소프트웨어 자동 전환(B3-07): `Xvfb`(X11)와 `WLR_RENDERER=pixman`(dmabuf가 없는 Wayland)에서 시작 스레드가 먼저 연 `RADV NAVI31`이 창 표면을 보이지 못하자(`the adapter opened early cannot show the window`) 스스로 `llvmpipe`로 다시 열어 `Bgra8Unorm` swapchain과 문서를 띄웠다.
+- 단일 실행과 세션 끝 복구: 떠 있는 첫 프로세스에 둘째 `./target/release/ugurugu f1.ugurugu`를 실행하자 둘째는 종료 코드 0으로 끝나고 첫 프로세스가 Unix 소켓으로 경로를 받아 열었다(`opening a document handed over from outside`, `ms=1.69 ok=true`). 3초 유휴 복구 타이머가 돌기 전에 `SIGTERM`을 보내자 `tab-1/1.json`(129바이트)과 `tab-1/1.ugurugu`(39,613바이트)를 `1.53ms`에 쓰고(`unsaved work kept for recovery as the session ends`) 종료 코드 0으로 끝났다.
+- 데스크톱 통합 파일: `desktop-file-validate resources/linux/dev.ugurugu.app3.desktop`이 경고 없이 통과했고, 임시 `XDG_DATA_HOME`에 `tools/linux_desktop.py install`·`uninstall`을 돌려 `.desktop`·512px 아이콘·MIME 정의의 설치와 제거를 확인했다.
+
+**재지 않은 것:** 실제 펜 태블릿 장치(Wayland `zwp_tablet_v2`와 X11 `XInput2`, B3-06), 실제 데스크톱 창에서의 입력→표시 지연, 포털 파일 대화상자·클립보드·파일 끌어놓기의 대화형 화면 확인.

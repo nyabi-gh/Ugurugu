@@ -43,6 +43,7 @@ const SECTIONS: [(&str, &[&str]); 5] = [
         "help-install",
         &[
             "help-install-beside",
+            #[cfg(windows)]
             "help-install-smartscreen",
             "help-install-updates",
         ],
@@ -87,7 +88,7 @@ mod tests {
         let keys = SECTIONS
             .iter()
             .flat_map(|(heading, paragraphs)| std::iter::once(heading).chain(paragraphs.iter()))
-            .chain([&"help-title", &"help-again"]);
+            .chain([&"help-title", &"help-again", &"help-install-smartscreen"]);
         for key in keys {
             assert_ne!(tr(key), *key);
         }

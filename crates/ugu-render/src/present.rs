@@ -73,13 +73,7 @@ impl Presenter {
         size: [u32; 2],
     ) -> Result<Self, String> {
         let capabilities = surface.get_capabilities(adapter);
-        let format = capabilities
-            .formats
-            .iter()
-            .copied()
-            .find(|format| !format.is_srgb())
-            .or_else(|| capabilities.formats.first().copied())
-            .ok_or("the surface supports no texture format")?;
+        let format = choose_surface_format(&capabilities.formats)?;
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -182,6 +176,25 @@ impl Presenter {
         };
         settle(&mut self.pending, shown, display_qpc)
     }
+}
+
+/// Picks a gamma-space 8-bit surface format ahead of floating-point and sRGB
+/// ones: `DocumentView` writes sRGB-encoded values without conversion, while
+/// `egui-wgpu` switches to linear output on `Rgba16Float` (which Mesa RADV
+/// lists ahead of `Bgra8Unorm` on Wayland).
+fn choose_surface_format(formats: &[wgpu::TextureFormat]) -> Result<wgpu::TextureFormat, String> {
+    formats
+        .iter()
+        .copied()
+        .find(|format| {
+            matches!(
+                format,
+                wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+            )
+        })
+        .or_else(|| formats.iter().copied().find(|format| !format.is_srgb()))
+        .or_else(|| formats.first().copied())
+        .ok_or_else(|| "the surface supports no texture format".to_owned())
 }
 
 /// Resolves pending presents against the newest displayed present: that one
@@ -331,5 +344,28 @@ mod tests {
         let mut queue = pending(&[(u32::MAX, 1), (0, 2)]);
         assert_eq!(settle(&mut queue, 0, 50)[0].input_qpc, 2);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn eight_bit_unorm_is_chosen_ahead_of_float_and_srgb_surface_formats() {
+        assert_eq!(
+            choose_surface_format(&[
+                wgpu::TextureFormat::Bgra8UnormSrgb,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                wgpu::TextureFormat::Rgba16Float,
+                wgpu::TextureFormat::Bgra8Unorm,
+                wgpu::TextureFormat::Rgba8Unorm,
+            ])
+            .unwrap(),
+            wgpu::TextureFormat::Bgra8Unorm
+        );
+        assert_eq!(
+            choose_surface_format(&[
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureFormat::Bgra8Unorm,
+            ])
+            .unwrap(),
+            wgpu::TextureFormat::Rgba8Unorm
+        );
     }
 }
