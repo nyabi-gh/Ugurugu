@@ -2530,6 +2530,8 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 
 ## 125. Linux 3단계 구현의 소화·렌더·오프스크린 실행 확인 (2026-11-14)
 
+**출처:** 이 절의 값과 화면 확인은 PR #187을 낸 기여자가 자기 PC에서 재고 본 것이다. 저장소의 PC에서는 다시 재지 않았고, Linux에서 앱을 실행해 본 적도 없다. CI의 Linux job(`ubuntu-24.04`, lavapipe)이 본 것은 clippy와 시험뿐이다.
+
 **환경:** AMD Ryzen 9 5900X(12코어 24스레드), RAM 31 GiB, AMD Radeon RX 7900 XTX(`RADV NAVI31`, Mesa 26.2.6), Bazzite 45(Linux `7.3.3-ogc1.1.fc45.x86_64`, glibc 2.44), release 빌드(`--locked`). `ldd target/release/ugurugu`의 직접 동적 의존(`DT_NEEDED`)은 `libfontconfig.so.1`·`libgcc_s.so.1`·`libm.so.6`·`libc.so.6` 넷뿐이고, Wayland·X11·xkbcommon·Vulkan은 실행 중에 `dlopen`으로 연다.
 
 **CPU·OS 간 화소 동일성 (`ugu-doc fixture`·`digest 8`):** 이 기계(AMD Zen 3 SSE4.2, glibc 2.44 `libm`)에서 새로 만든 fixture ①~⑤의 파일 크기(`161,986`·`1,187,150`·`1,758,985`·`1,576,290`·`1,008,164`바이트)와 8스레드 렌더 SHA-256 digest 다섯 개가 모두 104절(Windows Intel, UCRT) 및 101·115절(macOS Apple M4, FMA를 뺀 NEON, macOS `libm`)과 바이트까지 같았다(B3-71):
