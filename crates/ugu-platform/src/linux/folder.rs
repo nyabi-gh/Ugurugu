@@ -141,7 +141,8 @@ pub(crate) fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
 
 /// Opens `folder` in the desktop's file manager via
 /// `org.freedesktop.FileManager1.ShowFolders`, falling back to `xdg-open` when
-/// no D-Bus file manager service is available.
+/// no D-Bus file manager service is available. Both are tried on a thread of
+/// their own, so a failure is logged there and not returned.
 pub fn show(folder: &Path) -> Result<(), String> {
     let uri = path_to_file_uri(folder)?;
     let folder_buf = folder.to_path_buf();
@@ -151,14 +152,21 @@ pub fn show(folder: &Path) -> Result<(), String> {
             if show_via_dbus(&uri).is_ok() {
                 return;
             }
-            if let Err(error) = std::process::Command::new("xdg-open")
+            // Waited for, so the child is reaped and its failure is known.
+            let opened = std::process::Command::new("xdg-open")
                 .arg(&folder_buf)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn()
-            {
-                tracing::warn!(%error, folder = %folder_buf.display(), "cannot open the folder");
+                .status();
+            match opened {
+                Ok(status) if status.success() => {}
+                Ok(status) => {
+                    tracing::warn!(%status, folder = %folder_buf.display(), "cannot open the folder");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, folder = %folder_buf.display(), "cannot open the folder");
+                }
             }
         })
         .map(|_| ())

@@ -19,6 +19,8 @@ use zbus::{Connection, MatchRule, MessageStream};
 
 static TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+const PORTAL: &str = "org.freedesktop.portal.Desktop";
+
 /// Shows `dialog` through `org.freedesktop.portal.FileChooser` parented to
 /// `owner` and returns the chosen path, or `None` when cancelled.
 ///
@@ -73,13 +75,18 @@ async fn show_once(
 
     // Subscribe BEFORE invoking `OpenFile` / `SaveFile` so fast portal
     // responses cannot arrive before the signal match rule is active.
-    let rule = MatchRule::builder()
+    let mut stream =
+        MessageStream::for_match_rule(response_rule(&predicted_path)?, &conn, Some(4)).await?;
+    // A portal that ends or is replaced while its dialog is open never sends
+    // the Response.
+    let owner_rule = MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
-        .interface("org.freedesktop.portal.Request")?
-        .member("Response")?
-        .path(predicted_path.as_str())?
+        .sender("org.freedesktop.DBus")?
+        .interface("org.freedesktop.DBus")?
+        .member("NameOwnerChanged")?
+        .arg(0, PORTAL)?
         .build();
-    let mut stream = MessageStream::for_match_rule(rule, &conn, Some(4)).await?;
+    let mut owners = MessageStream::for_match_rule(owner_rule, &conn, Some(4)).await?;
 
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert("handle_token", Value::from(token.as_str()));
@@ -129,7 +136,7 @@ async fn show_once(
 
     let reply = conn
         .call_method(
-            Some("org.freedesktop.portal.Desktop"),
+            Some(PORTAL),
             "/org/freedesktop/portal/desktop",
             Some("org.freedesktop.portal.FileChooser"),
             method,
@@ -139,16 +146,30 @@ async fn show_once(
 
     let returned_path: OwnedObjectPath = reply.body().deserialize()?;
     if returned_path.as_str() != predicted_path {
-        let fallback_rule = MatchRule::builder()
-            .msg_type(zbus::message::Type::Signal)
-            .interface("org.freedesktop.portal.Request")?
-            .member("Response")?
-            .path(returned_path.as_str())?
-            .build();
+        let fallback_rule = response_rule(returned_path.as_str())?;
         stream = MessageStream::for_match_rule(fallback_rule, &conn, Some(4)).await?;
     }
 
-    if let Some(msg) = stream.next().await {
+    let portal_gone = async {
+        loop {
+            let changed = owners.next().await?;
+            let lost = changed.map(|message| {
+                let body = message.body();
+                body.deserialize::<(String, String, String)>()
+                    .is_ok_and(|(_, old_owner, _)| portal_lost(&old_owner))
+            });
+            match lost {
+                Ok(false) => {}
+                Ok(true) => {
+                    return Some(Err(zbus::Error::Failure(
+                        "the desktop portal ended while its dialog was open".into(),
+                    )));
+                }
+                Err(error) => return Some(Err(error)),
+            }
+        }
+    };
+    if let Some(msg) = futures_lite::future::or(stream.next(), portal_gone).await {
         let msg = msg?;
         let (code, results): (u32, HashMap<String, OwnedValue>) = msg.body().deserialize()?;
         if code != 0 {
@@ -168,13 +189,8 @@ async fn show_once(
 
         let chosen_type = match dialog {
             Dialog::Save { file_types, .. } if !file_types.is_empty() => {
-                let idx = results
-                    .get("current_filter")
-                    .and_then(extract_filter_name)
-                    .and_then(|filter_name| file_types.iter().position(|ft| ft.name == filter_name))
-                    .or(chosen_index)
-                    .unwrap_or(0)
-                    .min(file_types.len() - 1);
+                let named = results.get("current_filter").and_then(extract_filter_name);
+                let idx = chosen_type(file_types, named.as_deref(), &path, chosen_index);
                 Some((idx, file_types[idx]))
             }
             _ => None,
@@ -185,6 +201,51 @@ async fn show_once(
     Err(zbus::Error::Failure(
         "portal closed without sending a Response signal".into(),
     ))
+}
+
+/// Only the portal's own answer counts: any program on the session bus can
+/// emit a signal on the request's path, which is guessable.
+fn response_rule(request_path: &str) -> zbus::Result<MatchRule<'_>> {
+    Ok(MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender(PORTAL)?
+        .interface("org.freedesktop.portal.Request")?
+        .member("Response")?
+        .path(request_path)?
+        .build())
+}
+
+/// A `NameOwnerChanged` of the portal's name takes the portal away when the
+/// name had an owner. Without one the portal was only being started, by the
+/// call that opens the dialog.
+fn portal_lost(old_owner: &str) -> bool {
+    !old_owner.is_empty()
+}
+
+/// The index in `file_types` of the type to save as: the filter the portal
+/// names, else the type `path` already ends in, else the one asked for. A
+/// portal need not say which filter was chosen, and a name typed with another
+/// type's extension would otherwise get the first type's added.
+fn chosen_type(
+    file_types: &[FileType],
+    named: Option<&str>,
+    path: &Path,
+    asked: Option<usize>,
+) -> usize {
+    let by_name = named.and_then(|name| file_types.iter().position(|ft| ft.name == name));
+    let by_extension = || {
+        let extension = path.extension()?.to_str()?;
+        file_types.iter().position(|ft| {
+            ft.extensions
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(extension))
+        })
+    };
+    by_name
+        .or_else(by_extension)
+        .or(asked)
+        .unwrap_or(0)
+        .min(file_types.len() - 1)
 }
 
 fn next_handle_token() -> String {
@@ -253,6 +314,38 @@ mod tests {
             "*.[uU][gG][uU][rR][uU][gG][uU]"
         );
         assert_eq!(case_insensitive_glob("mp4"), "*.[mM][pP]4");
+    }
+
+    #[test]
+    fn the_saved_type_is_the_named_filter_then_the_typed_extension() {
+        let png = FileType {
+            name: "PNG",
+            extensions: &["png"],
+        };
+        let jpeg = FileType {
+            name: "JPEG",
+            extensions: &["jpg", "jpeg"],
+        };
+        let types = [png, jpeg];
+        let cat = Path::new("/home/painter/cat.JPEG");
+        assert_eq!(
+            chosen_type(&types, Some("JPEG"), Path::new("/a/cat"), None),
+            1
+        );
+        assert_eq!(chosen_type(&types, Some("PNG"), cat, Some(1)), 0);
+        assert_eq!(chosen_type(&types, None, cat, None), 1);
+        assert_eq!(chosen_type(&types, Some("no such filter"), cat, None), 1);
+        assert_eq!(chosen_type(&types, None, Path::new("/a/cat"), Some(1)), 1);
+        assert_eq!(chosen_type(&types, None, Path::new("/a/cat.gif"), None), 0);
+        assert_eq!(chosen_type(&types, None, Path::new("/a/cat"), Some(7)), 1);
+    }
+
+    #[test]
+    fn only_the_portal_answers_and_only_a_portal_that_was_there_is_lost() {
+        let rule = response_rule("/org/freedesktop/portal/desktop/request/1_204/t").unwrap();
+        assert_eq!(rule.sender().map(|sender| sender.as_str()), Some(PORTAL));
+        assert!(portal_lost(":1.31"));
+        assert!(!portal_lost(""));
     }
 
     #[test]
