@@ -223,8 +223,10 @@ pub fn drain_pen_events(hwnd: isize) -> Vec<PointerEvent> {
     pen.map_or_else(Vec::new, |q| q.drain())
 }
 
-/// Reports whether a pen stylus is currently in proximity over `hwnd`, so
-/// `WinitPointer` can suppress synthesized core-pointer mouse events.
+/// Whether a pen is the pointer over `hwnd` now: it touches, holds a button
+/// or moved a moment ago. `WinitPointer` then drops the mouse events that
+/// stand for it. Ask before [`drain_pen_events`], since a pen that has gone
+/// quiet leaves here.
 pub fn pen_in_proximity(hwnd: isize) -> bool {
     let pen = {
         let reg = registry().lock().expect("window registry poisoned");

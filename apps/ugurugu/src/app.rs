@@ -477,11 +477,12 @@ impl Session {
 
     #[cfg(target_os = "linux")]
     fn forward_pointer_input(&mut self) {
+        // Asked first: a pen that has gone quiet leaves here, and that has to
+        // reach the canvas before the mouse's next sample does.
+        let near = ugu_platform::window::pen_in_proximity(self.hwnd);
         let pen = ugu_platform::window::drain_pen_events(self.hwnd);
         // The mouse lets go first, so the pen's samples find the canvas free.
-        let mut events = self
-            .pointer
-            .set_pen_in_proximity(ugu_platform::window::pen_in_proximity(self.hwnd));
+        let mut events = self.pointer.set_pen_in_proximity(near);
         events.extend(pen);
         if !events.is_empty() {
             let _ = self.to_render.send(ToRender::Pointer(events));

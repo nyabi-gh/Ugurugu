@@ -47,10 +47,11 @@ pub(crate) const BTN_TOOL_RUBBER: u32 = 0x141;
 pub(crate) const BTN_STYLUS: u32 = 0x14b;
 pub(crate) const BTN_STYLUS2: u32 = 0x14c;
 
-/// Maximum idle gap on XInput2 (which lacks an XI2 `ProximityOut` event when a
-/// stylus lifts straight up above the window) before mouse suppression expires
-/// while no stylus button or tip is held.
-const X11_IDLE_PROXIMITY_TIMEOUT: Duration = Duration::from_millis(150);
+/// How long after its last event a pen that holds nothing keeps the mouse
+/// out. A pen resting on the tablet stays in proximity without sending
+/// anything, and XInput2 says nothing when a pen lifts straight up, so
+/// proximity alone would keep the mouse out for as long as the pen lies there.
+const IDLE_PEN_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// Thread-safe queue of [`PointerEvent`]s and proximity state shared between a
 /// Wayland or X11 tablet worker thread and the UI thread.
@@ -61,15 +62,22 @@ pub(crate) struct PenQueue {
 
 struct PenQueueInner {
     events: VecDeque<PointerEvent>,
-    wayland_proximity_count: usize,
-    x11_active: Option<X11Proximity>,
+    /// `Some` while a Wayland tool is over the window.
+    wayland: Option<Activity>,
+    x11_active: Option<(PointerId, Activity)>,
 }
 
 #[derive(Clone, Copy)]
-struct X11Proximity {
-    pointer: PointerId,
+struct Activity {
     in_contact_or_held: bool,
     last_event: Instant,
+}
+
+impl Activity {
+    fn keeps_the_mouse_out(self, now: Instant) -> bool {
+        self.in_contact_or_held
+            || now.saturating_duration_since(self.last_event) <= IDLE_PEN_TIMEOUT
+    }
 }
 
 impl PenQueue {
@@ -77,17 +85,28 @@ impl PenQueue {
         Arc::new(Self {
             inner: Mutex::new(PenQueueInner {
                 events: VecDeque::new(),
-                wayland_proximity_count: 0,
+                wayland: None,
                 x11_active: None,
             }),
             wake,
         })
     }
 
-    pub(crate) fn push_wayland(&self, batch: Vec<PointerEvent>, proximity_count: usize) {
+    /// A tool's frame: `proximity_count` tools are over the window and
+    /// `in_contact_or_held` says whether any of them touches or holds a button.
+    pub(crate) fn push_wayland(
+        &self,
+        batch: Vec<PointerEvent>,
+        proximity_count: usize,
+        in_contact_or_held: bool,
+        now: Instant,
+    ) {
         let should_wake = {
             let mut inner = self.inner.lock().expect("pen queue poisoned");
-            inner.wayland_proximity_count = proximity_count;
+            inner.wayland = (proximity_count > 0).then_some(Activity {
+                in_contact_or_held,
+                last_event: now,
+            });
             let non_empty = !batch.is_empty();
             for event in batch {
                 coalesce_push(&mut inner.events, event);
@@ -99,9 +118,17 @@ impl PenQueue {
         }
     }
 
-    pub(crate) fn set_wayland_proximity(&self, proximity_count: usize) {
+    /// A tool came over the window or left it, before its frame.
+    pub(crate) fn set_wayland_proximity(&self, proximity_count: usize, now: Instant) {
         let mut inner = self.inner.lock().expect("pen queue poisoned");
-        inner.wayland_proximity_count = proximity_count;
+        inner.wayland = match (proximity_count > 0, inner.wayland) {
+            (false, _) => None,
+            (true, Some(activity)) => Some(activity),
+            (true, None) => Some(Activity {
+                in_contact_or_held: false,
+                last_event: now,
+            }),
+        };
     }
 
     pub(crate) fn push_x11(
@@ -113,11 +140,13 @@ impl PenQueue {
     ) {
         {
             let mut inner = self.inner.lock().expect("pen queue poisoned");
-            inner.x11_active = Some(X11Proximity {
+            inner.x11_active = Some((
                 pointer,
-                in_contact_or_held,
-                last_event: now,
-            });
+                Activity {
+                    in_contact_or_held,
+                    last_event: now,
+                },
+            ));
             coalesce_push(&mut inner.events, event);
         }
         (self.wake)();
@@ -126,7 +155,9 @@ impl PenQueue {
     pub(crate) fn leave_x11(&self, pointer: PointerId) {
         let should_wake = {
             let mut inner = self.inner.lock().expect("pen queue poisoned");
-            let was_active = inner.x11_active.is_some_and(|st| st.pointer == pointer);
+            let was_active = inner
+                .x11_active
+                .is_some_and(|(active, _)| active == pointer);
             if was_active {
                 inner.x11_active = None;
                 coalesce_push(&mut inner.events, PointerEvent::Leave { pointer });
@@ -138,16 +169,33 @@ impl PenQueue {
         }
     }
 
+    /// The device of `pointer` is gone. No release will come for what it
+    /// held, so the gesture it was making is cancelled.
+    pub(crate) fn lose_x11(&self, pointer: PointerId, was_held: bool) {
+        let should_wake = {
+            let mut inner = self.inner.lock().expect("pen queue poisoned");
+            let was_active = inner
+                .x11_active
+                .is_some_and(|(active, _)| active == pointer);
+            if was_held {
+                coalesce_push(&mut inner.events, PointerEvent::CaptureLost { pointer });
+            }
+            if was_active {
+                inner.x11_active = None;
+                coalesce_push(&mut inner.events, PointerEvent::Leave { pointer });
+            }
+            was_held || was_active
+        };
+        if should_wake {
+            (self.wake)();
+        }
+    }
+
     pub(crate) fn clear_x11_from_non_pen(&self) {
         let should_wake = {
             let mut inner = self.inner.lock().expect("pen queue poisoned");
-            if let Some(active) = inner.x11_active.take() {
-                coalesce_push(
-                    &mut inner.events,
-                    PointerEvent::Leave {
-                        pointer: active.pointer,
-                    },
-                );
+            if let Some((pointer, _)) = inner.x11_active.take() {
+                coalesce_push(&mut inner.events, PointerEvent::Leave { pointer });
                 true
             } else {
                 false
@@ -158,18 +206,27 @@ impl PenQueue {
         }
     }
 
+    /// Whether a pen is the pointer now, so the mouse events that stand for
+    /// it are to be dropped. Ask before [`drain`](Self::drain): an X11 pen
+    /// that has gone quiet leaves here, and that is queued.
     pub(crate) fn in_proximity(&self) -> bool {
+        self.in_proximity_at(Instant::now())
+    }
+
+    fn in_proximity_at(&self, now: Instant) -> bool {
         let mut inner = self.inner.lock().expect("pen queue poisoned");
-        if inner.wayland_proximity_count > 0 {
+        if inner
+            .wayland
+            .is_some_and(|activity| activity.keeps_the_mouse_out(now))
+        {
             return true;
         }
-        if let Some(active) = inner.x11_active {
-            if active.in_contact_or_held
-                || active.last_event.elapsed() <= X11_IDLE_PROXIMITY_TIMEOUT
-            {
+        if let Some((pointer, activity)) = inner.x11_active {
+            if activity.keeps_the_mouse_out(now) {
                 return true;
             }
             inner.x11_active = None;
+            coalesce_push(&mut inner.events, PointerEvent::Leave { pointer });
         }
         false
     }
@@ -306,6 +363,10 @@ impl ToolTracker {
         self.in_proximity && self.class != ToolClass::NonPen
     }
 
+    fn in_contact_or_held(&self) -> bool {
+        self.tip_down || self.barrel_held || self.stylus2_held
+    }
+
     pub(crate) fn proximity_serial(&self) -> Option<u32> {
         (self.in_proximity && self.proximity_serial != 0).then_some(self.proximity_serial)
     }
@@ -346,7 +407,7 @@ impl ToolTracker {
         // If focus moved to another surface while a stroke or button was still
         // held without a preceding `Up` / `Button(Released)` in this frame,
         // cancel the gesture cleanly before leaving.
-        if self.tip_down || self.barrel_held || self.stylus2_held {
+        if self.in_contact_or_held() {
             self.tip_down = false;
             self.barrel_held = false;
             self.stylus2_held = false;
@@ -606,6 +667,12 @@ impl WaylandTablet {
             .count()
     }
 
+    fn in_contact_or_held(&self) -> bool {
+        self.tools
+            .values()
+            .any(|tool| tool.tracker.in_proximity() && tool.tracker.in_contact_or_held())
+    }
+
     pub(crate) fn cleanup(&mut self) {
         for strip in self.pad_strips.drain(..) {
             strip.destroy();
@@ -842,14 +909,20 @@ impl Dispatch<ZwpTabletToolV2, ()> for WaylandState {
                     }
                 }
                 let prox = state.tablet.proximity_count();
-                state.tablet.queue.set_wayland_proximity(prox);
+                state
+                    .tablet
+                    .queue
+                    .set_wayland_proximity(prox, Instant::now());
             }
             zwp_tablet_tool_v2::Event::ProximityOut => {
                 if let Some(live) = state.tablet.tools.get_mut(&tool_id) {
                     live.tracker.proximity_out();
                 }
                 let prox = state.tablet.proximity_count();
-                state.tablet.queue.set_wayland_proximity(prox);
+                state
+                    .tablet
+                    .queue
+                    .set_wayland_proximity(prox, Instant::now());
             }
             zwp_tablet_tool_v2::Event::Down { serial } => {
                 state.record_any_seat_serial(serial);
@@ -903,7 +976,11 @@ impl Dispatch<ZwpTabletToolV2, ()> for WaylandState {
                     .map(|live| live.tracker.frame(stamp, scale))
                     .unwrap_or_default();
                 let prox = state.tablet.proximity_count();
-                state.tablet.queue.push_wayland(batch, prox);
+                let held = state.tablet.in_contact_or_held();
+                state
+                    .tablet
+                    .queue
+                    .push_wayland(batch, prox, held, Instant::now());
             }
             zwp_tablet_tool_v2::Event::Removed => {
                 let mut flush = Vec::new();
@@ -916,7 +993,11 @@ impl Dispatch<ZwpTabletToolV2, ()> for WaylandState {
                     dead.proxy.destroy();
                 }
                 let prox = state.tablet.proximity_count();
-                state.tablet.queue.push_wayland(flush, prox);
+                let held = state.tablet.in_contact_or_held();
+                state
+                    .tablet
+                    .queue
+                    .push_wayland(flush, prox, held, Instant::now());
             }
             _ => {}
         }
@@ -1019,6 +1100,125 @@ impl Dispatch<ZwpTabletPadStripV2, ()> for WaylandState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn queue() -> Arc<PenQueue> {
+        PenQueue::new(Arc::new(|| {}))
+    }
+
+    fn hover(pointer: PointerId) -> PointerEvent {
+        PointerEvent::Samples {
+            pointer,
+            kind: PointerKind::Pen,
+            samples: vec![PointerSample {
+                position: [1.0, 2.0],
+                pressure: Some(0.0),
+                tilt: None,
+                twist: None,
+                buttons: Buttons::empty(),
+                in_contact: false,
+                inverted: false,
+                time: Ticks(1),
+                frame_id: 1,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_wayland_pen_lying_on_the_tablet_gives_the_mouse_back() {
+        let pen = queue();
+        let start = Instant::now();
+        let pointer = PointerId(PEN_POINTER_BASE);
+        pen.set_wayland_proximity(1, start);
+        assert!(pen.in_proximity_at(start));
+        pen.push_wayland(vec![hover(pointer)], 1, false, start);
+        assert!(pen.in_proximity_at(start + IDLE_PEN_TIMEOUT));
+        let quiet = start + IDLE_PEN_TIMEOUT + Duration::from_millis(1);
+        assert!(!pen.in_proximity_at(quiet), "still near, but silent");
+
+        pen.push_wayland(vec![hover(pointer)], 1, true, quiet);
+        let much_later = quiet + Duration::from_secs(60);
+        assert!(
+            pen.in_proximity_at(much_later),
+            "a held pen stays the pointer"
+        );
+
+        pen.push_wayland(vec![hover(pointer)], 1, false, much_later);
+        assert!(pen.in_proximity_at(much_later));
+        pen.set_wayland_proximity(0, much_later);
+        assert!(
+            !pen.in_proximity_at(much_later),
+            "gone at once when it leaves"
+        );
+    }
+
+    #[test]
+    fn an_x11_pen_gone_quiet_leaves_before_the_mouse_moves() {
+        let pen = queue();
+        let start = Instant::now();
+        let pointer = PointerId(PEN_POINTER_BASE + 3);
+        pen.push_x11(pointer, hover(pointer), false, start);
+        assert!(pen.in_proximity_at(start + IDLE_PEN_TIMEOUT));
+        assert_eq!(pen.drain(), [hover(pointer)]);
+        assert!(!pen.in_proximity_at(start + IDLE_PEN_TIMEOUT + Duration::from_millis(1)));
+        assert_eq!(pen.drain(), [PointerEvent::Leave { pointer }]);
+        assert!(!pen.in_proximity_at(start + Duration::from_secs(1)));
+        assert_eq!(pen.drain(), [], "it leaves once");
+
+        pen.push_x11(pointer, hover(pointer), true, start);
+        assert!(pen.in_proximity_at(start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn an_x11_pen_leaves_when_x_says_so_or_another_device_moves() {
+        let pen = queue();
+        let now = Instant::now();
+        let pointer = PointerId(PEN_POINTER_BASE + 3);
+        let other = PointerId(PEN_POINTER_BASE + 4);
+
+        pen.push_x11(pointer, hover(pointer), false, now);
+        pen.leave_x11(other);
+        assert!(
+            pen.in_proximity_at(now),
+            "another pen's leave is not this one's"
+        );
+        pen.leave_x11(pointer);
+        assert!(!pen.in_proximity_at(now));
+        assert_eq!(
+            pen.drain(),
+            [hover(pointer), PointerEvent::Leave { pointer }]
+        );
+
+        pen.clear_x11_from_non_pen();
+        assert_eq!(pen.drain(), [], "no pen was near");
+        pen.push_x11(pointer, hover(pointer), true, now);
+        pen.clear_x11_from_non_pen();
+        assert!(!pen.in_proximity_at(now));
+        assert_eq!(
+            pen.drain(),
+            [hover(pointer), PointerEvent::Leave { pointer }]
+        );
+    }
+
+    #[test]
+    fn an_x11_pen_unplugged_while_pressed_cancels_its_stroke() {
+        let pen = queue();
+        let now = Instant::now();
+        let pointer = PointerId(PEN_POINTER_BASE + 3);
+        pen.push_x11(pointer, hover(pointer), true, now);
+        pen.lose_x11(pointer, true);
+        assert!(!pen.in_proximity_at(now));
+        assert_eq!(
+            pen.drain(),
+            [
+                hover(pointer),
+                PointerEvent::CaptureLost { pointer },
+                PointerEvent::Leave { pointer },
+            ]
+        );
+
+        pen.lose_x11(pointer, false);
+        assert_eq!(pen.drain(), [], "an idle pen that was not the pointer");
+    }
 
     fn single_sample(events: &[PointerEvent]) -> PointerSample {
         assert_eq!(events.len(), 1, "expected 1 event, got {events:?}");

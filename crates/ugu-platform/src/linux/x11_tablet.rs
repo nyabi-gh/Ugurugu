@@ -394,6 +394,7 @@ fn refresh_pen_devices(
     window: Window,
     atoms: &TabletAtoms,
     devices: &mut HashMap<DeviceId, X11PenDevice>,
+    queue: &PenQueue,
 ) {
     let Ok(cookie) = conn.xinput_xi_query_device(Device::ALL) else {
         return;
@@ -437,6 +438,11 @@ fn refresh_pen_devices(
 
     let _ = conn.xinput_xi_select_events(window, &masks);
     let _ = conn.flush();
+    for (id, gone) in devices.iter() {
+        if !updated.contains_key(id) {
+            queue.lose_x11(gone.pointer, gone.any_held());
+        }
+    }
     *devices = updated;
 }
 
@@ -470,7 +476,7 @@ fn run_x11_tablet(window: Window, queue: Arc<PenQueue>, stop_fd: Arc<OwnedFd>) {
     );
 
     let mut devices: HashMap<DeviceId, X11PenDevice> = HashMap::new();
-    refresh_pen_devices(&conn, window, &atoms, &mut devices);
+    refresh_pen_devices(&conn, window, &atoms, &mut devices, &queue);
 
     let x11_fd = conn.stream().as_raw_fd();
     loop {
@@ -518,7 +524,7 @@ fn handle_x11_event(
 ) {
     match event {
         Event::XinputHierarchy(_) => {
-            refresh_pen_devices(conn, window, atoms, devices);
+            refresh_pen_devices(conn, window, atoms, devices, queue);
         }
         Event::XinputDeviceChanged(ev) => {
             if let Some(dev) = devices.get_mut(&ev.deviceid) {
