@@ -14,11 +14,12 @@ pub mod instance;
 pub mod locale;
 pub mod memory;
 pub mod menu;
+pub mod recent;
 pub mod requests;
 pub mod session;
 pub mod tablet;
 
-pub use crate::unsupported::{association, crash, file, recent};
+pub use crate::unsupported::{association, crash, file};
 
 unsafe extern "C" {
     fn sysctlbyname(

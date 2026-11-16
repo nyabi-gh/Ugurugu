@@ -184,6 +184,7 @@ pub mod memory {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 pub mod recent {
     use std::path::Path;
 
