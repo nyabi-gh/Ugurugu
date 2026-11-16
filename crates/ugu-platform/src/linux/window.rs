@@ -980,13 +980,18 @@ fn wait_for_pipe(fd: i32, events: libc::c_short, idle: Duration) -> std::io::Res
             events,
             revents: 0,
         };
-        let timeout_ms = i32::try_from(remaining.as_millis()).unwrap_or(i32::MAX);
+        // Rounded up: `poll` counts whole milliseconds, and a wait rounded
+        // down would end before the deadline.
+        let timeout_ms = i32::try_from(remaining.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
         // SAFETY: `pfd` points to a single live `pollfd` of an open descriptor.
         let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
         if ready > 0 {
             return Ok(());
         }
         if ready == 0 {
+            if Instant::now() < deadline {
+                continue;
+            }
             return Err(std::io::ErrorKind::TimedOut.into());
         }
         let error = std::io::Error::last_os_error();
