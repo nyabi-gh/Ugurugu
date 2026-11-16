@@ -49,7 +49,7 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 try {
     Copy-Item $Executable (Join-Path $staging 'ugurugu.exe')
     Copy-Item (Join-Path $root 'LICENSE') (Join-Path $staging 'LICENSE.txt')
-    python -X utf8 (Join-Path $root 'tools/third_party_notices.py') (Join-Path $staging 'THIRD_PARTY_NOTICES.txt')
+    python -X utf8 (Join-Path $root 'tools/third_party_notices.py') x86_64-pc-windows-msvc (Join-Path $staging 'THIRD_PARTY_NOTICES.txt')
     if ($LASTEXITCODE -ne 0) {
         throw "Third-party notices failed with exit code $LASTEXITCODE"
     }

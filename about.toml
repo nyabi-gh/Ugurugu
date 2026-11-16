@@ -1,5 +1,6 @@
-# cargo-about: the licenses of the crates the 3.0 app ships, for
-# tools/third_party_notices.py. Same list as deny.toml.
+# cargo-about: the licenses of the crates the 3.x app ships, for
+# tools/third_party_notices.py, which names one of `targets` for each
+# package. Same list as deny.toml.
 accepted = [
     "0BSD",
     "Apache-2.0",
@@ -16,7 +17,7 @@ accepted = [
     "Unlicense",
     "Zlib",
 ]
-targets = ["x86_64-pc-windows-msvc"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 workarounds = ["ring"]

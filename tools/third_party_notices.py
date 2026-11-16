@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-"""Writes THIRD_PARTY_NOTICES.txt for the 3.0 Windows package.
+"""Writes THIRD_PARTY_NOTICES.txt for the 3.x package of one target.
 
-The crates the app links come from `cargo about` (about.toml). Code and
-assets that no crate license covers are added here: the app icon, the
-Pretendard JP font the app embeds and libwebp, whose sources libwebp-sys
-builds into the executable under libwebp's own license.
+The crates the app links for that target come from `cargo about`
+(about.toml). Code and assets that no crate license covers are added here:
+the app icon, the Pretendard JP font the app embeds and libwebp, whose
+sources libwebp-sys builds into the executable under libwebp's own license.
 
-    python -X utf8 tools/third_party_notices.py OUTPUT
+    python -X utf8 tools/third_party_notices.py TARGET OUTPUT
 """
 
 import json
@@ -20,6 +20,13 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / "apps" / "ugurugu" / "Cargo.toml"
 RULE = "=" * 78
+# The package each target is released in, and the line ends its readers expect.
+TARGETS = {
+    "x86_64-pc-windows-msvc": ("Windows", "\r\n"),
+    "aarch64-apple-darwin": ("macOS", "\n"),
+    "x86_64-unknown-linux-gnu": ("Linux", "\n"),
+    "aarch64-unknown-linux-gnu": ("Linux", "\n"),
+}
 
 HEADER = """\
 Ugurugu 3 - third-party notices
@@ -27,7 +34,7 @@ Ugurugu 3 - third-party notices
 Ugurugu itself is licensed under GPL-3.0-or-later; LICENSE.txt next to this
 file holds the GNU GPL version 3 text that grant refers to. Its source is at
 https://github.com/nyabi-gh/Ugurugu. The notices below cover software and
-assets that the Windows package includes, not Ugurugu's own code.
+assets that the {system} package includes, not Ugurugu's own code.
 
 The app icon artwork is copyright (c) seuppi and is distributed under
 GPL-3.0-or-later with the rest of the project.
@@ -44,7 +51,7 @@ def cargo(*arguments: str) -> str:
     ).stdout
 
 
-def package_folder(name: str) -> pathlib.Path:
+def package_folder(name: str, target: str) -> pathlib.Path:
     metadata = json.loads(
         cargo(
             "metadata",
@@ -54,7 +61,7 @@ def package_folder(name: str) -> pathlib.Path:
             "--manifest-path",
             str(APP),
             "--filter-platform",
-            "x86_64-pc-windows-msvc",
+            target,
         )
     )
     folders = [
@@ -76,9 +83,11 @@ def read(path: pathlib.Path) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit(__doc__)
-    output = pathlib.Path(sys.argv[1])
+    if len(sys.argv) != 3 or sys.argv[1] not in TARGETS:
+        raise SystemExit(f"{__doc__}\nTARGET is one of: {', '.join(TARGETS)}")
+    target = sys.argv[1]
+    system, newline = TARGETS[target]
+    output = pathlib.Path(sys.argv[2])
 
     # cargo-about refuses to write to a pipe when started from PowerShell.
     with tempfile.TemporaryDirectory() as folder:
@@ -91,13 +100,15 @@ def main() -> None:
             "--locked",
             "--manifest-path",
             str(APP),
+            "--target",
+            target,
             "--output-file",
             str(listing),
         )
         about = json.loads(listing.read_text(encoding="utf-8"))
-    webp = package_folder("libwebp-sys") / "vendor"
+    webp = package_folder("libwebp-sys", target) / "vendor"
 
-    parts = [HEADER]
+    parts = [HEADER.format(system=system)]
     parts.append(
         section(
             "Pretendard JP",
@@ -147,7 +158,7 @@ def main() -> None:
         )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\n\n".join(parts), encoding="utf-8", newline="\r\n")
+    output.write_text("\n\n".join(parts), encoding="utf-8", newline=newline)
     print(f"{output}: {len(crates)} crates, {len(about['licenses'])} license texts")
 
 
