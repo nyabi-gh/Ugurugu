@@ -93,23 +93,68 @@ fn ensure_signal_pipe() -> Result<i32, &'static str> {
     Ok(SIGNAL_PIPE.get().map_or(fd, |p| p.efd.as_raw_fd()))
 }
 
+/// Counted in `ACTIVE_LISTENERS` for as long as the session-end thread runs,
+/// however it ends: a count left behind would have the handler swallow every
+/// later signal.
+struct Listening;
+
+impl Listening {
+    fn start() -> Self {
+        ACTIVE_LISTENERS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        ACTIVE_LISTENERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// What the logind watcher and the session-end thread share.
+struct Logind {
+    /// Signalled when `shutting_down` changes.
+    changed: OwnedFd,
+    /// The last `PrepareForShutdown`: a shutdown is under way, or it was
+    /// called off.
+    shutting_down: AtomicBool,
+    inhibitor: Mutex<Option<zbus::zvariant::OwnedFd>>,
+    stopped: AtomicBool,
+}
+
+impl Logind {
+    fn release(&self) {
+        if let Ok(mut guard) = self.inhibitor.lock() {
+            let _ = guard.take();
+        }
+    }
+}
+
 /// Calls back as the Linux session ends, until dropped.
 pub struct SessionEnd {
     stop_efd: Arc<OwnedFd>,
-    inhibitor: Arc<Mutex<Option<zbus::zvariant::OwnedFd>>>,
+    logind: Arc<Logind>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl SessionEnd {
     /// Installs `SIGTERM`/`SIGHUP` watchers and a best-effort `systemd-logind`
-    /// `"shutdown"` delay inhibitor lock. `ending` runs once before the
-    /// inhibitor lock is released or the termination signal is re-raised.
+    /// `"shutdown"` delay inhibitor lock. `ending` runs before the inhibitor
+    /// lock is released or the termination signal is re-raised, and again
+    /// for a later end when a shutdown was called off.
     ///
     /// # Safety
     /// None on Linux; `unsafe` to match the cross-OS signature.
     pub unsafe fn install(
         _hwnd: isize,
-        mut ending: impl FnMut() + Send + 'static,
+        ending: impl FnMut() + Send + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::install_with(system_bus_likely_present(), ending)
+    }
+
+    fn install_with(
+        watch_logind: bool,
+        ending: impl FnMut() + Send + 'static,
     ) -> Result<Self, &'static str> {
         let sig_fd = ensure_signal_pipe()?;
         // Drain any stale count left before this `SessionEnd` was installed.
@@ -117,109 +162,109 @@ impl SessionEnd {
         LAST_SIGNAL.store(0, Ordering::SeqCst);
 
         let stop_efd = Arc::new(new_eventfd()?);
-        let logind_efd = Arc::new(new_eventfd()?);
-        // Counted only once nothing before the thread can fail: a count
-        // left behind would have the handler swallow every later signal.
-        ACTIVE_LISTENERS.fetch_add(1, Ordering::SeqCst);
-        let inhibitor: Arc<Mutex<Option<zbus::zvariant::OwnedFd>>> = Arc::new(Mutex::new(None));
-        let stopped = Arc::new(AtomicBool::new(false));
+        let logind = Arc::new(Logind {
+            changed: new_eventfd()?,
+            shutting_down: AtomicBool::new(false),
+            inhibitor: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+        });
 
-        if system_bus_likely_present() {
-            let logind_notify = logind_efd.clone();
-            let logind_lock = inhibitor.clone();
-            let logind_stopped = stopped.clone();
+        if watch_logind {
+            let logind = logind.clone();
             let _ = std::thread::Builder::new()
                 .name("session-logind".to_owned())
                 .spawn(move || {
-                    let _ = watch_logind_shutdown(logind_notify, logind_lock, logind_stopped);
+                    let _ = watch_logind_shutdown(&logind);
                 });
         }
 
         let worker_stop = stop_efd.clone();
-        let worker_inhibitor = inhibitor.clone();
-        let worker_stopped = stopped;
+        let worker_logind = logind.clone();
+        // Dropped with the closure when the thread cannot start.
+        let listening = Listening::start();
         let thread = std::thread::Builder::new()
             .name("session-end".to_owned())
             .spawn(move || {
-                let mut ran_ending = false;
-                loop {
-                    let mut fds = [
-                        libc::pollfd {
-                            fd: sig_fd,
-                            events: libc::POLLIN,
-                            revents: 0,
-                        },
-                        libc::pollfd {
-                            fd: logind_efd.as_raw_fd(),
-                            events: libc::POLLIN,
-                            revents: 0,
-                        },
-                        libc::pollfd {
-                            fd: worker_stop.as_raw_fd(),
-                            events: libc::POLLIN,
-                            revents: 0,
-                        },
-                    ];
-                    // SAFETY: `fds` holds three open descriptors for the call.
-                    let ready =
-                        unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
-                    if ready < 0 {
-                        if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                            continue;
-                        }
-                        break;
-                    }
-                    if fds[2].revents & libc::POLLIN != 0 {
-                        worker_stopped.store(true, Ordering::SeqCst);
-                        break;
-                    }
-                    if fds[1].revents & libc::POLLIN != 0 {
-                        drain_eventfd(logind_efd.as_raw_fd());
-                        if !ran_ending {
-                            ran_ending = true;
-                            ending();
-                        }
-                        // Closing the delay inhibitor FD tells `logind` that
-                        // recovery data is on disk and shutdown may proceed.
-                        if let Ok(mut guard) = worker_inhibitor.lock() {
-                            let _ = guard.take();
-                        }
-                    }
-                    if fds[0].revents & libc::POLLIN != 0 {
-                        drain_eventfd(sig_fd);
-                        let sig = LAST_SIGNAL.swap(0, Ordering::SeqCst);
-                        if !ran_ending {
-                            ending();
-                        }
-                        if let Ok(mut guard) = worker_inhibitor.lock() {
-                            let _ = guard.take();
-                        }
-                        if sig != 0 {
-                            reraise_default(sig);
-                        }
-                        break;
-                    }
-                }
+                let _listening = listening;
+                wait_for_the_end(sig_fd, &worker_stop, &worker_logind, ending);
             })
-            .map_err(|_| {
-                ACTIVE_LISTENERS.fetch_sub(1, Ordering::SeqCst);
-                "cannot spawn session-end thread"
-            })?;
+            .map_err(|_| "cannot spawn session-end thread")?;
 
         Ok(Self {
             stop_efd,
-            inhibitor,
+            logind,
             thread: Some(thread),
         })
     }
 }
 
+fn wait_for_the_end(sig_fd: i32, stop: &OwnedFd, logind: &Logind, mut ending: impl FnMut()) {
+    // Whether `ending` has run for the shutdown now under way.
+    let mut ran_ending = false;
+    loop {
+        let mut fds = [
+            libc::pollfd {
+                fd: sig_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: logind.changed.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: stop.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // SAFETY: `fds` holds three open descriptors for the call.
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
+        if ready < 0 {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
+        }
+        if fds[2].revents & libc::POLLIN != 0 {
+            logind.stopped.store(true, Ordering::SeqCst);
+            break;
+        }
+        if fds[1].revents & libc::POLLIN != 0 {
+            drain_eventfd(logind.changed.as_raw_fd());
+            if logind.shutting_down.load(Ordering::SeqCst) {
+                if !ran_ending {
+                    ran_ending = true;
+                    ending();
+                }
+                // Closing the delay inhibitor FD tells `logind` that
+                // recovery data is on disk and shutdown may proceed.
+                logind.release();
+            } else {
+                // Called off: the work done from here on is not in what
+                // `ending` wrote.
+                ran_ending = false;
+            }
+        }
+        if fds[0].revents & libc::POLLIN != 0 {
+            drain_eventfd(sig_fd);
+            let sig = LAST_SIGNAL.swap(0, Ordering::SeqCst);
+            if !ran_ending {
+                ending();
+            }
+            logind.release();
+            if sig != 0 {
+                reraise_default(sig);
+            }
+            break;
+        }
+    }
+}
+
 impl Drop for SessionEnd {
     fn drop(&mut self) {
-        ACTIVE_LISTENERS.fetch_sub(1, Ordering::SeqCst);
-        if let Ok(mut guard) = self.inhibitor.lock() {
-            let _ = guard.take();
-        }
+        self.logind.release();
         signal_eventfd(self.stop_efd.as_raw_fd());
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -271,11 +316,25 @@ fn system_bus_likely_present() -> bool {
         || Path::new("/run/dbus/system_bus_socket").exists()
 }
 
-fn watch_logind_shutdown(
-    notify_efd: Arc<OwnedFd>,
-    inhibitor_slot: Arc<Mutex<Option<zbus::zvariant::OwnedFd>>>,
-    stopped: Arc<AtomicBool>,
-) -> Result<(), zbus::Error> {
+async fn inhibit_shutdown(conn: &zbus::Connection) -> zbus::Result<zbus::zvariant::OwnedFd> {
+    let reply = conn
+        .call_method(
+            Some("org.freedesktop.login1"),
+            "/org/freedesktop/login1",
+            Some("org.freedesktop.login1.Manager"),
+            "Inhibit",
+            &(
+                "shutdown",
+                "Ugurugu 3",
+                "Saving unsaved work for recovery",
+                "delay",
+            ),
+        )
+        .await?;
+    reply.body().deserialize()
+}
+
+fn watch_logind_shutdown(logind: &Logind) -> Result<(), zbus::Error> {
     zbus::block_on(async {
         let conn = zbus::Connection::system().await?;
         let rule = zbus::MatchRule::builder()
@@ -287,41 +346,29 @@ fn watch_logind_shutdown(
             .build();
         let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, Some(8)).await?;
 
-        let reply = conn
-            .call_method(
-                Some("org.freedesktop.login1"),
-                "/org/freedesktop/login1",
-                Some("org.freedesktop.login1.Manager"),
-                "Inhibit",
-                &(
-                    "shutdown",
-                    "Ugurugu 3",
-                    "Saving unsaved work for recovery",
-                    "delay",
-                ),
-            )
-            .await?;
-        let lock_fd: zbus::zvariant::OwnedFd = reply.body().deserialize()?;
-        if stopped.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        if let Ok(mut guard) = inhibitor_slot.lock() {
-            *guard = Some(lock_fd);
-        }
-
-        while let Some(msg) = stream.next().await {
-            if stopped.load(Ordering::SeqCst) {
+        let mut lock_fd = Some(inhibit_shutdown(&conn).await?);
+        loop {
+            if logind.stopped.load(Ordering::SeqCst) {
                 break;
             }
-            let Ok(msg) = msg else {
+            if let Some(lock_fd) = lock_fd.take()
+                && let Ok(mut guard) = logind.inhibitor.lock()
+            {
+                *guard = Some(lock_fd);
+            }
+            let Some(msg) = stream.next().await else {
+                break;
+            };
+            let Ok(starting) = msg.and_then(|msg| msg.body().deserialize::<bool>()) else {
                 continue;
             };
-            if let Ok(starting) = msg.body().deserialize::<bool>()
-                && starting
-            {
-                signal_eventfd(notify_efd.as_raw_fd());
-                break;
+            if !starting {
+                // The lock was given up when the shutdown began; without a
+                // new one the next shutdown would not wait for the recovery.
+                lock_fd = inhibit_shutdown(&conn).await.ok();
             }
+            logind.shutting_down.store(starting, Ordering::SeqCst);
+            signal_eventfd(logind.changed.as_raw_fd());
         }
         Ok(())
     })
@@ -337,12 +384,9 @@ mod tests {
             return;
         };
         let target = std::path::PathBuf::from(path);
-        // SAFETY: test-only `SessionEnd` installation.
-        let _guard = unsafe {
-            SessionEnd::install(0, move || {
-                let _ = std::fs::write(&target, "saved-before-sigterm");
-            })
-        }
+        let _guard = SessionEnd::install_with(false, move || {
+            let _ = std::fs::write(&target, "saved-before-sigterm");
+        })
         .unwrap();
 
         println!("READY");
@@ -381,12 +425,9 @@ mod tests {
         let target = std::path::PathBuf::from(path);
         // SAFETY: test-only; ignoring a signal has no preconditions.
         unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
-        // SAFETY: test-only `SessionEnd` installation.
-        let _guard = unsafe {
-            SessionEnd::install(0, move || {
-                let _ = std::fs::write(&target, "saved");
-            })
-        }
+        let _guard = SessionEnd::install_with(false, move || {
+            let _ = std::fs::write(&target, "saved");
+        })
         .unwrap();
 
         println!("READY");
@@ -438,7 +479,7 @@ mod tests {
                 rlim_max: before.rlim_max,
             };
             libc::setrlimit(libc::RLIMIT_NOFILE, &none);
-            let installed = SessionEnd::install(0, || {});
+            let installed = SessionEnd::install_with(false, || {});
             libc::setrlimit(libc::RLIMIT_NOFILE, &before);
             installed
         };
@@ -462,6 +503,56 @@ mod tests {
         unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
         let status = child.wait().unwrap();
         assert_eq!(status.signal(), Some(libc::SIGTERM), "{status:?}");
+    }
+
+    fn logind() -> Logind {
+        Logind {
+            changed: new_eventfd().unwrap(),
+            shutting_down: AtomicBool::new(false),
+            inhibitor: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+        }
+    }
+
+    #[test]
+    fn a_shutdown_called_off_has_the_next_one_write_the_recovery_again() {
+        let logind = logind();
+        let stop = new_eventfd().unwrap();
+        let signals = new_eventfd().unwrap();
+        let (told, written) = std::sync::mpsc::channel();
+        let wait = std::time::Duration::from_secs(5);
+        let quiet = std::time::Duration::from_millis(200);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                wait_for_the_end(signals.as_raw_fd(), &stop, &logind, || {
+                    let _ = told.send(());
+                });
+            });
+            let prepare = |starting: bool| {
+                logind.shutting_down.store(starting, Ordering::SeqCst);
+                signal_eventfd(logind.changed.as_raw_fd());
+            };
+            prepare(true);
+            assert!(written.recv_timeout(wait).is_ok());
+            prepare(true);
+            assert!(written.recv_timeout(quiet).is_err(), "once for a shutdown");
+            prepare(false);
+            assert!(written.recv_timeout(quiet).is_err(), "nothing ends");
+            prepare(true);
+            assert!(written.recv_timeout(wait).is_ok(), "the next shutdown");
+            signal_eventfd(stop.as_raw_fd());
+        });
+        assert!(logind.stopped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn the_signal_handler_counts_a_listener_only_while_its_thread_runs() {
+        let before = ACTIVE_LISTENERS.load(Ordering::SeqCst);
+        let listening = Listening::start();
+        assert_eq!(ACTIVE_LISTENERS.load(Ordering::SeqCst), before + 1);
+        // As when the thread ends by itself or was never started.
+        drop(listening);
+        assert_eq!(ACTIVE_LISTENERS.load(Ordering::SeqCst), before);
     }
 
     #[test]
