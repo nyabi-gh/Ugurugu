@@ -271,7 +271,7 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # The executable, package and checks of release-3.yml, so a release does
+  # The executables, packages and checks of release-3.yml, so a release does
   # not find a build or packaging problem first.
   package:
     name: Windows package
@@ -319,10 +319,92 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  package-macos:
+    name: macOS package
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941
+        with:
+          tool: cargo-about@0.9.2
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Release build
+        run: cargo build --package ugurugu --release --locked
+
+      - name: Package
+        run: python3 tools/package_unix.py macos target/release/ugurugu "$RUNNER_TEMP/package"
+
+      - name: Unpack and run
+        run: python3 tools/package_smoke_unix.py macos "$RUNNER_TEMP"/package/*-macOS-arm64.zip "$RUNNER_TEMP/smoke"
+
+  package-linux:
+    name: Linux package
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install build, packaging and test packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig-dev squashfs-tools xvfb mesa-vulkan-drivers \
+            libxcursor1 libxi6 libxkbcommon-x11-0 libxrandr2
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941
+        with:
+          tool: cargo-about@0.9.2
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Release build
+        run: cargo build --package ugurugu --release --locked
+
+      - name: Package
+        run: python3 tools/package_unix.py linux target/release/ugurugu "$RUNNER_TEMP/package"
+
+      - name: Unpack and run
+        run: xvfb-run -a python3 tools/package_smoke_unix.py linux "$RUNNER_TEMP"/package/*-Linux-x64.AppImage "$RUNNER_TEMP/smoke"
+
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, static, rust-static, test, release-test, test-macos, test-linux, package]
+    needs: [changes, static, rust-static, test, release-test, test-macos, test-linux, package, package-macos, package-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -336,6 +418,8 @@ jobs:
           MACOS_RESULT: ${{ needs.test-macos.result }}
           LINUX_RESULT: ${{ needs.test-linux.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          PACKAGE_MACOS_RESULT: ${{ needs.package-macos.result }}
+          PACKAGE_LINUX_RESULT: ${{ needs.package-linux.result }}
         run: |
           failed=0
           # A check may be skipped only because its paths did not change,
@@ -344,7 +428,7 @@ jobs:
             echo "CHANGES result: $CHANGES_RESULT"
             failed=1
           fi
-          for check in STATIC RUST_STATIC TEST RELEASE_TEST MACOS LINUX PACKAGE; do
+          for check in STATIC RUST_STATIC TEST RELEASE_TEST MACOS LINUX PACKAGE PACKAGE_MACOS PACKAGE_LINUX; do
             result_variable="${check}_RESULT"
             result="${!result_variable}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

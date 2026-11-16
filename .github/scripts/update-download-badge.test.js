@@ -20,6 +20,8 @@ test('includes installers and actual updater packages', () =>
     'Ugurugu-0.7.0-full.nupkg',
     'Ugurugu-macOS-arm64.zip',
     'Ugurugu-0.4.0-macOS-arm64.zip',
+    'Ugurugu-3.7.0-Linux-x64.AppImage',
+    'Ugurugu3-3.7.0-linux-x64-full.nupkg',
   ])
   {
     assert.equal(isDistributionAsset(name), true, name)

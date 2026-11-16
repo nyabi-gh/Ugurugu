@@ -9,6 +9,7 @@ function isDistributionAsset(name)
   return /\.dmg$/i.test(name)
     || /Setup\.exe$/i.test(name)
     || /-full\.nupkg$/i.test(name)
+    || /\.AppImage$/i.test(name)
     // Releases published before the Ugurugu rename keep their original asset
     // names permanently, so the badge has to keep counting them too.
     || /(?:Ugurugu|WagleWaglePaint).*macOS.*\.zip$/i.test(name)

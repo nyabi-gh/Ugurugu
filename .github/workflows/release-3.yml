@@ -1,7 +1,7 @@
 name: Release 3
 
-# The Rust 3.x Windows app. 2.x (C++) is not released any more; macOS gets a
-# new release workflow when 3.x supports it.
+# The Rust 3.x app for Windows, macOS and Linux. 2.x (C++) is not released
+# any more.
 on:
   push:
     tags:
@@ -153,6 +153,99 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
+  # Signed ad hoc, without an Apple Developer ID (docs/rust/decisions.md
+  # section 10).
+  macos:
+    name: Build macOS release
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941
+        with:
+          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version "$VELOPACK_VERSION"
+
+      - name: Build
+        run: cargo build --package ugurugu --release --locked
+
+      - name: Package with Velopack
+        run: python3 tools/package_unix.py macos target/release/ugurugu artifacts
+
+      - name: Unpack and run
+        run: python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.zip "$RUNNER_TEMP/smoke"
+
+      - name: Create macOS release metadata
+        run: bash .github/scripts/release-metadata.sh macOS-arm64 arm64 artifacts
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: macos-release
+          path: artifacts/*
+          if-no-files-found: error
+
+  # Built on the oldest Ubuntu the AppImage supports, so its glibc (2.35)
+  # is the lowest one it needs (docs/rust/decisions.md section 10).
+  linux:
+    name: Build Linux release
+    needs: verify
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install build, packaging and test packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig-dev squashfs-tools xvfb mesa-vulkan-drivers \
+            libxcursor1 libxi6 libxkbcommon-x11-0 libxrandr2
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941
+        with:
+          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Velopack
+        run: dotnet tool install --global vpk --version "$VELOPACK_VERSION"
+
+      - name: Build
+        run: cargo build --package ugurugu --release --locked
+
+      - name: Package with Velopack
+        run: python3 tools/package_unix.py linux target/release/ugurugu artifacts
+
+      - name: Unpack and run
+        run: xvfb-run -a python3 tools/package_smoke_unix.py linux artifacts/*-Linux-x64.AppImage "$RUNNER_TEMP/smoke"
+
+      - name: Create Linux release metadata
+        run: bash .github/scripts/release-metadata.sh Linux-x64 x64 artifacts
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: linux-release
+          path: artifacts/*
+          if-no-files-found: error
+
+  # Publishes Windows alone for now: macOS and Linux are built and tried
+  # above, and join `needs` and the download below once released
+  # (docs/rust/backlog.md B3-13 and section 16).
   publish:
     name: Publish GitHub release
     needs: [verify, windows]
@@ -171,6 +264,7 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
+          pattern: windows-release
           path: artifacts
           merge-multiple: true
 
@@ -179,7 +273,8 @@ jobs:
         run: echo "path=release-notes/${GITHUB_REF_NAME#v}.en.md" >> "$GITHUB_OUTPUT"
 
       # The app updates from the `updates` release (apps/ugurugu/src/update.rs),
-      # so a version's own release holds only its installer. A package is
+      # so a version's own release holds only its installers. Each OS has a
+      # channel, with a package and a list of its own there. A package is
       # never replaced or removed there: GitHub would forget its download
       # count, which the download badge sums.
       - name: Publish the update packages
@@ -221,8 +316,9 @@ jobs:
           # run again would offer that version as the latest.
           version="${GITHUB_REF_NAME#v}"
           if grep -q '^releases\..*\.json ' <<< "$published"; then
-            listed=$(gh release download updates --pattern 'releases.*.json' --output - \
-              | jq -r '.Assets[].Version' | sort -V | tail -n 1)
+            lists_there="$RUNNER_TEMP/published-lists"
+            gh release download updates --pattern 'releases.*.json' --dir "$lists_there"
+            listed=$(jq -r '.Assets[].Version' "$lists_there"/releases.*.json | sort -V | tail -n 1)
             if [[ -z "$listed" ]]; then
               echo "The published update list names no version"
               exit 1
@@ -236,7 +332,7 @@ jobs:
           lists=()
           for file in artifacts/*; do
             case "$(basename "$file")" in
-              *-full.nupkg | *Setup.exe | releases.*.json) ;;
+              *-full.nupkg | *Setup.exe | *-macOS-arm64.zip | *.AppImage | releases.*.json) ;;
               *) lists+=("$file") ;;
             esac
           done
@@ -250,7 +346,10 @@ jobs:
           name: Ugurugu ${{ github.ref_name }}
           body_path: ${{ steps.notes.outputs.path }}
           generate_release_notes: true
-          files: artifacts/*-Setup.exe
+          files: |
+            artifacts/*-Setup.exe
+            artifacts/*-macOS-arm64.zip
+            artifacts/*-Linux-x64.AppImage
 
       # A release made with this job's token starts no workflow, so its
       # `release` event never reaches the badge.
