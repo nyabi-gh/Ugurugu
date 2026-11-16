@@ -53,8 +53,21 @@ fn main() -> ExitCode {
     let running = recovery::default_root().map(|root| recovery::take_running(&root));
     #[cfg(not(windows))]
     if matches!(running, Some(Ok(None))) {
-        eprintln!("Ugurugu is already running with this recovery folder");
-        return ExitCode::SUCCESS;
+        // The window that is open did not take this start: it was busy, or
+        // it listens in another runtime directory.
+        return match &document {
+            Some(document) => {
+                eprintln!(
+                    "Ugurugu is already running and did not take {}; open it from that window",
+                    document.display()
+                );
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("Ugurugu is already running with this recovery folder");
+                ExitCode::SUCCESS
+            }
+        };
     }
     let _logging = logs::start();
     tracing::debug!("starting");

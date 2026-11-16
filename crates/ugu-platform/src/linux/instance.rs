@@ -33,6 +33,9 @@ const ACCEPTED: u8 = 1;
 const REJECTED: u8 = 0;
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(15);
+/// For a whole frame, so a connection that trickles bytes cannot hold the
+/// listener for longer.
+const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 const LONGEST_MESSAGE: usize = 1 << 16;
 
 /// Held from a start until its window is ready to receive documents.
@@ -44,7 +47,10 @@ impl StartLock {
     /// Waits up to 15 seconds for earlier starts using `name`. Returns `None`
     /// if the lock file cannot be opened or remains held past the timeout.
     pub fn take(name: &str) -> Option<Self> {
-        let dir = runtime_dir().ok()?;
+        Self::take_in(&runtime_dir().ok()?, name)
+    }
+
+    fn take_in(dir: &Path, name: &str) -> Option<Self> {
         let path = dir.join(format!("start-{}.lock", short_hash(name)));
         let file = open_lock_file(&path).ok()?;
         let deadline = Instant::now() + START_TIMEOUT;
@@ -72,14 +78,14 @@ pub fn hand_over(_class: &str, key: &str, document: Option<&Path>) -> bool {
         .or_else(|_| std::env::var("DESKTOP_STARTUP_ID"))
         .ok()
         .unwrap_or_default();
-    hand_over_with_token(key, document, &token)
-}
-
-fn hand_over_with_token(key: &str, document: Option<&Path>, token: &str) -> bool {
     let Ok(dir) = runtime_dir() else {
         return false;
     };
-    let (sock_path, lock_path) = instance_paths(&dir, key);
+    hand_over_in(&dir, key, document, &token)
+}
+
+fn hand_over_in(dir: &Path, key: &str, document: Option<&Path>, token: &str) -> bool {
+    let (sock_path, lock_path) = instance_paths(dir, key);
     let Ok(frame) = encode_frame(key, document, token) else {
         return false;
     };
@@ -168,10 +174,19 @@ struct PendingRequest {
 
 type ReceiveFn = Box<dyn FnMut(Option<PathBuf>) -> bool>;
 
+/// The requests the listener thread has read and the window has yet to take.
+#[derive(Default)]
+struct Pending {
+    requests: VecDeque<PendingRequest>,
+    /// Set when the window stops receiving: nothing will answer a request
+    /// queued after that.
+    closed: bool,
+}
+
 struct LocalReceiver {
     id: u64,
     hwnd: isize,
-    queue: Arc<Mutex<VecDeque<PendingRequest>>>,
+    queue: Arc<Mutex<Pending>>,
     receive: ReceiveFn,
 }
 
@@ -192,6 +207,7 @@ pub fn poll_current_thread_receivers() {
                     .queue
                     .lock()
                     .expect("document queue poisoned")
+                    .requests
                     .pop_front();
                 let Some(req) = next else {
                     break;
@@ -277,7 +293,7 @@ impl DocumentReceiver {
         let stop_efd = Arc::new(unsafe { OwnedFd::from_raw_fd(raw_efd) });
 
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let queue = Arc::new(Mutex::new(Pending::default()));
         LOCAL_RECEIVERS.with(|cell| {
             cell.borrow_mut().push(LocalReceiver {
                 id,
@@ -315,15 +331,15 @@ impl Drop for Listening {
         let one = 1u64.to_ne_bytes();
         // SAFETY: `stop_efd` is a live `OwnedFd`.
         let _ = unsafe { libc::write(self.stop_efd.as_raw_fd(), one.as_ptr().cast(), one.len()) };
-        if let Some(thread) = self.accept_thread.take() {
-            let _ = thread.join();
-        }
+        // Before the join: the thread may be waiting for the answer to a
+        // request that this window will no longer take.
         LOCAL_RECEIVERS.with(|cell| {
             if let Ok(mut list) = cell.try_borrow_mut() {
                 list.retain(|entry| {
                     if entry.id == self.id {
-                        if let Ok(mut q) = entry.queue.lock() {
-                            while let Some(req) = q.pop_front() {
+                        if let Ok(mut pending) = entry.queue.lock() {
+                            pending.closed = true;
+                            while let Some(req) = pending.requests.pop_front() {
                                 let _ = req.ack.send(false);
                             }
                         }
@@ -334,6 +350,9 @@ impl Drop for Listening {
                 });
             }
         });
+        if let Some(thread) = self.accept_thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -342,7 +361,7 @@ fn run_accept_loop(
     stop_efd: Arc<OwnedFd>,
     hwnd: isize,
     expected_key: String,
-    queue: Arc<Mutex<VecDeque<PendingRequest>>>,
+    queue: Arc<Mutex<Pending>>,
 ) {
     loop {
         let mut fds = [
@@ -373,26 +392,30 @@ fn run_accept_loop(
         }
 
         while let Ok((mut stream, _)) = listener.accept() {
+            let frame = read_and_match_frame(&mut stream, &stop_efd, &expected_key);
             let _ = stream.set_nonblocking(false);
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-
-            let Some((document, token)) = read_and_match_frame(&mut stream, &expected_key) else {
+            let _ = stream.set_write_timeout(Some(FRAME_TIMEOUT));
+            let Some((document, token)) = frame else {
                 let _ = stream.write_all(&[REJECTED]);
                 continue;
             };
 
             let (ack_tx, ack_rx) = mpsc::channel();
-            {
-                let mut guard = queue.lock().expect("document queue poisoned");
-                guard.push_back(PendingRequest {
-                    document,
-                    token,
-                    ack: ack_tx,
-                });
-            }
-            super::window::wake_ui(hwnd);
-            let taken = ack_rx.recv_timeout(SEND_TIMEOUT).unwrap_or(false);
+            let queued = {
+                let mut pending = queue.lock().expect("document queue poisoned");
+                if !pending.closed {
+                    pending.requests.push_back(PendingRequest {
+                        document,
+                        token,
+                        ack: ack_tx,
+                    });
+                }
+                !pending.closed
+            };
+            let taken = queued && {
+                super::window::wake_ui(hwnd);
+                ack_rx.recv_timeout(SEND_TIMEOUT).unwrap_or(false)
+            };
             let _ = stream.write_all(&[if taken { ACCEPTED } else { REJECTED }]);
             let _ = stream.flush();
         }
@@ -450,12 +473,67 @@ fn decode_frame_for_key(frame: &[u8], expected_key: &str) -> Option<(Option<Path
     Some((document, token))
 }
 
+/// Fills `buffer` from `stream`, giving up at `deadline` or when `stop` is
+/// signalled.
+fn read_exact_until(
+    stream: &mut UnixStream,
+    stop: &OwnedFd,
+    buffer: &mut [u8],
+    deadline: Instant,
+) -> Option<()> {
+    stream.set_nonblocking(true).ok()?;
+    let mut filled = 0;
+    while filled < buffer.len() {
+        let left = deadline.checked_duration_since(Instant::now())?;
+        let mut fds = [
+            libc::pollfd {
+                fd: stream.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: stop.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        let millis = left.as_millis().clamp(1, i32::MAX as u128) as i32;
+        // SAFETY: `fds` holds two open file descriptors for this call.
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, millis) };
+        if ready < 0 {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return None;
+        }
+        if fds[1].revents != 0 {
+            return None;
+        }
+        if fds[0].revents == 0 {
+            continue;
+        }
+        match stream.read(&mut buffer[filled..]) {
+            Ok(0) => return None,
+            Ok(read) => filled += read,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return None,
+        }
+    }
+    Some(())
+}
+
 fn read_and_match_frame(
     stream: &mut UnixStream,
+    stop: &OwnedFd,
     expected_key: &str,
 ) -> Option<(Option<PathBuf>, String)> {
+    let deadline = Instant::now() + FRAME_TIMEOUT;
     let mut header = [0u8; 13];
-    stream.read_exact(&mut header).ok()?;
+    read_exact_until(stream, stop, &mut header, deadline)?;
     if header[0] != FRAME_VERSION {
         return None;
     }
@@ -470,7 +548,7 @@ fn read_and_match_frame(
     let mut full = Vec::with_capacity(13 + payload_len);
     full.extend_from_slice(&header);
     full.resize(13 + payload_len, 0);
-    stream.read_exact(&mut full[13..]).ok()?;
+    read_exact_until(stream, stop, &mut full[13..], deadline)?;
     decode_frame_for_key(&full, expected_key)
 }
 
@@ -557,42 +635,120 @@ mod tests {
 
     use super::*;
 
+    /// A runtime directory of the test's own, so a test never touches the
+    /// sockets and locks of an Ugurugu the developer has running.
+    struct Runtime(PathBuf);
+
+    impl Runtime {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("ugu-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn install(
+            &self,
+            key: &str,
+            receive: impl FnMut(Option<PathBuf>) -> bool + 'static,
+        ) -> DocumentReceiver {
+            DocumentReceiver::install_in(Ok(self.0.clone()), 0, key, receive).unwrap()
+        }
+
+        fn hand_over(&self, key: &str, document: Option<&Path>) -> bool {
+            hand_over_in(&self.0, key, document, "")
+        }
+    }
+
+    impl Drop for Runtime {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn a_document_reaches_the_window_with_the_same_key_only() {
-        let key = format!("ugurugu-instance-test-{}-a", std::process::id());
-        let other_key = format!("ugurugu-instance-test-{}-b", std::process::id());
+        let runtime = Runtime::new("instance-keys");
+        let (key, other_key) = ("instance-a", "instance-b");
         let received = Rc::new(RefCell::new(Vec::new()));
         let sink = received.clone();
-
-        // SAFETY: `0` is the test window handle on this thread, and `receiver`
-        // is dropped on this thread below.
-        let receiver = unsafe {
-            DocumentReceiver::install(0, &key, move |path| {
-                sink.borrow_mut().push(path);
-                true
-            })
-        }
-        .unwrap();
+        let receiver = runtime.install(key, move |path| {
+            sink.borrow_mut().push(path);
+            true
+        });
 
         let document = Path::new("/tmp/그림/고양이 1.ugurugu");
-        assert!(hand_over("Ugurugu 3", &key, Some(document)));
-        assert!(hand_over("Ugurugu 3", &key, None));
-        assert!(!hand_over("Ugurugu 3", &other_key, Some(document)));
-        assert!(!hand_over("Ugurugu 3", &other_key, None));
+        assert!(runtime.hand_over(key, Some(document)));
+        assert!(runtime.hand_over(key, None));
+        assert!(!runtime.hand_over(other_key, Some(document)));
+        assert!(!runtime.hand_over(other_key, None));
         assert_eq!(*received.borrow(), [Some(document.to_path_buf()), None]);
 
         drop(receiver);
-        assert!(!hand_over("Ugurugu 3", &key, Some(document)));
-        assert!(!hand_over("Ugurugu 3", &key, None));
+        assert!(!runtime.hand_over(key, Some(document)));
+        assert!(!runtime.hand_over(key, None));
+    }
+
+    #[test]
+    fn a_window_closes_without_waiting_for_a_silent_connection() {
+        let runtime = Runtime::new("instance-silent");
+        let key = "instance-silent";
+        let receiver = runtime.install(key, |_| true);
+        let (sock_path, _) = instance_paths(&runtime.0, key);
+        let silent = UnixStream::connect(&sock_path).unwrap();
+        // Long enough for the listener to have accepted it and to be reading.
+        std::thread::sleep(Duration::from_millis(200));
+
+        let started = Instant::now();
+        drop(receiver);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "closing waited {:?} for a connection that sent nothing",
+            started.elapsed()
+        );
+        drop(silent);
+    }
+
+    #[test]
+    fn a_connection_that_trickles_is_cut_off_and_the_next_start_gets_through() {
+        let runtime = Runtime::new("instance-trickle");
+        let key = "instance-trickle";
+        let _receiver = runtime.install(key, |_| true);
+        let (sock_path, _) = instance_paths(&runtime.0, key);
+        let mut slow = UnixStream::connect(&sock_path).unwrap();
+        let trickle = std::thread::spawn(move || {
+            let started = Instant::now();
+            // A frame that promises a long key and sends it a byte at a
+            // time, each well inside any time limit on a single read.
+            let mut header = vec![FRAME_VERSION];
+            header.extend_from_slice(&60_000u32.to_le_bytes());
+            header.extend_from_slice(&[0; 8]);
+            let _ = slow.write_all(&header);
+            while slow.write_all(b"k").is_ok() && started.elapsed() < 3 * FRAME_TIMEOUT {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let mut answer = [ACCEPTED];
+            let _ = slow.set_read_timeout(Some(Duration::from_secs(1)));
+            let _ = slow.read_exact(&mut answer);
+            (started.elapsed(), answer[0])
+        });
+        std::thread::sleep(Duration::from_millis(100));
+
+        let started = Instant::now();
+        assert!(runtime.hand_over(key, None));
+        assert!(started.elapsed() < FRAME_TIMEOUT + Duration::from_secs(1));
+        let (_, answer) = trickle.join().unwrap();
+        assert_eq!(answer, REJECTED);
     }
 
     #[test]
     fn a_window_without_a_runtime_directory_still_starts() {
-        let key = format!("ugurugu-no-runtime-test-{}", std::process::id());
+        let runtime = Runtime::new("instance-no-runtime");
+        let key = "instance-no-runtime";
         let unusable = Err(io::Error::from(io::ErrorKind::PermissionDenied));
-        let receiver = DocumentReceiver::install_in(unusable, 0, &key, |_| true);
+        let receiver = DocumentReceiver::install_in(unusable, 0, key, |_| true);
         assert!(receiver.is_ok());
-        assert!(!hand_over("Ugurugu 3", &key, None));
+        assert!(!runtime.hand_over(key, None));
     }
 
     #[test]
@@ -637,13 +793,14 @@ mod tests {
 
     #[test]
     fn starts_take_turns() {
-        let name = format!("ugurugu-start-lock-test-{}", std::process::id());
-        let first = StartLock::take(&name).unwrap();
+        let runtime = Runtime::new("instance-start-lock");
+        let name = "start-lock";
+        let first = StartLock::take_in(&runtime.0, name).unwrap();
         let waited = std::thread::spawn({
-            let name = name.clone();
+            let dir = runtime.0.clone();
             move || {
                 let started = Instant::now();
-                drop(StartLock::take(&name).unwrap());
+                drop(StartLock::take_in(&dir, name).unwrap());
                 started.elapsed()
             }
         });
@@ -654,15 +811,14 @@ mod tests {
 
     #[test]
     fn stale_unowned_socket_is_removed_cleanly() {
-        let key = format!("ugurugu-stale-test-{}", std::process::id());
-        let dir = runtime_dir().unwrap();
-        let (sock_path, _) = instance_paths(&dir, &key);
-        let _ = std::fs::remove_file(&sock_path);
+        let runtime = Runtime::new("instance-stale");
+        let key = "instance-stale";
+        let (sock_path, _) = instance_paths(&runtime.0, key);
         {
             let _dangling = UnixListener::bind(&sock_path).unwrap();
         }
         assert!(sock_path.exists());
-        assert!(!hand_over("Ugurugu 3", &key, None));
+        assert!(!runtime.hand_over(key, None));
         assert!(!sock_path.exists());
     }
 }
