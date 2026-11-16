@@ -47,6 +47,9 @@ use wayland_protocols::xdg::foreign::zv2::client::{
 const PNG_MIME: &str = "image/png";
 const TIFF_MIME: &str = "image/tiff";
 const URI_LIST_MIME: &str = "text/uri-list";
+/// How long the other end of a clipboard or drop pipe may do nothing. It is
+/// counted from its last bytes and not from the start, so a large image that
+/// keeps coming is read to its end.
 const PIPE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_URI_LIST_BYTES: usize = 256 * 1024;
 
@@ -830,6 +833,11 @@ fn handle_command(
                     .cloned()
                     .ok_or_else(|| "no Wayland data device on seat".to_owned())?;
                 let serial = slot.latest_serial;
+                // The compositor takes a selection only with the serial of
+                // an input event; without one it would drop this silently.
+                if serial == 0 {
+                    return Err("no input yet to set the Wayland clipboard with".to_owned());
+                }
 
                 let source = manager.create_data_source(qh, ());
                 source.offer(PNG_MIME.to_owned());
@@ -943,11 +951,40 @@ fn set_nonblocking(fd: i32) -> std::io::Result<()> {
 }
 
 fn read_pipe_bounded(read_fd: OwnedFd, limit: usize) -> Result<Vec<u8>, ReadError> {
+    read_pipe_within(read_fd, limit, PIPE_TIMEOUT)
+}
+
+/// Waits up to `idle` for `fd` to be ready for `events`.
+fn wait_for_pipe(fd: i32, events: libc::c_short, idle: Duration) -> std::io::Result<()> {
+    let deadline = Instant::now() + idle;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let mut pfd = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        let timeout_ms = i32::try_from(remaining.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: `pfd` points to a single live `pollfd` of an open descriptor.
+        let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        if ready > 0 {
+            return Ok(());
+        }
+        if ready == 0 {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+fn read_pipe_within(read_fd: OwnedFd, limit: usize, idle: Duration) -> Result<Vec<u8>, ReadError> {
     set_nonblocking(read_fd.as_raw_fd()).map_err(|error| ReadError::System(error.to_string()))?;
     let mut file = std::fs::File::from(read_fd);
     let mut out = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
-    let deadline = Instant::now() + PIPE_TIMEOUT;
 
     loop {
         match file.read(&mut chunk) {
@@ -960,44 +997,44 @@ fn read_pipe_bounded(read_fd: OwnedFd, limit: usize) -> Result<Vec<u8>, ReadErro
             }
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    return Err(ReadError::System(
-                        "timed out reading clipboard pipe".to_owned(),
-                    ));
-                }
-                let timeout_ms = i32::try_from(remaining.as_millis()).unwrap_or(i32::MAX);
-                let mut pfd = libc::pollfd {
-                    fd: file.as_raw_fd(),
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                // SAFETY: `pfd` points to a single live `pollfd` for `file`.
-                let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
-                if ready == 0 {
-                    return Err(ReadError::System(
-                        "timed out reading clipboard pipe".to_owned(),
-                    ));
-                }
-                if ready < 0 {
-                    let poll_err = std::io::Error::last_os_error();
-                    if poll_err.kind() == std::io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    return Err(ReadError::System(poll_err.to_string()));
-                }
+                wait_for_pipe(file.as_raw_fd(), libc::POLLIN, idle).map_err(|error| {
+                    ReadError::System(if error.kind() == std::io::ErrorKind::TimedOut {
+                        "timed out reading clipboard pipe".to_owned()
+                    } else {
+                        error.to_string()
+                    })
+                })?;
             }
             Err(err) => return Err(ReadError::System(err.to_string())),
         }
     }
 }
 
+/// Writes `bytes` to a pipe whose reader may stop reading: it gives up once
+/// the reader has taken nothing for `idle`.
+fn write_pipe_within(write_fd: OwnedFd, bytes: &[u8], idle: Duration) -> std::io::Result<()> {
+    set_nonblocking(write_fd.as_raw_fd())?;
+    let mut file = std::fs::File::from(write_fd);
+    let mut written = 0;
+    while written < bytes.len() {
+        match file.write(&bytes[written..]) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(n) => written += n,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                wait_for_pipe(file.as_raw_fd(), libc::POLLOUT, idle)?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
+}
+
 fn spawn_pipe_writer(write_fd: OwnedFd, bytes: Arc<[u8]>) {
     let _ = std::thread::Builder::new()
         .name("wayland-clip-write".to_owned())
         .spawn(move || {
-            let mut file = std::fs::File::from(write_fd);
-            let _ = file.write_all(&bytes);
+            let _ = write_pipe_within(write_fd, &bytes, PIPE_TIMEOUT);
         });
 }
 
@@ -1454,9 +1491,15 @@ impl Dispatch<WlDataSource, ()> for WaylandState {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
-    use super::{parse_uri_list, supports_uri_list};
+    use ugu_platform_types::clipboard::ReadError;
+
+    use super::{
+        make_pipe, parse_uri_list, read_pipe_within, supports_uri_list, write_pipe_within,
+    };
 
     #[test]
     fn uri_list_decodes_percent_encoded_local_files_and_skips_comments_and_web_urls() {
@@ -1474,6 +1517,54 @@ mod tests {
                 PathBuf::from("/var/tmp/frame#2.png"),
             ]
         );
+    }
+
+    #[test]
+    fn a_pipe_that_keeps_sending_is_read_past_the_idle_time() {
+        let idle = Duration::from_millis(300);
+        let (read_fd, write_fd) = make_pipe().unwrap();
+        let writer = std::thread::spawn(move || {
+            let mut file = std::fs::File::from(write_fd);
+            for part in 0..6u8 {
+                std::thread::sleep(Duration::from_millis(100));
+                file.write_all(&[part; 1000]).unwrap();
+            }
+        });
+        let bytes = read_pipe_within(read_fd, 1 << 20, idle).unwrap();
+        writer.join().unwrap();
+        assert_eq!(
+            bytes.len(),
+            6000,
+            "600 ms of parts, each inside the idle time"
+        );
+
+        let (read_fd, stalled) = make_pipe().unwrap();
+        let started = Instant::now();
+        assert!(matches!(
+            read_pipe_within(read_fd, 1 << 20, idle),
+            Err(ReadError::System(_))
+        ));
+        assert!(started.elapsed() >= idle);
+        drop(stalled);
+    }
+
+    #[test]
+    fn writing_to_a_pipe_nobody_reads_gives_up() {
+        let idle = Duration::from_millis(200);
+        // More than a pipe holds, so the write cannot finish unread.
+        let bytes = vec![7u8; 4 << 20];
+
+        let (unread, write_fd) = make_pipe().unwrap();
+        let started = Instant::now();
+        let error = write_pipe_within(write_fd, &bytes, idle).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(unread);
+
+        let (read_fd, write_fd) = make_pipe().unwrap();
+        let reader = std::thread::spawn(move || read_pipe_within(read_fd, 8 << 20, idle));
+        write_pipe_within(write_fd, &bytes, idle).unwrap();
+        assert_eq!(reader.join().unwrap().unwrap().len(), bytes.len());
     }
 
     #[test]
