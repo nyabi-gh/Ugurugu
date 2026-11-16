@@ -2582,3 +2582,23 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **고치기 전에 실패하는지:** 세션 끝의 두 시험은 고친 두 곳(`SIG_IGN` 검사, `ACTIVE_LISTENERS`를 올리는 자리)만 되돌린 코드에서 실패했다: 무시해야 할 SIGHUP에 자식이 SIGHUP으로 끝나며 복구 표시를 남겼고(`(Some(ExitStatus(1)), true)`), 시작에 실패한 뒤의 SIGTERM에 자식이 신호로 끝나지 않고 10초 뒤 정상 종료했다. 나머지 시험은 고치기 전 코드에 없는 함수·값을 쓰므로 그 코드에서는 컴파일되지 않는다. errno 저장·복원에는 시험이 없다.
 
 **보지 않은 것:** 실제 Wayland·X11 세션에서의 동작 전부. 근접 때 놓는 마우스 표본이 X11의 펜 누름 경쟁(backlog B3-178 ③)을 점 하나로 끝내는지는 가설이다.
+
+## 127. #187 검토에서 코드로 확인된 나머지 결함의 수정과 시험 (2026-11-16)
+
+**환경:** Apple M4 Mac의 Docker Desktop 29.9.2 안 Ubuntu 24.04.5(aarch64), Rust 1.99.0, debug 빌드, CI의 Linux job과 같은 패키지(`libfontconfig-dev`, `mesa-vulkan-drivers`, 글꼴), `UGU_REQUIRE_ADAPTER=1`. 표시 서버, 세션 버스, logind, 펜이 없다: 아래는 모두 단위 시험이고 창을 띄우지 않았다.
+
+**고친 것과 시험** (backlog.md 16절의 항목):
+
+- 펜이 놓여 있는 동안의 마우스(B3-178, `linux/wayland_tablet.rs` `PenQueue`): Wayland의 근접 수가 0보다 크면 기한 없이 마우스를 막던 것을, Wayland와 X11 모두 "닿았거나 버튼을 쥐었거나 마지막 이벤트가 150ms 안"일 때만 막게 했다. 조용해진 X11 펜은 물러나며 `Leave`를 내고, 앱은 그것을 마우스 표본보다 먼저 보내려고 근접을 먼저 묻는다(`app.rs` `forward_pointer_input`). 누른 채 빠진 X11 장치는 `CaptureLost`와 `Leave`를 낸다(`x11_tablet.rs` `refresh_pen_devices`). 시험 `a_wayland_pen_lying_on_the_tablet_gives_the_mouse_back`, `an_x11_pen_gone_quiet_leaves_before_the_mouse_moves`, `an_x11_pen_leaves_when_x_says_so_or_another_device_moves`, `an_x11_pen_unplugged_while_pressed_cancels_its_stroke`.
+- 문서 넘기기(B3-180, `linux/instance.rs`, `main.rs`): 듣는 쪽은 프레임 하나를 2초 안에 받지 못하면 끊고(전에는 `read`마다 2초), 창을 닫을 때 읽던 연결과 답을 기다리던 요청을 놓는다. 문서를 넘기지 못하고 실행 잠금에서 끝나는 실행은 실패 코드로 끝난다(시험 없음, `main`의 분기). 시험은 임시 폴더를 runtime 폴더로 쓴다. 시험 `a_window_closes_without_waiting_for_a_silent_connection`(닫기가 500ms 안), `a_connection_that_trickles_is_cut_off_and_the_next_start_gets_through`(긴 열쇠를 약속하고 100ms마다 한 바이트를 보내는 연결 뒤의 넘기기가 3초 안에 닿는다).
+- 포털 대화상자와 폴더 열기(B3-183, `linux/dialog.rs`, `folder.rs`): `Response` 규칙에 보낸 쪽을 더했고, 포털 이름의 `NameOwnerChanged`를 함께 기다리며, 포털이 `current_filter`를 주지 않으면 이름의 확장자로 형식을 고른다. `xdg-open`은 끝날 때까지 기다려 실패를 로그에 남긴다. 시험 `the_saved_type_is_the_named_filter_then_the_typed_extension`, `only_the_portal_answers_and_only_a_portal_that_was_there_is_lost`. zbus 5.19.0의 `MatchRule::matches`는 well-known 이름의 `sender`를 받은 쪽에서 비교하지 않는다(소스로 확인). 그래서 걸러 내는 것은 bus다.
+- 세션 끝(B3-182, `linux/session.rs`): 종료가 취소되면 inhibitor를 다시 잡고 다음 종료에서 복구를 다시 쓴다. `ACTIVE_LISTENERS`는 세션 끝 스레드가 쥔 값이 떨어질 때 내려간다. 시험은 logind를 보지 않는 `install_with(false, …)`를 쓴다. 시험 `a_shutdown_called_off_has_the_next_one_write_the_recovery_again`(logind 스레드 대신 시험이 `shutting_down`과 eventfd를 바꾼다), `the_signal_handler_counts_a_listener_only_while_its_thread_runs`.
+- 클립보드 파이프(B3-179, `linux/window.rs`): 읽기의 3초를 전체가 아니라 마지막 바이트부터 세고, 쓰기 스레드는 상대가 3초 동안 아무것도 가져가지 않으면 그만둔다. 입력 직렬 번호가 0이면 쓰기를 오류로 답한다(시험 없음). 시험 `a_pipe_that_keeps_sending_is_read_past_the_idle_time`, `writing_to_a_pipe_nobody_reads_gives_up`.
+- Wayland 작업 스레드(B3-184, `linux/window.rs` `run_wayland_worker`): 이벤트 처리나 읽기가 `WouldBlock`이 아닌 오류로 끝나면 루프를 나간다. 시험은 판정 함수뿐이다(`only_a_broken_display_connection_ends_the_worker`).
+- 설치 스크립트(`tools/linux_desktop.py`, 이것으로 그 행은 닫았다): `Exec` 값의 역슬래시를 문자열 단계 몫으로 한 번 더 겹치고, 쓰이지 않던 MIME 형식 아이콘을 깔지 않는다. 규격의 두 단계(문자열, 인용된 인자)로 되읽는 스크립트에 경로 일곱 개를 넣었다: 고친 뒤 일곱 모두 원래 경로로 돌아왔고, 고치기 전에는 역슬래시가 든 둘(`/tmp/back\slash`, `/tmp/\$mix`)이 달랐다. `$`·`"`·백틱만 든 경로는 고치기 전에도 맞았다. 스크립트는 저장소에 두지 않았다.
+
+**결과:** `cargo test -p ugu-platform --locked`가 59개(1개 ignored)를 통과했다. 고치기 전(`41946fe`)은 같은 컨테이너에서 46개였다. 같은 컨테이너의 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`(앱 322개, 6개 ignored)가 통과했다. Mac에서는 BUILDING.md의 검사(fmt, `cargo deny --locked check`, clippy, debug와 release 시험, `native_deps.py`, release 빌드, `check_docs.py`, `strings_to_ftl.py`)가 통과했다. Windows 대상으로는 빌드하지 않았다: Windows에서 컴파일되는 코드는 바뀌지 않았다(`main.rs`의 바뀐 곳은 `cfg(not(windows))` 안이다).
+
+**고치기 전에 실패하는지:** 돌려 보지 않았다. 새 시험은 고치기 전 코드에 없는 함수(`in_proximity_at`, `lose_x11`, `hand_over_in`, `read_pipe_within`, `wait_for_the_end` 등)를 써서 그 코드에서는 컴파일되지 않는다.
+
+**보지 않은 것:** 실제 Wayland·X11 세션, 포털, logind, 펜에서의 동작 전부. backlog.md 16절의 각 행에 남겼다.
