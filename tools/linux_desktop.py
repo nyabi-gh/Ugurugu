@@ -16,7 +16,9 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_ID = "dev.ugurugu.app3"
-MIME_ICON = "application-x-ugurugu"
+# Earlier versions of this script installed it, and nothing showed it: the
+# MIME type names the app's icon as its own.
+OLD_MIME_ICON = "application-x-ugurugu"
 
 
 def default_data_home() -> pathlib.Path:
@@ -27,11 +29,15 @@ def default_data_home() -> pathlib.Path:
 
 
 def desktop_exec_quote(executable: pathlib.Path) -> str:
-    # FreeDesktop Exec value quoting rules: wrap in double quotes and escape
-    # `\`, `"`, `` ` ``, and `$`, then double `%` so field codes are preserved.
+    # The Desktop Entry Specification unescapes an Exec value twice: as a
+    # string value, where two backslashes are one, and then as a quoted
+    # argument, where a backslash goes before `\`, `"`, `` ` `` and `$`. So
+    # the backslashes of the second are doubled for the first. `%` is doubled
+    # too, since a single one starts a field code.
     raw = str(executable.resolve()).replace("%", "%%")
     for ch in ("\\", '"', "`", "$"):
         raw = raw.replace(ch, "\\" + ch)
+    raw = raw.replace("\\", "\\\\")
     return f'"{raw}" %f'
 
 
@@ -70,9 +76,8 @@ def install(executable: pathlib.Path, data_home: pathlib.Path) -> None:
     apps_dir = data_home / "applications"
     mime_pkg_dir = data_home / "mime" / "packages"
     app_icon_dir = data_home / "icons" / "hicolor" / "512x512" / "apps"
-    mime_icon_dir = data_home / "icons" / "hicolor" / "512x512" / "mimetypes"
 
-    for directory in (apps_dir, mime_pkg_dir, app_icon_dir, mime_icon_dir):
+    for directory in (apps_dir, mime_pkg_dir, app_icon_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     template = (ROOT / "resources" / "linux" / f"{APP_ID}.desktop").read_text(
@@ -92,7 +97,6 @@ def install(executable: pathlib.Path, data_home: pathlib.Path) -> None:
     )
     icon_src = ROOT / "resources" / "icons" / "Ugurugu.png"
     shutil.copy2(icon_src, app_icon_dir / f"{APP_ID}.png")
-    shutil.copy2(icon_src, mime_icon_dir / f"{MIME_ICON}.png")
 
     refresh_caches(data_home)
     print(desktop_path)
@@ -103,7 +107,12 @@ def uninstall(data_home: pathlib.Path) -> None:
         data_home / "applications" / f"{APP_ID}.desktop",
         data_home / "mime" / "packages" / f"{APP_ID}.xml",
         data_home / "icons" / "hicolor" / "512x512" / "apps" / f"{APP_ID}.png",
-        data_home / "icons" / "hicolor" / "512x512" / "mimetypes" / f"{MIME_ICON}.png",
+        data_home
+        / "icons"
+        / "hicolor"
+        / "512x512"
+        / "mimetypes"
+        / f"{OLD_MIME_ICON}.png",
     ]
     for path in targets:
         if path.exists():
