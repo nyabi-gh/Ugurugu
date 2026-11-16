@@ -2599,6 +2599,8 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 
 **결과:** `cargo test -p ugu-platform --locked`가 59개(1개 ignored)를 통과했다. 고치기 전(`41946fe`)은 같은 컨테이너에서 46개였다. 같은 컨테이너의 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`(앱 322개, 6개 ignored)가 통과했다. Mac에서는 BUILDING.md의 검사(fmt, `cargo deny --locked check`, clippy, debug와 release 시험, `native_deps.py`, release 빌드, `check_docs.py`, `strings_to_ftl.py`)가 통과했다. Windows 대상으로는 빌드하지 않았다: Windows에서 컴파일되는 코드는 바뀌지 않았다(`main.rs`의 바뀐 곳은 `cfg(not(windows))` 안이다).
 
+**CI에서 찾은 것:** PR의 첫 CI(Ubuntu 24.04 x86_64)에서 `a_pipe_that_keeps_sending_is_read_past_the_idle_time`이 `started.elapsed() >= idle`로 실패했다. `wait_for_pipe`가 남은 시간을 밀리초로 내림해 `poll`에 주고, `poll`이 0을 돌려주면 기한을 다시 보지 않고 시간 초과로 답해서, 기한보다 1ms 가까이 일찍 끝날 수 있었다(코드를 읽은 것, 일찍 끝난 시간을 재지는 않았다). 올림하고 기한이 지났을 때만 시간 초과로 답하게 고쳤고, 같은 컨테이너에서 파이프 시험 둘을 20번 돌려 모두 통과했다. 고치기 전의 컨테이너 실행에서는 이 실패가 나오지 않았다.
+
 **고치기 전에 실패하는지:** 돌려 보지 않았다. 새 시험은 고치기 전 코드에 없는 함수(`in_proximity_at`, `lose_x11`, `hand_over_in`, `read_pipe_within`, `wait_for_the_end` 등)를 써서 그 코드에서는 컴파일되지 않는다.
 
 **보지 않은 것:** 실제 Wayland·X11 세션, 포털, logind, 펜에서의 동작 전부. backlog.md 16절의 각 행에 남겼다.
