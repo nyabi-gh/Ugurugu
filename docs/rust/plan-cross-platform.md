@@ -202,6 +202,8 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - 최근 문서.
 - 펜은 장치로 확인하기 전까지 열린 gate다. 합성 입력(`CGEventCreateMouseEvent`에 tablet 필드)으로 경로를 시험할 수 있는지 본다.
 
+상태(2026-11-16): 펜은 `crates/ugu-platform/src/macos/tablet.rs`, 최근 문서는 `macos/recent.rs`다(decisions.md 3·7절의 2026-11-16 행). 4절 표의 "점 이벤트에는 지우개 값이 없다"는 확인하지 않고, 근접 이벤트의 값을 `deviceID`마다 기억한다. 사용자 데스크톱에서는 합성 입력을 쓰지 않으므로(decisions.md 3절) 펜 경로는 단위 시험과 실제 장치로 본다. 실제 펜으로는 보지 않았다(B3-13).
+
 ### 3단계: Linux
 
 - Vulkan 표시와 lavapipe 대체. 작업 공간이 winit의 기본 기능을 끄므로 `x11`·`wayland`에 더해 `wayland-dlopen`(libwayland를 실행 때 열어, 그것이 없는 시스템에서도 X11로 뜬다)과 `wayland-csd-adwaita`를 켠다. GNOME은 서버 쪽 창 테두리가 없어, 이 기능이 없으면 winit은 글자 없는 sctk `FallbackFrame`을 그린다.

@@ -2604,3 +2604,21 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **고치기 전에 실패하는지:** 돌려 보지 않았다. 새 시험은 고치기 전 코드에 없는 함수(`in_proximity_at`, `lose_x11`, `hand_over_in`, `read_pipe_within`, `wait_for_the_end` 등)를 써서 그 코드에서는 컴파일되지 않는다.
 
 **보지 않은 것:** 실제 Wayland·X11 세션, 포털, logind, 펜에서의 동작 전부. backlog.md 16절의 각 행에 남겼다.
+
+## 128. macOS 2단계의 펜과 최근 문서 (2026-11-16)
+
+**질문:** local event monitor를 단 앱이 뜨고 끝나나. 문서를 열면 최근 문서 목록에 들어가나. 펜 표본의 규칙(필압, 지우개 끝, barrel 버튼, 떠남, 같은 NSEvent의 winit 마우스 이벤트 거르기)이 맞나.
+
+**방법:** Apple M4, macOS 27.2, Rust 1.99.0, release, `tools/macos_app.py`로 만든 번들. `open -g -n --env …`로 설정·복구·로그를 빈 폴더에 두고 한글 이름의 문서 하나를 열었다. 화면과 합성 입력은 쓰지 않았고, 로그와 프로세스 상태만 봤다. 최근 문서 목록(`~/Library/Application Support/com.apple.sharedfilelist`)은 개인정보 보호(TCC)로 다른 프로세스가 읽을 수 없어, 저장소에 넣지 않은 시험 코드가 앱 안에서 `noteNewRecentDocumentURL` 뒤 `recentDocumentURLs`를 파일로 적었다. 끝내기는 `osascript`의 `quit`로 보냈다. 펜 규칙은 `macos/tablet.rs`의 단위 시험 7개다(`State::take`에 읽은 값을 넣는다).
+
+**결과:**
+
+| 확인 | 결과 |
+|---|---|
+| 앱 시작, 문서 열기 | `document opened ok=true`, 오류·경고 줄 없음 |
+| 최근 문서 목록 | 연 문서의 경로 한 줄 |
+| 끝내기 | 앱이 끝내기를 미루고(`osascript`는 -128) 스스로 창을 닫은 뒤 프로세스가 끝남(117절과 같다) |
+| 사용자가 같은 번들로 그리기 | 사용자가 그려 보고 잘 된다고 했다(약 6초, 어느 장치였는지는 적지 않았다). 그 실행의 로그에 오류·경고가 없었고, winit이 미룬 이벤트는 창 이벤트 6개(크기·초점·이동·닫힘)뿐이어서 마우스 이벤트는 미루어지지 않았다 |
+| 시험 | macOS `cargo test --workspace --locked`와 `--release`(`UGU_REQUIRE_ADAPTER=1`), clippy 통과. Linux(126절의 컨테이너) clippy와 `ugu-platform`·`ugurugu` 시험 세 번 통과(옮긴 `pen_buttons`) |
+
+**결론:** 문서를 열고 저장하면 Dock의 최근 목록이 읽는 `NSDocumentController` 목록에 들어간다. Dock 메뉴에 보이는지는 화면으로 보지 않았다. monitor를 단 앱에서 사용자가 그리기를 확인했지만, 펜의 필압·지우개 끝·barrel 버튼은 따로 보지 않았다(B3-13).
