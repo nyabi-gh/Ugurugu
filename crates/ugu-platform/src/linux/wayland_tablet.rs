@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ugu_platform_types::clock::Ticks;
-use ugu_platform_types::pointer::{Buttons, PointerEvent, PointerId, PointerKind, PointerSample};
+use ugu_platform_types::pointer::{PointerEvent, PointerId, PointerKind, PointerSample};
 use wayland_backend::client::ObjectId;
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
@@ -35,10 +35,7 @@ use wayland_protocols::wp::tablet::zv2::client::{
 
 use super::clock;
 use super::window::WaylandState;
-
-/// Keeps Linux pen pointer IDs disjoint from `WinitPointer`'s mouse (`0`) and
-/// low-numbered touch IDs (`1 + touch.id`).
-pub(crate) const PEN_POINTER_BASE: u32 = 0x4000_0000;
+pub(crate) use crate::pen::{PEN_POINTER_BASE, pen_buttons};
 
 /// Linux `input-event-codes.h` button codes emitted by `zwp_tablet_tool_v2`.
 pub(crate) const BTN_RIGHT: u32 = 0x111;
@@ -265,33 +262,6 @@ fn coalesce_push(queue: &mut VecDeque<PointerEvent>, event: PointerEvent) {
     } else {
         queue.push_back(event);
     }
-}
-
-/// Maps pen tip contact, barrel buttons, and eraser state to [`Buttons`] and
-/// `in_contact`, matching Windows `WM_POINTER` (`crates/ugu-win/src/pointer.rs`).
-pub(crate) fn pen_buttons(
-    tip_down: bool,
-    barrel_held: bool,
-    stylus2_held: bool,
-    inverted: bool,
-) -> (Buttons, bool) {
-    let mut buttons = Buttons::empty();
-    if tip_down {
-        if barrel_held {
-            buttons = buttons.union(Buttons::SECONDARY).union(Buttons::BARREL);
-        } else {
-            buttons = buttons.union(Buttons::PRIMARY);
-        }
-        if inverted {
-            buttons = buttons.union(Buttons::ERASER);
-        }
-    } else if barrel_held {
-        buttons = buttons.union(Buttons::BARREL);
-    }
-    if stylus2_held {
-        buttons = buttons.union(Buttons::MIDDLE);
-    }
-    (buttons, tip_down)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1100,6 +1070,7 @@ impl Dispatch<ZwpTabletPadStripV2, ()> for WaylandState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ugu_platform_types::pointer::Buttons;
 
     fn queue() -> Arc<PenQueue> {
         PenQueue::new(Arc::new(|| {}))
