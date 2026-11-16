@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use ugu_platform_types::clipboard::{Encoded, ReadError};
 use ugu_platform_types::pointer::PointerEvent;
-use wayland_backend::client::{Backend, ObjectId};
+use wayland_backend::client::{Backend, ObjectId, WaylandError};
 use wayland_client::protocol::{
     wl_data_device::{self, WlDataDevice},
     wl_data_device_manager::{DndAction, WlDataDeviceManager},
@@ -739,7 +739,11 @@ fn run_wayland_worker(
     let _ = ready_tx.send(());
 
     while !state.exit {
-        let _ = queue.dispatch_pending(&mut state);
+        // A connection that has failed stays failed: going on would only
+        // spin on a socket that reports itself readable for ever.
+        if queue.dispatch_pending(&mut state).is_err() {
+            break;
+        }
         let _ = conn.flush();
 
         while let Ok(cmd) = rx.try_recv() {
@@ -790,7 +794,9 @@ fn run_wayland_worker(
         }
 
         if fds[0].revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0 {
-            let _ = guard.read();
+            if connection_failed(guard.read()) {
+                break;
+            }
         } else {
             drop(guard);
         }
@@ -806,6 +812,16 @@ fn run_wayland_worker(
 
     state.cleanup();
     let _ = conn.flush();
+}
+
+/// Whether reading the display connection found it broken. Another thread
+/// having read the events first is not a failure.
+fn connection_failed(read: Result<usize, WaylandError>) -> bool {
+    match read {
+        Ok(_) => false,
+        Err(WaylandError::Io(error)) => error.kind() != std::io::ErrorKind::WouldBlock,
+        Err(_) => true,
+    }
 }
 
 fn handle_command(
@@ -1496,9 +1512,11 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use ugu_platform_types::clipboard::ReadError;
+    use wayland_backend::client::WaylandError;
 
     use super::{
-        make_pipe, parse_uri_list, read_pipe_within, supports_uri_list, write_pipe_within,
+        connection_failed, make_pipe, parse_uri_list, read_pipe_within, supports_uri_list,
+        write_pipe_within,
     };
 
     #[test]
@@ -1565,6 +1583,17 @@ mod tests {
         let reader = std::thread::spawn(move || read_pipe_within(read_fd, 8 << 20, idle));
         write_pipe_within(write_fd, &bytes, idle).unwrap();
         assert_eq!(reader.join().unwrap().unwrap().len(), bytes.len());
+    }
+
+    #[test]
+    fn only_a_broken_display_connection_ends_the_worker() {
+        assert!(!connection_failed(Ok(3)));
+        assert!(!connection_failed(Err(WaylandError::Io(
+            std::io::ErrorKind::WouldBlock.into()
+        ))));
+        assert!(connection_failed(Err(WaylandError::Io(
+            std::io::ErrorKind::BrokenPipe.into()
+        ))));
     }
 
     #[test]
