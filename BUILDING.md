@@ -139,6 +139,20 @@ open --env UGURUGU_SETTINGS_PATH=/tmp/ugu/settings.json \
   "target/release/Ugurugu 3.app"
 ```
 
+The package is a Velopack zip of the bundle, signed ad hoc, made and tried
+with the tools of the Windows package section (`vpk` needs .NET 10):
+
+```sh
+python3 tools/package_unix.py macos target/release/ugurugu artifacts
+python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.zip /tmp/ugu-smoke
+```
+
+CI and the release workflow build it, but releases do not publish it yet.
+`--version` and `--release-notes` make a later version of the same build
+for a local update feed (`UGURUGU_UPDATE_FEED`). Velopack keeps downloaded
+packages in `~/Library/Caches/velopack/Ugurugu3` and applies one there when
+any copy of the app starts; delete it after trying an update.
+
 ## Ugurugu 3 (Linux, in development)
 
 There is no Linux release of 3.x yet. It builds on x86_64 Linux (releases
@@ -165,6 +179,19 @@ python3 tools/linux_desktop.py install target/release/ugurugu
 To keep a development run apart from `~/.config/ugurugu/3` and
 `~/.local/state/ugurugu/3`, set `UGURUGU_SETTINGS_PATH`,
 `UGURUGU_RECOVERY_PATH` and `UGURUGU_LOG_PATH`.
+
+The package is a Velopack AppImage, built on Ubuntu 22.04 for its glibc.
+`vpk` needs .NET 10 and `mksquashfs` (`squashfs-tools`); the smoke run needs
+an X server (`xvfb-run`) and the X11 client libraries:
+
+```sh
+python3 tools/package_unix.py linux target/release/ugurugu artifacts
+xvfb-run -a python3 tools/package_smoke_unix.py linux artifacts/*-Linux-x64.AppImage /tmp/ugu-smoke
+```
+
+CI and the release workflow build it, but releases do not publish it yet.
+On an arm64 machine, `--runtime linux-arm64` makes a package to try; only
+x64 is released.
 
 ## Ugurugu 2.x
 

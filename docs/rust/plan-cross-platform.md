@@ -221,12 +221,14 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ### 4단계: 패키지·업데이트·릴리스
 
-- Velopack 1.2.161(지금 판)은 macOS `.app`·`.pkg`·`.zip`과 Linux `.AppImage`를 만든다. 채널은 `osx-arm64`·`linux-x64`처럼 나누고, 패키지 ID는 `Ugurugu3` 그대로(**확인 필요**: 한 피드에 여러 채널을 두는 방식).
-- macOS 서명: 9절 결정 1에 따른다. Developer ID가 없으면 ad-hoc 서명만이다. 링커의 서명은 실행 파일만 덮으므로 `Info.plist`·자원을 넣은 뒤 번들 전체를 `codesign --force --deep -s -`로 다시 서명한다(하지 않으면 받은 앱이 "손상됨"으로 나와 "그래도 열기"도 없을 수 있다, **가설**). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. Velopack 업데이트는 Developer ID 서명을 전제로 한다(**확인 필요**: 서명 없을 때 업데이트가 되는지).
+- Velopack 1.2.161(지금 판)은 macOS `.app`·`.pkg`·`.zip`과 Linux `.AppImage`를 만든다. 채널은 `osx-arm64`·`linux-x64`처럼 나누고, 패키지 ID는 `Ugurugu3` 그대로.
+- macOS 서명: ad-hoc(9절). Velopack이 자기 파일을 넣은 뒤 번들 전체를 서명한다(decisions.md 10절). 받은 앱은 macOS 15부터 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기"로만 연다. ad-hoc 번들도 업데이트를 받는다(evidence.md 129절, 내려받은 번들로는 아직 보지 않았다).
 - Linux: AppImage 하나. Ubuntu 22.04에서 빌드해 glibc 2.35를 하한으로 둔다(decisions.md 10절).
 - 제3자 고지(`tools/third_party_notices.py`)를 OS마다 링크되는 crate로.
 - `release-3.yml`에 macOS·Linux job, 다운로드 배지·릴리스 노트의 파일 이름.
 - 사용자 안내: README(ko·en·ja)의 요구 사항, `BUILDING.md`의 macOS·Linux 빌드 절, 릴리스 노트.
+
+상태(2026-11-16): 9절의 두 결정을 사용자가 정했다: macOS는 ad-hoc 서명으로 시작하고 Linux는 x64 AppImage만이다. `tools/package_unix.py`가 두 패키지를 만들고 `tools/package_smoke_unix.py`가 풀어 띄우며, CI와 `release-3.yml`이 둘 다 돌린다(decisions.md 10절의 2026-11-16 행, evidence.md 129절). 한 피드에 채널을 여럿 두는 방식은 채널마다 `releases.<채널>.json`이 따로여서 그대로 된다. ad-hoc 번들의 업데이트는 이 Mac에서 됐다. 사용자 결정으로 발행은 B3-13과 backlog 16절이 닫힐 때까지 Windows만 한다. README와 릴리스 노트는 그때 쓴다.
 
 ## 8. 바깥 상태 출처 (2026-10-28 확인)
 
@@ -242,5 +244,4 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 
 ## 9. 남은 사용자 결정
 
-1. **macOS 서명**: 유료 Apple Developer 계정(Developer ID 서명·공증)을 쓸지. 업데이트와 첫 실행 안내가 이것에 달렸다.
-2. **Linux 범위**: x64 AppImage, X11·Wayland 둘 다(제안). 배포판 패키지(deb·rpm·Flatpak)는 범위 밖으로 두고 나중에 본다.
+2026-11-16에 정했다(decisions.md 10절): macOS는 Developer ID 없이 ad-hoc 서명으로 시작하고, Linux는 x64 AppImage(X11·Wayland)만 낸다. 남은 결정은 macOS·Linux를 언제 처음 낼지다(B3-13).

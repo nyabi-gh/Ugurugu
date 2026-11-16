@@ -2622,3 +2622,24 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 | 시험 | macOS `cargo test --workspace --locked`와 `--release`(`UGU_REQUIRE_ADAPTER=1`), clippy 통과. Linux(126절의 컨테이너) clippy와 `ugu-platform`·`ugurugu` 시험 세 번 통과(옮긴 `pen_buttons`) |
 
 **결론:** 문서를 열고 저장하면 Dock의 최근 목록이 읽는 `NSDocumentController` 목록에 들어간다. Dock 메뉴에 보이는지는 화면으로 보지 않았다. monitor를 단 앱에서 사용자가 그리기를 확인했지만, 펜의 필압·지우개 끝·barrel 버튼은 따로 보지 않았다(B3-13).
+
+## 129. macOS·Linux 패키지와 ad-hoc 서명 번들의 업데이트 (2026-11-16)
+
+**질문:** Velopack 1.2.161로 만든 macOS 번들과 Linux AppImage가 풀려서 뜨나. Developer ID 없이 ad-hoc 서명한 macOS 번들이 업데이트를 받나. 대상마다 만든 제3자 고지가 Windows에서는 전과 같나.
+
+**방법:** Apple M4, macOS 27.2.1, Rust 1.99.0, release. macOS는 `tools/package_unix.py macos`로 3.6.2 패키지를 만들고, 같은 실행 파일을 판만 3.6.3으로 한 패키지를 폴더 피드로 두었다. 3.6.2 zip을 풀어 `UGURUGU_UPDATE_FEED`와 빈 설정·복구·로그 폴더로 실행했고, 사용자가 업데이트를 눌렀다. Linux는 126절의 arm64 Ubuntu 24.04 컨테이너에서 release를 빌드해 `--runtime linux-arm64`로 AppImage를 만들고, Xvfb와 lavapipe에서 `tools/package_smoke_unix.py`로 풀어 띄운 뒤 SIGTERM으로 끝냈다. 고지는 세 대상마다 `tools/third_party_notices.py`로 만들고, Windows 것은 바꾸기 전 스크립트의 출력과 바이트로 비교했다.
+
+**결과:**
+
+| 확인 | 결과 |
+|---|---|
+| macOS 번들 서명 | `macos_app.py`가 서명한 번들을 Velopack이 서명 없이 싸면 `codesign --verify --deep --strict`가 "a sealed resource is missing or invalid"로 실패했다(Velopack이 `UpdateMac`·`sq.version`을 넣은 뒤). `--signAppIdentity -`로 Velopack이 서명하게 하자 통과(`flags=0x10002(adhoc,runtime)`) |
+| Velopack 기본 entitlements | 지정하지 않으면 `allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`, `allow-dyld-environment-variables`, `automation.apple-events`가 붙었다. 빈 entitlements로 바꾼 번들도 뜨고 업데이트됐다 |
+| macOS 업데이트 3.6.2 → 3.6.3 | 시작 2초 뒤 `update found version="3.6.3"`, 사용자가 업데이트를 누르자 `UpdateMac`이 번들을 바꾸고 `open -n`으로 다시 띄웠다. 새 번들 `CFBundleShortVersionString` 3.6.3, 서명 검증 통과, 두 실행의 로그에 ERROR 없음. 내려받은 파일이 아니라 quarantine 속성은 없었다 |
+| Velopack 캐시 | 받은 패키지가 `~/Library/Caches/velopack/Ugurugu3/packages`에 남아, 그 뒤 다른 폴더에서 띄운 3.6.2가 시작할 때 3.6.3을 적용했다(`VelopackApp::run`). 같은 패키지 ID의 다른 사본도 업데이트된다 |
+| macOS 패키지 smoke | 풀기, 파일 목록, 서명 검증, GPU 선택까지 실행, SIGTERM 통과 |
+| Linux AppImage smoke | X11 클라이언트 라이브러리(libX11·libXcursor·libXrandr·libXi·libxkbcommon-x11)가 없으면 "Failed to load one of xlib's shared libraries"로 끝났다. 깔고 나서 llvmpipe를 골라 뜨고, SIGTERM에 `unsaved work kept for recovery as the session ends` 뒤 끝남. AppImage 런타임의 extract-and-run으로 띄우면 SIGTERM이 런타임에서 멈춰 앱이 X가 꺼질 때까지 남았으므로, smoke는 풀어 놓은 `AppRun`을 실행한다 |
+| 크기 | macOS zip 16,757,818바이트, nupkg 17,220,955바이트(실행 파일 34,136,728바이트). Linux arm64 AppImage 57,141,768바이트, nupkg 56,192,471바이트: 실행 파일이 222,996,344바이트로 `line-tables-only` 디버그 정보가 그 안에 있다. x64는 CI가 처음 만든다 |
+| 고지 | Windows 263 crate·77 license, 바꾸기 전 출력과 같은 바이트. macOS 270·74, Linux x64 352·106 |
+
+**결론:** ad-hoc 서명 번들도 Velopack 업데이트를 받는다. 남은 것은 GitHub에서 내려받아 quarantine이 붙은 번들(처음 열기의 "그래도 열기"와 그 뒤 업데이트), Linux AppImage의 업데이트, x64 AppImage를 실제 데스크톱에서 띄우는 것이다(B3-13). 업데이트는 smoke에 넣지 않았다: 적용은 사용자가 누르는 버튼에서 시작한다.
