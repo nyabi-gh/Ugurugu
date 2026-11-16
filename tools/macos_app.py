@@ -94,12 +94,14 @@ def info(app_version: str) -> dict:
     }
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit(__doc__)
-    executable = pathlib.Path(sys.argv[1])
-    app = pathlib.Path(sys.argv[2]) / f"{NAME}.app"
-
+def make(
+    executable: pathlib.Path,
+    folder: pathlib.Path,
+    app_version: str,
+    resources: dict[str, pathlib.Path] | None = None,
+) -> pathlib.Path:
+    """The bundle in `folder`, with `resources` copied under the names given."""
+    app = folder / f"{NAME}.app"
     # Not written over: macOS kills a program whose signed file changed in
     # place since the kernel first saw it.
     if app.exists():
@@ -109,12 +111,20 @@ def main() -> None:
     (contents / "Resources").mkdir()
     shutil.copy2(executable, contents / "MacOS" / EXECUTABLE)
     shutil.copy2(ROOT / "resources" / "icons" / ICON, contents / "Resources" / ICON)
+    for name, source in (resources or {}).items():
+        shutil.copy2(source, contents / "Resources" / name)
     with open(contents / "Info.plist", "wb") as plist:
-        plistlib.dump(info(version()), plist)
+        plistlib.dump(info(app_version), plist)
     # The linker signed the executable alone; this also seals Info.plist and
     # the icon, under the bundle's identifier.
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
-    print(app)
+    return app
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        raise SystemExit(__doc__)
+    print(make(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), version()))
 
 
 if __name__ == "__main__":
