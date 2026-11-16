@@ -19,8 +19,9 @@ pub struct WinitPointer {
     position: Option<[f64; 2]>,
     buttons: Buttons,
     frame: u32,
-    /// Suppresses synthesized core-pointer mouse events while a native pen
-    /// stylus (`zwp_tablet_v2` or `XInput2`) is in proximity.
+    /// Suppresses the mouse events the OS makes of a pen read natively: while
+    /// a `zwp_tablet_v2` or `XInput2` stylus is in proximity, and on macOS
+    /// while winit's events come from the pen's.
     pen_in_proximity: bool,
 }
 
@@ -28,12 +29,12 @@ impl WinitPointer {
     /// The mouse events the pen's arrival makes: buttons the mouse holds are
     /// let go, since their releases will be suppressed and whatever they
     /// were dragging would never end.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     pub fn set_pen_in_proximity(&mut self, in_proximity: bool) -> Vec<PointerEvent> {
         self.set_pen_in_proximity_at(in_proximity, clock::now())
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     fn set_pen_in_proximity_at(&mut self, in_proximity: bool, time: Ticks) -> Vec<PointerEvent> {
         let arrived = in_proximity && !self.pen_in_proximity;
         self.pen_in_proximity = in_proximity;

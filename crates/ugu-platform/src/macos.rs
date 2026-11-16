@@ -16,6 +16,7 @@ pub mod memory;
 pub mod menu;
 pub mod requests;
 pub mod session;
+pub mod tablet;
 
 pub use crate::unsupported::{association, crash, file, recent};
 

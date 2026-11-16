@@ -64,6 +64,9 @@ pub enum UiEvent {
     Window(WindowChange),
     #[cfg(target_os = "linux")]
     LinuxWake,
+    /// Pen events wait that no window event will collect.
+    #[cfg(target_os = "macos")]
+    TabletWake,
     #[cfg(target_os = "linux")]
     DroppedFile(std::path::PathBuf),
 }
@@ -102,6 +105,9 @@ struct Session {
     /// Dropped before the window, whose view it reads.
     #[cfg(target_os = "macos")]
     menus: ugu_platform::menu::Menus,
+    /// Dropped before the window, whose view it reads.
+    #[cfg(target_os = "macos")]
+    tablet: ugu_platform::tablet::Tablet,
     /// Dropped before the window, whose Wayland/X11 handles it holds.
     #[cfg(target_os = "linux")]
     _linux_window: Option<ugu_platform::window::LinuxWindow>,
@@ -413,6 +419,16 @@ impl Session {
                 })
             }
         };
+        #[cfg(target_os = "macos")]
+        let tablet = {
+            let wake_proxy = proxy.clone();
+            // SAFETY: as for the menus.
+            unsafe {
+                ugu_platform::tablet::Tablet::install(hwnd, move || {
+                    let _ = wake_proxy.send_event(UiEvent::TabletWake);
+                })
+            }
+        };
         let render_window = window.clone();
         let render_thread = std::thread::Builder::new()
             .name("render".to_owned())
@@ -455,6 +471,8 @@ impl Session {
             _quit_requests: quit_requests,
             #[cfg(target_os = "macos")]
             menus,
+            #[cfg(target_os = "macos")]
+            tablet,
             #[cfg(target_os = "linux")]
             _linux_window: linux_window,
             #[cfg(target_os = "linux")]
@@ -489,8 +507,19 @@ impl Session {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn forward_pointer_input(&mut self) {
+        let (pen, mouse_is_pen) = self.tablet.drain();
+        // As on Linux, the mouse lets go before the pen's samples.
+        let mut events = self.pointer.set_pen_in_proximity(mouse_is_pen);
+        events.extend(pen);
+        if !events.is_empty() {
+            let _ = self.to_render.send(ToRender::Pointer(events));
+        }
+    }
+
     /// Elsewhere pointer input comes with each window event instead.
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     fn forward_pointer_input(&mut self) {}
 }
 
@@ -609,6 +638,13 @@ impl ApplicationHandler<UiEvent> for App {
             #[cfg(target_os = "linux")]
             UiEvent::LinuxWake => {
                 ugu_platform::instance::poll_current_thread_receivers();
+                if let Some(session) = self.session.as_mut() {
+                    session.forward_pointer_input();
+                }
+                return;
+            }
+            #[cfg(target_os = "macos")]
+            UiEvent::TabletWake => {
                 if let Some(session) = self.session.as_mut() {
                     session.forward_pointer_input();
                 }

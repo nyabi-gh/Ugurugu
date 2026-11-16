@@ -9,7 +9,7 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod pen;
 #[cfg(unix)]
 mod unix;
@@ -91,6 +91,12 @@ pub mod pointer {
 
 pub mod recent {
     pub use crate::os::recent::add;
+}
+
+/// The pen, which winit hands on as a mouse.
+#[cfg(target_os = "macos")]
+pub mod tablet {
+    pub use crate::os::tablet::Tablet;
 }
 
 #[cfg(target_os = "macos")]
