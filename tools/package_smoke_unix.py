@@ -76,7 +76,8 @@ def unpack_macos(package: pathlib.Path, work: pathlib.Path, notarized: bool) -> 
     finally:
         subprocess.run(["hdiutil", "detach", str(volume)], check=True, stdout=subprocess.DEVNULL)
     app = install / APP
-    expect(files_under(app), MACOS_FILES, "Bundle files")
+    # Stapling a notarized bundle adds its ticket as Contents/CodeResources.
+    expect(files_under(app), MACOS_FILES + (["Contents/CodeResources"] if notarized else []), "Bundle files")
     subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)], check=True)
     if notarized:
         check_notarized(app, ["--type", "execute"])

@@ -2562,3 +2562,11 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **macOS·Linux 더하기(2026-11-17):** 사용자가 그 릴리스에 두 판을 더하기로 했다. 같은 실행의 아티팩트 `macos-release`·`linux-release`를 받아, 빌드 메타데이터가 `095f946`·velopack 1.2.161이고 목록의 SHA256이 패키지와 같음을 보고, macOS zip을 이 Mac에서 풀어 `codesign --verify --deep --strict` 통과·판 3.6.3·arm64를 확인했다. AppImage 런타임은 libfuse를 정적으로 담고 있다(문자열로 확인). 그 뒤 손으로 올렸다: `updates`에 패키지(`Ugurugu3-3.6.3-osx-arm64-full.nupkg` 17,254,873바이트, `Ugurugu3-3.6.3-linux-x64-full.nupkg` 61,813,947바이트)를 먼저, 그다음 `RELEASES-*`·`assets.*.json`·빌드 메타데이터, 마지막에 `releases.osx-arm64.json`·`releases.linux-x64.json`. GitHub가 적은 digest가 받은 파일과 같았다. `v3.6.3`에는 `Ugurugu-3.6.3-macOS-arm64.zip`(16,787,611바이트)과 `Ugurugu-3.6.3-Linux-x64.AppImage`(62,581,240바이트)를 더하고, 본문을 macOS·Linux 절을 넣은 `release-notes/3.6.3.en.md`로 바꿨다. 같은 날 `release-3.yml`이 세 OS를 발행하게 고쳤다.
 
 **보지 않은 것:** 받은 zip의 "그래도 열기"와 그 번들의 업데이트, AppImage의 업데이트, x64 AppImage를 실제 데스크톱에서 띄우기(B3-13).
+
+## 131. Developer ID 서명·공증 dmg (2026-11-17)
+
+**방법:** 이 Mac(Apple M4)의 로그인 키체인에 개인 계정의 Developer ID Application 인증서를, `xcrun notarytool store-credentials`로 App Store Connect API 키 프로필을 두고 3.6.3 release 빌드를 `python3 tools/package_unix.py macos … --sign-identity "Developer ID Application" --notary-profile ugurugu-notary`로 쌌다(vpk 1.2.161). 그 dmg에 `tools/package_smoke_unix.py macos … --notarized`를 돌렸다.
+
+**결과:** Velopack이 번들을 서명·공증하고 티켓을 붙였고(vpk 1.2.161을 디컴파일해 `OsxPackCommandRunner.CodeSign`이 `--notaryProfile`이 있으면 번들을 zip으로 보내 `notarytool submit --wait`, `stapler staple`, `spctl` 하는 것을 확인), 이어 dmg를 서명해 보낸 공증이 몇 분 만에 Accepted로 끝나 티켓이 붙었다. dmg는 17,745,996바이트(같은 빌드의 ad-hoc dmg 17,705,732바이트). `spctl`은 dmg(`--type open --context context:primary-signature`)와 꺼낸 앱(`--type execute`)을 모두 `accepted`, `source=Notarized Developer ID`로 받아들였고, `stapler validate`가 둘 다 통과했으며 앱이 GPU를 고를 때까지 떴다. 티켓을 붙인 번들에는 `Contents/CodeResources`가 더 생겨, 시험의 파일 목록이 공증된 번들에서 이를 기대하게 했다(전에는 이 단계에서 실패했다).
+
+**보지 않은 것:** `release-3.yml`의 임시 keychain 경로(첫 태그에서 돈다), 브라우저로 내려받아 격리 속성이 붙은 dmg를 Finder에서 열기, ad-hoc 3.6.3에서 서명한 판으로의 업데이트.
