@@ -33,6 +33,8 @@ pub mod limits {
     pub const STROKES_BYTES: u64 = 12
         + 8 * ugu_core::document::limits::OPERATIONS as u64
         + 12 * ugu_core::store::limits::POINTS as u64;
+    /// Header, then id and bounds per mask, then the bits the store may hold.
+    pub const MASKS_BYTES: u64 = 12 + 20 * MASKS as u64 + ugu_core::store::limits::BYTES;
     /// All entries together, inflated.
     pub const TOTAL_BYTES: u64 = DOCUMENT_BYTES + ugu_core::store::limits::BYTES + 1024 * 1024;
     /// The file: every entry stored or barely grown by Deflate, and each
@@ -421,7 +423,7 @@ impl<R: Read + Seek> Entries<R> {
                 return Err(corrupt(format!("stroke {} appears twice", stroke.id)));
             }
         }
-        let mut masks = parse_masks(&self.read(MASKS, store::limits::BYTES)?, dto.masks.len())
+        let mut masks = parse_masks(&self.read(MASKS, limits::MASKS_BYTES)?, dto.masks.len())
             .ok_or_else(|| corrupt("mask bits do not match the masks"))?;
         for mask in &dto.masks {
             let value = masks

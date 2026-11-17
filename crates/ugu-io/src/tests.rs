@@ -606,6 +606,37 @@ fn unexpected_json_is_refused() {
 }
 
 #[test]
+fn masks_that_fill_the_store_read_back() {
+    let edge = *ugu_core::document::limits::CANVAS_EDGE.end();
+    let mut document = Document::new([edge, edge]);
+    let bits = edge as usize * Mask::row_bytes(edge as i32);
+    let count = ugu_core::store::limits::BYTES as usize / bits;
+    let LayerKind::Paint(base) = &mut document.layers[0].kind else {
+        unreachable!()
+    };
+    for id in 0..count as u32 {
+        document.store.masks.insert(
+            MaskId(id),
+            Mask {
+                bounds: [0, 0, edge as i32, edge as i32],
+                bits: vec![0; bits].into(),
+            },
+        );
+        base.ops.push(Op::Fill {
+            coverage: MaskId(id),
+            color: Rgba8([1, 2, 3, 4]),
+            antialias: false,
+            clip: None,
+            behind: false,
+        });
+    }
+    assert_eq!(document.store.bytes(), ugu_core::store::limits::BYTES);
+    assert_eq!(document.validate(), Ok(()));
+    let (read, _) = read_bytes(written(&document)).unwrap();
+    assert_eq!(read.store.bytes(), ugu_core::store::limits::BYTES);
+}
+
+#[test]
 fn an_entry_that_inflates_past_its_limit_is_refused() {
     // A few kilobytes that inflate to more than the manifest limit.
     let bomb = with_entry(MANIFEST, |data| {
