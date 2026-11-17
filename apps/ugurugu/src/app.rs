@@ -45,11 +45,41 @@ pub fn instance_key() -> String {
             .unwrap_or_default()
     };
     [
-        path(std::env::current_exe().ok()),
+        path(executable()),
         path(crate::settings::default_path()),
         path(crate::recovery::default_root()),
     ]
     .join("\n")
+}
+
+/// The file this start runs from.
+fn executable() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    #[cfg(target_os = "linux")]
+    if let Some(image) = mounted_image(
+        &executable,
+        std::env::var_os("APPDIR"),
+        std::env::var_os("APPIMAGE"),
+    ) {
+        return Some(image);
+    }
+    Some(executable)
+}
+
+/// The AppImage an executable runs from. Each start mounts the image at a
+/// folder of its own (`APPDIR`), so the executable's path there differs from
+/// start to start and the image's (`APPIMAGE`) stands for it. A process an
+/// AppImage started inherits both, so they count only for an executable
+/// inside the mounted folder.
+#[cfg(any(target_os = "linux", test))]
+fn mounted_image(
+    executable: &std::path::Path,
+    mounted: Option<std::ffi::OsString>,
+    image: Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let (mounted, image) = (mounted?, image?);
+    (!mounted.is_empty() && !image.is_empty() && executable.starts_with(&mounted))
+        .then(|| image.into())
 }
 
 pub enum UiEvent {
@@ -720,6 +750,33 @@ pub fn document_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starts_from_one_appimage_share_a_key_whatever_folder_each_is_mounted_at() {
+        use std::path::Path;
+        let image = "/home/cat/Ugurugu.AppImage";
+        let key = |mounted: &str| {
+            mounted_image(
+                &Path::new(mounted).join("usr/bin/ugurugu"),
+                Some(mounted.into()),
+                Some(image.into()),
+            )
+        };
+        assert_eq!(key("/tmp/.mount_UguruAbCdEf"), Some(image.into()));
+        assert_eq!(
+            key("/tmp/.mount_UguruGhIjKl"),
+            key("/tmp/.mount_UguruAbCdEf")
+        );
+        // A build started from a terminal that itself runs in an AppImage.
+        let own = Path::new("/src/target/release/ugurugu");
+        let inherited = Some("/tmp/.mount_TermXyZ".into());
+        assert_eq!(mounted_image(own, inherited, Some(image.into())), None);
+        assert_eq!(mounted_image(own, None, None), None);
+        assert_eq!(
+            mounted_image(own, Some("".into()), Some(image.into())),
+            None
+        );
+    }
 
     #[test]
     fn options_are_not_taken_for_a_document() {
