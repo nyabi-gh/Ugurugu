@@ -465,7 +465,8 @@ pub fn number(
     width: f32,
     name: &str,
 ) -> Response {
-    let response = ui
+    let before = *value;
+    let mut response = ui
         .scope(|ui| {
             let widgets = &mut ui.visuals_mut().widgets;
             widgets.inactive.weak_bg_fill = theme::base();
@@ -481,10 +482,17 @@ pub fn number(
                     .suffix(suffix)
                     .max_decimals(decimals)
                     .min_decimals(decimals)
-                    .speed(0.2),
+                    .speed(0.2)
+                    // "100" is typed through 1 and 10, which are not values
+                    // the user chose.
+                    .update_while_editing(false),
             )
         })
         .inner;
+    // egui calls each key typed a change, though the value waits for Enter.
+    response
+        .flags
+        .set(egui::response::Flags::CHANGED, *value != before);
     let shown = f64::from(*value);
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(true, shown);

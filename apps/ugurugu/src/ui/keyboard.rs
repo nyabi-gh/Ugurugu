@@ -596,3 +596,23 @@ fn the_canvas_size_panel_lays_out_inside_the_window_and_enter_applies_it() {
         [before[0] + 10, before[1]]
     );
 }
+
+#[test]
+fn a_frame_count_is_set_when_typing_ends_not_at_each_key() {
+    let mut window = Window::new();
+    let before = window.canvas.session().document().frames;
+    let steps = window.canvas.session().undo_label().map(str::to_owned);
+    window.tab_to_label(tr("frame-count"));
+    for key in ["1", "0", "0"] {
+        window.frame(vec![Event::Text(key.to_owned())]);
+        assert_eq!(window.canvas.session().document().frames, before);
+    }
+    window.key(NONE, Key::Enter);
+    assert_eq!(window.canvas.session().document().frames, 100);
+    window.canvas.edit(|session| session.undo()).unwrap();
+    assert_eq!(window.canvas.session().document().frames, before);
+    assert_eq!(
+        window.canvas.session().undo_label().map(str::to_owned),
+        steps
+    );
+}
