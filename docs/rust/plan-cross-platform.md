@@ -14,11 +14,11 @@
 
 ## 2. 지금 상태
 
-evidence.md 97절이 macOS에서 확인한 것이다. 요약:
+2026-11-17 기준. 0~4단계를 main에 넣었고, 3.6.3부터 macOS(Apple Silicon, ad-hoc 서명 zip)와 Linux(x64 AppImage)판을 Windows판과 함께 낸다(decisions.md 10절, evidence.md 129·130절). 다음 `v3.*` 태그부터는 `release-3.yml`이 세 OS를 모두 발행한다. 남은 것은 실제 장치로 볼 것들이다:
 
-- OS 의존이 없는 네 crate(`ugu-core`·`ugu-io`·`ugu-session`·`ugu-text`)는 macOS에서 빌드되고, `ugu-text`의 시험 둘만 실패한다. `Fonts::new`의 대체 글꼴이 Windows 글꼴 이름뿐이라 다른 글꼴로 풀린 탓이다(evidence.md 97절에서 확인).
-- 나머지는 `windows` crate를 조건 없이 의존해 빌드되지 않는다. 코드에 `cfg(windows)` 분기가 하나도 없다.
-- Windows 코드는 거의 `ugu-win`(14개 모듈, 약 2,800줄)에 있고, 그 밖에는 `ugu-render`의 `gpu.rs`·`present.rs`·`view.rs` 시험, 앱의 `app.rs`·`build.rs`·`recovery.rs`·`settings.rs`·`theme.rs`·`render.rs`(`Backends::DX12`), 도구 셋이다. 앱과 도구의 파일 22개가 `ugu_win::`을 부르고, 3.1절대로 하면 이것들은 경로만 바뀐다.
+- macOS: 실제 펜(필압·지우개 끝·barrel·hover), Dock 메뉴의 최근 문서, 메뉴 막대와 IME를 화면으로, 받은 zip의 "그래도 열기"와 그 번들의 업데이트(B3-13).
+- Linux: 실제 X11·Wayland 세션의 펜 근접·클립보드·포털·logind·단일 실행(backlog 16절), AppImage의 업데이트와 x64 AppImage를 실제 데스크톱에서 띄우기(B3-13), 지우개 끝·barrel·X11 태블릿(B3-06).
+- 시작 전의 상태(빌드되지 않던 crate, `ugu-win`에 모인 Windows 코드)는 evidence.md 97절에 있다.
 
 ## 3. 구조
 
