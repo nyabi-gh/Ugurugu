@@ -17,6 +17,8 @@
 
 두 모니터가 서로 다른 GPU에 연결돼 있어, 모니터를 옮길 때의 DPI 변경과 다른 어댑터로 넘어가는 경우를 이 PC에서 시험한다. 앱은 어댑터를 고를 수 없어 Intel iGPU로는 시험하지 못했다. 깨끗한 설치·합성 펜·터치 시험은 이 PC의 Windows Sandbox에서 한다.
 
+macOS는 Apple M4 Mac에서 개발·측정하고(evidence.md 97절부터), Linux는 기여자의 Ryzen 9 5900X·Radeon RX 7900 XTX·KDE Plasma Wayland에서 확인했다(evidence.md 125절).
+
 ## 2. 펜·터치 없이 진행하는 방식
 
 입력 경로는 처음부터 Win32 Pointer API(`WM_POINTER*`)이고 마우스도 같은 경로를 쓴다. 장치가 있어야만 확인되는 항목은 통과로 적지 않는다.
@@ -76,12 +78,13 @@
 
 | 항목 | 범위 |
 |---|---|
-| OS | Windows x64. Windows 11에서 시험한다. Windows 10은 막지 않고 README의 "Windows 10 이상"을 둔다(따로 시험하지 않음, 2026-10-11 사용자 결정) |
-| ARM64 | 제외 |
-| macOS | 3.0 출시 범위에서 빼고 3.0 뒤에 지원한다(2026-10-10 사용자 결정). 그때까지 macOS는 2.2.13 |
-| GPU | 하드웨어 DX12 어댑터. 표시할 수 없으면 WARP(느린 소프트웨어 표시)로 연다. 시험한 것은 RTX 5080과 WARP이고, 다른 GPU는 열린 gate |
+| Windows | x64. Windows 11에서 시험한다. Windows 10은 막지 않고 README의 "Windows 10 이상"을 둔다(따로 시험하지 않음, 2026-10-11 사용자 결정) |
+| macOS | 3.6.3부터. Apple Silicon만, macOS 14부터, ad-hoc 서명 zip(decisions.md 10절). Intel Mac은 제외 |
+| Linux | 3.6.3부터. x64 AppImage 하나(X11·Wayland), Ubuntu 22.04에서 빌드해 glibc 2.35부터(decisions.md 10절) |
+| ARM64 | Windows·Linux의 ARM64는 제외 |
+| GPU | Windows는 하드웨어 DX12, 표시할 수 없으면 WARP(느린 소프트웨어 표시)로 연다. macOS는 Metal(소프트웨어 대체 없음), Linux는 Vulkan이고 안 되면 소프트웨어 Vulkan으로 연다(decisions.md 2절). 시험한 GPU 밖은 열린 gate(backlog B3-07) |
 | 원격 세션 | Windows Sandbox 원격 세션에서 실행·업데이트·WARP 확인. 다른 PC에서 `mstsc`로 접속한 경우는 미확인 |
-| 설치 | 사용자 단위(관리자 권한 없음), 2.2.13과 함께 설치 가능 |
+| 설치 | Windows는 사용자 단위(관리자 권한 없음), 2.2.13과 함께 설치 가능 |
 
 ## 5. 제외
 

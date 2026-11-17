@@ -2,8 +2,8 @@
 
 ## 지금 상태
 
-- Ugurugu 3(Rust, `apps/`, `crates/`)은 Windows판으로 3.0.0, 3.0.1, 3.0.2(2026-10-13), 3.1.0과 3.2.0(2026-10-14), 3.2.1과 3.3.0(2026-10-15), 3.3.1과 3.3.2(2026-10-16), 3.4.0과 3.4.1(2026-10-17), 3.4.2(2026-10-21), 3.4.3(2026-10-22), 3.5.0(2026-11-05), 3.6.0(2026-11-09), 3.6.1과 3.6.2(2026-11-12), 3.6.3(2026-11-16)을 냈다. macOS(Apple Silicon)·Linux(x64)판은 3.6.3에 처음 더했다(2026-11-17). 열린 일은 [backlog.md](rust/backlog.md)에 있고, 2026-10-21 UI/UX 검토의 남은 일은 그 15절에 있다.
-- 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다. macOS·Linux 3.x의 남은 일은 [plan-cross-platform.md](rust/plan-cross-platform.md)와 backlog의 B3-13에 있다.
+- Ugurugu 3(Rust, `apps/`, `crates/`)은 3.0.0(2026-10-13)부터 Windows판을 냈고, 3.6.3(2026-11-17)부터 macOS(Apple Silicon)·Linux(x64)판도 함께 낸다. 판마다 바뀐 것은 `release-notes/`와 GitHub 릴리스에 있다. 열린 일은 [backlog.md](rust/backlog.md)에 있고, macOS·Linux의 남은 일은 그 B3-13과 16절에 있다.
+- 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
 
 ## 3.0 문서 (`rust/`)
 
@@ -15,17 +15,19 @@
 | [backlog.md](rust/backlog.md) | 열린 일: 출시 전 할 일, 열린 gate, 미룬 결정, 알려진 한계, 개선 후보 |
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
-| [plan-cross-platform.md](rust/plan-cross-platform.md) | macOS·Linux 지원 계획(진행 중, 끝나면 지운다) |
 
 새 결정은 decisions.md에, 새 측정은 evidence.md에, 열린 일은 backlog.md에 적는다. 같은 내용을 여러 문서에 다시 쓰지 않는다. 일을 닫으면 backlog.md의 행과 다른 문서의 그 ID도 함께 지운다. CI의 `tools/check_docs.py`가 문서 링크와 backlog ID를 검사한다.
 
 ## 지운 문서
 
-2026-10-12에 마일스톤 계획(`RUST_WINDOWS_PORT_PLAN.md`, `rust/m0-close.md`, `rust/m2-plan.md`~`m6-plan.md`), 옛 측정 기록(`rust/m0-evidence.md`), 2.x 상태 문서(`project-status.md`), 검토 보고서(`ANALYSIS_REPORT.md`, `analysis-3.0.md`, `RUST_3_REVIEW_2026-10-12.md`)와 그 원자료(`review-evidence-*`)를 지웠다. 남길 것은 위 문서로 옮겼고, 원문은 git `70f9454`에 있다(`git show 70f9454:docs/rust/m6-plan.md`).
+계획 문서는 일이 끝나면 지운다. 결정은 decisions.md, 측정은 evidence.md, 남은 일은 backlog.md로 옮겼다. 문서에 남은 "m6-plan 2절", "plan-cross-platform 3.3절" 같은 출처는 아래 커밋에서 읽는다(`git show 70f9454:docs/rust/m6-plan.md`).
 
-2026-10-13에 문서 탭·UI 다듬기 계획(`rust/plan-document-tabs.md`)을 지웠다. 결정은 decisions.md, 측정은 evidence.md 36~43절, 남은 일은 backlog.md로 옮겼고, 원문은 git `70c27f4`에 있다.
-
-2026-10-14에 3.2.0 애니메이션 계획(`rust/plan-animation.md`)을 지웠다. 결정은 decisions.md 4절 "키프레임과 애니메이션 폴더"와 ADR 8절, 측정은 evidence.md 55·56절, 남은 일은 backlog.md 12절로 옮겼고, 원문은 git `d0506ba`에 있다.
+| 지운 날 | 문서 | 원문 |
+|---|---|---|
+| 2026-10-12 | 마일스톤 계획(`RUST_WINDOWS_PORT_PLAN.md`, `rust/m0-close.md`, `rust/m2-plan.md`~`m6-plan.md`), 옛 측정 기록(`rust/m0-evidence.md`), 2.x 상태 문서(`project-status.md`), 검토 보고서(`ANALYSIS_REPORT.md`, `analysis-3.0.md`, `RUST_3_REVIEW_2026-10-12.md`)와 그 원자료(`review-evidence-*`) | `70f9454` |
+| 2026-10-13 | 문서 탭·UI 다듬기 계획(`rust/plan-document-tabs.md`) | `70c27f4` |
+| 2026-10-14 | 3.2.0 애니메이션 계획(`rust/plan-animation.md`) | `d0506ba` |
+| 2026-11-17 | macOS·Linux 지원 계획(`rust/plan-cross-platform.md`) | `ced89bd` |
 
 ## 그 밖
 
