@@ -2582,3 +2582,27 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **서명·공증(실행 로그):** "Import the Developer ID and the notary key" 단계가 임시 keychain에 인증서를 넣고(`1 identity imported`) 공증 자격 증명을 확인했다(`Credentials validated`). "Package with Velopack, sign and notarize" 단계에서 번들 공증이 24초 만에 `Accepted`(07:38:29 → 07:38:53, id `e66cfb95-b1bd-423b-b731-77d4be822c16`)로 끝나 티켓이 붙었고, dmg 공증이 25초 만에 `Accepted`(07:39:15 → 07:39:40, id `175c27db-5004-4df3-8a50-1f20c7b4578c`)로 끝나 티켓이 붙었다. "Unpack and run" 단계(`package_smoke_unix.py … --notarized`)에서 `spctl`이 dmg와 꺼낸 앱을 `accepted`, `source=Notarized Developer ID`로 받아들였고 `stapler validate`가 둘 다 통과했으며, 앱이 판 3.6.4·커밋 `83f1db6`으로 GPU를 고를 때까지 떴다.
 
 **보지 않은 것:** 브라우저로 내려받아 격리 속성이 붙은 dmg를 Finder에서 열기, ad-hoc 3.6.3에서 3.6.4로의 업데이트, AppImage의 업데이트, Windows 3.6.3에서 3.6.4로의 실제 업데이트(B3-13).
+
+## 133. Velopack MSI의 설치 폴더와 업데이트, Windows Sandbox (2026-11-17)
+
+**질문:** `vpk pack --msi --instLocation Either`(1.2.161)로 만든 .msi가 고른 폴더를 어떻게 다루나. Setup으로 깐 3.6.x 위에 깔고 지우면 어떻게 되나. per-machine(Program Files) 설치를 표준 사용자가 앱 안에서 업데이트하나. 설치 위치를 고르고 싶다는 건의(2026-11-17)에서 나온 가설 세 가지를 확인한다.
+
+**방법:** 시험용 브랜치에서 release 빌드(판 3.6.3)를 `vpk pack`에 `--msi --instLocation Either`를 더해 쌌다(패키지 스크립트의 시험용 스위치와 Sandbox 스크립트 `msi.ps1`을 그 브랜치에 만들었고, 결정 뒤 main에 넣지 않고 지웠다): 설치용 3.6.3(Setup 23,984,238바이트, .msi 17,743,872바이트, 서명 없음)과 같은 실행 파일을 판만 3.6.4로 한 폴더 피드. Windows Sandbox(10.0.26100, 한국어, 네트워크 없음)에서 `msi.ps1`을 다섯 번 돌렸다(전체 세 번, 남은 단계만 두 번. 스크립트를 고치며 돌렸고 같은 단계의 결과는 실행마다 같았다). 그 뒤 설치 화면 단계만 두 번(첫 번은 단추를 찾지 못해 실패: UI Automation이 대화 상자의 컨트롤을 모두 Pane으로 알려, 창 클래스로 단추를 가리게 고쳤다), UAC를 켜는 흐름으로 한 번 더 돌렸다. 이 흐름은 per-machine 설치 뒤 `EnableLUA=1`, `PromptOnSecureDesktop=0`으로 바꾸고 Sandbox를 안에서 재시작한 다음(디스크와 매핑된 폴더가 남는다), 예약된 작업으로 승격해 다시 뜬 스크립트가 표준 사용자의 업데이트만 본다. 업데이트는 `UGURUGU_UPDATE_FEED`로 띄운 앱의 Update 단추로 했고, 표준 사용자는 Administrators에 들지 않은 로컬 계정 `ugutest`로 띄웠다. 이 Sandbox는 처음에 UAC가 꺼져 있다(`EnableLUA=0`). Velopack 1.2.161의 소스는 GitHub의 `1.2.161` 태그에서 읽었다.
+
+**결과:**
+
+| 확인 | 결과 |
+|---|---|
+| per-user, 새 폴더(`VELOPACK_INSTALLDIR`) | 폴더에 `current\`, `Update.exe`, `Ugurugu 3.exe`, `.msi-installed`. HKCU 제거 항목 `MSI:Ugurugu3`, 바탕 화면·시작 메뉴 바로 가기, `.ugurugu` 연결. 앱이 떴다 |
+| 그 설치의 업데이트 | 앱에서 3.6.4로, 제거 항목의 판도 3.6.4 |
+| 그 설치의 제거(`msiexec /x`) | 폴더·항목·바로 가기·연결이 모두 지워졌다 |
+| 다른 파일이 있는 폴더에 설치 | 설치는 `notes.txt`, `Other App\other.exe`를 두었지만 제거가 폴더를 통째로 지워 둘 다 사라졌다. **가설 a 확인** |
+| Setup 설치 위에 조용한 per-user 설치 | 기본 폴더가 Setup과 같은 `%LOCALAPPDATA%\Ugurugu3`이어서 Setup의 파일 위에 깔리고 제거 항목은 둘(`Ugurugu3`, `MSI:Ugurugu3`)이 됐다. .msi를 지우자 폴더가 통째로 사라졌고, Setup의 제거 항목만 파일 없이 남았다. **가설 b 확인** |
+| per-machine 설치(`ALLUSERS=1`) | `C:\Program Files\Ugurugu3`, HKLM 항목. 관리자가 앱에서 3.6.4로 업데이트했고 제거가 모두 지웠다 |
+| per-machine을 표준 사용자가 업데이트 | 앱은 3.6.4를 찾았다. Velopack은 설치 폴더에 쓸 수 없어(`os error 5`) 대신 `C:\Users\ugutest\AppData\Local\Ugurugu3`에 패키지를 받고 `Update.exe`를 복사해 `apply --root "C:\Program Files\Ugurugu3"`로 띄웠다. 그 `Update.exe`가 같은 인자(`--norestart … --rootDir`)로 자신을 약 0.1초마다 다시 띄웠고 부모는 끝나지 않아, 2분 뒤 `Update.exe`가 1,213~1,232개였다. 판은 3.6.3 그대로, 창이나 오류 표시는 없었다. **가설 c 확인(더 나쁘게)** |
+| per-machine을 표준 사용자가 업데이트, UAC 켬 | 앱이 3.6.4를 찾아 닫히고 `Update.exe`가 하나 떴다(16:16:31). 사용자 계정 컨트롤 창이 "게시자를 알 수 없는 이 앱이 디바이스를 변경할 수 있도록 허용하시겠어요? Update.exe … 계속하려면 관리 사용자 이름 및 암호를 입력하세요"를 띄우고 기다렸다(이 Sandbox에서는 단추가 "아니요"뿐이었다). 2분 뒤에도 `Update.exe`는 하나, 판은 3.6.3. 자격 증명을 넣거나 거절한 뒤는 보지 않았다 |
+| 설치 화면 | 세 장이다: 시작 → 설치 범위("사용자에 대해서만 설치" / "모든 사용자에 대해 설치", 관리자인 Sandbox 계정에서는 뒤쪽이 골라져 있다) → 설치 준비. **폴더를 고르거나 보여 주는 페이지가 없다.** 템플릿(`MsiTemplate.hbs`)에 `BrowseDlg`가 들어 있지만 그것을 여는 `Publish`가 없어, 폴더는 `msiexec … VELOPACK_INSTALLDIR=<폴더>`로만 바뀐다. 화면 문자열은 시스템 언어(한국어)로 나온다. 서명 없는 패키지의 소프트웨어 제한 정책 확인이 네트워크 없이 2분(16:07:32 → 16:09:32) 걸려 그동안 "Preparing to install"만 보인다. 조용한 설치도 각각 약 2분 걸렸다 |
+
+**원인:** `apply_windows_impl.rs`는 설치 폴더에 쓸 수 없고 프로세스 토큰이 승격되지 않았으면 `ShellExecuteEx`의 `runas`로 같은 `Update.exe`를 `apply --norestart … --rootDir`로 다시 띄우고 10분까지 기다린다. UAC가 꺼져 있으면 `runas`가 묻지도 승격하지도 않아 새 프로세스가 같은 판단을 되풀이하는 것으로 본다(가설; UAC를 켜자 복제가 사라지고 자격 증명 창이 뜬 것과 맞는다). 또 표준 사용자의 대체 폴더가 그 사용자의 Setup 설치 폴더와 같은 `%LOCALAPPDATA%\Ugurugu3`이다.
+
+**결론:** 이 .msi는 그대로 내지 않는다. 설치 화면에서 폴더를 고를 수 없어 건의(설치 위치 고르기)를 채우지 못하고, 명령줄로 고른 폴더나 Setup 설치를 제거 때 지울 수 있으며, per-machine 설치는 표준 사용자가 업데이트할 때마다 관리자 암호가 필요하다(UAC가 꺼진 PC에서는 `Update.exe`가 끝없이 뜬다). 사용자 결정(2026-11-17): MSI를 내지 않고 Setup만 둔다(decisions.md 10절).
