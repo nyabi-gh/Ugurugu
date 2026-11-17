@@ -2606,3 +2606,18 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **원인:** `apply_windows_impl.rs`는 설치 폴더에 쓸 수 없고 프로세스 토큰이 승격되지 않았으면 `ShellExecuteEx`의 `runas`로 같은 `Update.exe`를 `apply --norestart … --rootDir`로 다시 띄우고 10분까지 기다린다. UAC가 꺼져 있으면 `runas`가 묻지도 승격하지도 않아 새 프로세스가 같은 판단을 되풀이하는 것으로 본다(가설; UAC를 켜자 복제가 사라지고 자격 증명 창이 뜬 것과 맞는다). 또 표준 사용자의 대체 폴더가 그 사용자의 Setup 설치 폴더와 같은 `%LOCALAPPDATA%\Ugurugu3`이다.
 
 **결론:** 이 .msi는 그대로 내지 않는다. 설치 화면에서 폴더를 고를 수 없어 건의(설치 위치 고르기)를 채우지 못하고, 명령줄로 고른 폴더나 Setup 설치를 제거 때 지울 수 있으며, per-machine 설치는 표준 사용자가 업데이트할 때마다 관리자 암호가 필요하다(UAC가 꺼진 PC에서는 `Update.exe`가 끝없이 뜬다). 사용자 결정(2026-11-17): MSI를 내지 않고 Setup만 둔다(decisions.md 10절).
+
+## 134. 코드 검토에서 찾은 결함 여섯의 수정 (2026-11-17)
+
+**찾은 방법:** `83f1db6`의 코드를 영역별로 읽어 찾았고(PR #204), 앱을 실행해 재현하지는 않았다. 아래 시험은 각각 고치기 전 코드에서 실패하고 고친 뒤 통과한다(macOS arm64, debug). 마지막 것만 예외로, 시험은 열쇠를 정하는 함수만 본다.
+
+| 결함 | 원인 | 고친 것 | 시험 (고치기 전 실패) |
+|---|---|---|---|
+| 레이어 외곽선 색·굵기, 불투명도를 실행 취소하면 다음 프레임에 옛 값이 새 단계로 다시 커밋되거나 옛 값이 그대로 보였다. 탭을 바꾸면 같은 id의 레이어에 앞 문서의 외곽선 값이 들어갈 수 있었다 | 끄는 동안의 값을 레이어 id로만 기억해, 문서 값이 다른 길(실행 취소)로 바뀌어도 버리지 않았다. `switch_document`는 불투명도만 비웠다 | 기억한 값이 시작한 문서 값을 함께 두고 그것이 달라지면 문서 값에서 다시 시작한다(`ui/layers.rs` `Draft`). 탭을 바꿀 때 셋 다 비운다 | `an_undone_outline_and_opacity_stay_undone`: 실행 취소 뒤 외곽선이 취소 전 색 `[200, 100, 50, 255]`로 돌아가 있었다 |
+| 프레임 수 칸에 100을 치면 2(1은 하한 2가 된다), 10, 100이 차례로 커밋되어 2프레임으로 줄 때 그 뒤의 키와 셀 노출이 잘렸다. 다른 숫자 칸도 키마다 실행 취소 단계를 만들었다 | egui `DragValue`는 기본으로 키마다 값을 바꾸고, 칸들은 값이 바뀌면 커밋한다 | `widgets::number`가 `update_while_editing(false)`로 Enter나 칸을 떠날 때 값을 바꾸고, 값이 바뀌었을 때만 `changed()`를 알린다 | `a_frame_count_is_set_when_typing_ends_not_at_each_key`: "1"을 친 프레임에 프레임 수가 30에서 2가 됐다 |
+| 선택한 부분을 캔버스 밖으로 다 옮기면 화면에는 원래 자리의 화소가 남고 전체 렌더(내보내기)에서는 지워졌다 | `Split::show_move`가 옮긴 그림이 캔버스에 닿지 않으면 원래 자리를 지우지 않고 끝났다 | 원래 자리를 지우는 것과 옮긴 그림을 그리는 것을 따로 정한다(`moving.rs`) | `a_pending_transform_shown_on_any_layer_is_within_a_level_of_a_full_render`에 캔버스 밖 이동 둘을 더했다: 레이어 화소가 전체 렌더와 250단계 달랐다 |
+| 재생 중 이동 도구로 끌면 다음 틱에 끌기가 취소됐다. 그리는 중에 재생 키를 누르면 획이 버려졌다 | `tick`이 그리는 중이 아니면 재생을 다시 시작했고, `toggle_playback`은 멈출 때에도 `cancel_sizing`으로 하던 제스처를 취소했다 | 멈출 때는 제스처를 두고, 다시 시작은 하던 것이 없을 때만 한다(`canvas.rs`) | `a_pose_dragged_while_playing_is_keyed_and_playback_goes_on`, `stopping_playback_during_a_stroke_keeps_it_stopped`(획이 남는지를 더했다) |
+| 마스크 비트가 저장소 한도(128MiB)를 다 채운 문서는 저장되지만 `too large: masks.bin`으로 열리지 않았다 | 읽는 쪽의 `masks.bin` 한도가 비트의 한도와 같아 머리 12바이트와 마스크마다 20바이트가 들어갈 자리가 없었다 | `read::limits::MASKS_BYTES`(머리 + 마스크 수 한도 × 20 + 비트 한도) | `masks_that_fill_the_store_read_back`: 4096×4096 마스크 64개(134,217,728바이트)를 쓰고 읽는다 |
+| AppImage로 뜬 창에 둘째 실행이 문서를 넘기지 못한다(**가설**, 실행해 보지 않음) | 실행 열쇠의 실행 파일 경로가 AppImage가 실행마다 새로 만드는 마운트 폴더 아래다 | 실행 파일이 `APPDIR` 아래면 `APPIMAGE`를 쓴다(`app.rs` `mounted_image`) | `starts_from_one_appimage_share_a_key_whatever_folder_each_is_mounted_at`(함수만. 컨테이너에는 FUSE가 없어 실제 AppImage로는 보지 않았다, B3-180) |
+
+**남긴 것:** 재생 중 붙여넣기·변형·글자 놓기는 다음 프레임에 바로 적용된다(`Session::set_frame`이 대기 중인 편집을 적용한다). 재생을 멈출지 적용을 미룰지 정해야 해 고치지 않았다.
