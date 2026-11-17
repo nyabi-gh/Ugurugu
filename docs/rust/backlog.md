@@ -43,7 +43,7 @@
 
 ## 3. macOS·Linux 실제 장치 확인
 
-3.6.3부터 macOS(ad-hoc 서명 zip)와 Linux(x64 AppImage)도 낸다(evidence.md 130절). 아래는 코드는 있지만 실제 기계·세션·장치에서 보지 않은 것이다. 펜·GPU 전반은 2절의 gate에 있다.
+3.6.3부터 macOS(3.6.4부터 서명·공증한 dmg)와 Linux(x64 AppImage)도 낸다(evidence.md 130절). 아래는 코드는 있지만 실제 기계·세션·장치에서 보지 않은 것이다. 펜·GPU 전반은 2절의 gate에 있다.
 
 | ID | 항목 | 왜·영향 | 어디 | 출처 |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@
 | B3-09 | M6-12 2.2.13 ③ 채우기 클릭→화면 측정 공백 | 2.2.13 값을 재지 못했다(측정 도구 scratchpad `fill_probe.py`, 사용자 PC 사용으로 값 버림). 2.x를 더 유지하지 않으므로 비교 기준으로만 의미가 있다. 버려도 된다 | GUI 측정 | m6-plan 3절, 6절 M6-12 |
 | B3-10 | Intel iGPU 등 어댑터를 고르는 진단 옵션 | 지금 `UGURUGU_ADAPTER`는 소프트웨어 대체(`fallback`·`warp`·`software`)만 안다. 특정 하드웨어 어댑터(iGPU 등)를 이름·전력 선호로 고르려면 더 필요하다 | `crates/ugu-render/src/gpu.rs` `from_env` | m6-plan 4절 순서, 7절, 2026-11-14 Linux 3단계 |
 | B3-11 | 델타 업데이트 | 2.2.13도 `--delta None`. 전체 패키지 15.5MB | `tools/package_windows.ps1` | m6-plan 1절 |
-| B3-12 | 코드 서명 | 서명 없이 내기로 했다(2026-10-11 사용자). SmartScreen 경고는 도움말에 있다. 서명하게 되면 `vpk pack --signParams`만 더한다. macOS는 ad-hoc 서명이고(2026-11-16 사용자), Developer ID로 바꾸면 `tools/package_unix.py`의 `--signAppIdentity`에 인증서 이름을, `--notaryProfile`을 더한다. 2.x 분석 R-02의 지적도 그대로 해당한다: Windows 업데이트의 신뢰 근거가 GitHub 릴리스 하나뿐이라 계정·토큰이 털리면 업데이트 경로로 코드가 나간다(서명 전까지는 2FA·토큰 범위 관리) | `tools/package_windows.ps1`, `release-3.yml` | m6-plan 2절 7, 5절; ANALYSIS_REPORT R-02 |
+| B3-12 | 코드 서명 | 서명 없이 내기로 했다(2026-10-11 사용자). SmartScreen 경고는 도움말에 있다. 서명하게 되면 `vpk pack --signParams`만 더한다. macOS는 3.6.4부터 Developer ID로 서명·공증한다(decisions.md 10절). 2.x 분석 R-02의 지적도 그대로 해당한다: Windows 업데이트의 신뢰 근거가 GitHub 릴리스 하나뿐이라 계정·토큰이 털리면 업데이트 경로로 코드가 나간다(서명 전까지는 2FA·토큰 범위 관리) | `tools/package_windows.ps1`, `release-3.yml` | m6-plan 2절 7, 5절; ANALYSIS_REPORT R-02 |
 | B3-14 | macOS 2.2.13의 업데이트 확인 | 2.2.13의 Sparkle 피드는 `releases/latest/download/appcast.xml`이다. 3.x가 GitHub Latest라 이 주소는 404다(2026-10-13 `curl`로 확인, `v3.0.1`로 리디렉션된 뒤 404). m6-plan은 "업데이트 없음"으로 끝난다고 적었지만 2.2.13에서 확인하지 않았다(**가설**). Sparkle이 404를 오류로 보여 줄 수도 있다. 자동 확인이면 조용히 실패하고 수동 확인이면 오류 창이 뜰 것으로 보인다(가설). 피하려면 3.x 릴리스마다 2.2.13의 `appcast.xml`을 자산으로 함께 올리는 방법이 있다(정하지 않음) | GitHub Releases, `release-3.yml` | m6-plan 2절 14 |
 | B3-15 | ARM64 Windows | 범위 밖으로 뺐다. 빌드 대상·libwebp·ring·Velopack 런타임을 함께 봐야 한다 | `.cargo/config.toml`, 패키지 | m6-plan 1절, 8절 |
 | B3-78 | 문서 탭을 창 밖으로 떼어 새 창 만들기 | 3.0 탭은 순서 바꾸기만 한다(사용자 결정 2026-10-12). 떼려면 문서를 다른 프로세스로 넘겨야 한다 | `apps/ugurugu/src/ui/tabs.rs`, `canvas.rs` `move_tab`, `render.rs` | [plan-document-tabs.md](https://github.com/nyabi-gh/Ugurugu/blob/70c27f4/docs/rust/plan-document-tabs.md) 3절 3 |

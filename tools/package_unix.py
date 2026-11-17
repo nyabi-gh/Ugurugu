@@ -8,9 +8,13 @@ Velopack, as tools/package_windows.ps1 does for Windows.
     python3 tools/package_unix.py linux target/release/ugurugu artifacts
 
 The package ID is Ugurugu3 on every OS; the channel is the runtime, so each
-OS and architecture has its own list in the one update feed. macOS is
-signed ad hoc (docs/rust/decisions.md section 10): Velopack adds its updater
-to the bundle and signs it all again, so the signature covers what ships.
+OS and architecture has its own list in the one update feed. Velopack adds
+its updater to the macOS bundle and signs it all again, so the signature
+covers what ships; the bundle then goes into a disk image. Without
+`--sign-identity` both are signed ad hoc; with a Developer ID and
+`--notary-profile` (a `xcrun notarytool store-credentials` profile) Velopack
+notarizes the bundle and this script the disk image
+(docs/rust/decisions.md section 10).
 `--version` and `--release-notes` make a later version of the same build,
 for trying an update from a local feed (`UGURUGU_UPDATE_FEED`).
 """
@@ -88,6 +92,35 @@ def stage_macos(executable: pathlib.Path, staging: pathlib.Path, version: str, t
     return app
 
 
+def make_disk_image(portable: pathlib.Path, image: pathlib.Path, args: argparse.Namespace) -> None:
+    with tempfile.TemporaryDirectory(prefix="ugurugu-dmg-") as folder:
+        contents = pathlib.Path(folder) / "contents"
+        # The bundle Velopack signed and stapled, as its portable zip holds it.
+        run("ditto", "-x", "-k", portable, contents)
+        (contents / "Applications").symlink_to("/Applications")
+        image.unlink(missing_ok=True)
+        run(
+            "hdiutil", "create",
+            "-volname", TITLE,
+            "-srcfolder", contents,
+            "-fs", "HFS+",
+            "-format", "ULFO",
+            image,
+        )
+    if args.sign_identity == "-":
+        return
+    keychain = ["--keychain", args.keychain] if args.keychain else []
+    run("codesign", "-s", args.sign_identity, "--timestamp", *keychain, image)
+    if args.notary_profile:
+        run(
+            "xcrun", "notarytool", "submit", image,
+            "--keychain-profile", args.notary_profile,
+            *keychain,
+            "--wait",
+        )
+        run("xcrun", "stapler", "staple", image)
+
+
 def stage_linux(executable: pathlib.Path, staging: pathlib.Path, target: str) -> pathlib.Path:
     folder = staging / "app"
     folder.mkdir()
@@ -107,7 +140,12 @@ def main() -> None:
     parser.add_argument("--vpk", default="vpk")
     parser.add_argument("--version")
     parser.add_argument("--release-notes", type=pathlib.Path)
+    parser.add_argument("--sign-identity", default="-", help="macOS signing identity; ad hoc by default")
+    parser.add_argument("--notary-profile", help="notarytool keychain profile; needs --sign-identity")
+    parser.add_argument("--keychain", help="keychain holding the identity and the profile")
     args = parser.parse_args()
+    if args.notary_profile and args.sign_identity == "-":
+        raise SystemExit("--notary-profile needs a Developer ID in --sign-identity")
 
     runtimes = TARGETS[args.system]
     runtime = args.runtime or next(iter(runtimes))
@@ -142,14 +180,17 @@ def main() -> None:
             app = stage_macos(args.executable, staging, version, runtimes[runtime])
             pack += [
                 "--packDir", app,
-                # Only the bundle is released: a downloaded `.pkg` that is
-                # not signed asks for the same Open Anyway and then for an
-                # administrator, and installs the app as root, where the
-                # updater cannot replace it (hypothesis).
+                # Only the bundle is released, in a disk image: a `.pkg`
+                # asks for an administrator and installs the app as root,
+                # where the updater cannot replace it (hypothesis).
                 "--noInst",
-                "--signAppIdentity", "-",
+                "--signAppIdentity", args.sign_identity,
                 "--signEntitlements", ROOT / "resources" / "macos" / "Ugurugu.entitlements",
             ]
+            if args.notary_profile:
+                pack += ["--notaryProfile", args.notary_profile]
+            if args.keychain:
+                pack += ["--keychain", args.keychain]
         else:
             app = stage_linux(args.executable, staging, runtimes[runtime])
             pack += [
@@ -161,13 +202,15 @@ def main() -> None:
 
     shown = SHOWN[runtime]
     if args.system == "macos":
-        installer = args.output / f"{PACK_ID}-{runtime}-Portable.zip"
-        renamed = args.output / f"Ugurugu-{version}-{shown}.zip"
+        # Only the disk image is released; updates come from the nupkg.
+        portable = args.output / f"{PACK_ID}-{runtime}-Portable.zip"
+        released = args.output / f"Ugurugu-{version}-{shown}.dmg"
+        make_disk_image(portable, released, args)
+        portable.unlink()
     else:
-        installer = args.output / f"{PACK_ID}-{runtime}.AppImage"
-        renamed = args.output / f"Ugurugu-{version}-{shown}.AppImage"
-    os.replace(installer, renamed)
-    print(renamed)
+        released = args.output / f"Ugurugu-{version}-{shown}.AppImage"
+        os.replace(args.output / f"{PACK_ID}-{runtime}.AppImage", released)
+    print(released)
 
 
 if __name__ == "__main__":

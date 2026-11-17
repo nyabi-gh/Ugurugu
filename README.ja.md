@@ -30,12 +30,12 @@
 | プラットフォーム | 動作環境 | ファイル |
 | --- | --- | --- |
 | Windows | Windows 10 以降、64 ビット | `…-Windows-x64-Setup.exe` |
-| macOS | macOS 14 以降、Apple Silicon | `…-macOS-arm64.zip` |
+| macOS | macOS 14 以降、Apple Silicon | `…-macOS-arm64.dmg` |
 | Linux | 64 ビット (x86_64)、glibc 2.35 以降 (Ubuntu 22.04 以降など)、X11 または Wayland、Vulkan ドライバー | `…-Linux-x64.AppImage` |
 | macOS (2.2.13) | macOS 14 以降、Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
 - **Windows**: インストール時に「Windows によって PC が保護されました」と表示されたら、**詳細情報 → 実行** を選んでください。
-- **macOS**: zip を展開し、`Ugurugu 3.app` をアプリケーションフォルダーに移します。Apple の開発者署名がないため、初めて開くと開けないと表示されます。**システム設定 → プライバシーとセキュリティ** の下のほうにある **このまま開く** をクリックしてください。ショートカットの `Ctrl` は macOS では `⌘` です。
+- **macOS**: dmg を開き、`Ugurugu 3.app` をアプリケーションフォルダーにドラッグします。ショートカットの `Ctrl` は macOS では `⌘` です。
 - **Linux**: ファイルに実行権限を付けて (`chmod +x Ugurugu-*.AppImage`) 実行します。
 
 どの版も、新しいバージョンが出るとアプリが自分で知らせます。

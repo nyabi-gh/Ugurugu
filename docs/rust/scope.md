@@ -79,7 +79,7 @@ macOS는 Apple M4 Mac에서 개발·측정하고(evidence.md 97절부터), Linux
 | 항목 | 범위 |
 |---|---|
 | Windows | x64. Windows 11에서 시험한다. Windows 10은 막지 않고 README의 "Windows 10 이상"을 둔다(따로 시험하지 않음, 2026-10-11 사용자 결정) |
-| macOS | 3.6.3부터. Apple Silicon만, macOS 14부터, ad-hoc 서명 zip(decisions.md 10절). Intel Mac은 제외 |
+| macOS | 3.6.3부터. Apple Silicon만, macOS 14부터, 3.6.4부터 Developer ID로 서명·공증한 dmg(3.6.3은 ad-hoc 서명 zip, decisions.md 10절). Intel Mac은 제외 |
 | Linux | 3.6.3부터. x64 AppImage 하나(X11·Wayland), Ubuntu 22.04에서 빌드해 glibc 2.35부터(decisions.md 10절) |
 | ARM64 | Windows·Linux의 ARM64는 제외 |
 | GPU | Windows는 하드웨어 DX12, 표시할 수 없으면 WARP(느린 소프트웨어 표시)로 연다. macOS는 Metal(소프트웨어 대체 없음), Linux는 Vulkan이고 안 되면 소프트웨어 Vulkan으로 연다(decisions.md 2절). 시험한 GPU 밖은 열린 gate(backlog B3-07) |

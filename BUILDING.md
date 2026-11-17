@@ -139,15 +139,18 @@ open --env UGURUGU_SETTINGS_PATH=/tmp/ugu/settings.json \
   "target/release/Ugurugu 3.app"
 ```
 
-The package is a Velopack zip of the bundle, signed ad hoc, made and tried
-with the tools of the Windows package section (`vpk` needs .NET 10):
+The package is a disk image holding the bundle Velopack packed, signed ad
+hoc, made and tried with the tools of the Windows package section (`vpk`
+needs .NET 10):
 
 ```sh
 python3 tools/package_unix.py macos target/release/ugurugu artifacts
-python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.zip /tmp/ugu-smoke
+python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.dmg /tmp/ugu-smoke
 ```
 
-CI builds and tries it, and the release workflow publishes it.
+CI builds and tries it. The release workflow signs it with the Developer ID
+from the repository secrets, has Apple notarize the bundle and the disk
+image, checks them with `--notarized` and publishes the disk image.
 `--version` and `--release-notes` make a later version of the same build
 for a local update feed (`UGURUGU_UPDATE_FEED`). Velopack keeps downloaded
 packages in `~/Library/Caches/velopack/Ugurugu3` and applies one there when

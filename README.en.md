@@ -30,12 +30,12 @@ Get the file for your computer from the [latest release](https://github.com/nyab
 | Platform | Requirements | File |
 | --- | --- | --- |
 | Windows | Windows 10 or later, 64-bit | `…-Windows-x64-Setup.exe` |
-| macOS | macOS 14 or later, Apple Silicon | `…-macOS-arm64.zip` |
+| macOS | macOS 14 or later, Apple Silicon | `…-macOS-arm64.dmg` |
 | Linux | 64-bit (x86_64), glibc 2.35 or later (Ubuntu 22.04 or later, for example), X11 or Wayland, a Vulkan driver | `…-Linux-x64.AppImage` |
 | macOS (2.2.13) | macOS 14 or later, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
 - **Windows**: if "Windows protected your PC" appears during setup, choose **More info → Run anyway**.
-- **macOS**: unzip it and move `Ugurugu 3.app` to Applications. It has no Apple developer signature, so the first time you open it macOS says it cannot be opened. Click **Open Anyway** at the bottom of **System Settings → Privacy & Security**. Where a shortcut says `Ctrl`, use `⌘` on macOS.
+- **macOS**: open the dmg and drag `Ugurugu 3.app` to Applications. Where a shortcut says `Ctrl`, use `⌘` on macOS.
 - **Linux**: make the file executable (`chmod +x Ugurugu-*.AppImage`) and run it.
 
 All three tell you by themselves when a new version is out.

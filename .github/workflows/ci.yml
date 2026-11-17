@@ -355,7 +355,7 @@ jobs:
         run: python3 tools/package_unix.py macos target/release/ugurugu "$RUNNER_TEMP/package"
 
       - name: Unpack and run
-        run: python3 tools/package_smoke_unix.py macos "$RUNNER_TEMP"/package/*-macOS-arm64.zip "$RUNNER_TEMP/smoke"
+        run: python3 tools/package_smoke_unix.py macos "$RUNNER_TEMP"/package/*-macOS-arm64.dmg "$RUNNER_TEMP/smoke"
 
   package-linux:
     name: Linux package

@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nyabi (nyabi-gh)
 
-"""Unpacks the macOS or Linux 3.x package, checks its files, runs the app
-until it has chosen a GPU and ends it, as tools/package_smoke.ps1 does for
-the Windows setup. Neither updates: that was tried by hand
+"""Unpacks the macOS or Linux 3.x package, checks its files and signature,
+runs the app until it has chosen a GPU and ends it, as
+tools/package_smoke.ps1 does for the Windows setup. Neither updates: that was tried by hand
 (docs/rust/evidence.md section 129).
 
-    python3 tools/package_smoke_unix.py macos artifacts/Ugurugu-3.7.0-macOS-arm64.zip WORK
+    python3 tools/package_smoke_unix.py macos artifacts/Ugurugu-3.7.0-macOS-arm64.dmg WORK
     python3 tools/package_smoke_unix.py linux artifacts/Ugurugu-3.7.0-Linux-x64.AppImage WORK
+
+`--notarized` also asks Gatekeeper to accept the disk image and the app
+and checks that both carry a stapled ticket.
 
 The run uses its own settings, recovery and log folders under WORK and does
 not check for updates. It ends with SIGTERM: Linux takes that as the end of
@@ -49,12 +52,34 @@ def expect(found: list[str], expected: list[str], what: str) -> None:
         raise SystemExit(f"{what} differ from the expected list: {', '.join(found)}")
 
 
-def unpack_macos(package: pathlib.Path, work: pathlib.Path) -> list[str]:
-    install = work / "install"
-    subprocess.run(["ditto", "-x", "-k", str(package), str(install)], check=True)
+def check_notarized(path: pathlib.Path, assessment: list[str]) -> None:
+    subprocess.run(["spctl", "--assess", "--verbose=2", *assessment, str(path)], check=True)
+    subprocess.run(["xcrun", "stapler", "validate", str(path)], check=True)
+
+
+def unpack_macos(package: pathlib.Path, work: pathlib.Path, notarized: bool) -> list[str]:
+    if notarized:
+        check_notarized(package, ["--type", "open", "--context", "context:primary-signature"])
+    volume = work / "volume"
+    subprocess.run(
+        ["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", str(volume), str(package)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    try:
+        expect(sorted(path.name for path in volume.iterdir() if not path.name.startswith(".")), ["Applications", APP], "Disk image items")
+        if os.readlink(volume / "Applications") != "/Applications":
+            raise SystemExit("The disk image's Applications link points elsewhere")
+        install = work / "install"
+        # As a person dragging it to Applications would copy it.
+        subprocess.run(["ditto", str(volume / APP), str(install / APP)], check=True)
+    finally:
+        subprocess.run(["hdiutil", "detach", str(volume)], check=True, stdout=subprocess.DEVNULL)
     app = install / APP
     expect(files_under(app), MACOS_FILES, "Bundle files")
     subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)], check=True)
+    if notarized:
+        check_notarized(app, ["--type", "execute"])
     return [str(app / "Contents" / "MacOS" / "ugurugu")]
 
 
@@ -87,11 +112,17 @@ def main() -> None:
     parser.add_argument("package", type=pathlib.Path)
     parser.add_argument("work", type=pathlib.Path)
     parser.add_argument("--start-seconds", type=int, default=90)
+    parser.add_argument("--notarized", action="store_true", help="macOS: expect a notarized disk image")
     args = parser.parse_args()
+    if args.notarized and args.system != "macos":
+        raise SystemExit("--notarized is for macOS")
 
     work = args.work.resolve()
     work.mkdir(parents=True)
-    command = unpack_macos(args.package, work) if args.system == "macos" else unpack_linux(args.package, work)
+    if args.system == "macos":
+        command = unpack_macos(args.package, work, args.notarized)
+    else:
+        command = unpack_linux(args.package, work)
 
     logs = work / "logs"
     settings = work / "settings.json"

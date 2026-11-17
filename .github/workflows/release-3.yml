@@ -153,8 +153,8 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
-  # Signed ad hoc, without an Apple Developer ID (docs/rust/decisions.md
-  # section 10).
+  # Signed with the Developer ID and notarized (docs/rust/decisions.md
+  # section 10); a release without the signing secrets stops here.
   macos:
     name: Build macOS release
     needs: verify
@@ -180,11 +180,53 @@ jobs:
       - name: Build
         run: cargo build --package ugurugu --release --locked
 
-      - name: Package with Velopack
-        run: python3 tools/package_unix.py macos target/release/ugurugu artifacts
+      # MACOS_CERTIFICATE is the Developer ID Application certificate and key
+      # as a base64 .p12; MACOS_NOTARY_KEY is the text of an App Store
+      # Connect API key (.p8).
+      - name: Import the Developer ID and the notary key
+        id: signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing secret $name"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          # Lets codesign use the key without a prompt no one can answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          printf '%s\n' "$MACOS_NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool store-credentials ugurugu-notary --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" --keychain "$keychain"
+          rm "$RUNNER_TEMP/notary.p8"
+          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
+
+      - name: Package with Velopack, sign and notarize
+        run: |
+          python3 tools/package_unix.py macos target/release/ugurugu artifacts \
+            --sign-identity "Developer ID Application" --notary-profile ugurugu-notary \
+            --keychain "${{ steps.signing.outputs.keychain }}"
+
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.keychain != ''
+        run: security delete-keychain "${{ steps.signing.outputs.keychain }}"
 
       - name: Unpack and run
-        run: python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.zip "$RUNNER_TEMP/smoke"
+        run: python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.dmg "$RUNNER_TEMP/smoke" --notarized
 
       - name: Create macOS release metadata
         run: bash .github/scripts/release-metadata.sh macOS-arm64 arm64 artifacts
@@ -328,7 +370,7 @@ jobs:
           lists=()
           for file in artifacts/*; do
             case "$(basename "$file")" in
-              *-full.nupkg | *Setup.exe | *-macOS-arm64.zip | *.AppImage | releases.*.json) ;;
+              *-full.nupkg | *Setup.exe | *-macOS-arm64.dmg | *.AppImage | releases.*.json) ;;
               *) lists+=("$file") ;;
             esac
           done
@@ -344,7 +386,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/*-Setup.exe
-            artifacts/*-macOS-arm64.zip
+            artifacts/*-macOS-arm64.dmg
             artifacts/*-Linux-x64.AppImage
 
       # A release made with this job's token starts no workflow, so its
