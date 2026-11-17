@@ -48,8 +48,9 @@ version has release notes in `release-notes/<version>.en.md`. The others run
 only when something other than documents changed (the paths are listed in
 the "Detect changes" job), side by side: "Format and dependencies" on Ubuntu,
 "Rust Windows tests", "Rust Windows release tests" and "Windows package"
-on Windows, and "Rust macOS tests" and "Rust Linux tests", which run the
-same clippy and debug tests there. The GPU tests run on WARP on Windows,
+on Windows, "Rust macOS tests" and "Rust Linux tests", which run the
+same clippy and debug tests there, and "macOS package" and "Linux
+package", which build and try those packages (see their sections below). The GPU tests run on WARP on Windows,
 the runner's Metal on macOS and Mesa's lavapipe on Linux; CI sets
 `UGU_REQUIRE_ADAPTER`, so a test without an adapter fails instead of
 skipping. Together they run:
@@ -113,7 +114,8 @@ when the script ends, so the next run needs no `wsb stop`. The app looks for
 updates in the folder `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
-commit and no advisory is open; the release workflow runs no tests of its own.
+commit and no advisory is open; the release workflow runs no `cargo test`
+of its own, only the package trials on each OS.
 
 ## Ugurugu 3 (macOS)
 
@@ -139,9 +141,9 @@ open --env UGURUGU_SETTINGS_PATH=/tmp/ugu/settings.json \
   "target/release/Ugurugu 3.app"
 ```
 
-The package is a disk image holding the bundle Velopack packed, signed ad
-hoc, made and tried with the tools of the Windows package section (`vpk`
-needs .NET 10):
+The package is a disk image holding the bundle Velopack packed. Here the
+bundle is signed ad hoc and the disk image is not signed. Both are made and
+tried with the tools of the Windows package section (`vpk` needs .NET 10):
 
 ```sh
 python3 tools/package_unix.py macos target/release/ugurugu artifacts

@@ -57,7 +57,7 @@ Press `F1` any time for help.
 - **Tabs** — work on several drawings in one window.
 - **Make it yours** — arrange the panels, pick a light or dark theme and change any shortcut. If the app closes unexpectedly, your work comes back.
 
-Settings are under **Edit → Settings** (`Ctrl+,`).
+Settings are under **Edit → Settings** (`Ctrl+,`); on macOS they are in the app menu (`⌘,`).
 
 ## Handy shortcuts
 
