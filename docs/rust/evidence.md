@@ -2570,3 +2570,15 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 **결과:** Velopack이 번들을 서명·공증하고 티켓을 붙였고(vpk 1.2.161을 디컴파일해 `OsxPackCommandRunner.CodeSign`이 `--notaryProfile`이 있으면 번들을 zip으로 보내 `notarytool submit --wait`, `stapler staple`, `spctl` 하는 것을 확인), 이어 dmg를 서명해 보낸 공증이 몇 분 만에 Accepted로 끝나 티켓이 붙었다. dmg는 17,745,996바이트(같은 빌드의 ad-hoc dmg 17,705,732바이트). `spctl`은 dmg(`--type open --context context:primary-signature`)와 꺼낸 앱(`--type execute`)을 모두 `accepted`, `source=Notarized Developer ID`로 받아들였고, `stapler validate`가 둘 다 통과했으며 앱이 GPU를 고를 때까지 떴다. 티켓을 붙인 번들에는 `Contents/CodeResources`가 더 생겨, 시험의 파일 목록이 공증된 번들에서 이를 기대하게 했다(전에는 이 단계에서 실패했다).
 
 **보지 않은 것:** `release-3.yml`의 임시 keychain 경로(첫 태그에서 돈다), 브라우저로 내려받아 격리 속성이 붙은 dmg를 Finder에서 열기, ad-hoc 3.6.3에서 서명한 판으로의 업데이트.
+
+## 132. 3.6.4 출시와 release-3.yml의 서명·공증 (2026-11-17)
+
+**담은 것:** macOS판을 Developer ID로 서명하고 공증한 dmg로 낸다(#200). 릴리스 노트는 Windows와 Linux에 3.6.3과 달라진 것이 없다고 적는다. 준비 커밋은 `83f1db6`(PR #201).
+
+**CI:** PR #200 실행 44025008514와 PR #201 실행 44027705181(4분 36초)이 통과한 뒤 #200, #201 순서로 main을 fast-forward했다. main(`83f1db6`) 실행 44038418842는 5분 32초에 통과했다. Windows Sandbox(GUI·pointer·수용)는 이 출시에서 돌리지 않았다.
+
+**출시:** 태그 `v3.6.4`(annotated, `83f1db6`) → `release-3.yml` 실행 44039242395 성공(07:30:34 → 07:40:37 UTC, 10분 3초). `v3.6.4`에는 `Ugurugu-3.6.4-Windows-x64-Setup.exe`(23,983,549바이트), `Ugurugu-3.6.4-macOS-arm64.dmg`(17,748,015바이트), `Ugurugu-3.6.4-Linux-x64.AppImage`(62,581,240바이트)가 있고 본문 끝에 "What's Changed"와 비교 링크가 붙었다. `updates`에 `Ugurugu3-3.6.4-win-x64-full.nupkg`(16,418,237바이트), `-osx-arm64-`(17,251,813바이트), `-linux-x64-`(61,812,954바이트)가 더해졌고, 내려받은 `releases.win-x64.json`·`releases.osx-arm64.json`·`releases.linux-x64.json`이 모두 3.6.4를 가리킨다. 다운로드 배지 실행(44040531061)도 성공했다.
+
+**서명·공증(실행 로그):** "Import the Developer ID and the notary key" 단계가 임시 keychain에 인증서를 넣고(`1 identity imported`) 공증 자격 증명을 확인했다(`Credentials validated`). "Package with Velopack, sign and notarize" 단계에서 번들 공증이 24초 만에 `Accepted`(07:38:29 → 07:38:53, id `e66cfb95-b1bd-423b-b731-77d4be822c16`)로 끝나 티켓이 붙었고, dmg 공증이 25초 만에 `Accepted`(07:39:15 → 07:39:40, id `175c27db-5004-4df3-8a50-1f20c7b4578c`)로 끝나 티켓이 붙었다. "Unpack and run" 단계(`package_smoke_unix.py … --notarized`)에서 `spctl`이 dmg와 꺼낸 앱을 `accepted`, `source=Notarized Developer ID`로 받아들였고 `stapler validate`가 둘 다 통과했으며, 앱이 판 3.6.4·커밋 `83f1db6`으로 GPU를 고를 때까지 떴다.
+
+**보지 않은 것:** 브라우저로 내려받아 격리 속성이 붙은 dmg를 Finder에서 열기, ad-hoc 3.6.3에서 3.6.4로의 업데이트, AppImage의 업데이트, Windows 3.6.3에서 3.6.4로의 실제 업데이트(B3-13).
