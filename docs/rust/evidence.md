@@ -2643,3 +2643,17 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 | 고지 | Windows 263 crate·77 license, 바꾸기 전 출력과 같은 바이트. macOS 270·74, Linux x64 352·106 |
 
 **결론:** ad-hoc 서명 번들도 Velopack 업데이트를 받는다. 남은 것은 GitHub에서 내려받아 quarantine이 붙은 번들(처음 열기의 "그래도 열기"와 그 뒤 업데이트), Linux AppImage의 업데이트, x64 AppImage를 실제 데스크톱에서 띄우는 것이다(B3-13). 업데이트는 smoke에 넣지 않았다: 적용은 사용자가 누르는 버튼에서 시작한다.
+
+## 130. 3.6.3 출시와 macOS·Linux판 첫 발행 (2026-11-16·17)
+
+**담은 것:** Windows 사용자에게 보이는 것은 #187의 두 가지(테마 "Same as system"과 도움말의 "file manager", 파일 대화상자를 열지 못했을 때의 안내)다. 나머지 #186~#193은 macOS·Linux 코드와 문서이고, Windows에 닿는 공용 변경은 표면 형식 선택(`present::choose_surface_format`)뿐인데 wgpu-hal 30.0.1 DX12의 형식 목록(`Bgra8UnormSrgb`, `Bgra8Unorm`, …)에서는 전과 같이 `Bgra8Unorm`을 고른다(코드로 확인).
+
+**방법:** 판 번호, 릴리스 노트 첫 문단, `docs/README.md`의 판 목록만 바꾼 준비 커밋 `095f946`(PR #194)에 BUILDING.md의 검사(서식, `cargo deny`, `native_deps.py`, `check_docs.py`, `.ftl`, clippy, debug·release 시험 각 828개)를 macOS에서 돌려 실패가 없었다. Windows Sandbox(GUI·pointer·수용)는 돌리지 않았다: 이 출시는 Mac에서 준비했다.
+
+**CI:** PR #194 실행 43833804931 약 5분 16초, main(`095f946`) 실행 43834584367 4분 52초, 둘 다 통과.
+
+**출시:** 태그 `v3.6.3`(annotated, `095f946`) → `release-3.yml` 실행 43834654197 성공(14분 21초, macOS·Linux 빌드 job 포함). 그때의 workflow는 Windows만 발행해 `v3.6.3`에는 `Ugurugu-3.6.3-Windows-x64-Setup.exe`(23,983,670바이트)만, 본문 끝에 "What's Changed"(#184~#194)와 비교 링크가 붙었고 Latest다. `updates`에 `Ugurugu3-3.6.3-win-x64-full.nupkg`(16,418,358바이트)가 더해지고 `releases.win-x64.json`이 3.6.3을 가리킨다. 다운로드 배지 실행(43841544352)도 성공했다.
+
+**macOS·Linux 더하기(2026-11-17):** 사용자가 그 릴리스에 두 판을 더하기로 했다. 같은 실행의 아티팩트 `macos-release`·`linux-release`를 받아, 빌드 메타데이터가 `095f946`·velopack 1.2.161이고 목록의 SHA256이 패키지와 같음을 보고, macOS zip을 이 Mac에서 풀어 `codesign --verify --deep --strict` 통과·판 3.6.3·arm64를 확인했다. AppImage 런타임은 libfuse를 정적으로 담고 있다(문자열로 확인). 그 뒤 손으로 올렸다: `updates`에 패키지(`Ugurugu3-3.6.3-osx-arm64-full.nupkg` 17,254,873바이트, `Ugurugu3-3.6.3-linux-x64-full.nupkg` 61,813,947바이트)를 먼저, 그다음 `RELEASES-*`·`assets.*.json`·빌드 메타데이터, 마지막에 `releases.osx-arm64.json`·`releases.linux-x64.json`. GitHub가 적은 digest가 받은 파일과 같았다. `v3.6.3`에는 `Ugurugu-3.6.3-macOS-arm64.zip`(16,787,611바이트)과 `Ugurugu-3.6.3-Linux-x64.AppImage`(62,581,240바이트)를 더하고, 본문을 macOS·Linux 절을 넣은 `release-notes/3.6.3.en.md`로 바꿨다. 같은 날 `release-3.yml`이 세 OS를 발행하게 고쳤다.
+
+**보지 않은 것:** 받은 zip의 "그래도 열기"와 그 번들의 업데이트, AppImage의 업데이트, x64 AppImage를 실제 데스크톱에서 띄우기(B3-13).
