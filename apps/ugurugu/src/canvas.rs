@@ -1146,14 +1146,15 @@ impl Canvas {
 
     /// Plays from the current frame, or stops on the frame shown.
     pub fn toggle_playback(&mut self) {
-        self.cancel_sizing();
-        // Paused for a stroke, it stays stopped.
+        // Paused for a stroke, it stays stopped. Stopping changes nothing a
+        // drag under way depends on, so the drag goes on.
         if std::mem::take(&mut self.tab.resume_playback) || self.stop_playback() {
             return;
         }
         if !self.animation_allowed {
             return;
         }
+        self.cancel_sizing();
         // Playing moves through frames, which applies a pending transform or
         // placed text.
         if !self.apply_pending() {
@@ -1185,8 +1186,9 @@ impl Canvas {
     /// Shows the next frame if it is due and rendered, and returns when to
     /// look again; `None` when not playing.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
+        // Playing on would end whatever is being dragged.
         if self.tab.resume_playback
-            && !matches!(self.interaction, Interaction::Drawing { .. })
+            && matches!(self.interaction, Interaction::Idle)
             && self.tab.area_clicks.is_empty()
         {
             self.tab.resume_playback = false;
@@ -2794,6 +2796,7 @@ mod tests {
         canvas.apply(CanvasInput::End(press(20.0, 20.0)));
         canvas.tick(Instant::now());
         assert!(!canvas.is_playing());
+        assert_eq!(canvas.session().undo_label(), Some("Draw"));
     }
 
     #[test]
@@ -4726,6 +4729,34 @@ mod tests {
         canvas.escape();
         assert!(canvas.session().posing().is_none());
         assert!(near(canvas.session().key_here(layer).unwrap().pose.offset));
+    }
+
+    #[test]
+    fn a_pose_dragged_while_playing_is_keyed_and_playback_goes_on() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[30.0, 40.0], [60.0, 40.0]]);
+        settle(&mut canvas, &renders);
+        canvas.set_tool(Tool::Move).unwrap();
+        canvas.toggle_playback();
+        assert!(canvas.is_playing());
+        let at = |canvas: &super::Canvas, x: f64, y: f64| {
+            let [x, y] = canvas.to_client([x, y]);
+            press(x, y)
+        };
+        let begin = at(&canvas, 60.0, 45.0);
+        canvas.apply(CanvasInput::Begin(Gesture::Draw, PointerKind::Mouse, begin));
+        canvas.tick(Instant::now());
+        assert!(canvas.posing_on_canvas());
+        assert!(!canvas.is_playing());
+        let moved = at(&canvas, 70.0, 50.0);
+        canvas.apply(CanvasInput::Extend(moved));
+        canvas.apply(CanvasInput::End(moved));
+        assert_eq!(
+            canvas.session().undo_label(),
+            Some("Move layer on this frame")
+        );
+        canvas.tick(Instant::now());
+        assert!(canvas.is_playing());
     }
 
     #[test]
