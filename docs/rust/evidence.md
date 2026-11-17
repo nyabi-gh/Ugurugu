@@ -1582,7 +1582,7 @@ GIF는 모두 두 색(흰 바탕과 획)이었다. 기본 메모리 Sandbox에�
 
 **고친 뒤(PR #117):** 같은 방법으로 카드 설명이 줄바꿈되고(영어는 3줄), 레이어 줄이 "레이어 2·그룹 1·애니메이션 1"과 "100% 일반"이며, 새 아이콘 넷이 16·18pt에서 다른 아이콘과 구분되고, 기본값 복원이 설정 위에 확인 창을 띄우는 것을 봤다. 시험은 `ui::tests::an_options_text_wraps_inside_its_card`, `ui::actions::tests::no_two_actions_show_the_same_glyph`, `ui::keyboard::restoring_the_default_settings_asks_first`, ugu-session의 `whatever_adds_a_layer_names_it_with_the_windows_namer`, `i18n::tests::every_language_numbers_what_is_added`이고, 앞의 넷은 고치기 전 코드(또는 그 줄을 되돌린 코드)에서 실패했다.
 
-**남은 것:** 배치·기능 공백은 backlog.md 15절에 있고, 도크 높이는 91절에서 쟀다. 2026-10-21 Sandbox를 켠 뒤 GUI 실행의 "Screen set"(89절)이 같은 화면을 실제 창으로 찍었다.
+**남은 것:** 배치·기능 공백은 backlog.md에 출처 "2026-10-21 UI 검토"로 있고, 도크 높이는 91절에서 쟀다. 2026-10-21 Sandbox를 켠 뒤 GUI 실행의 "Screen set"(89절)이 같은 화면을 실제 창으로 찍었다.
 
 ## 89. 3.4.2 출시 (2026-10-21)
 
@@ -2486,13 +2486,13 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 
 **고치기 전에 실패하는지:** 세션 끝의 두 시험은 고친 두 곳(`SIG_IGN` 검사, `ACTIVE_LISTENERS`를 올리는 자리)만 되돌린 코드에서 실패했다: 무시해야 할 SIGHUP에 자식이 SIGHUP으로 끝나며 복구 표시를 남겼고(`(Some(ExitStatus(1)), true)`), 시작에 실패한 뒤의 SIGTERM에 자식이 신호로 끝나지 않고 10초 뒤 정상 종료했다. 나머지 시험은 고치기 전 코드에 없는 함수·값을 쓰므로 그 코드에서는 컴파일되지 않는다. errno 저장·복원에는 시험이 없다.
 
-**보지 않은 것:** 실제 Wayland·X11 세션에서의 동작 전부. 근접 때 놓는 마우스 표본이 X11의 펜 누름 경쟁(backlog B3-178 ③)을 점 하나로 끝내는지는 가설이다.
+**보지 않은 것:** 실제 Wayland·X11 세션에서의 동작 전부. 근접 때 놓는 마우스 표본이 X11의 펜 누름 경쟁(backlog B3-178 ①)을 점 하나로 끝내는지는 가설이다.
 
 ## 127. #187 검토에서 코드로 확인된 나머지 결함의 수정과 시험 (2026-11-16)
 
 **환경:** Apple M4 Mac의 Docker Desktop 29.9.2 안 Ubuntu 24.04.5(aarch64), Rust 1.99.0, debug 빌드, CI의 Linux job과 같은 패키지(`libfontconfig-dev`, `mesa-vulkan-drivers`, 글꼴), `UGU_REQUIRE_ADAPTER=1`. 표시 서버, 세션 버스, logind, 펜이 없다: 아래는 모두 단위 시험이고 창을 띄우지 않았다.
 
-**고친 것과 시험** (backlog.md 16절의 항목):
+**고친 것과 시험** (backlog.md 3절의 Linux 항목):
 
 - 펜이 놓여 있는 동안의 마우스(B3-178, `linux/wayland_tablet.rs` `PenQueue`): Wayland의 근접 수가 0보다 크면 기한 없이 마우스를 막던 것을, Wayland와 X11 모두 "닿았거나 버튼을 쥐었거나 마지막 이벤트가 150ms 안"일 때만 막게 했다. 조용해진 X11 펜은 물러나며 `Leave`를 내고, 앱은 그것을 마우스 표본보다 먼저 보내려고 근접을 먼저 묻는다(`app.rs` `forward_pointer_input`). 누른 채 빠진 X11 장치는 `CaptureLost`와 `Leave`를 낸다(`x11_tablet.rs` `refresh_pen_devices`). 시험 `a_wayland_pen_lying_on_the_tablet_gives_the_mouse_back`, `an_x11_pen_gone_quiet_leaves_before_the_mouse_moves`, `an_x11_pen_leaves_when_x_says_so_or_another_device_moves`, `an_x11_pen_unplugged_while_pressed_cancels_its_stroke`.
 - 문서 넘기기(B3-180, `linux/instance.rs`, `main.rs`): 듣는 쪽은 프레임 하나를 2초 안에 받지 못하면 끊고(전에는 `read`마다 2초), 창을 닫을 때 읽던 연결과 답을 기다리던 요청을 놓는다. 문서를 넘기지 못하고 실행 잠금에서 끝나는 실행은 실패 코드로 끝난다(시험 없음, `main`의 분기). 시험은 임시 폴더를 runtime 폴더로 쓴다. 시험 `a_window_closes_without_waiting_for_a_silent_connection`(닫기가 500ms 안), `a_connection_that_trickles_is_cut_off_and_the_next_start_gets_through`(긴 열쇠를 약속하고 100ms마다 한 바이트를 보내는 연결 뒤의 넘기기가 3초 안에 닿는다).
@@ -2508,7 +2508,7 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 
 **고치기 전에 실패하는지:** 돌려 보지 않았다. 새 시험은 고치기 전 코드에 없는 함수(`in_proximity_at`, `lose_x11`, `hand_over_in`, `read_pipe_within`, `wait_for_the_end` 등)를 써서 그 코드에서는 컴파일되지 않는다.
 
-**보지 않은 것:** 실제 Wayland·X11 세션, 포털, logind, 펜에서의 동작 전부. backlog.md 16절의 각 행에 남겼다.
+**보지 않은 것:** 실제 Wayland·X11 세션, 포털, logind, 펜에서의 동작 전부. backlog.md 3절의 각 행에 남겼다.
 
 ## 128. macOS 2단계의 펜과 최근 문서 (2026-11-16)
 

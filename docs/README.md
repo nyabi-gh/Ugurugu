@@ -2,7 +2,7 @@
 
 ## 지금 상태
 
-- Ugurugu 3(Rust, `apps/`, `crates/`)은 3.0.0(2026-10-13)부터 Windows판을 냈고, 3.6.3(2026-11-17)부터 macOS(Apple Silicon)·Linux(x64)판도 함께 낸다. 판마다 바뀐 것은 `release-notes/`와 GitHub 릴리스에 있다. 열린 일은 [backlog.md](rust/backlog.md)에 있고, macOS·Linux의 남은 일은 그 B3-13과 16절에 있다.
+- Ugurugu 3(Rust, `apps/`, `crates/`)은 3.0.0(2026-10-13)부터 Windows판을 냈고, 3.6.3(2026-11-17)부터 macOS(Apple Silicon)·Linux(x64)판도 함께 낸다. 판마다 바뀐 것은 `release-notes/`와 GitHub 릴리스에 있다. 열린 일은 [backlog.md](rust/backlog.md)에 있고, macOS·Linux의 남은 일은 그 3절에 있다.
 - 2.2.13(C++)과 웹판은 더 고치거나 내지 않는다. 그 소스는 2026-10-13에 저장소에서 지웠고 `v2.2.13` 태그에 있다. 문서에 나오는 `src/`, `tools/*.cpp`, `tests/*.cpp` 같은 C++ 경로는 그 태그 기준이다.
 
 ## 3.0 문서 (`rust/`)
@@ -12,7 +12,7 @@
 | [scope.md](rust/scope.md) | 제품 범위: 기능, 플랫폼, 하드웨어, 뺀 것, 측정 PC |
 | [decisions.md](rust/decisions.md) | 설계 결정과 2.2.13과 다르게 정한 점. 출처 칸의 옛 ID(M5-17 등)로 코드 주석에서 찾는다 |
 | [evidence.md](rust/evidence.md) | 지금 코드가 기대는 측정과 시험 결과, 측정 방법 |
-| [backlog.md](rust/backlog.md) | 열린 일: 출시 전 할 일, 열린 gate, 미룬 결정, 알려진 한계, 개선 후보 |
+| [backlog.md](rust/backlog.md) | 열린 일을 종류별로: 사용자 할 일, 열린 gate, macOS·Linux 실제 장치 확인, 미룬 결정, 알려진 한계, 개선 후보, 측정·확인 공백 |
 | [adr-operations-and-format.md](rust/adr-operations-and-format.md) | 편집 연산의 의미와 `.ugurugu` 형식 |
 | [ugu-import.md](rust/ugu-import.md) | 2.x `.ugu` schema 13 가져오기 대응표 |
 
