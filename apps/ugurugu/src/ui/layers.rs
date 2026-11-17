@@ -42,17 +42,40 @@ const BLENDS: [Blend; 4] = [
     Blend::Overlay,
 ];
 
+/// A layer's value while a control changes it, before it is committed.
+struct Draft<T> {
+    layer: LayerId,
+    /// The document's value this started from.
+    from: T,
+    value: T,
+}
+
+/// The value a control shows for `layer`: the one being changed, or the
+/// document's when the layer or its value is no longer what the change
+/// started from, as after an undo.
+fn draft<T: Copy + PartialEq>(slot: &mut Option<Draft<T>>, layer: LayerId, from: T) -> &mut T {
+    let draft = match slot.take() {
+        Some(draft) if draft.layer == layer && draft.from == from => draft,
+        _ => Draft {
+            layer,
+            from,
+            value: from,
+        },
+    };
+    &mut slot.insert(draft).value
+}
+
 #[derive(Default)]
 pub struct LayerDock {
     folded: HashSet<LayerId>,
     /// The layer being renamed and the text so far.
     renaming: Option<(LayerId, String)>,
     /// Opacity being dragged, committed when the drag ends.
-    opacity: Option<(LayerId, f32)>,
+    opacity: Option<Draft<f32>>,
     /// Outline width being dragged, committed when the drag ends.
-    outline_width: Option<(LayerId, f32)>,
+    outline_width: Option<Draft<f32>>,
     /// Outline colour being picked, committed when the pointer lets go.
-    outline_color: Option<(LayerId, [u8; 4])>,
+    outline_color: Option<Draft<[u8; 4]>>,
     outline_picking: bool,
     /// The layer being dragged in the list.
     dragging: Option<LayerId>,
@@ -382,6 +405,9 @@ impl LayerDock {
         self.folded = self.folded_elsewhere.remove(&to).unwrap_or_default();
         self.renaming = None;
         self.opacity = None;
+        self.outline_width = None;
+        self.outline_color = None;
+        self.outline_picking = false;
         self.dragging = None;
         self.thumbnails.clear();
     }
@@ -1046,17 +1072,15 @@ impl LayerDock {
             }
         }
 
-        if self.opacity.is_none_or(|(id, _)| id != current) {
-            self.opacity = Some((current, opacity));
-        }
-        let mut percent = self.opacity.expect("set").1 * 100.0;
+        let shown = draft(&mut self.opacity, current, opacity);
+        let mut percent = *shown * 100.0;
         let slider = widgets::form_row(ui, tr("opacity"), |ui| {
             let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, tr("opacity"));
             let width = ui.available_width().max(40.0);
             widgets::slider(ui, &mut percent, 0.0..=100.0, tr("opacity"), width).union(field)
         });
         let value = percent.round() / 100.0;
-        self.opacity = Some((current, value));
+        *shown = value;
         // One undo step when the drag ends, as 2.2.13 commits on release.
         if (slider.drag_stopped() || (slider.changed() && !slider.dragged())) && value != opacity {
             report(
@@ -1114,10 +1138,8 @@ impl LayerDock {
             return;
         };
 
-        if self.outline_width.is_none_or(|(id, _)| id != current) {
-            self.outline_width = Some((current, line.width));
-        }
-        let mut width = self.outline_width.expect("set").1;
+        let shown = draft(&mut self.outline_width, current, line.width);
+        let mut width = *shown;
         let name = tr("layer-outline-width");
         let slider = widgets::form_row(ui, name, |ui| {
             let field = widgets::number(ui, &mut width, OUTLINE_WIDTH, " px", 0, 64.0, name);
@@ -1127,17 +1149,15 @@ impl LayerDock {
         let width = width
             .round()
             .clamp(*OUTLINE_WIDTH.start(), *OUTLINE_WIDTH.end());
-        self.outline_width = Some((current, width));
+        *shown = width;
         if (slider.drag_stopped() || (slider.changed() && !slider.dragged())) && width != line.width
         {
             set(canvas, refusal, Some(Outline { width, ..line }));
             self.outline_width = None;
         }
 
-        if self.outline_color.is_none_or(|(id, _)| id != current) {
-            self.outline_color = Some((current, line.color.0));
-        }
-        let [r, g, b, a] = self.outline_color.expect("set").1;
+        let shown = draft(&mut self.outline_color, current, line.color.0);
+        let [r, g, b, a] = *shown;
         let mut color = Color32::from_rgba_unmultiplied(r, g, b, a);
         widgets::form_row(ui, tr("layer-outline-color"), |ui| {
             let swatch =
@@ -1154,9 +1174,9 @@ impl LayerDock {
                 egui::color_picker::Alpha::OnlyBlend,
             )
         {
-            self.outline_color = Some((current, color.to_srgba_unmultiplied()));
+            *shown = color.to_srgba_unmultiplied();
         }
-        let picked = self.outline_color.expect("set").1;
+        let picked = *shown;
         // One undo step when the pointer lets go of the picker.
         if picked != line.color.0 && !ui.input(|input| input.pointer.any_down()) {
             set(
@@ -1306,5 +1326,58 @@ mod tests {
             let delete = bounds(tr("layer-delete"));
             assert!(delete.x0 >= down.x1, "at {width}: {down:?} and {delete:?}");
         }
+    }
+
+    #[test]
+    fn an_undone_outline_and_opacity_stay_undone() {
+        let ctx = egui::Context::default();
+        let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
+        let current = canvas.session().current_layer();
+        let first = Outline {
+            color: Rgba8([10, 20, 30, 255]),
+            ..NEW_OUTLINE
+        };
+        let second = Outline {
+            width: first.width + 2.0,
+            color: Rgba8([200, 100, 50, 255]),
+        };
+        let update = |canvas: &mut Canvas, outline: Outline, opacity: f32| {
+            canvas
+                .edit(|session| {
+                    session.update_layer(current, "Layer", |layer| {
+                        if let LayerKind::Paint(paint) = &mut layer.kind {
+                            paint.outline = Some(outline);
+                            paint.opacity = opacity;
+                        }
+                    })
+                })
+                .unwrap();
+        };
+        update(&mut canvas, first, 1.0);
+        update(&mut canvas, second, 0.5);
+        let mut dock = LayerDock::default();
+        let mut refusal = None;
+        let mut frame = |canvas: &mut Canvas| {
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                    ..RawInput::default()
+                },
+                |ui| dock.properties(ui, canvas, current, &mut refusal),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut canvas);
+        canvas.edit(|session| session.undo()).unwrap();
+        frame(&mut canvas);
+        frame(&mut canvas);
+
+        let document = canvas.session().document();
+        let Some(LayerKind::Paint(paint)) = document.layer(current).map(|layer| &layer.kind) else {
+            panic!("the layer is a paint layer");
+        };
+        assert_eq!(paint.outline, Some(first));
+        assert_eq!(paint.opacity, 1.0);
+        assert_eq!(canvas.session().redo_label(), Some("Layer"));
     }
 }
