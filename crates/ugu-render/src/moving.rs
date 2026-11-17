@@ -261,8 +261,10 @@ impl Split {
         keep_source: bool,
     ) -> Option<PixelRect> {
         let size = moving.original.size();
-        moving.transform = (transform != ops::Affine::IDENTITY).then(|| affine(transform));
-        let moved = (transform != ops::Affine::IDENTITY)
+        let transformed = transform != ops::Affine::IDENTITY;
+        moving.transform = transformed.then(|| affine(transform));
+        // Where the part lands on the canvas; nowhere when it is moved off it.
+        let moved = transformed
             .then(|| {
                 let kurbo = affine(transform);
                 let rect = clamp(moved_bounds(moving.bounds, kurbo), size)?;
@@ -271,10 +273,10 @@ impl Split {
                     .then_some(rect)
             })
             .flatten();
-        let now = moved.map(|rect| {
-            let cleared = (!keep_source).then(|| clamp(moving.bounds, size)).flatten();
-            union(Some(rect), cleared).expect("moved is a rectangle")
-        });
+        let cleared = (transformed && !keep_source)
+            .then(|| clamp(moving.bounds, size))
+            .flatten();
+        let now = union(moved, cleared);
         let rect = union(moving.shown, now)?;
         moving.shown = now;
         let Held::Tiles(surface) = &mut self.sources[self.edited?] else {
@@ -293,9 +295,9 @@ impl Split {
                 let from = (x - left) as usize;
                 line[from..from + part.len()].copy_from_slice(part);
             }
-            let Some(moved) = moved else {
+            if !transformed {
                 return;
-            };
+            }
             if !keep_source {
                 for &[from, to] in runs.row(y as i32) {
                     let span =
@@ -303,7 +305,9 @@ impl Split {
                     line[span(from)..span(to)].fill([0; 4]);
                 }
             }
-            if (moved[1]..moved[3]).contains(&y) {
+            if let Some(moved) = moved
+                && (moved[1]..moved[3]).contains(&y)
+            {
                 let row = (y - moved[1]) as usize * moved_width;
                 let span = row..row + (moved[2] - moved[0]) as usize;
                 let target = &mut line[(moved[0] - left) as usize..(moved[2] - left) as usize];

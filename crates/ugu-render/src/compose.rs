@@ -2024,9 +2024,12 @@ mod tests {
     fn a_pending_transform_shown_on_any_layer_is_within_a_level_of_a_full_render() {
         use ugu_core::ops::{Affine as Transform, Sampling};
         let centre = [65.0, 45.0];
+        // The first and the fourth leave the canvas altogether.
         let transforms = [
+            (Transform::translation(500.0, 0.0), Sampling::Smooth),
             (Transform::translation(7.5, -3.25), Sampling::Smooth),
             (Transform::translation(-12.0, 5.0), Sampling::Smooth),
+            (Transform::translation(0.0, -500.0), Sampling::Nearest),
             (Transform::rotation_about(0.52, centre), Sampling::Smooth),
             (
                 Transform::scaling_about([0.3, 0.4], centre),
@@ -2095,7 +2098,7 @@ mod tests {
                     let mut shown = canvas(document);
                     composite(&split, &[], whole(document), &mut shown);
                     assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
-                    split.show_move(&mut moving, transforms[2].0, Sampling::Smooth, keep_source);
+                    split.show_move(&mut moving, transforms[4].0, Sampling::Smooth, keep_source);
                     split.end_move(moving, false);
                     composite(&split, &[], whole(document), &mut shown);
                     assert!(shown.data_as_u8_slice() == render(document, 4).data_as_u8_slice());
