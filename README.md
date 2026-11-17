@@ -20,17 +20,25 @@
 움직이는 그림은 GIF나 WebP로 저장해 어디든 올릴 수 있어요.
 
 > [!NOTE]
-> Ugurugu 3.0은 Windows 전용입니다. macOS에서는 2.2.13을 써 주세요.
+> macOS·Linux판은 3.6.3에서 처음 나왔습니다. 실제 펜 태블릿으로는 아직 충분히 시험하지 못했으니, 이상한 점이 있으면 알려 주세요.
 > 2.1.0 이후에 저장한 `.ugu` 파일은 3.0에서 열 수 있습니다. 그보다 오래된 파일은 2.2.13에서 한 번 다시 저장해 주세요.
 
 ## 다운로드
 
-| 플랫폼 | 지원 환경 | 다운로드 |
+[최신 릴리스](https://github.com/nyabi-gh/Ugurugu/releases/latest)에서 내 컴퓨터에 맞는 파일을 받으세요.
+
+| 플랫폼 | 지원 환경 | 파일 |
 | --- | --- | --- |
-| Windows | Windows 10 이상, 64비트 | [최신 릴리스](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
+| Windows | Windows 10 이상, 64비트 | `…-Windows-x64-Setup.exe` |
+| macOS | macOS 14 이상, Apple Silicon | `…-macOS-arm64.zip` |
+| Linux | 64비트(x86_64), glibc 2.35 이상(Ubuntu 22.04 이후 등), X11 또는 Wayland, Vulkan 드라이버 | `…-Linux-x64.AppImage` |
 | macOS (2.2.13) | macOS 14 이상, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-설치할 때 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누르면 됩니다.
+- **Windows**: 설치할 때 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누르면 됩니다.
+- **macOS**: zip을 풀어 `Ugurugu 3.app`을 응용 프로그램 폴더로 옮깁니다. Apple 개발자 서명이 없어 처음 열면 열 수 없다는 창이 뜹니다. **시스템 설정 → 개인정보 보호 및 보안**의 아래쪽에서 **그래도 열기**를 누르면 됩니다. 단축키의 `Ctrl`은 macOS에서 `⌘`입니다.
+- **Linux**: 받은 파일에 실행 권한을 주고(`chmod +x Ugurugu-*.AppImage`) 실행합니다.
+
+세 판 모두 새 판이 나오면 앱이 스스로 알려 줍니다.
 
 ## 처음 시작하기
 

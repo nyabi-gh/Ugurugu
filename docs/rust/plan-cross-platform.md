@@ -228,7 +228,7 @@ ARM에서는 `raster.rs`의 시험 `every_simd_level_draws_the_same_pixels`가 �
 - `release-3.yml`에 macOS·Linux job, 다운로드 배지·릴리스 노트의 파일 이름.
 - 사용자 안내: README(ko·en·ja)의 요구 사항, `BUILDING.md`의 macOS·Linux 빌드 절, 릴리스 노트.
 
-상태(2026-11-16): 9절의 두 결정을 사용자가 정했다: macOS는 ad-hoc 서명으로 시작하고 Linux는 x64 AppImage만이다. `tools/package_unix.py`가 두 패키지를 만들고 `tools/package_smoke_unix.py`가 풀어 띄우며, CI와 `release-3.yml`이 둘 다 돌린다(decisions.md 10절의 2026-11-16 행, evidence.md 129절). 한 피드에 채널을 여럿 두는 방식은 채널마다 `releases.<채널>.json`이 따로여서 그대로 된다. ad-hoc 번들의 업데이트는 이 Mac에서 됐다. 사용자 결정으로 발행은 B3-13과 backlog 16절이 닫힐 때까지 Windows만 한다. README와 릴리스 노트는 그때 쓴다.
+상태(2026-11-16): 9절의 두 결정을 사용자가 정했다: macOS는 ad-hoc 서명으로 시작하고 Linux는 x64 AppImage만이다. `tools/package_unix.py`가 두 패키지를 만들고 `tools/package_smoke_unix.py`가 풀어 띄우며, CI와 `release-3.yml`이 둘 다 돌린다(decisions.md 10절의 2026-11-16 행, evidence.md 129절). 한 피드에 채널을 여럿 두는 방식은 채널마다 `releases.<채널>.json`이 따로여서 그대로 된다. ad-hoc 번들의 업데이트는 이 Mac에서 됐다. 처음에는 발행을 B3-13과 backlog 16절이 닫힐 때까지 미뤘으나, 사용자가 2026-11-17 Windows만으로 나간 3.6.3에 두 패키지를 더하기로 했다(evidence.md 130절). README(ko·en·ja)에 받는 법과 "그래도 열기"를 적었다.
 
 ## 8. 바깥 상태 출처 (2026-10-28 확인)
 

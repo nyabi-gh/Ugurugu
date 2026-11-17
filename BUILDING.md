@@ -115,11 +115,11 @@ Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
 commit and no advisory is open; the release workflow runs no tests of its own.
 
-## Ugurugu 3 (macOS, in development)
+## Ugurugu 3 (macOS)
 
-There is no macOS release of 3.x yet. It builds on Apple Silicon with macOS
-14 or later, [rustup](https://rustup.rs/), Xcode or its command line tools,
-and Python 3. The checks are the ones above, with `python3` for `python`.
+Releases include a macOS version from 3.6.3. It builds on Apple Silicon
+with macOS 14 or later, [rustup](https://rustup.rs/), Xcode or its command
+line tools, and Python 3. The checks are the ones above, with `python3` for `python`.
 
 ```sh
 cargo build --package ugurugu --release --locked
@@ -147,16 +147,16 @@ python3 tools/package_unix.py macos target/release/ugurugu artifacts
 python3 tools/package_smoke_unix.py macos artifacts/*-macOS-arm64.zip /tmp/ugu-smoke
 ```
 
-CI and the release workflow build it, but releases do not publish it yet.
+CI builds and tries it, and the release workflow publishes it.
 `--version` and `--release-notes` make a later version of the same build
 for a local update feed (`UGURUGU_UPDATE_FEED`). Velopack keeps downloaded
 packages in `~/Library/Caches/velopack/Ugurugu3` and applies one there when
 any copy of the app starts; delete it after trying an update.
 
-## Ugurugu 3 (Linux, in development)
+## Ugurugu 3 (Linux)
 
-There is no Linux release of 3.x yet. It builds on x86_64 Linux (releases
-target glibc 2.35 or later) with [rustup](https://rustup.rs/), a C compiler,
+Releases include a Linux version from 3.6.3. It builds on x86_64 Linux
+(releases target glibc 2.35 or later) with [rustup](https://rustup.rs/), a C compiler,
 `pkg-config`, the `fontconfig` development files (`libfontconfig-dev` on
 Debian and Ubuntu, `fontconfig-devel` on Fedora), and Python 3. The checks
 are the ones above, with `python3` for `python`.
@@ -189,7 +189,7 @@ python3 tools/package_unix.py linux target/release/ugurugu artifacts
 xvfb-run -a python3 tools/package_smoke_unix.py linux artifacts/*-Linux-x64.AppImage /tmp/ugu-smoke
 ```
 
-CI and the release workflow build it, but releases do not publish it yet.
+CI builds and tries it, and the release workflow publishes it.
 On an arm64 machine, `--runtime linux-arm64` makes a package to try; only
 x64 is released.
 

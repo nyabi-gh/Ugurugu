@@ -20,17 +20,25 @@
 動く絵は GIF や WebP で保存して、どこにでも投稿できます。
 
 > [!NOTE]
-> Ugurugu 3.0 は Windows 専用です。macOS では 2.2.13 をお使いください。
+> macOS 版と Linux 版は 3.6.3 で初めて公開しました。実際のペンタブレットではまだ十分に試していないので、おかしな点があればお知らせください。
 > 2.1.0 以降に保存した `.ugu` ファイルは 3.0 で開けます。それより古いファイルは 2.2.13 で一度保存し直してください。
 
 ## ダウンロード
 
-| プラットフォーム | 動作環境 | ダウンロード |
+[最新リリース](https://github.com/nyabi-gh/Ugurugu/releases/latest)からお使いのコンピューターに合うファイルをダウンロードしてください。
+
+| プラットフォーム | 動作環境 | ファイル |
 | --- | --- | --- |
-| Windows | Windows 10 以降、64 ビット | [最新リリース](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
+| Windows | Windows 10 以降、64 ビット | `…-Windows-x64-Setup.exe` |
+| macOS | macOS 14 以降、Apple Silicon | `…-macOS-arm64.zip` |
+| Linux | 64 ビット (x86_64)、glibc 2.35 以降 (Ubuntu 22.04 以降など)、X11 または Wayland、Vulkan ドライバー | `…-Linux-x64.AppImage` |
 | macOS (2.2.13) | macOS 14 以降、Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-インストール時に「Windows によって PC が保護されました」と表示されたら、**詳細情報 → 実行** を選んでください。
+- **Windows**: インストール時に「Windows によって PC が保護されました」と表示されたら、**詳細情報 → 実行** を選んでください。
+- **macOS**: zip を展開し、`Ugurugu 3.app` をアプリケーションフォルダーに移します。Apple の開発者署名がないため、初めて開くと開けないと表示されます。**システム設定 → プライバシーとセキュリティ** の下のほうにある **このまま開く** をクリックしてください。ショートカットの `Ctrl` は macOS では `⌘` です。
+- **Linux**: ファイルに実行権限を付けて (`chmod +x Ugurugu-*.AppImage`) 実行します。
+
+どの版も、新しいバージョンが出るとアプリが自分で知らせます。
 
 ## はじめに
 

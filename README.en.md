@@ -20,17 +20,25 @@ Draw a line and it comes alive, wriggling like hand-drawn animation.
 Save your moving drawings as GIF or WebP and share them anywhere.
 
 > [!NOTE]
-> Ugurugu 3.0 is for Windows. On macOS, please keep using 2.2.13.
+> The macOS and Linux versions are new in 3.6.3 and have not been tried much with real pen tablets yet; please tell us if something looks wrong.
 > `.ugu` files saved in 2.1.0 or later open in 3.0. Save older ones again in 2.2.13 first.
 
 ## Download
 
-| Platform | Requirements | Download |
+Get the file for your computer from the [latest release](https://github.com/nyabi-gh/Ugurugu/releases/latest).
+
+| Platform | Requirements | File |
 | --- | --- | --- |
-| Windows | Windows 10 or later, 64-bit | [Latest release](https://github.com/nyabi-gh/Ugurugu/releases/latest) |
+| Windows | Windows 10 or later, 64-bit | `…-Windows-x64-Setup.exe` |
+| macOS | macOS 14 or later, Apple Silicon | `…-macOS-arm64.zip` |
+| Linux | 64-bit (x86_64), glibc 2.35 or later (Ubuntu 22.04 or later, for example), X11 or Wayland, a Vulkan driver | `…-Linux-x64.AppImage` |
 | macOS (2.2.13) | macOS 14 or later, Apple Silicon | [DMG](https://github.com/nyabi-gh/Ugurugu/releases/download/v2.2.13/Ugurugu-macOS-arm64.dmg) |
 
-If "Windows protected your PC" appears during setup, choose **More info → Run anyway**.
+- **Windows**: if "Windows protected your PC" appears during setup, choose **More info → Run anyway**.
+- **macOS**: unzip it and move `Ugurugu 3.app` to Applications. It has no Apple developer signature, so the first time you open it macOS says it cannot be opened. Click **Open Anyway** at the bottom of **System Settings → Privacy & Security**. Where a shortcut says `Ctrl`, use `⌘` on macOS.
+- **Linux**: make the file executable (`chmod +x Ugurugu-*.AppImage`) and run it.
+
+All three tell you by themselves when a new version is out.
 
 ## Getting started
 
