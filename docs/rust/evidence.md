@@ -2620,4 +2620,4 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 | 마스크 비트가 저장소 한도(128MiB)를 다 채운 문서는 저장되지만 `too large: masks.bin`으로 열리지 않았다 | 읽는 쪽의 `masks.bin` 한도가 비트의 한도와 같아 머리 12바이트와 마스크마다 20바이트가 들어갈 자리가 없었다 | `read::limits::MASKS_BYTES`(머리 + 마스크 수 한도 × 20 + 비트 한도) | `masks_that_fill_the_store_read_back`: 4096×4096 마스크 64개(134,217,728바이트)를 쓰고 읽는다 |
 | AppImage로 뜬 창에 둘째 실행이 문서를 넘기지 못한다(**가설**, 실행해 보지 않음) | 실행 열쇠의 실행 파일 경로가 AppImage가 실행마다 새로 만드는 마운트 폴더 아래다 | 실행 파일이 `APPDIR` 아래면 `APPIMAGE`를 쓴다(`app.rs` `mounted_image`) | `starts_from_one_appimage_share_a_key_whatever_folder_each_is_mounted_at`(함수만. 컨테이너에는 FUSE가 없어 실제 AppImage로는 보지 않았다, B3-180) |
 
-**남긴 것:** 재생 중 붙여넣기·변형·글자 놓기는 다음 프레임에 바로 적용된다(`Session::set_frame`이 대기 중인 편집을 적용한다). 재생을 멈출지 적용을 미룰지 정해야 해 고치지 않았다.
+**남긴 것:** 재생 중 붙여넣기·변형·글자 놓기는 다음 프레임에 바로 적용된다(`Session::set_frame`이 대기 중인 편집을 적용한다). 재생을 멈출지 적용을 미룰지 정해야 해 고치지 않았다(B3-187). 검토의 나머지는 backlog.md의 B3-187~B3-209다.
