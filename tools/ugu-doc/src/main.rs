@@ -21,6 +21,9 @@
 //!   layer with the most operations, or every paint layer, a white outline.
 //! - `ugu-doc outline-live <file.ugurugu> <line|air> <samples per frame>`: what
 //!   drawing on the layer with the most operations costs per frame.
+//! - `ugu-doc gaps <brush id>`: draws rings with an opening with that brush
+//!   and tells which close gaps setting keeps a fill in them
+//!   (docs/rust/evidence.md section 137).
 //! - `ugu-doc fade <in.ugurugu> <out.ugurugu> <length>`: gives every stroke
 //!   that can fade that fade length, to measure what the fade costs.
 //! - `ugu-doc reframe <in.ugurugu> <out.ugurugu> <crop|resample|both>`: makes
@@ -84,7 +87,7 @@ use ugu_core::ops::{
 use ugu_core::store::{Asset, Brush, BrushEngine, Mask, Point, Stroke};
 
 const USAGE: &str = "usage: ugu-doc fixture <1-5> <out.ugurugu> | many <operations> <layers> <out.ugurugu> | info <file.ugurugu> \
-     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | outline <in.ugurugu> <out.ugurugu> <one|all> <width> | outline-live <file.ugurugu> <line|air> <samples per frame> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu> | wide <edge> <brush id> <width> <strokes> | live <file.ugurugu or edge> <brush id> <width> <samples per frame>";
+     | bench <file.ugurugu> [rounds] | render <file.ugurugu> [threads [tile]] | pen-only <in.ugurugu> <out.ugurugu> | sparse <in.ugurugu> <out.ugurugu> | fills <in.ugurugu> <out.ugurugu> | moves <in.ugurugu> <out.ugurugu> <count> <dx> <dy> | fade <in.ugurugu> <out.ugurugu> <length> | outline <in.ugurugu> <out.ugurugu> <one|all> <width> | outline-live <file.ugurugu> <line|air> <samples per frame> | reframe <in.ugurugu> <out.ugurugu> <crop|resample|both> | animate <in.ugurugu> <out.ugurugu> <keyed> <cels> | play <file.ugurugu> <threads> | onion <file.ugurugu> <threads> | cd-only <entries> <out.ugurugu> | readmem <file> | digest <file.ugurugu> <threads> | stop <file.ugurugu> | layers <file.ugurugu> <threads> | gif <file.ugurugu> <out.gif> <percent> [threads] | webp <file.ugurugu> <out.webp> <percent> [threads] | compare <file.ugu> <frames> [diffs] | import <file.ugu> <out.ugurugu> | insert <image> | strokes <file.ugurugu> | wide <edge> <brush id> <width> <strokes> | gaps <brush id> | live <file.ugurugu or edge> <brush id> <width> <samples per frame>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -169,6 +172,7 @@ fn main() -> ExitCode {
             .parse()
             .map_err(|_| USAGE.to_owned())
             .and_then(|length| fade(Path::new(from), Path::new(to), length)),
+        ["gaps", brush] => gaps(brush),
         ["wide", edge, brush, width, strokes] => {
             match (edge.parse(), width.parse(), strokes.parse()) {
                 (Ok(edge), Ok(width), Ok(strokes)) => wide(edge, brush, width, strokes),
@@ -1246,6 +1250,112 @@ fn wide(edge: u32, brush: &str, width: f32, strokes: usize) -> Result<(), String
             .collect();
     }
     render_document(&document, 8, None)
+}
+
+/// Which close gaps setting keeps a fill inside a ring drawn with `brush`
+/// that has an opening: for each line width and each opening (the distance
+/// between the two round ends, so the ends' centres are the ends' width
+/// further apart), over rings turned to 15 angles, how many were closed as
+/// drawn, the settings the others needed and how many rings settings 1 to
+/// 4 keep the fill in. `tapered` ends lose pressure over their last 12
+/// pixels, down to a fifth, as a pen lifted while moving does.
+fn gaps(brush: &str) -> Result<(), String> {
+    use ugu_core::selection::{Compare, Selection};
+    use ugu_render::document::{DocumentRenderer, Purpose};
+    use ugu_render::plan::RenderPlan;
+
+    const EDGE: u32 = 240;
+    const RADIUS: f64 = 80.0;
+    const MOST: u8 = 24;
+    let preset = ugu_core::brush::find(brush).ok_or("no such brush")?;
+    let mut renderer = DocumentRenderer::new(1);
+    let mut pixmap = vello_cpu::Pixmap::new(EDGE as u16, EDGE as u16);
+    println!(
+        "width tapered opening closed needed(min median max) over-{MOST} kept-by(1 2 3 4), of 15"
+    );
+    for width in [2.0f32, 3.0, 6.0, 10.0] {
+        for tapered in [false, true] {
+            for halves in 1..=16 {
+                let opening = f64::from(halves) * 0.5;
+                let mut closed = 0;
+                let mut over = 0;
+                let mut needed = Vec::new();
+                for turn in 0..15 {
+                    let end = if tapered {
+                        ugu_render::stroke::pressure_scale(preset.brush.size_dynamics, 0.2)
+                    } else {
+                        1.0
+                    };
+                    let open = (opening + f64::from(width) * end) / RADIUS;
+                    let start = f64::from(turn * 6).to_radians() + open / 2.0;
+                    let sweep = std::f64::consts::TAU - open;
+                    let count = (sweep * RADIUS / 2.0).ceil() as usize;
+                    let points: Vec<Point> = (0..=count)
+                        .map(|index| {
+                            let along = sweep * index as f64 / count as f64;
+                            let from_end = along.min(sweep - along) * RADIUS;
+                            let (sin, cos) = (start + along).sin_cos();
+                            Point {
+                                x: (120.0 + RADIUS * cos) as f32,
+                                y: (120.0 + RADIUS * sin) as f32,
+                                pressure: if tapered {
+                                    (0.2 + 0.8 * from_end / 12.0).min(1.0) as f32
+                                } else {
+                                    1.0
+                                },
+                            }
+                        })
+                        .collect();
+                    let mut builder = Builder::new([EDGE, EDGE]);
+                    let mut layer = builder.paint("Ring", 0, |_| Shape::plain(2));
+                    builder.document.store.strokes.insert(
+                        StrokeId(0),
+                        Stroke {
+                            points: points.into(),
+                            color: Rgba8([0, 0, 0, 255]),
+                            width,
+                            brush: preset.brush,
+                            seed: 1,
+                        },
+                    );
+                    set_paint(&mut layer, |paint| {
+                        paint.ops.push(Op::Paint {
+                            stroke: StrokeId(0),
+                            clip: None,
+                        });
+                    });
+                    builder.document.layers.push(layer);
+                    let document = builder.document;
+                    document.validate().map_err(|error| error.to_string())?;
+                    let plan = RenderPlan::new(&document, Purpose::Reference, 0);
+                    renderer.render_scaled(&document, &plan, 0, None, 1, &mut pixmap);
+                    let pixels = pixmap.data_as_u8_slice().as_chunks::<4>().0;
+                    let seed = [EDGE / 2; 2];
+                    let all = Selection::flood(pixels, [EDGE; 2], seed, Compare::AlphaBoundary)
+                        .ok_or("the middle is on the line")?;
+                    if !all.mask().contains(0, 0) {
+                        closed += 1;
+                        continue;
+                    }
+                    match (1..=MOST).find(|&gap| !all.closing_gaps(seed, gap).mask().contains(0, 0))
+                    {
+                        Some(gap) => needed.push(gap),
+                        None => over += 1,
+                    }
+                }
+                needed.sort_unstable();
+                let spread = match needed[..] {
+                    [] => "-".to_owned(),
+                    [least, .., most] => format!("{least} {} {most}", needed[needed.len() / 2]),
+                    [only] => format!("{only} {only} {only}"),
+                };
+                let kept = [1, 2, 3, 4]
+                    .map(|gap| closed + needed.iter().filter(|&&needed| needed <= gap).count());
+                println!("{width} {tapered} {opening} {closed} {spread} {over} {kept:?}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn render_document(document: &Document, threads: u16, tile: Option<u32>) -> Result<(), String> {
