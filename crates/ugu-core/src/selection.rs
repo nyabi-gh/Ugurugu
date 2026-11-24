@@ -357,6 +357,264 @@ impl Selection {
         reached.selection()
     }
 
+    /// This flooded area without what it reached through openings up to
+    /// about `gap` pixels wide; `seed` is the pixel it was flooded from.
+    ///
+    /// The area's wide parts are its pixels farther from its edge than the
+    /// middle of such an opening can be, joined by their edges, so no
+    /// opening joins two of them. The result is the wide part at the seed,
+    /// or the one nearest it, with the narrow pixels that are no nearer
+    /// another wide part: an opening is shared down its middle with what is
+    /// past it, and a corner or a strand that leads nowhere else is kept
+    /// whole. An area with one wide part or none is returned as it is. The
+    /// canvas's edge is not an edge of the area: a margin along it is as
+    /// wide as the lines leave it.
+    pub fn closing_gaps(&self, seed: [u32; 2], gap: u8) -> Selection {
+        const NARROW: u8 = 1;
+        const WIDE: u8 = 2;
+        const ROOMY: u8 = 3;
+        const KEPT: u8 = 4;
+        const OTHERS: u8 = 5;
+        let [left, top, width, height] = self.mask.bounds;
+        if gap == 0 || !self.mask.contains(seed[0] as i32, seed[1] as i32) {
+            return self.clone();
+        }
+        let [width, height] = [width as usize, height as usize];
+        let seed = (seed[1] as usize - top as usize) * width + (seed[0] as usize - left as usize);
+        let ends_at_canvas = [
+            left == 0,
+            top == 0,
+            left as usize + width == self.canvas[0] as usize,
+            top as usize + height == self.canvas[1] as usize,
+        ];
+        // With d the distance between a pixel's centre and the nearest
+        // centre outside the area, a pixel is narrow when 4 d² <= (gap + 1)²:
+        // the middle pixel of an opening `gap` wide is (gap + 1) / 2 from
+        // the nearer end. It is roomy when d is over a pixel more.
+        let gap = usize::from(gap);
+        let limits = [(gap + 1).pow(2), (gap + 3).pow(2)];
+        let reach = (gap + 3) / 2;
+        // How far along a row a pixel `rows` rows from the outside keeps
+        // pixels within each limit.
+        let along = limits.map(|limit| {
+            (0..=reach)
+                .map(|rows| {
+                    (0..=reach)
+                        .rev()
+                        .find(|columns| 4 * (rows * rows + columns * columns) <= limit)
+                        .map_or(-1, |columns| columns as isize)
+                })
+                .collect::<Vec<_>>()
+        });
+        let row_bytes = Mask::row_bytes(width as i32);
+        // Rows to the nearest pixel outside the area in each column, at most
+        // one past `reach`. Everything past the bounds is outside the area,
+        // except where the canvas ends there.
+        let cap = reach as u8 + 1;
+        let past = |at_canvas: bool| if at_canvas { cap } else { 1 };
+        let mut labels = vec![0u8; width * height];
+        let mut rows_out = vec![0u8; width * height];
+        for y in 0..height {
+            let bits = &self.mask.bits[y * row_bytes..][..row_bytes];
+            let labels = &mut labels[y * width..][..width];
+            let (above, row) = rows_out.split_at_mut(y * width);
+            let above = (y > 0).then(|| &above[(y - 1) * width..]);
+            for x in 0..width {
+                if bits[x / 8] & (0x80 >> (x % 8)) != 0 {
+                    labels[x] = ROOMY;
+                    row[x] = above.map_or(past(ends_at_canvas[1]), |above| (above[x] + 1).min(cap));
+                }
+            }
+        }
+        for y in (0..height).rev() {
+            let (row, below) = rows_out[y * width..].split_at_mut(width);
+            for (x, rows) in row.iter_mut().enumerate() {
+                let down = below
+                    .get(x)
+                    .map_or(past(ends_at_canvas[3]), |&below| below + 1);
+                *rows = (*rows).min(down);
+            }
+        }
+        // Every pixel starts roomy, and each pixel near the outside in its
+        // column takes the room of those beside it in its row. Few pixels
+        // are near the outside, so most of a row is passed over.
+        for (row, out) in labels
+            .chunks_exact_mut(width)
+            .zip(rows_out.chunks_exact(width))
+        {
+            let mut narrow = |x: isize, rows: u8| {
+                for (along, label) in along.iter().zip([NARROW, WIDE]) {
+                    let columns = along[usize::from(rows)];
+                    let from = (x - columns).max(0) as usize;
+                    let to = (x + columns + 1).clamp(0, width as isize) as usize;
+                    if columns >= 0 && from < to {
+                        for at in &mut row[from..to] {
+                            *at = (*at).min(label);
+                        }
+                    }
+                }
+            };
+            if !ends_at_canvas[0] {
+                narrow(-1, 0);
+            }
+            if !ends_at_canvas[2] {
+                narrow(width as isize, 0);
+            }
+            for (x, &rows) in out.iter().enumerate() {
+                // Of the pixels outside, the ones beside the area do it all.
+                let beside =
+                    || (x > 0 && out[x - 1] != 0) || out.get(x + 1).is_some_and(|&next| next != 0);
+                if rows < cap && (rows != 0 || beside()) {
+                    narrow(x as isize, rows);
+                }
+            }
+        }
+        let neighbours = |at: usize| {
+            let x = at % width;
+            [
+                (x > 0).then(|| at - 1),
+                (x + 1 < width).then_some(at + 1),
+                (at >= width).then(|| at - width),
+                (at + width < width * height).then_some(at + width),
+            ]
+            .into_iter()
+            .flatten()
+        };
+        // Marks the wide part `start` is in as `to`; returns whether any of
+        // it is roomy.
+        let mut pending = Vec::new();
+        let mut mark =
+            |labels: &mut [u8], start: usize, from: std::ops::RangeInclusive<u8>, to: u8| {
+                let mut roomy = false;
+                pending.push(start);
+                while let Some(at) = pending.pop() {
+                    if !from.contains(&labels[at]) {
+                        continue;
+                    }
+                    let row = at - at % width;
+                    let mut first = at;
+                    while first > row && from.contains(&labels[first - 1]) {
+                        first -= 1;
+                    }
+                    let mut last = at;
+                    while last + 1 < row + width && from.contains(&labels[last + 1]) {
+                        last += 1;
+                    }
+                    roomy |= labels[first..=last].contains(&ROOMY);
+                    labels[first..=last].fill(to);
+                    let rows = [
+                        (first >= width).then(|| first - width),
+                        (last + width < width * height).then_some(first + width),
+                    ];
+                    for start in rows.into_iter().flatten() {
+                        let mut run = false;
+                        for (next, label) in (start..).zip(&labels[start..=start + (last - first)])
+                        {
+                            let wide = from.contains(label);
+                            if wide && !run {
+                                pending.push(next);
+                            }
+                            run = wide;
+                        }
+                    }
+                }
+                roomy
+            };
+        // The wide part at the seed, or the first one reached from it
+        // through narrow pixels.
+        let mut start = (labels[seed] != NARROW).then_some(seed);
+        if start.is_none() {
+            let mut seen = vec![false; width * height];
+            seen[seed] = true;
+            let mut queue = std::collections::VecDeque::from([seed]);
+            'search: while let Some(at) = queue.pop_front() {
+                for next in neighbours(at) {
+                    if labels[next] > NARROW {
+                        start = Some(next);
+                        break 'search;
+                    }
+                    if labels[next] == NARROW && !seen[next] {
+                        seen[next] = true;
+                        queue.push_back(next);
+                    }
+                }
+            }
+        }
+        let Some(start) = start else {
+            return self.clone();
+        };
+        mark(&mut labels, start, WIDE..=ROOMY, KEPT);
+        // Another wide part takes its share only when some of it is roomy.
+        // Where a passage is about as wide as the gap, its pixels are wide
+        // in specks that join nothing, and each would stop the area.
+        let mut others = false;
+        for at in 0..labels.len() {
+            if labels[at] == WIDE || labels[at] == ROOMY {
+                if mark(&mut labels, at, WIDE..=ROOMY, OTHERS) {
+                    others = true;
+                } else {
+                    mark(&mut labels, at, OTHERS..=OTHERS, NARROW);
+                }
+            }
+        }
+        if !others {
+            return self.clone();
+        }
+        // Each narrow pixel goes to the wide part it is fewest steps from,
+        // the kept one when as near.
+        let mut kept = Vec::new();
+        let mut theirs = Vec::new();
+        for at in 0..labels.len() {
+            if labels[at] != NARROW {
+                continue;
+            }
+            let mut beside = [false; 2];
+            for next in neighbours(at) {
+                beside[0] |= labels[next] == KEPT;
+                beside[1] |= labels[next] == OTHERS;
+            }
+            if beside[0] {
+                kept.push(at);
+            } else if beside[1] {
+                theirs.push(at);
+            }
+        }
+        // A ring of steps is marked only once it is whole, so that its
+        // pixels do not count as wide for each other.
+        for (ring, label) in [(&kept, KEPT), (&theirs, OTHERS)] {
+            for &at in ring {
+                labels[at] = label;
+            }
+        }
+        let mut next_ring = Vec::new();
+        while !kept.is_empty() || !theirs.is_empty() {
+            for (ring, label) in [(&mut kept, KEPT), (&mut theirs, OTHERS)] {
+                for &at in ring.iter() {
+                    for next in neighbours(at) {
+                        if labels[next] == NARROW {
+                            labels[next] = label;
+                            next_ring.push(next);
+                        }
+                    }
+                }
+                ring.clear();
+                std::mem::swap(ring, &mut next_ring);
+            }
+        }
+        let mut bits = vec![0u8; row_bytes * height];
+        for (row, out) in labels
+            .chunks_exact(width)
+            .zip(bits.chunks_exact_mut(row_bytes))
+        {
+            for (x, &label) in row.iter().enumerate() {
+                if label == KEPT {
+                    out[x / 8] |= 0x80 >> (x % 8);
+                }
+            }
+        }
+        tight(self.canvas, self.mask.bounds, bits).unwrap_or_else(|| self.clone())
+    }
+
     /// This area grown into the lines that bound it, up to their middles:
     /// the pixels of `pixels` (premultiplied rows of the canvas) at least
     /// half opaque that are nearer this area than any other open pixel, at
@@ -1182,6 +1440,138 @@ mod tests {
         );
     }
 
+    /// An 80×60 canvas with an opaque box outline around x 20..60, y 15..45,
+    /// two pixels thick, open for `gap` rows from y 30 in its right side.
+    fn open_box(gap: usize) -> (Vec<[u8; 4]>, [u32; 2]) {
+        let mut pixels = vec![[0; 4]; 80 * 60];
+        for y in 15..45 {
+            for x in 20..60 {
+                let wall = !(22..58).contains(&x) || !(17..43).contains(&y);
+                if wall && !(x >= 58 && (30..30 + gap).contains(&y)) {
+                    pixels[y * 80 + x] = [0, 0, 0, 255];
+                }
+            }
+        }
+        (pixels, [80, 60])
+    }
+
+    fn count(selection: &Selection) -> u32 {
+        selection
+            .mask
+            .bits
+            .iter()
+            .map(|byte| byte.count_ones())
+            .sum()
+    }
+
+    #[test]
+    fn closing_gaps_keeps_a_flood_inside_an_outline_with_an_opening() {
+        for gap in 1..=8u8 {
+            let (pixels, size) = open_box(usize::from(gap));
+            let seed = [40, 30];
+            let leaked = Selection::flood(&pixels, size, seed, Compare::AlphaBoundary).unwrap();
+            assert_eq!(leaked.mask.bounds, [0, 0, 80, 60], "a {gap} px opening");
+            assert_eq!(leaked.closing_gaps(seed, 0), leaked);
+            let inside = leaked.closing_gaps(seed, gap);
+            // The whole inside and the inner half of the opening.
+            assert_eq!(
+                (inside.mask.bounds, count(&inside)),
+                ([22, 17, 37, 26], 36 * 26 + u32::from(gap)),
+                "a {gap} px opening"
+            );
+            // The outside takes the rest, so filling both leaves no hole.
+            let outside = leaked.closing_gaps([2, 2], gap);
+            assert_eq!(
+                Selection::combine(Some(&inside), Some(outside.clone()), Combine::Add),
+                Some(leaked.clone()),
+                "a {gap} px opening"
+            );
+            assert_eq!(
+                count(&inside) + count(&outside),
+                count(&leaked),
+                "a {gap} px opening"
+            );
+            // An opening two pixels wider than asked for is a way through.
+            if gap > 2 {
+                assert_eq!(leaked.closing_gaps(seed, gap - 2), leaked);
+            }
+        }
+    }
+
+    #[test]
+    fn closing_gaps_changes_nothing_in_an_area_with_no_opening() {
+        let (pixels, size) = ring();
+        let inside = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
+        let outside = Selection::flood(&pixels, size, [0, 0], Compare::AlphaBoundary).unwrap();
+        for gap in [1, 2, 5, 20, 255] {
+            assert_eq!(inside.closing_gaps([10, 10], gap), inside);
+            assert_eq!(outside.closing_gaps([0, 0], gap), outside);
+        }
+    }
+
+    /// Two rooms, x 2..30 and x 50..78 of y 2..38, joined by a corridor
+    /// `width` rows high from y 20, with a strand one pixel wide running up
+    /// from the left room to y 0 at x 10. All in an opaque 80×40 canvas.
+    fn rooms(width: usize) -> (Vec<[u8; 4]>, [u32; 2]) {
+        let mut pixels = vec![[0, 0, 0, 255]; 80 * 40];
+        for y in 0..40 {
+            for x in 0..80 {
+                let room = (2..38).contains(&y) && ((2..30).contains(&x) || (50..78).contains(&x));
+                let corridor = (20..20 + width).contains(&y) && (30..50).contains(&x);
+                if room || corridor || (x == 10 && y < 2) {
+                    pixels[y * 80 + x] = [0; 4];
+                }
+            }
+        }
+        (pixels, [80, 40])
+    }
+
+    #[test]
+    fn closing_gaps_goes_through_a_corridor_wider_than_the_gap() {
+        for (gap, width) in [(1, 3), (2, 4), (3, 5), (4, 6), (8, 10), (16, 18)] {
+            let (pixels, size) = rooms(width);
+            let both = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
+            assert_eq!(both.mask.bounds, [2, 0, 76, 38]);
+            assert_eq!(
+                both.closing_gaps([10, 10], gap),
+                both,
+                "gap {gap}, a corridor of {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn closing_gaps_shares_a_narrow_corridor_and_keeps_what_leads_nowhere() {
+        for (gap, width) in [(1, 1), (2, 2), (4, 3), (4, 4), (10, 9)] {
+            let (pixels, size) = rooms(width);
+            let both = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
+            let left = both.closing_gaps([10, 10], gap);
+            // The left room with its strand and the nearer half of the
+            // corridor.
+            assert_eq!(
+                (left.mask.bounds, count(&left)),
+                ([2, 0, 38, 38], (28 * 36 + 2 + 10 * width) as u32),
+                "gap {gap}, a corridor of {width}"
+            );
+            // A click in the strand or in a corner fills the room it is in,
+            // one in the corridor the nearer room.
+            for seed in [[10, 0], [2, 2], [29, 37], [32, 20]] {
+                assert_eq!(both.closing_gaps(seed, gap), left, "from {seed:?}");
+            }
+            let right = both.closing_gaps([48, 20], gap);
+            assert_eq!(right.mask.bounds, [40, 2, 38, 36]);
+            assert_eq!(count(&left) + count(&right), count(&both));
+        }
+    }
+
+    #[test]
+    fn closing_gaps_keeps_an_area_too_small_to_have_a_wide_part() {
+        let (pixels, size) = ring();
+        let inside = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
+        // 8 by 6 pixels: nothing is more than 3 from the line.
+        assert_eq!(inside.closing_gaps([10, 10], 6), inside);
+    }
+
     #[test]
     fn a_colour_flood_compares_every_straight_channel_with_the_tolerance() {
         let premultiplied = |[r, g, b, a]: [u8; 4]| {
@@ -1337,6 +1727,167 @@ mod tests {
                 flood[0],
                 under[7],
                 under[0]
+            );
+        }
+    }
+
+    /// What closing gaps adds to finding an area (evidence.md section 136):
+    /// a wobbly ring, closed or with a 2 pixel opening, filled from its
+    /// middle.
+    #[test]
+    #[ignore]
+    fn measure_closing_gaps() {
+        for (edge, radius, width) in [
+            (1024u32, 400.0f64, 3.0f64),
+            (2048, 900.0, 4.0),
+            (4096, 1900.0, 6.0),
+            (8192, 3800.0, 8.0),
+        ] {
+            let n = edge as usize;
+            let centre = n as f64 / 2.0;
+            for opening in [0.0, 2.0] {
+                let pixels: Vec<[u8; 4]> = (0..n * n)
+                    .map(|i| {
+                        let (x, y) = ((i % n) as f64 + 0.5 - centre, (i / n) as f64 + 0.5 - centre);
+                        let angle = y.atan2(x);
+                        let r = radius * (1.0 + 0.03 * (angle * 7.0).sin());
+                        let line = ((x * x + y * y).sqrt() - r).abs() <= width / 2.0;
+                        if line && angle.abs() * r >= opening / 2.0 {
+                            [0, 0, 0, 255]
+                        } else {
+                            [0; 4]
+                        }
+                    })
+                    .collect();
+                let seed = [edge / 2, edge / 2];
+                let median = |run: &mut dyn FnMut()| {
+                    let mut times: Vec<f64> = (0..9)
+                        .map(|_| {
+                            let started = std::time::Instant::now();
+                            run();
+                            started.elapsed().as_secs_f64() * 1000.0
+                        })
+                        .collect();
+                    times.sort_by(f64::total_cmp);
+                    times[4]
+                };
+                let flood = || {
+                    Selection::flood(&pixels, [edge, edge], seed, Compare::AlphaBoundary).unwrap()
+                };
+                let area = flood();
+                let flooding = median(&mut || {
+                    std::hint::black_box(flood());
+                });
+                let closing = [2u8, 20].map(|gap| {
+                    median(&mut || {
+                        std::hint::black_box(area.closing_gaps(seed, gap));
+                    })
+                });
+                let closed = area.closing_gaps(seed, 2);
+                let under = median(&mut || {
+                    std::hint::black_box(closed.under_lines(&pixels, 16));
+                });
+                eprintln!(
+                    "{edge}x{edge}, opening {opening}: flooded {} px in {flooding:.1} ms, \
+                     closing gaps of 2 {:.1} ms and of 20 {:.1} ms leaves {} px, under_lines {under:.1} ms",
+                    count(&area),
+                    closing[0],
+                    closing[1],
+                    count(&closed),
+                );
+            }
+        }
+    }
+
+    /// How closing gaps holds on slanted lines (evidence.md section 136):
+    /// how often a fill gets out of a ring through an opening of a given
+    /// length, and how many clicks cover two rooms joined by a slanted
+    /// corridor of a given width.
+    #[test]
+    #[ignore]
+    fn measure_closing_gaps_on_slanted_lines() {
+        let n = 240usize;
+        let drawn = |open: &dyn Fn(f64, f64) -> bool| -> Vec<[u8; 4]> {
+            (0..n * n)
+                .map(|i| {
+                    let at = [i % n, i / n].map(|at| at as f64 + 0.5 - 120.0);
+                    if open(at[0], at[1]) {
+                        [0; 4]
+                    } else {
+                        [0, 0, 0, 255]
+                    }
+                })
+                .collect()
+        };
+        let flood = |pixels: &[[u8; 4]], seed| {
+            Selection::flood(pixels, [n as u32; 2], seed, Compare::AlphaBoundary).unwrap()
+        };
+        for gap in [1u8, 2, 3, 4, 6, 10, 20] {
+            let mut leaks = String::new();
+            for tenths in (10..=(usize::from(gap) + 3) * 10).step_by(5) {
+                let length = tenths as f64 / 10.0;
+                let (mut out, mut total) = (0, 0);
+                for thick in [1.2f64, 2.0, 3.0, 6.0] {
+                    for angle in (0..90).step_by(2) {
+                        let theta = f64::from(angle).to_radians();
+                        let pixels = drawn(&|x, y| {
+                            let mut turn = (y.atan2(x) - theta).abs();
+                            if turn > std::f64::consts::PI {
+                                turn = std::f64::consts::TAU - turn;
+                            }
+                            ((x * x + y * y).sqrt() - 80.0).abs() >= thick / 2.0
+                                || turn * 80.0 < length / 2.0
+                        });
+                        let all = flood(&pixels, [120, 120]);
+                        // A line this thin can hide an opening this short.
+                        if !all.mask.contains(0, 0) {
+                            continue;
+                        }
+                        total += 1;
+                        out += u32::from(all.closing_gaps([120, 120], gap).mask.contains(0, 0));
+                    }
+                }
+                leaks += &format!("{length}:{out}/{total} ");
+            }
+            let mut clicks = String::new();
+            for tenths in (10..=(usize::from(gap) + 5) * 10).step_by(5) {
+                let width = tenths as f64 / 10.0;
+                let mut most = 0;
+                for angle in (0..=45).step_by(3) {
+                    let (sin, cos) = f64::from(angle).to_radians().sin_cos();
+                    let pixels = drawn(&|x, y| {
+                        let (u, v) = (x * cos + y * sin, y * cos - x * sin);
+                        ((u.abs() - 80.0).abs() < 25.0 && v.abs() < 25.0)
+                            || (u.abs() < 60.0 && v.abs() < width / 2.0)
+                    });
+                    let rooms = [-80.0, 80.0].map(|u: f64| [120.0 + u * cos, 120.0 + u * sin]);
+                    let all = flood(&pixels, rooms[0].map(|at| at as u32));
+                    // A click in each room, then wherever is left.
+                    let mut covered: Option<Selection> = None;
+                    let mut count = 0;
+                    let mut seeds = rooms.map(|at| at.map(|at| at as u32)).to_vec();
+                    while covered.as_ref() != Some(&all) {
+                        let seed = seeds.pop().unwrap_or_else(|| {
+                            let rest =
+                                Selection::combine(Some(&all), covered.clone(), Combine::Subtract)
+                                    .unwrap();
+                            let [left, top, width, height] = rest.mask.bounds;
+                            (top..top + height)
+                                .flat_map(|y| (left..left + width).map(move |x| [x, y]))
+                                .find(|&[x, y]| rest.mask.contains(x, y))
+                                .unwrap()
+                                .map(|at| at as u32)
+                        });
+                        let more = all.closing_gaps(seed, gap);
+                        covered = Selection::combine(covered.as_ref(), Some(more), Combine::Add);
+                        count += 1;
+                    }
+                    most = most.max(count);
+                }
+                clicks += &format!("{width}:{most} ");
+            }
+            eprintln!(
+                "gap {gap}\n  opening length:leaks/tries {leaks}\n  corridor width:clicks {clicks}"
             );
         }
     }

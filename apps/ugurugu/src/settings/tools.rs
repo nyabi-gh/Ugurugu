@@ -10,8 +10,8 @@ use ugu_core::brush::{self, Preset};
 use ugu_core::ops::{Rgba8, Sampling};
 use ugu_core::store::limits::{FADE, STROKE_WIDTH};
 use ugu_session::{
-    Brushes, ColorHistory, Kept, Reads, Shape, ShapeKind, ShapePaint, ShapeSettings, TextSettings,
-    Tool, ToolSettings, Tools, is_pixel,
+    Brushes, ColorHistory, FillSettings, Kept, Reads, Shape, ShapeKind, ShapePaint, ShapeSettings,
+    TextSettings, Tool, ToolSettings, Tools, is_pixel,
 };
 
 const TOOLS: [(Tool, &str); 10] = [
@@ -312,6 +312,9 @@ pub(super) fn read(value: &Value, mut tools: Tools) -> Tools {
             tools.fill.tolerance = tolerance.round() as u8;
         }
         boolean(fill, "antialias", &mut tools.fill.antialias);
+        if let Some(gap) = number(fill, "gap", 0.0..=f32::from(FillSettings::WIDEST_GAP)) {
+            tools.fill.gap = gap.round() as u8;
+        }
     }
     if let Some(text) = object(value, "text") {
         match text.get("family") {
@@ -402,6 +405,7 @@ pub(super) fn to_json(tools: &Tools) -> Value {
             "byColour": tools.fill.by_colour,
             "tolerance": tools.fill.tolerance,
             "antialias": tools.fill.antialias,
+            "gap": tools.fill.gap,
         },
         "text": text,
     });
@@ -497,6 +501,7 @@ mod tests {
         tools.fill.by_colour = true;
         tools.fill.tolerance = 7;
         tools.fill.antialias = false;
+        tools.fill.gap = 7;
         tools.text = TextSettings {
             family: Some("Malgun Gothic".to_owned()),
             size: 120.0,
@@ -560,7 +565,7 @@ mod tests {
                 "nothing": { "width": 5 },
             },
             "selection": { "shape": 3, "sampling": "nearest" },
-            "fill": { "tolerance": 400, "reads": "marked" },
+            "fill": { "tolerance": 400, "reads": "marked", "gap": 400 },
             "tablet": { "pressure": "off" },
             "text": { "size": 2, "family": "" },
         }));
@@ -578,6 +583,7 @@ mod tests {
         assert!(tools.uses_pressure);
         assert_eq!(tools.fill.tolerance, 255);
         assert_eq!(tools.fill.reads, Reads::Marked);
+        assert_eq!(tools.fill.gap, FillSettings::WIDEST_GAP);
         assert_eq!(tools.text.size, *TextSettings::SIZE.start());
         assert_eq!(tools.text.family, None);
     }
@@ -597,6 +603,7 @@ mod tests {
         assert_eq!(tools.color, kept.color);
         assert_eq!(tools.fill.tolerance, 9);
         assert_eq!(tools.fill.reads, kept.fill.reads);
+        assert_eq!(tools.fill.gap, kept.fill.gap);
         assert_eq!(tools.text, kept.text);
         // The brush left keeps its width for when it is chosen again.
         assert_eq!(

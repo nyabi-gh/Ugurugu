@@ -775,6 +775,19 @@ fn fill_settings(ui: &mut egui::Ui, canvas: &mut Canvas, bucket: bool) {
         );
     });
     fill.tolerance = tolerance.round().clamp(0.0, 255.0) as u8;
+    let widest = f32::from(FillSettings::WIDEST_GAP);
+    let mut gap = f32::from(fill.gap);
+    slider_row(
+        ui,
+        tr("fill-gap"),
+        tr("fill-gap"),
+        &mut gap,
+        0.0..=widest,
+        " px",
+        0,
+    )
+    .on_hover_text(tr("fill-gap-tip"));
+    fill.gap = gap.round().clamp(0.0, widest) as u8;
     if bucket && !canvas.session().pixel_mode() {
         ui.add_space(theme::space::XS);
         widgets::check_row(

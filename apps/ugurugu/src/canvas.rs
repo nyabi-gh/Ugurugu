@@ -2991,7 +2991,8 @@ mod tests {
 
     /// How long a bucket click right after playback stops and right after
     /// an undo holds the render thread, and how long until the fill is in,
-    /// on the document at `UGU_FILL_FIXTURE` (`ugu-doc fixture 2`):
+    /// on the document at `UGU_FILL_FIXTURE` (`ugu-doc fixture 2`), without
+    /// closing gaps and with the gap closed from the start:
     /// `UGU_WORKER_THREADS=8 cargo test --release -p ugurugu fill_wait --
     /// --ignored --nocapture`.
     #[test]
@@ -3040,34 +3041,37 @@ mod tests {
             );
         };
         // It reads the current layer, as it does unless set otherwise.
-        let mut played = Vec::new();
-        let mut undone = Vec::new();
-        for _ in 0..5 {
-            quiet(&mut canvas);
-            canvas.toggle_playback();
-            let mut now = Instant::now();
-            let first = canvas.session().frame();
-            while canvas.session().frame() < first + 3 {
-                canvas.tick(now);
-                now += Duration::from_millis(100);
-                if let Ok(rendered) = renders.recv_timeout(Duration::from_millis(100)) {
-                    canvas.adopt(rendered);
+        for gap in [0, canvas.tools().fill.gap] {
+            canvas.tools_mut().fill.gap = gap;
+            let mut played = Vec::new();
+            let mut undone = Vec::new();
+            for _ in 0..5 {
+                quiet(&mut canvas);
+                canvas.toggle_playback();
+                let mut now = Instant::now();
+                let first = canvas.session().frame();
+                while canvas.session().frame() < first + 3 {
+                    canvas.tick(now);
+                    now += Duration::from_millis(100);
+                    if let Ok(rendered) = renders.recv_timeout(Duration::from_millis(100)) {
+                        canvas.adopt(rendered);
+                    }
                 }
-            }
-            played.push(click(&mut canvas));
-            canvas.tab.resume_playback = false;
-            canvas.edit(Session::undo).unwrap();
+                played.push(click(&mut canvas));
+                canvas.tab.resume_playback = false;
+                canvas.edit(Session::undo).unwrap();
 
-            quiet(&mut canvas);
-            click(&mut canvas);
-            quiet(&mut canvas);
-            canvas.edit(Session::undo).unwrap();
-            canvas.sync();
-            undone.push(click(&mut canvas));
-            canvas.edit(Session::undo).unwrap();
+                quiet(&mut canvas);
+                click(&mut canvas);
+                quiet(&mut canvas);
+                canvas.edit(Session::undo).unwrap();
+                canvas.sync();
+                undone.push(click(&mut canvas));
+                canvas.edit(Session::undo).unwrap();
+            }
+            report(&format!("gap {gap}, after playback"), played);
+            report(&format!("gap {gap}, after undo"), undone);
         }
-        report("after playback", played);
-        report("after undo", undone);
     }
 
     #[test]

@@ -1090,6 +1090,86 @@ fn the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection() {
     );
 }
 
+/// `pixels`, 200 wide, with the two columns from `x` open for `gap` rows
+/// from y 50.
+fn opened(mut pixels: Vec<[u8; 4]>, x: usize, gap: usize) -> Vec<[u8; 4]> {
+    for y in 50..50 + gap {
+        pixels[y * 200 + x..][..2].fill([0; 4]);
+    }
+    pixels
+}
+
+#[test]
+fn the_wand_and_the_bucket_stay_inside_lines_open_no_wider_than_the_gap() {
+    let mut session = session();
+    let layer = session.current_layer();
+    for gap in [1, 2, 6] {
+        let reference = opened(boxed(), 118, usize::from(gap));
+        let read = Some(reference.as_slice());
+        let mut tools = Tools::default();
+        // The gap closed from the start covers a break of a pixel or two.
+        if gap > tools.fill.gap {
+            tools.fill.gap = gap;
+        }
+        for by_colour in [false, true] {
+            tools.fill.by_colour = by_colour;
+            session
+                .wand(&tools, [60.0, 50.0], Combine::Replace, read)
+                .unwrap();
+            // The inside and the inner half of the opening.
+            assert_eq!(
+                selected(&session),
+                Some([42, 22, 77, 56]),
+                "an opening of {gap}, by colour {by_colour}"
+            );
+        }
+        session.deselect().unwrap();
+        tools.fill.by_colour = false;
+        session.bucket(&tools, [60.0, 50.0], read).unwrap();
+        let [(coverage, ..)] = fills(&session, layer)[..] else {
+            panic!("one fill");
+        };
+        // Under the line as around a closed box.
+        assert_eq!(
+            session.document().store.masks[&coverage].bounds,
+            [41, 21, 78, 58],
+            "an opening of {gap}"
+        );
+        assert!(session.undo().unwrap());
+        // Without closing gaps, or through an opening wider than the gap by
+        // two pixels, the area is everything around the lines.
+        for (gap, reference) in [
+            (0, reference.clone()),
+            (gap, opened(boxed(), 118, usize::from(gap) + 2)),
+        ] {
+            tools.fill.gap = gap;
+            session
+                .wand(&tools, [60.0, 50.0], Combine::Replace, Some(&reference))
+                .unwrap();
+            assert_eq!(selected(&session), Some([0, 0, 200, 100]));
+            session.deselect().unwrap();
+        }
+    }
+}
+
+#[test]
+fn the_ruler_closes_the_gaps_of_the_mirrored_area_too() {
+    let mut session = session();
+    let tools = Tools::default();
+    let layer = session.current_layer();
+    let reference = opened(opened(two_boxes(), 20, 1), 178, 1);
+    mirrored(&mut session);
+    session
+        .bucket(&tools, [40.0, 50.0], Some(&reference))
+        .unwrap();
+    let [(coverage, ..)] = fills(&session, layer)[..] else {
+        panic!("one fill");
+    };
+    let mask = &session.document().store.masks[&coverage];
+    assert_eq!(mask.bounds, [21, 21, 158, 58]);
+    assert!(!mask.contains(100, 50), "nothing between the boxes");
+}
+
 #[test]
 fn filling_the_selection_or_a_painted_shape_is_one_fill_cut_to_the_selection() {
     let mut session = session();

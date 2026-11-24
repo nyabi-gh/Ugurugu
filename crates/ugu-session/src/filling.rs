@@ -36,17 +36,23 @@ pub struct FillSettings {
     pub tolerance: u8,
     /// Fills soften their edges.
     pub antialias: bool,
+    /// The widest opening in the lines, in pixels, that the area does not
+    /// pass through; 0 passes through every opening.
+    pub gap: u8,
 }
 
 impl FillSettings {
     /// 2.2.13's: the current layer, stopping at lines, tolerance 32 kept for
-    /// colour, antialiased.
+    /// colour, antialiased. Closing gaps is 3.x's own.
     pub const DEFAULT: Self = Self {
         reads: Reads::Current,
         by_colour: false,
         tolerance: 32,
         antialias: true,
+        gap: 2,
     };
+
+    pub const WIDEST_GAP: u8 = 20;
 
     pub fn compare(&self) -> Compare {
         if self.by_colour {
@@ -105,6 +111,7 @@ impl Session {
     ) -> Result<Selection, FillError> {
         let reference = reference.ok_or(FillError::NoReference)?;
         Selection::flood(reference, self.document().canvas, seed, fill.compare())
+            .map(|area| area.closing_gaps(seed, fill.gap))
             .ok_or(FillError::NothingThere)
     }
 
