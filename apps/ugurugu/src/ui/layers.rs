@@ -1074,11 +1074,14 @@ impl LayerDock {
 
         let shown = draft(&mut self.opacity, current, opacity);
         let mut percent = *shown * 100.0;
-        let slider = widgets::form_row(ui, tr("opacity"), |ui| {
-            let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, tr("opacity"));
-            let width = ui.available_width().max(40.0);
-            widgets::slider(ui, &mut percent, 0.0..=100.0, tr("opacity"), width).union(field)
-        });
+        let slider = widgets::ValueBar {
+            label: tr("opacity"),
+            name: tr("opacity"),
+            suffix: "%",
+            decimals: 0,
+            scale: widgets::Scale::Even,
+        }
+        .show(ui, &mut percent, 0.0..=100.0);
         let value = percent.round() / 100.0;
         *shown = value;
         // One undo step when the drag ends, as 2.2.13 commits on release.
@@ -1141,11 +1144,14 @@ impl LayerDock {
         let shown = draft(&mut self.outline_width, current, line.width);
         let mut width = *shown;
         let name = tr("layer-outline-width");
-        let slider = widgets::form_row(ui, name, |ui| {
-            let field = widgets::number(ui, &mut width, OUTLINE_WIDTH, " px", 0, 64.0, name);
-            let room = ui.available_width().max(40.0);
-            widgets::slider(ui, &mut width, OUTLINE_WIDTH, name, room).union(field)
-        });
+        let slider = widgets::ValueBar {
+            label: name,
+            name,
+            suffix: " px",
+            decimals: 0,
+            scale: widgets::Scale::Even,
+        }
+        .show(ui, &mut width, OUTLINE_WIDTH);
         let width = width
             .round()
             .clamp(*OUTLINE_WIDTH.start(), *OUTLINE_WIDTH.end());

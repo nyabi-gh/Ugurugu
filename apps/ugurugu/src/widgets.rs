@@ -705,6 +705,7 @@ impl ValueBar<'_> {
                     room.max(0.0),
                     egui::FontSelection::Default,
                 );
+            let cut_short = caption.elided;
             let painter = ui.painter();
             painter.galley(
                 egui::pos2(
@@ -724,6 +725,9 @@ impl ValueBar<'_> {
             );
             if response.has_focus() {
                 focus_ring(painter, rect, theme::radius::CONTROL);
+            }
+            if cut_short {
+                response = response.on_hover_text(label);
             }
         }
         let shown = *value;

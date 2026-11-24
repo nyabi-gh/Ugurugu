@@ -1556,13 +1556,14 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
         .horizontal(|ui| {
             let preview = wobble_preview(ui, amount, ui.ctx().input(|input| input.time));
             preview.on_hover_text(tr("wobble-preview-tip"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let field =
-                    widgets::number(ui, &mut amount, min..=max, " px", 1, 64.0, tr("wobble"));
-                let width = ui.available_width().max(40.0);
-                widgets::slider(ui, &mut amount, min..=max, tr("wobble"), width).union(field)
-            })
-            .inner
+            widgets::ValueBar {
+                label: "",
+                name: tr("wobble"),
+                suffix: " px",
+                decimals: 1,
+                scale: widgets::Scale::Even,
+            }
+            .show(ui, &mut amount, min..=max)
         })
         .inner;
     let mut changed = track(response);
@@ -1688,14 +1689,17 @@ pub fn wobble(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     }
 }
 
-/// A share from 0 to 1 as a slider and a field of whole percent.
+/// A share from 0 to 1 as a value bar of whole percent.
 fn percent_row(ui: &mut egui::Ui, label: &str, share: &mut f32) -> egui::Response {
     let mut percent = *share * 100.0;
-    let response = widgets::form_row(ui, label, |ui| {
-        let field = widgets::number(ui, &mut percent, 0.0..=100.0, "%", 0, 64.0, label);
-        let width = ui.available_width().max(40.0);
-        widgets::slider(ui, &mut percent, 0.0..=100.0, label, width).union(field)
-    });
+    let response = widgets::ValueBar {
+        label,
+        name: label,
+        suffix: "%",
+        decimals: 0,
+        scale: widgets::Scale::Even,
+    }
+    .show(ui, &mut percent, 0.0..=100.0);
     if response.changed() {
         *share = percent.round() / 100.0;
     }
