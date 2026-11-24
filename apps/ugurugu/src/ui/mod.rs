@@ -382,7 +382,7 @@ pub fn rail(
     }
 }
 
-/// A slider with its number field, on one row after its name.
+/// A row that is one value bar, named inside it.
 fn slider_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -392,11 +392,14 @@ fn slider_row(
     suffix: &str,
     decimals: usize,
 ) -> egui::Response {
-    widgets::form_row(ui, label, |ui| {
-        let field = widgets::number(ui, value, range.clone(), suffix, decimals, 64.0, name);
-        let width = ui.available_width().max(40.0);
-        widgets::slider(ui, value, range, name, width).union(field)
-    })
+    widgets::ValueBar {
+        label,
+        name,
+        suffix,
+        decimals,
+        scale: widgets::Scale::Even,
+    }
+    .show(ui, value, range)
 }
 
 pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
@@ -444,12 +447,14 @@ pub fn tool_settings(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels
         | Tool::Symmetry => tr("brush-size"),
     };
     let range = BRUSH_SIZES[0]..=BRUSH_SIZES[BRUSH_SIZES.len() - 1];
-    widgets::form_row(ui, tr("size"), |ui| {
-        let width = &mut settings.width;
-        widgets::number(ui, width, range.clone(), " px", 0, 64.0, size_name);
-        let length = ui.available_width().max(40.0);
-        widgets::slider_scaled(ui, width, range, widgets::Scale::Ratio, size_name, length);
-    });
+    widgets::ValueBar {
+        label: tr("size"),
+        name: size_name,
+        suffix: " px",
+        decimals: 0,
+        scale: widgets::Scale::Ratio,
+    }
+    .show(ui, &mut settings.width, range);
     let pixel = settings.preset.brush.engine == ugu_core::store::BrushEngine::Pixel;
     if pixel {
         settings.width = settings.width.round().max(1.0);

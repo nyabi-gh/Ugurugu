@@ -502,6 +502,240 @@ pub fn number(
     response
 }
 
+/// What a value bar holds while its number is typed.
+#[derive(Clone)]
+struct Typing {
+    text: String,
+    /// The field takes the focus, its text selected, on the frame after the
+    /// one that opened it: the Enter or Space that opened it would be typed
+    /// into a field focused on the same frame.
+    fresh: bool,
+}
+
+/// The number written in `text`, whatever unit is written with it.
+fn typed_number(text: &str) -> Option<f32> {
+    let digits: String = text
+        .chars()
+        .map(|each| if each == ',' { '.' } else { each })
+        .filter(|each| each.is_ascii_digit() || matches!(each, '.' | '-'))
+        .collect();
+    digits.parse().ok().filter(|value: &f32| value.is_finite())
+}
+
+/// A slider and its number field in one: a bar as wide as the panel, filled
+/// up to the value, with `label` at its left and the value at its right.
+/// Dragging puts the value under the pointer (a tenth as fast with Shift);
+/// a click, Enter or Space lets the number be typed. `name` is what screen
+/// readers call it.
+pub struct ValueBar<'a> {
+    pub label: &'a str,
+    pub name: &'a str,
+    pub suffix: &'a str,
+    pub decimals: usize,
+    pub scale: Scale,
+}
+
+impl ValueBar<'_> {
+    pub fn show(
+        self,
+        ui: &mut Ui,
+        value: &mut f32,
+        range: std::ops::RangeInclusive<f32>,
+    ) -> Response {
+        const INSET: f32 = 8.0;
+        let Self {
+            label,
+            name,
+            suffix,
+            decimals,
+            scale,
+        } = self;
+        let (low, high) = (*range.start(), *range.end());
+        let (rect, mut response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT),
+            Sense::click_and_drag(),
+        );
+        let enabled = ui.is_enabled();
+        let edit = response.id.with("typed");
+        let typing: Option<Option<Typing>> = ui.data(|data| data.get_temp(edit));
+        let typing = typing.flatten();
+        if typing.is_none() && response.clicked() {
+            let opened = Typing {
+                text: format!("{:.*}", decimals, *value),
+                fresh: true,
+            };
+            ui.data_mut(|data| data.insert_temp(edit, Some(opened)));
+            ui.ctx().request_repaint();
+        } else if let Some(mut typed) = typing.clone() {
+            let fresh = typed.fresh;
+            if fresh {
+                ui.memory_mut(|memory| memory.request_focus(edit));
+            }
+            let mut inside = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect.shrink2(egui::vec2(INSET, 0.0)))
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            ui.painter().rect(
+                rect,
+                CornerRadius::same(theme::radius::CONTROL),
+                theme::base(),
+                Stroke::new(1.0, theme::accent_ink()),
+                StrokeKind::Inside,
+            );
+            let mut output = egui::TextEdit::singleline(&mut typed.text)
+                .id(edit)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .font(FontId::proportional(theme::BODY))
+                .desired_width(f32::INFINITY)
+                .show(&mut inside);
+            let field = &output.response.response;
+            if fresh {
+                let all = egui::text::CCursorRange::select_all(&output.galley);
+                output.state.cursor.set_char_range(Some(all));
+                output.state.store(ui.ctx(), edit);
+                typed.fresh = false;
+            }
+            if fresh || field.has_focus() {
+                ui.data_mut(|data| data.insert_temp(edit, Some(typed)));
+            } else {
+                // Left without the focus ever going, the bar was hidden
+                // while its number was typed, and nothing was entered.
+                let cancelled = ui.input(|input| input.key_pressed(egui::Key::Escape));
+                if field.lost_focus()
+                    && !cancelled
+                    && let Some(new) = typed_number(&typed.text)
+                {
+                    let new = new.clamp(low, high);
+                    if new != *value {
+                        *value = new;
+                        response.mark_changed();
+                    }
+                }
+                let keyed = ui.input(|input| input.key_pressed(egui::Key::Enter)) || cancelled;
+                if field.lost_focus() && keyed {
+                    response.request_focus();
+                }
+                ui.data_mut(|data| data.insert_temp(edit, None::<Typing>));
+            }
+        }
+        if typing.is_none() {
+            if response.dragged()
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let along = if ui.input(|input| input.modifiers.shift) {
+                    scale.along(*value, low, high) + response.drag_delta().x * 0.1 / rect.width()
+                } else {
+                    (pointer.x - rect.left()) / rect.width()
+                };
+                let new = scale.value(along.clamp(0.0, 1.0), low, high);
+                if new != *value {
+                    *value = new;
+                    response.mark_changed();
+                }
+            }
+            if response.has_focus() {
+                let delta = ui.input(|input| {
+                    i8::from(input.key_pressed(egui::Key::ArrowRight))
+                        - i8::from(input.key_pressed(egui::Key::ArrowLeft))
+                });
+                if delta != 0 {
+                    *value = scale.stepped(*value, delta > 0, low, high);
+                    response.mark_changed();
+                }
+            }
+            let hot = enabled && (response.hovered() || response.dragged());
+            let painter = ui.painter();
+            let radius = CornerRadius::same(theme::radius::CONTROL);
+            painter.rect(
+                rect,
+                radius,
+                theme::base(),
+                Stroke::new(
+                    1.0,
+                    if hot {
+                        theme::disabled()
+                    } else {
+                        theme::border()
+                    },
+                ),
+                StrokeKind::Inside,
+            );
+            // The filled part and the mark at its end are the bar's rounded
+            // shape cut off at the value, so they follow its corners.
+            let x = rect.left() + scale.along(*value, low, high) * rect.width();
+            let cut = |from: f32, to: f32| {
+                let part =
+                    Rect::from_min_max(egui::pos2(from, rect.top()), egui::pos2(to, rect.bottom()));
+                painter.with_clip_rect(part.intersect(painter.clip_rect()))
+            };
+            cut(rect.left(), x).rect_filled(rect.shrink(1.0), radius, theme::border());
+            let mark = x.clamp(rect.left() + 2.0, rect.right() - 1.0);
+            cut(mark - 2.0, mark).rect_filled(
+                rect.shrink(1.0),
+                radius,
+                match (enabled, hot) {
+                    (false, _) => theme::disabled(),
+                    (true, true) => theme::accent_ink(),
+                    (true, false) => theme::muted(),
+                },
+            );
+            let number = painter.layout_no_wrap(
+                format!("{:.*}{suffix}", decimals, *value),
+                FontId::proportional(theme::BODY),
+                if enabled {
+                    theme::text()
+                } else {
+                    theme::disabled()
+                },
+            );
+            let room = rect.width() - 3.0 * INSET - number.size().x;
+            let caption =
+                egui::WidgetText::from(egui::RichText::new(label).size(theme::SMALL).color(
+                    if enabled {
+                        theme::muted()
+                    } else {
+                        theme::disabled()
+                    },
+                ))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    room.max(0.0),
+                    egui::FontSelection::Default,
+                );
+            let painter = ui.painter();
+            painter.galley(
+                egui::pos2(
+                    rect.left() + INSET,
+                    rect.center().y - caption.size().y / 2.0,
+                ),
+                caption,
+                theme::muted(),
+            );
+            painter.galley(
+                egui::pos2(
+                    rect.right() - INSET - number.size().x,
+                    rect.center().y - number.size().y / 2.0,
+                ),
+                number,
+                theme::text(),
+            );
+            if response.has_focus() {
+                focus_ring(painter, rect, theme::radius::CONTROL);
+            }
+        }
+        let shown = *value;
+        response.widget_info(|| {
+            let mut info = egui::WidgetInfo::slider(enabled, f64::from(shown), name);
+            info.current_text_value = Some(format!("{:.*}{suffix}", decimals, shown));
+            info
+        });
+        response.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+    }
+}
+
 /// A square check box with a tick and an edge in the accent when checked,
 /// followed by `text` if there is any.
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: &str) -> Response {
@@ -1277,5 +1511,105 @@ mod tests {
         let changed = frame(&ctx, vec![press(at, false)], |ui| show(ui, &mut current)).changed();
         assert!(changed);
         assert_eq!(current, 3);
+    }
+    /// A frame of a 200-point value bar from 0 to 100 in a focused window.
+    fn bar_frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut f32) -> Response {
+        let input = egui::RawInput {
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let mut result = None;
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.set_width(200.0);
+            let bar = ValueBar {
+                label: "Opacity",
+                name: "Brush opacity",
+                suffix: "%",
+                decimals: 0,
+                scale: Scale::Even,
+            };
+            result = Some(bar.show(ui, value, 0.0..=100.0));
+        });
+        output.textures_delta.clear();
+        result.unwrap()
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_typed_number_is_read_past_its_unit() {
+        assert_eq!(typed_number("40"), Some(40.0));
+        assert_eq!(typed_number("12.5 px"), Some(12.5));
+        assert_eq!(typed_number("7,5%"), Some(7.5));
+        assert_eq!(typed_number("-3"), Some(-3.0));
+        assert_eq!(typed_number("px"), None);
+        assert_eq!(typed_number(""), None);
+    }
+
+    #[test]
+    fn dragging_a_value_bar_puts_the_value_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let mut value = 50.0;
+        let bar = bar_frame(&ctx, Vec::new(), &mut value).rect;
+        assert_eq!(bar.width(), 200.0);
+        let at = |along: f32| egui::pos2(bar.left() + along * bar.width(), bar.center().y);
+        bar_frame(
+            &ctx,
+            vec![egui::Event::PointerMoved(at(0.75)), press(at(0.75), true)],
+            &mut value,
+        );
+        assert_eq!(value, 50.0, "a press alone moves nothing");
+        let dragged = bar_frame(&ctx, vec![egui::Event::PointerMoved(at(0.25))], &mut value);
+        assert!(dragged.changed());
+        assert_eq!(value, 25.0);
+        bar_frame(&ctx, vec![egui::Event::PointerMoved(at(2.0))], &mut value);
+        assert_eq!(value, 100.0);
+        bar_frame(&ctx, vec![press(at(2.0), false)], &mut value);
+        assert_eq!(value, 100.0);
+    }
+
+    #[test]
+    fn a_click_on_a_value_bar_types_its_number() {
+        let ctx = egui::Context::default();
+        let mut value = 50.0;
+        let bar = bar_frame(&ctx, Vec::new(), &mut value).rect;
+        let at = egui::pos2(bar.left() + 20.0, bar.center().y);
+        let click = |ctx: &egui::Context, value: &mut f32| {
+            bar_frame(
+                ctx,
+                vec![egui::Event::PointerMoved(at), press(at, true)],
+                value,
+            );
+            bar_frame(ctx, vec![press(at, false)], value);
+            bar_frame(ctx, Vec::new(), value);
+        };
+        click(&ctx, &mut value);
+        assert_eq!(value, 50.0, "a click moves nothing");
+        // What is typed takes the place of the number, which is selected.
+        bar_frame(&ctx, vec![egui::Event::Text("4".to_owned())], &mut value);
+        bar_frame(&ctx, vec![egui::Event::Text("0 %".to_owned())], &mut value);
+        assert_eq!(value, 50.0, "nothing is entered while typing");
+        let entered = bar_frame(&ctx, vec![key(egui::Key::Enter)], &mut value);
+        assert!(entered.changed());
+        assert_eq!(value, 40.0);
+
+        click(&ctx, &mut value);
+        bar_frame(&ctx, vec![egui::Event::Text("900".to_owned())], &mut value);
+        bar_frame(&ctx, vec![key(egui::Key::Escape)], &mut value);
+        assert_eq!(value, 40.0, "Escape enters nothing");
+
+        click(&ctx, &mut value);
+        bar_frame(&ctx, vec![egui::Event::Text("900".to_owned())], &mut value);
+        bar_frame(&ctx, vec![key(egui::Key::Enter)], &mut value);
+        assert_eq!(value, 100.0, "a number past the range stops at its end");
     }
 }
