@@ -214,6 +214,15 @@ fn area(
                 .inner_margin(Margin::same(theme::space::M as i8)),
         )
         .show(ui, |ui| {
+            // The area is as wide as the user dragged it, whatever is in it:
+            // egui widens a panel to its content and never narrows it again,
+            // and a scroll area is wider than its room by part of a point
+            // while its bar slides in or out. So the content is laid out in
+            // a child, whose size the panel does not take.
+            let room = ui.available_rect_before_wrap();
+            ui.allocate_rect(room, Sense::hover());
+            let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(room));
+            let ui = &mut ui;
             // A window too low for every panel's least height scrolls the
             // whole area, so that none is out of reach.
             egui::ScrollArea::vertical()

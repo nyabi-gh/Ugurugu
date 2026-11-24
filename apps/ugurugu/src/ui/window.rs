@@ -552,6 +552,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn changing_the_tool_leaves_the_docks_as_wide_as_they_were() {
+        use crate::i18n::tr;
+        // At this size the tool settings scroll for a frame when the pen's
+        // rows take the place of the symmetry ruler's.
+        let size = [1600.0, 900.0];
+        let mut shown = Shown::new();
+        let mut edges = Vec::new();
+        for _ in 0..3 {
+            for tool in [ugu_session::Tool::Pen, ugu_session::Tool::Symmetry] {
+                shown.canvas.choose_tool(tool);
+                let output = shown.frames(size);
+                let left = bounds(&output, tr("dock-width-left")).expect("the left edge");
+                let right = bounds(&output, tr("dock-width-right")).expect("the right edge");
+                edges.push((tool, left.x0, right.x0));
+            }
+        }
+        let (_, left, right) = edges[0];
+        for (tool, a, b) in &edges {
+            assert!(
+                *a == left && *b == right,
+                "with {tool:?} the docks end at {a} and {b}: {edges:?}"
+            );
+        }
+    }
+
     const TOOLS: [ugu_session::Tool; 9] = [
         ugu_session::Tool::Pen,
         ugu_session::Tool::Eraser,
