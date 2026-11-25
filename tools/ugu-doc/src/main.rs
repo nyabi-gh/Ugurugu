@@ -290,14 +290,28 @@ fn strokes(path: &Path) -> Result<(), String> {
         let (x0, x1) = extent(|point| point.x);
         let (y0, y1) = extent(|point| point.y);
         let (p0, p1) = extent(|point| point.pressure);
+        let steps: Vec<f32> = points
+            .windows(2)
+            .map(|pair| (pair[1].x - pair[0].x).hypot(pair[1].y - pair[0].y))
+            .collect();
+        let length: f32 = steps.iter().sum();
+        let longest = steps.iter().copied().fold(0.0, f32::max);
         println!(
-            "\"{layer}\" {kind} {:?} width {} points {} x {x0:.1}..{x1:.1} y {y0:.1}..{y1:.1} pressure {p0:.3}..{p1:.3} first {:.3} last {:.3}",
+            "\"{layer}\" {kind} {:?} width {} fade {} points {} length {length:.1} longest step {longest:.1} x {x0:.1}..{x1:.1} y {y0:.1}..{y1:.1} pressure {p0:.3}..{p1:.3} first {:.3} last {:.3}",
             stroke.brush.engine,
             stroke.width,
+            stroke.brush.fade,
             points.len(),
             points.first().map_or(0.0, |point| point.pressure),
             points.last().map_or(0.0, |point| point.pressure),
         );
+        if std::env::var_os("UGU_POINTS").is_some() {
+            let listed: Vec<String> = points
+                .iter()
+                .map(|point| format!("{:.0},{:.0}", point.x, point.y))
+                .collect();
+            println!("  {}", listed.join(" "));
+        }
     }
     Ok(())
 }

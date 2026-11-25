@@ -114,14 +114,14 @@ public static class Native
     }
 
     // A drag through the points, in steps of a few pixels every few ms.
-    public static void Drag(int[] xs, int[] ys)
+    public static void Drag(int[] xs, int[] ys, int stride = 4)
     {
         Glide(xs[0], ys[0]);
         System.Threading.Thread.Sleep(50);
         Down();
         for (int i = 1; i < xs.Length; i++)
         {
-            int steps = Math.Max(1, (int)(Math.Sqrt(Math.Pow(xs[i] - xs[i - 1], 2) + Math.Pow(ys[i] - ys[i - 1], 2)) / 4));
+            int steps = Math.Max(1, (int)(Math.Sqrt(Math.Pow(xs[i] - xs[i - 1], 2) + Math.Pow(ys[i] - ys[i - 1], 2)) / stride));
             for (int s = 1; s <= steps; s++)
             {
                 Glide(xs[i - 1] + (xs[i] - xs[i - 1]) * s / steps, ys[i - 1] + (ys[i] - ys[i - 1]) * s / steps);
@@ -1220,7 +1220,9 @@ Step 'Alt and a right-drag size the brush' {
 Step 'Fade narrows a stroke and ends it' {
     Stop-Apps
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+    $env:UGURUGU_LOG = 'info,wgpu_core=warn,wgpu_hal=warn,ugu_win=trace'
     $process = Start-App
+    Remove-Item Env:UGURUGU_LOG
     $words = Read-Words 'en'
     Send-Keys $process 'b'
     Set-Field $process 'Brush size' '24'
@@ -1232,14 +1234,41 @@ Step 'Fade narrows a stroke and ends it' {
     $column = { param($At, $Line) [Native]::DarkIn($x + $At - 2, $Line - 30, 4, 60) }
     Set-Field $process $words['stroke-fade-name'] '300'
     Start-Sleep -Milliseconds 300
-    [Native]::Drag(@($x, ($x + 600)), @($y, $y))
-    [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
-    Start-Sleep -Milliseconds 700
-    $start = & $column 30 $y
-    $middle = & $column 160 $y
-    $end = & $column 270 $y
-    $past = & $column 340 $y
-    $shot = Save-Screen 'fade-300'
+    # The Sandbox puts the pointer back where it was a move ago about twice
+    # a second (docs/rust/evidence.md section 142). A stroke that went back
+    # is longer than it looks, and its fade ends early, so the stroke is
+    # read back as it was stored and drawn again until none got in. Drawn in
+    # 13 moves, it takes less time than there is between two of them.
+    $recovery = Join-Path $env:TEMP 'gui-recovery'
+    $tries = 0
+    do {
+        $tries++
+        $drawn = Get-Date
+        [Native]::Drag(@($x, ($x + 416)), @($y, $y), 32)
+        [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $start = & $column 30 $y
+        $middle = & $column 160 $y
+        $end = & $column 270 $y
+        $past = & $column 340 $y
+        $shot = Save-Screen 'fade-300'
+        # The recovery copy is written once the document has been quiet.
+        $stored = Wait-Until {
+            Get-ChildItem -Recurse -Filter '*.ugurugu' $recovery -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -gt $drawn } | Select-Object -First 1
+        } 20 'the recovery copy of the stroke'
+        $stroke = (& (Join-Path $in 'ugu-doc.exe') strokes $stored.FullName | Select-Object -Last 1)
+        if ($stroke -notmatch 'length ([0-9.]+) .* x ([0-9.]+)\.\.([0-9.]+) ') {
+            throw "no stroke in the recovery copy: $stroke"
+        }
+        $extra = [double]$Matches[1] - ([double]$Matches[3] - [double]$Matches[2])
+        if ($extra -gt 0.5) {
+            Send-Keys $process '^z'
+        }
+    } while ($extra -gt 0.5 -and $tries -lt 10)
+    if ($extra -gt 0.5) {
+        throw "the pointer went back in each of $tries strokes, by $extra px in the last"
+    }
     $line = $y - 90
     Set-Field $process $words['stroke-fade-name'] '0'
     Start-Sleep -Milliseconds 300
@@ -1249,7 +1278,7 @@ Step 'Fade narrows a stroke and ends it' {
     $whole = & $column 340 $line
     $wholeShot = Save-Screen 'fade-off'
     Stop-Apps
-    $detail = "dark in a 4px column: at 30px $start, 160px $middle, 270px $end, 340px $past; without a fade at 340px $whole; $shot; $wholeShot"
+    $detail = "dark in a 4px column: at 30px $start, 160px $middle, 270px $end, 340px $past; without a fade at 340px $whole; stroke $tries had no move back; $shot; $wholeShot"
     if (-not ($start -gt $middle -and $middle -gt $end -and $end -gt 0 -and $past -eq 0 -and $whole -gt 0)) {
         throw $detail
     }

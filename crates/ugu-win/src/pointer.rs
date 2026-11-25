@@ -192,10 +192,20 @@ impl Shared {
                 sample: newest_first[0],
             },
         );
+        let given = newest_first.len();
         if let (Some(buffer), Some(last)) = (buffer.as_deref(), last) {
             // SAFETY: forwarded from the caller.
             newest_first.extend(unsafe { recover_mouse_moves(hwnd, info, current, buffer, last) });
         }
+        tracing::trace!(
+            ?current,
+            given,
+            recovered = newest_first.len() - given,
+            last_entry = ?last.and_then(|last| last.entry),
+            last_time = last.map(|last| last.time_ms),
+            buffer = ?buffer.as_deref().map(|buffer| &buffer[..buffer.len().min(6)]),
+            "mouse frame"
+        );
         newest_first.reverse();
         newest_first
     }
