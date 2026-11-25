@@ -813,7 +813,7 @@ impl LayerDock {
         let on_thumbnail = response
             .interact_pointer_pos()
             .is_some_and(|at| thumb.contains(at));
-        let modifiers = ui.input(|input| input.modifiers);
+        let modifiers = click_modifiers(ui);
         if response.clicked() && !toggles_hit && on_thumbnail && modifiers.command {
             // As in Clip Studio Paint, and the current layer stays.
             let combine = match (modifiers.shift, modifiers.alt) {
@@ -1310,6 +1310,28 @@ fn move_by_drop(session: &mut Session, id: LayerId, target: Drop) -> Result<Outc
     session.move_layer_to(id, parent, index)
 }
 
+/// The modifiers held when the primary button was let go this frame, as its
+/// event has them. The input's own are those at the end of the frame, and a
+/// key let go right after the button has changed them by then.
+fn click_modifiers(ui: &Ui) -> egui::Modifiers {
+    ui.input(|input| {
+        input
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                    ..
+                } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or(input.modifiers)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use egui::{Pos2, RawInput, Rect, vec2};
@@ -1348,6 +1370,85 @@ mod tests {
             let down = bounds(tr("layer-down"));
             let delete = bounds(tr("layer-delete"));
             assert!(delete.x0 >= down.x1, "at {width}: {down:?} and {delete:?}");
+        }
+    }
+
+    #[test]
+    fn ctrl_and_a_click_on_a_thumbnail_selects_the_drawing_and_keeps_the_layer() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut canvas = Canvas::new(Document::new([64, 64]), |_| {});
+        let below = canvas.session().current_layer();
+        canvas.edit(|session| session.add_layer()).unwrap();
+        let current = canvas.session().current_layer();
+        let mut dock = LayerDock::default();
+        let mut refusal = None;
+        let mut frame = |canvas: &mut Canvas, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.allocate_ui(vec2(300.0, 500.0), |ui| {
+                        dock.show(ui, canvas, &mut refusal);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update
+        };
+        let tree = frame(&mut canvas, Vec::new()).unwrap();
+        let name = canvas
+            .session()
+            .document()
+            .layer(below)
+            .unwrap()
+            .name
+            .clone();
+        let row = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label().is_some_and(|label| label == name))
+            .and_then(|(_, node)| node.bounds())
+            .expect("the row of the layer below");
+        let on_thumbnail = Pos2::new(
+            row.x0 as f32 + 4.0 + 13.0 + 12.0 + 20.0,
+            row.y0 as f32 + 28.0,
+        );
+        let on_name = Pos2::new(row.x0 as f32 + 150.0, row.y0 as f32 + 28.0);
+        let click = |at: Pos2, modifiers: egui::Modifiers| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers,
+            };
+            [
+                vec![
+                    egui::Event::ModifiersChanged(modifiers),
+                    egui::Event::PointerMoved(at),
+                ],
+                vec![button(true)],
+                // The key is let go right after the button, in the same frame.
+                vec![
+                    button(false),
+                    egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                ],
+            ]
+        };
+        // Beside the thumbnail, Ctrl changes nothing: the layer is chosen.
+        for (at, modifiers, chosen) in [
+            (on_thumbnail, egui::Modifiers::COMMAND, current),
+            (on_name, egui::Modifiers::COMMAND, below),
+        ] {
+            canvas.edit_settled(|session| session.select_layer(current));
+            for events in click(at, modifiers) {
+                frame(&mut canvas, events);
+            }
+            frame(&mut canvas, Vec::new());
+            assert_eq!(canvas.session().current_layer(), chosen, "{at:?}");
         }
     }
 
