@@ -1619,6 +1619,33 @@ mod tests {
     }
 
     #[test]
+    fn closing_gaps_keeps_a_fill_in_a_small_outline_with_an_opening() {
+        // A box 4 pixels across inside, open for one row on its right, in
+        // a wide canvas: wide in its middle, but nowhere roomy. The fill
+        // keeps the box and the pixel of its opening.
+        let size = [40u32, 30];
+        let mut pixels = vec![[0u8; 4]; 40 * 30];
+        for y in 10..16 {
+            for x in 10..16 {
+                let wall = !(11..15).contains(&x) || !(11..15).contains(&y);
+                if wall && !(x == 15 && y == 12) {
+                    pixels[y * 40 + x] = [0, 0, 0, 255];
+                }
+            }
+        }
+        let leaked = Selection::flood(&pixels, size, [12, 12], Compare::AlphaBoundary).unwrap();
+        assert_eq!(leaked.mask.bounds, [0, 0, 40, 30]);
+        for seed in [[12, 12], [11, 11], [14, 14]] {
+            let inside = leaked.closing_gaps(seed, 2);
+            assert_eq!(
+                (inside.mask.bounds, count(&inside)),
+                ([11, 11, 5, 4], 17),
+                "from {seed:?}"
+            );
+        }
+    }
+
+    #[test]
     fn closing_gaps_keeps_an_area_too_small_to_have_a_wide_part() {
         let (pixels, size) = ring();
         let inside = Selection::flood(&pixels, size, [10, 10], Compare::AlphaBoundary).unwrap();
