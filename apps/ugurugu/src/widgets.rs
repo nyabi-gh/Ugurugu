@@ -1492,7 +1492,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         };
-        let mut press = |value: &mut f32, arrow| {
+        let press = |value: &mut f32, arrow| {
             whole_bar(&ctx, value, 20.0, vec![key(arrow, true)]);
             whole_bar(&ctx, value, 20.0, vec![key(arrow, false)]);
         };

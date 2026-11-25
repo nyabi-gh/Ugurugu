@@ -2741,3 +2741,28 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 - 고친 빌드: Ctrl+클릭으로 다른 레이어가 현재인 채 두 선의 둘레가 선택됐고, Ctrl+Alt+클릭으로 선택이 없어졌고, Ctrl+Shift+클릭으로 다시 생겼다(한 번씩).
 
 **결론과 코드 위치:** 두 기능은 실행한 앱에서 동작한다. 수정 키를 프레임 끝의 상태로 읽으면 빠른 클릭에서 놓친다. `apps/ugurugu/src/ui/layers.rs` `click_modifiers`.
+
+## 140. 3.7.0에 들어갈 변경의 검토와 고친 것 (2026-11-25)
+
+**질문:** `v3.6.4`부터 `5f5bfa0`까지의 변경(#204, #206, #207, #212, #214)에 버그나 회귀가 있는가.
+
+**방법:** 하위 에이전트(Claude Opus 5.5, effort medium)가 `git diff v3.6.4..main -- apps crates tools/ugu-doc`와 둘레의 코드를 읽고 의심 가는 곳은 임시 시험으로 확인했다(작업 트리는 그대로 두게 했다). 보고된 여섯 가지를 코드로 다시 읽고, 고친 것마다 고치기 전에 실패하는 시험을 먼저 썼다. 접근성 트리 전반, macOS 메뉴, 실제 펜 입력은 보지 않았다.
+
+**결과:**
+
+| 문제 | 재현(고치기 전) | 고친 뒤 | 시험 |
+|---|---|---|---|
+| 값을 정수로 두는 값 막대에서 Shift 끌기가 듣지 않음: 프레임마다 더한 몫이 호출한 쪽의 반올림에 버려진다 | 200pt 막대(0~100)를 프레임마다 3pt씩 60프레임 끌어도 50 그대로 | 59(180pt의 1/10) | `widgets::tests::shift_drags_a_bar_of_whole_numbers_a_tenth_as_fast` |
+| 같은 막대의 방향키: 범위의 1/100이 반올림에 버려진다(틈 닫기 0~20) | 2에서 → 를 눌러도 2 | 3, ← 두 번에 1 | `an_arrow_key_moves_a_bar_of_whole_numbers_by_one` |
+| 멈춘 캔버스에서 그리는 중 재생 키: 바로 재생을 시작하며 끌던 것을 끝낸다 | 획이 사라지고 재생 | 획이 들어간 뒤 재생, 끄는 중 두 번 누르면 그대로 | `canvas::tests::the_play_key_during_a_stroke_on_a_still_canvas_plays_once_it_is_drawn` |
+| 투명색을 켠 채 지금 색과 같은 색을 고름: 색이 바뀐 것을 보고 끄고 있었다 | 색상환에서 검정을 눌러도 켜진 채 | 꺼짐 | `ui::color::tests::pressing_the_colour_it_already_is_chooses_it_over_the_transparent_one` |
+| 레이어 그림 선택이 기다리는 사이 그 레이어를 지움 | "그룹에는 그릴 수 없습니다" 안내 | 안내 없음, 선택 없음 | `canvas::tests::selecting_the_drawing_of_a_layer_removed_meanwhile_does_nothing` |
+
+고치지 않은 것 둘:
+
+- 틈 닫기의 작은 조각(B3-215). `rooms(4)`의 통로에 (40, 24)를 열고 gap 3으로 (40, 22)를 누르면 43화소([35, 20, 11, 5])만 남는다(불룩한 곳이 없으면 가까운 방 1048화소). 누른 조각도 여유가 있어야 시작점이 되게 바꾸면 이 경우는 방을 채우지만, 6×6 테두리에 안쪽 4×4, 오른쪽에 1px 틈이 난 상자를 gap 2로 누를 때 17화소(상자와 틈의 화소)가 아니라 캔버스 1181화소가 된다. 그래서 그 변경은 넣지 않았고 뒤의 경우를 시험으로 남겼다.
+- 레이어 그림 선택이 숨긴 레이어, 이 프레임에 나오지 않는 셀, 클리핑에 가려진 부분도 고른다. 동작은 두고 릴리스 노트와 decisions.md의 표현을 "그려진 것"으로 고쳤다.
+
+문제를 찾지 못한 곳(하위 에이전트의 보고): 새 C 키와 다른 단축키·글자 입력, 설정 파일 읽기, 투명색과 대칭자·픽셀 모드·페이드·펜의 지우개 끝, 틈 닫기의 캔버스 가장자리와 색인 범위.
+
+**결론과 코드 위치:** 다섯 가지를 고쳤고 하나는 B3-215로 남겼다. `apps/ugurugu/src/widgets.rs` `ValueBar::show`, `apps/ugurugu/src/canvas.rs` `toggle_playback`·`fill_area`, `crates/ugu-session/src/tools.rs` `Tools::choose_color`.
