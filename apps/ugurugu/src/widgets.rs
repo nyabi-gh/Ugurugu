@@ -621,19 +621,33 @@ impl ValueBar<'_> {
             }
         }
         if typing.is_none() {
-            if response.dragged()
-                && let Some(pointer) = response.interact_pointer_pos()
-            {
-                let along = if ui.input(|input| input.modifiers.shift) {
-                    scale.along(*value, low, high) + response.drag_delta().x * 0.1 / rect.width()
-                } else {
-                    (pointer.x - rect.left()) / rect.width()
-                };
-                let new = scale.value(along.clamp(0.0, 1.0), low, high);
-                if new != *value {
-                    *value = new;
-                    response.mark_changed();
+            // Where a slow drag has got to. The caller may keep a rounder
+            // value than a frame's share of the drag, so the drag is added
+            // up here and not on the value.
+            let slow = response.id.with("slow drag");
+            let pointer = response
+                .interact_pointer_pos()
+                .filter(|_| response.dragged());
+            match pointer {
+                Some(pointer) => {
+                    let along = if ui.input(|input| input.modifiers.shift) {
+                        let from: Option<f32> = ui.data(|data| data.get_temp(slow));
+                        let along = from.unwrap_or_else(|| scale.along(*value, low, high))
+                            + response.drag_delta().x * 0.1 / rect.width();
+                        let along = along.clamp(0.0, 1.0);
+                        ui.data_mut(|data| data.insert_temp(slow, along));
+                        along
+                    } else {
+                        ui.data_mut(|data| data.remove::<f32>(slow));
+                        ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0)
+                    };
+                    let new = scale.value(along, low, high);
+                    if new != *value {
+                        *value = new;
+                        response.mark_changed();
+                    }
                 }
+                None => ui.data_mut(|data| data.remove::<f32>(slow)),
             }
             if response.has_focus() {
                 let delta = ui.input(|input| {
@@ -641,7 +655,16 @@ impl ValueBar<'_> {
                         - i8::from(input.key_pressed(egui::Key::ArrowLeft))
                 });
                 if delta != 0 {
-                    *value = scale.stepped(*value, delta > 0, low, high);
+                    // The least the value shows, or a hundredth of a short
+                    // range would be rounded away by the caller.
+                    let least = 10f32.powi(-(decimals as i32));
+                    let next = scale.stepped(*value, delta > 0, low, high);
+                    let next = if delta > 0 {
+                        next.max(*value + least)
+                    } else {
+                        next.min(*value - least)
+                    };
+                    *value = next.clamp(low, high);
                     response.mark_changed();
                 }
             }
@@ -1386,6 +1409,98 @@ mod tests {
         // Evenly shared, the same sizes are where they were.
         assert_eq!(Scale::Even.along(64.5, 1.0, 128.0), 0.5);
         assert_eq!(Scale::Even.value(0.5, 1.0, 128.0), 64.5);
+    }
+
+    /// A value bar 200 points wide from 0 to `high`, whose caller keeps
+    /// whole numbers as most panels do, shown for one frame with `events`.
+    fn whole_bar(
+        ctx: &egui::Context,
+        value: &mut f32,
+        high: f32,
+        events: Vec<egui::Event>,
+    ) -> Response {
+        let mut shown = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 200.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ui| {
+                ui.allocate_ui(egui::vec2(200.0, 40.0), |ui| {
+                    let bar = ValueBar {
+                        label: "Value",
+                        name: "Value",
+                        suffix: "",
+                        decimals: 0,
+                        scale: Scale::Even,
+                    };
+                    shown = Some(bar.show(ui, value, 0.0..=high));
+                    *value = value.round();
+                });
+            },
+        );
+        output.textures_delta.clear();
+        shown.expect("the bar was shown")
+    }
+
+    #[test]
+    fn shift_drags_a_bar_of_whole_numbers_a_tenth_as_fast() {
+        let ctx = egui::Context::default();
+        let mut value = 50.0;
+        let rect = whole_bar(&ctx, &mut value, 100.0, Vec::new()).rect;
+        let at = |x: f32| egui::pos2(rect.left() + x, rect.center().y);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at(20.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::SHIFT,
+        };
+        whole_bar(
+            &ctx,
+            &mut value,
+            100.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                egui::Event::PointerMoved(at(20.0)),
+                button(true),
+            ],
+        );
+        // 3 points a frame: less than the whole number a frame's share is.
+        for frame in 1..=60 {
+            let moved = egui::Event::PointerMoved(at(20.0 + 3.0 * frame as f32));
+            whole_bar(&ctx, &mut value, 100.0, vec![moved]);
+        }
+        whole_bar(&ctx, &mut value, 100.0, vec![button(false)]);
+        // 180 points of 200, a tenth as fast, of a range of 100.
+        assert_eq!(value, 59.0);
+    }
+
+    #[test]
+    fn an_arrow_key_moves_a_bar_of_whole_numbers_by_one() {
+        let ctx = egui::Context::default();
+        let mut value = 2.0;
+        let id = whole_bar(&ctx, &mut value, 20.0, Vec::new()).id;
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        let key = |key, pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut press = |value: &mut f32, arrow| {
+            whole_bar(&ctx, value, 20.0, vec![key(arrow, true)]);
+            whole_bar(&ctx, value, 20.0, vec![key(arrow, false)]);
+        };
+        press(&mut value, egui::Key::ArrowRight);
+        assert_eq!(value, 3.0);
+        press(&mut value, egui::Key::ArrowLeft);
+        press(&mut value, egui::Key::ArrowLeft);
+        assert_eq!(value, 1.0);
     }
 
     #[test]
