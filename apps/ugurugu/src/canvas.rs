@@ -1157,6 +1157,12 @@ impl Canvas {
         if !self.animation_allowed {
             return;
         }
+        // Playing would end whatever is being dragged, so it waits until
+        // that is over, as it does after a stroke that paused it.
+        if !matches!(self.interaction, Interaction::Idle) {
+            self.tab.resume_playback = true;
+            return;
+        }
         self.cancel_sizing();
         // Playing moves through frames, which applies a pending transform or
         // placed text.
@@ -2839,6 +2845,36 @@ mod tests {
         canvas.tick(Instant::now());
         assert!(!canvas.is_playing());
         assert_eq!(canvas.session().undo_label(), Some("Draw"));
+    }
+
+    #[test]
+    fn the_play_key_during_a_stroke_on_a_still_canvas_plays_once_it_is_drawn() {
+        let mut canvas = super::Canvas::new(Document::new([64, 64]), |_| {});
+        let begin = |canvas: &mut super::Canvas| {
+            canvas.apply(CanvasInput::Begin(
+                Gesture::Draw,
+                PointerKind::Mouse,
+                press(10.0, 10.0),
+            ));
+        };
+        begin(&mut canvas);
+        canvas.toggle_playback();
+        canvas.tick(Instant::now());
+        assert!(!canvas.is_playing());
+        canvas.apply(CanvasInput::End(press(20.0, 20.0)));
+        assert_eq!(canvas.session().undo_label(), Some("Draw"));
+        canvas.tick(Instant::now());
+        assert!(canvas.is_playing());
+        // Pressed twice during a stroke, it stays as it was.
+        canvas.toggle_playback();
+        let revision = canvas.session().revision();
+        begin(&mut canvas);
+        canvas.toggle_playback();
+        canvas.toggle_playback();
+        canvas.apply(CanvasInput::End(press(30.0, 20.0)));
+        canvas.tick(Instant::now());
+        assert!(!canvas.is_playing());
+        assert!(canvas.session().revision() > revision);
     }
 
     #[test]
