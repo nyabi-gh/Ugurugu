@@ -1701,10 +1701,13 @@ impl Canvas {
             .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
         let before = self.key();
         if let Some(layer) = click.drawn {
-            if let Err(error) = self
-                .tab
-                .session
-                .select_drawn(layer, click.combine, reference)
+            // With nothing to read, the layer was removed or made a group
+            // while this waited: what was clicked is no longer there.
+            if read
+                && let Err(error) = self
+                    .tab
+                    .session
+                    .select_drawn(layer, click.combine, reference)
             {
                 self.fill_notice(&error);
             }
@@ -3042,6 +3045,26 @@ mod tests {
             .id;
         canvas.select_drawn(group, Combine::Replace);
         assert_eq!(canvas.notice(), Some(tr("layer-select-drawn-group")));
+    }
+
+    #[test]
+    fn selecting_the_drawing_of_a_layer_removed_meanwhile_does_nothing() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([64, 64]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        canvas.edit(|session| session.add_layer()).unwrap();
+        settle(&mut canvas, &renders);
+        let removed = canvas.session().current_layer();
+        // Waiting for the worker to draw the layer.
+        canvas.tab.split = None;
+        canvas.select_drawn(removed, Combine::Replace);
+        assert_eq!(canvas.tab.area_clicks.len(), 1);
+        canvas.edit(|session| session.remove_layer()).unwrap();
+        settle(&mut canvas, &renders);
+        assert!(canvas.tab.area_clicks.is_empty());
+        assert_eq!(canvas.notice(), None);
+        assert!(canvas.session().selection().is_none());
     }
 
     #[test]
