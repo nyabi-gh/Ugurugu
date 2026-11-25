@@ -59,7 +59,10 @@ pub fn window(ui: &mut egui::Ui, parts: Parts<'_>) -> Shown {
     let mut canvas_area = [0; 4];
     let mut ants = None;
     panels.follow_document(canvas);
-    panels.color.follow(canvas.tools().color);
+    // A colour chosen anywhere is chosen over the transparent one.
+    if panels.color.follow(canvas.tools().color) {
+        canvas.tools_mut().transparent = false;
+    }
     // Asked for again by the navigator if it is shown.
     panels.navigator.wanted = None;
     super::actions::sync_animation_tools(canvas, &mut panels.layout);

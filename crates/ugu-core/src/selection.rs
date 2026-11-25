@@ -357,6 +357,32 @@ impl Selection {
         reached.selection()
     }
 
+    /// The pixels of `pixels`, premultiplied rows of a canvas of `canvas`,
+    /// that stop a fill by alpha; `None` when there are none.
+    pub fn opaque(pixels: &[[u8; 4]], canvas: [u32; 2]) -> Option<Self> {
+        let width = canvas[0] as usize;
+        if width == 0 || pixels.len() != width * canvas[1] as usize {
+            return None;
+        }
+        let mut drawn = Canvas::empty(canvas);
+        for (y, row) in pixels.chunks_exact(width).enumerate() {
+            let mut x = 0;
+            while x < width {
+                let Some(from) = row[x..].iter().position(|pixel| pixel[3] >= 128) else {
+                    break;
+                };
+                let from = x + from;
+                let to = row[from..]
+                    .iter()
+                    .position(|pixel| pixel[3] < 128)
+                    .map_or(width, |run| from + run);
+                drawn.fill(y, from, to);
+                x = to;
+            }
+        }
+        drawn.selection()
+    }
+
     /// This flooded area without what it reached through openings up to
     /// about `gap` pixels wide; `seed` is the pixel it was flooded from.
     ///
@@ -1438,6 +1464,34 @@ mod tests {
             Selection::flood(&pixels, size, [24, 0], Compare::AlphaBoundary),
             None
         );
+    }
+
+    #[test]
+    fn opaque_is_what_a_fill_by_alpha_stops_at() {
+        let size = [20u32, 6];
+        let mut pixels = vec![[0u8; 4]; 120];
+        for (x, y, alpha) in [(3, 1, 255), (4, 1, 128), (5, 1, 127), (17, 4, 200)] {
+            pixels[y * 20 + x] = [0, 0, 0, alpha];
+        }
+        let drawn = Selection::opaque(&pixels, size).unwrap();
+        assert_eq!(drawn.mask.bounds, [3, 1, 15, 4]);
+        for y in 0..6 {
+            for x in 0..20 {
+                assert_eq!(
+                    drawn.mask.contains(x, y),
+                    [(3, 1), (4, 1), (17, 4)].contains(&(x, y)),
+                    "{x} {y}"
+                );
+            }
+        }
+        // With the area a fill reaches from a clear pixel, the whole canvas.
+        let clear = Selection::flood(&pixels, size, [0, 0], Compare::AlphaBoundary).unwrap();
+        assert_eq!(
+            Selection::combine(Some(&clear), Some(drawn), Combine::Add),
+            Selection::all(size)
+        );
+        assert_eq!(Selection::opaque(&[[0; 4]; 120], size), None);
+        assert_eq!(Selection::opaque(&pixels, [20, 5]), None);
     }
 
     /// An 80×60 canvas with an opaque box outline around x 20..60, y 15..45,

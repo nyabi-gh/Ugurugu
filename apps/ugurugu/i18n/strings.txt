@@ -323,6 +323,8 @@ layer-show-hide | Show or hide layer | 레이어 표시 또는 숨기기 | レ�
 brush-smaller | Smaller brush | 브러시 작게 | ブラシを小さく | 缩小画笔
 brush-larger | Larger brush | 브러시 크게 | ブラシを大きく | 放大画笔
 color-swap | Swap current and previous color | 현재 색상과 이전 색상 바꾸기 | 現在の色と前の色を入れ替え | 交换当前颜色和上一个颜色
+color-transparent | Transparent color | 투명색 | 透明色 | 透明色
+color-transparent-tip | Draw with the transparent color: the brush and the shape tool erase in their own shapes. Choosing a color ends it. | 투명색으로 그립니다. 브러시와 도형 도구가 제 모양대로 지웁니다. 색상을 고르면 끝납니다. | 透明色で描きます。ブラシと図形ツールがそれぞれの形で消します。色を選ぶと終わります。 | 用透明色绘制：画笔和形状工具按各自的形状擦除。选择颜色后结束。
 layer-up | Move layer up | 레이어 위로 이동 | レイヤーを上へ移動 | 上移图层
 layer-down | Move layer down | 레이어 아래로 이동 | レイヤーを下へ移動 | 下移图层
 layer-move | Move layer | 레이어 이동 | レイヤーの移動 | 移动图层
@@ -356,6 +358,8 @@ layer-outline-choose-color | Choose the outline color | 외곽선 색 선택 | �
 layer-visible | Layer is visible | 레이어가 표시되어 있습니다 | レイヤーは表示されています | 图层可见
 layer-hidden | Layer is hidden | 레이어가 숨겨져 있습니다 | レイヤーは非表示です | 图层已隐藏
 layer-wobbles | Layer wobbles | 레이어가 우글거립니다 | レイヤーはゆらいでいます | 图层会抖动
+layer-select-drawn-tip | Ctrl+click to select what the layer shows. Shift adds to the selection, Alt takes away from it. | Ctrl+클릭하면 레이어에 그려진 부분을 선택합니다. Shift는 선택 영역에 더하고 Alt는 뺍니다. | Ctrl+クリックでレイヤーに描かれた部分を選択します。Shift で選択範囲に追加し、Alt で除きます。 | 按住 Ctrl 单击可选择图层上绘制的部分。Shift 添加到选区，Alt 从选区中减去。
+layer-select-drawn-group | Only what a paint layer shows can be selected this way, not a group. | 이 방법으로는 그룹이 아니라 페인트 레이어에 그려진 부분만 선택할 수 있습니다. | この方法で選択できるのは、グループではなくペイントレイヤーに描かれた部分だけです。 | 此方式只能选择绘画图层上绘制的部分，不能选择组。
 layer-still | Layer holds still | 레이어가 멈춰 있습니다 | レイヤーは静止しています | 图层保持静止
 group-fold | Fold group | 그룹 접기 | グループを折りたたむ | 折叠组
 group-unfold | Unfold group | 그룹 펼치기 | グループを展開 | 展开组

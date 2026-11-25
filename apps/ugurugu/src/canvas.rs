@@ -73,8 +73,8 @@ const SMALL_EDGE: f64 = 256.0;
 /// one on screen, and the timing starts again from when it arrives, so a
 /// cold start plays slowly instead of standing still until frames that were
 /// due long ago come round again.
-/// A wand or bucket click waiting for its turn, or for the worker to draw
-/// what it reads.
+/// A wand or bucket click, or a layer whose drawing is to be selected,
+/// waiting for its turn or for the worker to draw what it reads.
 struct AreaClick {
     /// Tells the answer to its latest request apart from older ones.
     number: u64,
@@ -83,6 +83,9 @@ struct AreaClick {
     asked: Option<Key>,
     /// Whether there was anything to read, once the answer came.
     read: Option<bool>,
+    /// The layer to select the drawing of, in place of the tool's click at
+    /// `point`.
+    drawn: Option<LayerId>,
     point: [f64; 2],
     tools: Tools,
     combine: Combine,
@@ -1607,10 +1610,41 @@ impl Canvas {
             number: 0,
             asked: None,
             read: None,
+            drawn: None,
             point,
             tools: self.tools.clone(),
             combine: self.combine(),
             started,
+        });
+        self.end_area_clicks();
+    }
+
+    /// Selects what the paint layer `layer` shows on this frame, combined
+    /// with the selection as `combine` says. It waits its turn and for what
+    /// it reads as a wand click does.
+    pub fn select_drawn(&mut self, layer: LayerId, combine: Combine) {
+        self.notice = None;
+        let document = self.tab.session.document();
+        if !matches!(
+            document.layer(layer).map(|layer| &layer.kind),
+            Some(LayerKind::Paint(_))
+        ) {
+            self.notice = Some(tr("layer-select-drawn-group").to_owned());
+            return;
+        }
+        self.pause_playback();
+        if let Err(error) = self.tab.session.settle() {
+            return self.fill_notice(&FillError::Edit(error));
+        }
+        self.tab.area_clicks.push_back(AreaClick {
+            number: 0,
+            asked: None,
+            read: None,
+            drawn: Some(layer),
+            point: [0.0; 2],
+            tools: self.tools.clone(),
+            combine,
+            started: Instant::now(),
         });
         self.end_area_clicks();
     }
@@ -1634,8 +1668,13 @@ impl Canvas {
                 click.number = self.tab.clicks;
                 click.asked = Some(key);
                 click.read = None;
-                let reads = click.tools.fill.reads;
-                match self.read_reference(self.tab.clicks, reads) {
+                let reference = match (click.drawn, click.tools.fill.reads) {
+                    (Some(layer), _) => Reference::Layer(layer),
+                    (None, Reads::Current) => Reference::Layer(self.tab.session.current_layer()),
+                    (None, Reads::Marked) => Reference::Marked,
+                    (None, Reads::Visible) => Reference::Visible,
+                };
+                match self.read_reference(self.tab.clicks, reference) {
                     Some(read) => read,
                     None => return,
                 }
@@ -1655,7 +1694,15 @@ impl Canvas {
             .filter(|_| read)
             .map(|pixels| pixels.data_as_u8_slice().as_chunks::<4>().0);
         let before = self.key();
-        if click.tools.tool == Tool::Wand {
+        if let Some(layer) = click.drawn {
+            if let Err(error) = self
+                .tab
+                .session
+                .select_drawn(layer, click.combine, reference)
+            {
+                self.fill_notice(&error);
+            }
+        } else if click.tools.tool == Tool::Wand {
             if let Err(error) =
                 self.tab
                     .session
@@ -1691,13 +1738,8 @@ impl Canvas {
     /// `self.tab.reference` when the split shows this frame and holds the
     /// layers; `false` when there is nothing to read, `None` when the worker
     /// draws them instead, for click `number`.
-    fn read_reference(&mut self, number: u64, reads: Reads) -> Option<bool> {
+    fn read_reference(&mut self, number: u64, reference: Reference) -> Option<bool> {
         let document = self.tab.session.document();
-        let reference = match reads {
-            Reads::Current => Reference::Layer(self.tab.session.current_layer()),
-            Reads::Marked => Reference::Marked,
-            Reads::Visible => Reference::Visible,
-        };
         let frame = self.tab.session.frame();
         let plan = RenderPlan::reference(document, reference, frame);
         if plan.layers.is_empty() {
@@ -2899,6 +2941,71 @@ mod tests {
             canvas.adopt(rendered);
             canvas.sync();
         }
+    }
+
+    #[test]
+    fn a_layer_s_drawing_is_selected_whichever_layer_is_current() {
+        let (to_test, renders) = std::sync::mpsc::channel();
+        let mut canvas = super::Canvas::new(Document::new([320, 200]), move |rendered| {
+            let _ = to_test.send(rendered);
+        });
+        let drawn_on = canvas.session().current_layer();
+        let tools = canvas.tools().clone();
+        canvas.edit(|session| {
+            let point = |y, time| ugu_session::InputPoint {
+                position: [160.0, y],
+                pressure: None,
+                time,
+            };
+            session.begin_stroke(&tools, point(40.0, 0.0)).unwrap();
+            session.extend_stroke(point(100.0, 8.0));
+            session.end_stroke(point(160.0, 16.0)).unwrap();
+            session.add_layer().unwrap();
+        });
+        settle(&mut canvas, &renders);
+        let current = canvas.session().current_layer();
+        assert_ne!(current, drawn_on);
+        let bounds = |canvas: &super::Canvas| {
+            canvas
+                .session()
+                .selection()
+                .map(|selection| selection.mask().bounds)
+        };
+        // Read from the split, then drawn by the worker.
+        for split in [true, false] {
+            canvas.edit(|session| session.deselect()).unwrap();
+            settle(&mut canvas, &renders);
+            if !split {
+                canvas.tab.split = None;
+            }
+            canvas.select_drawn(drawn_on, Combine::Replace);
+            render_until(&mut canvas, &renders, |canvas| bounds(canvas).is_some());
+            let [left, top, width, height] = bounds(&canvas).unwrap();
+            assert!(
+                (155..=158).contains(&left)
+                    && (4..=8).contains(&width)
+                    && (35..=40).contains(&top)
+                    && (120..=130).contains(&height),
+                "{left} {top} {width} {height}, split {split}"
+            );
+            assert_eq!(canvas.session().current_layer(), current);
+        }
+        // The empty layer selects nothing, which replaces the selection.
+        canvas.select_drawn(current, Combine::Replace);
+        render_until(&mut canvas, &renders, |canvas| bounds(canvas).is_none());
+        // A group has nothing of its own to read.
+        canvas.edit(|session| session.add_group().unwrap());
+        settle(&mut canvas, &renders);
+        let group = canvas
+            .session()
+            .document()
+            .layers
+            .iter()
+            .find(|layer| matches!(layer.kind, LayerKind::Group(_)))
+            .expect("the group just added")
+            .id;
+        canvas.select_drawn(group, Combine::Replace);
+        assert_eq!(canvas.notice(), Some(tr("layer-select-drawn-group")));
     }
 
     #[test]

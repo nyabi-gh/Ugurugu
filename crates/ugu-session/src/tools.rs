@@ -201,6 +201,10 @@ pub struct Tools {
     pub tool: Tool,
     /// What strokes, fills and text are made with.
     pub color: Rgba8,
+    /// The brush and the shape tool take away what they would paint, each
+    /// in its own shape, as with Clip Studio Paint's transparent colour.
+    /// Fills and text keep the colour.
+    pub transparent: bool,
     /// The brush and eraser out of pixel mode.
     pub plain: Brushes,
     /// The brush and eraser in pixel mode, pixel presets only, so moving
@@ -222,6 +226,7 @@ impl Default for Tools {
         Self {
             tool: Tool::Pen,
             color: Rgba8([0, 0, 0, 255]),
+            transparent: false,
             plain: Brushes::plain(),
             pixel: Brushes::pixel(),
             selection_shape: ShapeKind::default(),
@@ -270,15 +275,17 @@ impl Tools {
     }
 
     /// Makes the colour that of `pixel`, a premultiplied pixel of the frame
-    /// shown; a clear pixel leaves it, as in 2.2.13. Returns whether the
-    /// colour changed.
+    /// shown, in place of the transparent colour too; a clear pixel leaves
+    /// it, as in 2.2.13. Returns whether what strokes are made with
+    /// changed.
     pub fn pick_color(&mut self, pixel: [u8; 4]) -> bool {
         if pixel[3] == 0 {
             return false;
         }
         let color = Rgba8::from_premultiplied(pixel);
-        let changed = self.color != color;
+        let changed = self.color != color || self.transparent;
         self.color = color;
+        self.transparent = false;
         changed
     }
 }

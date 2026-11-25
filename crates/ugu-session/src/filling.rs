@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use ugu_core::command;
+use ugu_core::document::LayerId;
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::selection::{Combine, Compare, Selection};
 
@@ -160,6 +161,41 @@ impl Session {
         };
         self.settle()?;
         let next = Selection::combine(self.selection().map(Arc::as_ref), Some(area), combine);
+        Ok(self.history_mut()?.select(label, next))
+    }
+
+    /// Selects what `layer` shows on this frame, a paint layer's pixels of
+    /// alpha 128 and over, combined with the selection as `combine` says;
+    /// returns whether the selection changed. `reference` is the layer
+    /// alone in its own pixels. A layer with nothing drawn selects nothing,
+    /// which replacing takes as clearing the selection.
+    pub fn select_drawn(
+        &mut self,
+        layer: LayerId,
+        combine: Combine,
+        reference: Option<&[[u8; 4]]>,
+    ) -> Result<bool, FillError> {
+        self.drop_live();
+        self.lasso = None;
+        let reference = reference.ok_or(FillError::NoLayer)?;
+        let canvas = self.document().canvas;
+        let drawn = Selection::opaque(reference, canvas).and_then(|drawn| {
+            match self.document().transform(layer, self.cycle()) {
+                Some(transform) => drawn.transformed(transform),
+                None => Some(drawn),
+            }
+        });
+        let label = match combine {
+            Combine::Replace if drawn.is_some() => "Select layer",
+            Combine::Replace => "Deselect",
+            Combine::Add => "Add to selection",
+            Combine::Subtract => "Subtract from selection",
+        };
+        if drawn.is_none() && combine != Combine::Replace {
+            return Ok(false);
+        }
+        self.settle()?;
+        let next = Selection::combine(self.selection().map(Arc::as_ref), drawn, combine);
         Ok(self.history_mut()?.select(label, next))
     }
 

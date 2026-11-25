@@ -17,6 +17,7 @@ use ugu_core::document::limits::OUTLINE_WIDTH;
 use ugu_core::document::{Document, Layer, LayerId, LayerKind};
 use ugu_core::edit::{EditError, Outcome};
 use ugu_core::ops::{Blend, MergeRefusal, Outline, Rgba8, Wobble};
+use ugu_core::selection::Combine;
 use ugu_session::Session;
 
 use crate::canvas::Canvas;
@@ -598,6 +599,10 @@ impl LayerDock {
             Stroke::new(1.0, theme::border()),
             egui::StrokeKind::Inside,
         );
+        if row.folded.is_none() {
+            ui.interact(thumb, response.id.with("thumbnail"), Sense::hover())
+                .on_hover_text(tr("layer-select-drawn-tip"));
+        }
 
         // Toggles on the right: visibility, and wobble for paint layers.
         let eye = Rect::from_center_size(
@@ -805,7 +810,19 @@ impl LayerDock {
         }
 
         let toggles_hit = eye_response.hovered() || ui.ctx().is_being_dragged(eye_response.id);
-        if response.clicked() && !toggles_hit {
+        let on_thumbnail = response
+            .interact_pointer_pos()
+            .is_some_and(|at| thumb.contains(at));
+        let modifiers = ui.input(|input| input.modifiers);
+        if response.clicked() && !toggles_hit && on_thumbnail && modifiers.command {
+            // As in Clip Studio Paint, and the current layer stays.
+            let combine = match (modifiers.shift, modifiers.alt) {
+                (true, false) => Combine::Add,
+                (false, true) => Combine::Subtract,
+                _ => Combine::Replace,
+            };
+            canvas.select_drawn(row.id, combine);
+        } else if response.clicked() && !toggles_hit {
             let id = row.id;
             canvas.edit_settled(|session| session.select_layer(id));
             // egui focuses only text fields on click; F2 and Space need the row.

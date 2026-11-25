@@ -996,6 +996,97 @@ fn the_wand_selects_the_area_clicked_and_combines_like_a_shape() {
 }
 
 #[test]
+fn a_layer_s_drawn_pixels_are_selected_added_and_subtracted() {
+    let mut session = session();
+    let layer = session.current_layer();
+    let reference = boxed();
+    let read = Some(reference.as_slice());
+    assert_eq!(
+        session.select_drawn(layer, Combine::Replace, read),
+        Ok(true)
+    );
+    assert_eq!(selected(&session), Some([40, 20, 80, 60]));
+    let mask = session.selection().unwrap().mask().clone();
+    // The 2 pixel line alone, not what it goes around.
+    assert!(mask.contains(41, 50) && !mask.contains(60, 50));
+    assert_eq!(session.undo_label(), Some("Select layer"));
+    assert_eq!(
+        session.select_drawn(layer, Combine::Replace, read),
+        Ok(false)
+    );
+    // Taken away from a rectangle over its left half, and added back.
+    drag(
+        &mut session,
+        ShapeKind::Rectangle,
+        [30.0, 10.0],
+        [80.0, 90.0],
+        Combine::Replace,
+    );
+    assert_eq!(
+        session.select_drawn(layer, Combine::Subtract, read),
+        Ok(true)
+    );
+    let mask = session.selection().unwrap().mask().clone();
+    assert!(!mask.contains(41, 50) && mask.contains(60, 50) && mask.contains(35, 50));
+    assert_eq!(session.undo_label(), Some("Subtract from selection"));
+    assert_eq!(session.select_drawn(layer, Combine::Add, read), Ok(true));
+    assert_eq!(selected(&session), Some([30, 10, 90, 80]));
+    // A layer with nothing drawn: nothing to add, and replacing deselects.
+    let empty = vec![[0u8; 4]; 200 * 100];
+    assert_eq!(
+        session.select_drawn(layer, Combine::Add, Some(&empty)),
+        Ok(false)
+    );
+    assert_eq!(
+        session.select_drawn(layer, Combine::Replace, Some(&empty)),
+        Ok(true)
+    );
+    assert!(session.selection().is_none());
+    // A group has no pixels of its own to read.
+    assert_eq!(
+        session.select_drawn(layer, Combine::Replace, None),
+        Err(FillError::NoLayer)
+    );
+}
+
+#[test]
+fn the_transparent_colour_makes_the_brush_and_shapes_erase() {
+    let mut session = session();
+    let mut tools = Tools::default();
+    let layer = session.current_layer();
+    draw(&mut session, &tools, 10.0, 60.0);
+    session.take_used_colors();
+    tools.transparent = true;
+    tools.color = Rgba8([200, 30, 30, 255]);
+    draw(&mut session, &tools, 20.0, 40.0);
+    assert!(matches!(
+        ops(&session, layer)[..],
+        [Op::Paint { .. }, Op::Erase { .. }]
+    ));
+    assert_eq!(session.undo_label(), Some("Erase"));
+    // In the brush's own shape and size, and its colour is not one used.
+    let erased = strokes_on(&session, layer).pop().unwrap();
+    let pen = tools.stroke(false);
+    assert_eq!(
+        (erased.width, erased.brush.tip),
+        (pen.width, pen.preset.brush.tip)
+    );
+    assert!(session.take_used_colors().is_empty());
+    tools.tool = Tool::Shape;
+    session.begin_shape(&tools, [100.0, 20.0]).unwrap();
+    session
+        .end_shape([150.0, 60.0], Default::default())
+        .unwrap();
+    assert!(matches!(
+        ops(&session, layer)[..],
+        [Op::Paint { .. }, Op::Erase { .. }, Op::Erase { .. }]
+    ));
+    // Picking a colour from the canvas ends it.
+    assert!(tools.pick_color([200, 30, 30, 255]));
+    assert!(!tools.transparent);
+}
+
+#[test]
 fn the_bucket_fills_the_area_clicked_once_and_only_inside_the_selection() {
     let mut session = session();
     let mut tools = Tools::default();

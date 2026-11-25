@@ -477,7 +477,8 @@ impl Session {
     }
 
     /// Starts a stroke with the current tool of `tools`: the eraser, else
-    /// the brush, of the brushes for the document's mode. Applies a pending
+    /// the brush, of the brushes for the document's mode; the brush erases
+    /// too while the colour is the transparent one. Applies a pending
     /// transform or placed text first, so the stroke is cut to the selection
     /// as they leave it.
     pub fn begin_stroke(&mut self, tools: &Tools, input: InputPoint) -> Result<(), StrokeRefused> {
@@ -531,7 +532,7 @@ impl Session {
             .layer_transform()
             .and_then(|transform| transform.inverse());
         let settings = *tools.stroke(self.pixel_mode());
-        let erase = tools.tool == Tool::Eraser;
+        let erase = tools.tool == Tool::Eraser || tools.transparent;
         self.strokes_started += 1;
         // A pixel brush draws whole pixels, a whole number of them wide.
         let pixel = settings.preset.brush.engine == BrushEngine::Pixel;

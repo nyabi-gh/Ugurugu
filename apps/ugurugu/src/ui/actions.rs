@@ -133,6 +133,7 @@ pub const TOOLS: &[Entry] = &[
     Do(A::SmallerBrush),
     Do(A::LargerBrush),
     Do(A::SwapColors),
+    Do(A::TransparentColor),
     Gap,
     Do(A::ImportTools),
     Do(A::ExportTools),
@@ -460,6 +461,7 @@ fn checked(action: Action, canvas: &Canvas, layout: &Layout) -> Option<bool> {
         A::Mirror => Some(canvas.is_mirrored()),
         A::Symmetry => Some(canvas.symmetry().on),
         A::PixelMode => Some(canvas.session().pixel_mode()),
+        A::TransparentColor => Some(canvas.tools().transparent),
         _ => None,
     }
 }
@@ -723,6 +725,10 @@ pub fn run(
         A::SmallerBrush => canvas.step_brush_size(false),
         A::LargerBrush => canvas.step_brush_size(true),
         A::SwapColors => panels.color.swap(canvas),
+        A::TransparentColor => {
+            let tools = canvas.tools_mut();
+            tools.transparent = !tools.transparent;
+        }
         A::ResetLayout => panels.set_layout(Layout::default()),
         A::AnimationTools => {
             panels.layout.animation_tools = !panels.layout.animation_tools;

@@ -488,6 +488,7 @@ actions! {
     SmallerBrush "smallerBrush" "brush-smaller" [plain(Key::OpenBracket)] [];
     LargerBrush "largerBrush" "brush-larger" [plain(Key::CloseBracket)] [];
     SwapColors "swapColors" "color-swap" [plain(Key::X)] [];
+    TransparentColor "transparentColor" "color-transparent" [plain(Key::C)] [];
     ImportTools "importToolPreset" "tools-import" [] [];
     ExportTools "exportToolPreset" "tools-export" [] [];
     NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];

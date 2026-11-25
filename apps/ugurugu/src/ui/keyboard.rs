@@ -349,6 +349,29 @@ fn the_layer_brush_size_and_colour_keys_act() {
 }
 
 #[test]
+fn c_draws_with_the_transparent_colour_until_a_colour_is_chosen() {
+    let mut window = Window::new();
+    window.frame(Vec::new());
+    window.key(NONE, Key::C);
+    assert!(window.canvas.tools().transparent);
+    window.key(NONE, Key::C);
+    assert!(!window.canvas.tools().transparent);
+    // Swapping colours, and a colour set from outside the panel, choose it.
+    window.key(NONE, Key::C);
+    window.key(NONE, Key::X);
+    assert!(!window.canvas.tools().transparent);
+    window.key(NONE, Key::C);
+    window.canvas.tools_mut().color = Rgba8([0, 0, 255, 255]);
+    window.frame(Vec::new());
+    assert!(!window.canvas.tools().transparent);
+    // The swatch in the colour panel turns it on and off.
+    window.click_named(tr("color-transparent"));
+    assert!(window.canvas.tools().transparent);
+    window.click_named(tr("color-transparent"));
+    assert!(!window.canvas.tools().transparent);
+}
+
+#[test]
 fn x_swaps_with_the_colour_before_while_the_colour_panel_is_closed() {
     let mut window = Window::new();
     window

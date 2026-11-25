@@ -154,8 +154,10 @@ impl ColorDock {
     /// Makes the colour shown last the previous one when the pen colour was
     /// changed elsewhere: by the eyedropper, the history or a restore, as
     /// 2.2.13's pair follows every change of colour. Every frame, so that X
-    /// swaps with the colour before also while the panel is hidden.
-    pub fn follow(&mut self, color: Rgba8) {
+    /// swaps with the colour before also while the panel is hidden. Returns
+    /// whether the colour was changed elsewhere.
+    pub fn follow(&mut self, color: Rgba8) -> bool {
+        let changed = self.seen.is_some_and(|seen| seen != color);
         if let Some(seen) = self.seen
             && seen != color
             && self.dragged_from.is_none()
@@ -163,6 +165,14 @@ impl ColorDock {
             self.previous = Some(seen);
         }
         self.seen = Some(color);
+        changed
+    }
+
+    /// Makes `color` the pen colour, chosen over the transparent one.
+    fn choose(canvas: &mut Canvas, color: Rgba8) {
+        let tools = canvas.tools_mut();
+        tools.color = color;
+        tools.transparent = false;
     }
 
     /// Swaps the pen colour and the previous one, as clicking the rear
@@ -173,7 +183,7 @@ impl ColorDock {
         let previous = self.previous.unwrap_or(Rgba8([255, 255, 255, 255]));
         self.previous = Some(picked);
         self.seen = Some(previous);
-        canvas.tools_mut().color = previous;
+        Self::choose(canvas, previous);
     }
 
     /// How tall the panel is with the wheel as wide as `width` allows.
@@ -344,7 +354,7 @@ impl ColorDock {
             hsv_to_rgb(hsv).map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
         let picked = Rgba8([r, g, b, (alpha * 255.0).round() as u8]);
         if picked != color {
-            canvas.tools_mut().color = picked;
+            Self::choose(canvas, picked);
         }
         self.seen = Some(picked);
         if !pressed
@@ -391,11 +401,17 @@ impl ColorDock {
                 Stroke::new(1.0, theme::border()),
                 egui::StrokeKind::Inside,
             );
+            // The ring is on what strokes are made with.
+            let front_ring = if canvas.tools().transparent {
+                Stroke::new(1.0, theme::border())
+            } else {
+                Stroke::new(3.0, theme::accent_ink())
+            };
             painter.rect(
                 front,
                 CornerRadius::same(theme::radius::CONTROL),
                 rgba(picked),
-                Stroke::new(3.0, theme::accent_ink()),
+                front_ring,
                 egui::StrokeKind::Inside,
             );
             if back_response.has_focus() {
@@ -415,8 +431,9 @@ impl ColorDock {
                 {
                     self.previous = Some(picked);
                     self.seen = Some(typed);
-                    canvas.tools_mut().color = typed;
+                    Self::choose(canvas, typed);
                 }
+                transparent_swatch(ui, canvas);
             });
         });
         let rest = ui.cursor().min.y - top - side;
@@ -451,6 +468,54 @@ impl ColorDock {
             return None;
         }
         parse_hex(&typed?, picked.0[3])
+    }
+}
+
+/// The transparent colour: a checkered swatch that is ringed while the
+/// brush erases, and turns that on and off.
+fn transparent_swatch(ui: &mut Ui, canvas: &mut Canvas) {
+    let on = canvas.tools().transparent;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(32.0, 16.0), Sense::click());
+    let response = response.on_hover_text(tr("color-transparent-tip"));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            true,
+            on,
+            tr("color-transparent"),
+        )
+    });
+    let painter = ui.painter().with_clip_rect(rect);
+    let cell = 8.0;
+    for row in 0..2 {
+        for column in 0..4 {
+            let shade = if (row + column) % 2 == 0 { 255 } else { 204 };
+            painter.rect_filled(
+                Rect::from_min_size(
+                    rect.min + egui::vec2(column as f32 * cell, row as f32 * cell),
+                    egui::Vec2::splat(cell),
+                ),
+                CornerRadius::ZERO,
+                egui::Color32::from_gray(shade),
+            );
+        }
+    }
+    let ring = if on {
+        Stroke::new(3.0, theme::accent_ink())
+    } else {
+        Stroke::new(1.0, theme::border())
+    };
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(theme::radius::SMALL),
+        ring,
+        egui::StrokeKind::Inside,
+    );
+    if response.has_focus() {
+        crate::widgets::focus_ring(ui.painter(), rect, theme::radius::SMALL);
+    }
+    if response.clicked() {
+        canvas.tools_mut().transparent = !on;
     }
 }
 
