@@ -154,10 +154,8 @@ impl ColorDock {
     /// Makes the colour shown last the previous one when the pen colour was
     /// changed elsewhere: by the eyedropper, the history or a restore, as
     /// 2.2.13's pair follows every change of colour. Every frame, so that X
-    /// swaps with the colour before also while the panel is hidden. Returns
-    /// whether the colour was changed elsewhere.
-    pub fn follow(&mut self, color: Rgba8) -> bool {
-        let changed = self.seen.is_some_and(|seen| seen != color);
+    /// swaps with the colour before also while the panel is hidden.
+    pub fn follow(&mut self, color: Rgba8) {
         if let Some(seen) = self.seen
             && seen != color
             && self.dragged_from.is_none()
@@ -165,14 +163,6 @@ impl ColorDock {
             self.previous = Some(seen);
         }
         self.seen = Some(color);
-        changed
-    }
-
-    /// Makes `color` the pen colour, chosen over the transparent one.
-    fn choose(canvas: &mut Canvas, color: Rgba8) {
-        let tools = canvas.tools_mut();
-        tools.color = color;
-        tools.transparent = false;
     }
 
     /// Swaps the pen colour and the previous one, as clicking the rear
@@ -183,7 +173,7 @@ impl ColorDock {
         let previous = self.previous.unwrap_or(Rgba8([255, 255, 255, 255]));
         self.previous = Some(picked);
         self.seen = Some(previous);
-        Self::choose(canvas, previous);
+        canvas.tools_mut().choose_color(previous);
     }
 
     /// How tall the panel is with the wheel as wide as `width` allows.
@@ -353,8 +343,9 @@ impl ColorDock {
         let [r, g, b] =
             hsv_to_rgb(hsv).map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
         let picked = Rgba8([r, g, b, (alpha * 255.0).round() as u8]);
-        if picked != color {
-            Self::choose(canvas, picked);
+        // A press on the colour it already is chooses it too.
+        if picked != color || pressed {
+            canvas.tools_mut().choose_color(picked);
         }
         self.seen = Some(picked);
         if !pressed
@@ -426,12 +417,12 @@ impl ColorDock {
                         .size(theme::SMALL)
                         .color(theme::muted()),
                 );
-                if let Some(typed) = self.hex_field(ui, picked, label.id)
-                    && typed != picked
-                {
-                    self.previous = Some(picked);
-                    self.seen = Some(typed);
-                    Self::choose(canvas, typed);
+                if let Some(typed) = self.hex_field(ui, picked, label.id) {
+                    if typed != picked {
+                        self.previous = Some(picked);
+                        self.seen = Some(typed);
+                    }
+                    canvas.tools_mut().choose_color(typed);
                 }
                 transparent_swatch(ui, canvas);
             });
@@ -671,6 +662,21 @@ mod tests {
                 .map(|channel| f32::from(channel) / 255.0);
             rgb_to_hsv([r, g, b])
         }
+    }
+
+    #[test]
+    fn pressing_the_colour_it_already_is_chooses_it_over_the_transparent_one() {
+        let black = Rgba8([0, 0, 0, 255]);
+        let mut wheel = Wheel::new(black);
+        wheel.canvas.tools_mut().transparent = true;
+        let center = wheel.area.center();
+        let side = wheel.area.width();
+        let thickness = (side * 0.11).max(10.0);
+        let corner = (side * 0.5 - MARGIN - thickness - RING_GAP) / std::f32::consts::SQRT_2;
+        // The square's bottom edge is black at any saturation.
+        wheel.click(center + Vec2::new(0.0, corner - 0.2));
+        assert_eq!(wheel.canvas.tools().color, black);
+        assert!(!wheel.canvas.tools().transparent);
     }
 
     #[test]

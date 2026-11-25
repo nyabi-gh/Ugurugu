@@ -356,13 +356,9 @@ fn c_draws_with_the_transparent_colour_until_a_colour_is_chosen() {
     assert!(window.canvas.tools().transparent);
     window.key(NONE, Key::C);
     assert!(!window.canvas.tools().transparent);
-    // Swapping colours, and a colour set from outside the panel, choose it.
+    // Swapping colours chooses one.
     window.key(NONE, Key::C);
     window.key(NONE, Key::X);
-    assert!(!window.canvas.tools().transparent);
-    window.key(NONE, Key::C);
-    window.canvas.tools_mut().color = Rgba8([0, 0, 255, 255]);
-    window.frame(Vec::new());
     assert!(!window.canvas.tools().transparent);
     // The swatch in the colour panel turns it on and off.
     window.click_named(tr("color-transparent"));

@@ -101,6 +101,6 @@ pub fn show(ui: &mut Ui, canvas: &mut Canvas) {
             });
         });
     if let Some(color) = chosen {
-        canvas.tools_mut().color = color;
+        canvas.tools_mut().choose_color(color);
     }
 }

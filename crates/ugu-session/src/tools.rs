@@ -284,8 +284,15 @@ impl Tools {
         }
         let color = Rgba8::from_premultiplied(pixel);
         let changed = self.color != color || self.transparent;
+        self.choose_color(color);
+        changed
+    }
+
+    /// Makes `color` what strokes, fills and text are made with, chosen
+    /// over the transparent colour: for every way of choosing a colour, the
+    /// one it already is too.
+    pub fn choose_color(&mut self, color: Rgba8) {
         self.color = color;
         self.transparent = false;
-        changed
     }
 }
