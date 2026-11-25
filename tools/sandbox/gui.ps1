@@ -1804,6 +1804,68 @@ Step 'The bucket fills where the symmetry ruler mirrors' {
     $detail
 }
 
+# The bucket's close gaps row, in both themes: an outline left open by more
+# than the brush is filled alone at the widest setting, and at 0 the fill
+# gets out of one like it.
+Step 'Close gaps keeps the bucket in an open outline' {
+    $words = Read-Words 'en'
+    $details = @()
+    foreach ($theme in @('dark', 'light')) {
+        Stop-Apps
+        Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
+        Set-Content -Path (Join-Path $env:TEMP 'gui-settings.json') -Encoding ascii -Value "{`"format`": `"ugurugu.settings`", `"version`": 1, `"checkForUpdates`": false, `"theme`": `"$theme`"}"
+        # Tall enough for the tool settings to show the row.
+        $process = Start-App 2700 1560
+        Send-Keys $process 'b'
+        Set-Field $process 'Brush size' '6'
+        Set-Field $process $words['canvas-zoom-percent'] '100'
+        Start-Sleep -Milliseconds 500
+        $pen = Save-Screen "gaps-$theme-pen"
+        $paper = Find-Paper $process
+        $w = $paper.Right - $paper.Left
+        $h = $paper.Bottom - $paper.Top
+        $top = $paper.Top + [int]($h * 0.3)
+        $bottom = $paper.Top + [int]($h * 0.6)
+        $row = [int](($top + $bottom) / 2)
+        $dark = { param([int] $x, [int] $y) [Native]::DarkIn($x - 20, $y - 20, 40, 40) }
+        # Two boxes, each ending 16 px short of where it started.
+        $insides = foreach ($share in @(0.15, 0.55)) {
+            $left = $paper.Left + [int]($w * $share)
+            $right = $left + [int]($w * 0.25)
+            [Native]::Drag(@($left, $right, $right, $left, $left), @($top, $top, $bottom, $bottom, ($top + 16)))
+            Start-Sleep -Milliseconds 300
+            [int](($left + $right) / 2)
+        }
+        $below = $paper.Top + [int]($h * 0.85)
+        Send-Keys $process 'g'
+        Start-Sleep -Milliseconds 300
+        Set-Field $process $words['fill-gap'] '20'
+        $widest = Get-Value $process $words['fill-gap']
+        [Native]::Drag(@($insides[0], $insides[0]), @($row, $row))
+        [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $kept = & $dark $insides[0] $row
+        $keptBelow = & $dark $insides[0] $below
+        $closed = Save-Screen "gaps-$theme-20"
+        Set-Field $process $words['fill-gap'] '0'
+        $off = Get-Value $process $words['fill-gap']
+        [Native]::Drag(@($insides[1], $insides[1]), @($row, $row))
+        [Native]::Glide($paper.Right + 40, $paper.Bottom + 40)
+        Start-Sleep -Milliseconds 700
+        $leaked = & $dark $insides[1] $row
+        $leakedBelow = & $dark $insides[1] $below
+        $open = Save-Screen "gaps-$theme-0"
+        Stop-Apps
+        $detail = "${theme}: the row reads $widest then $off; dark in 40x40 inside and below, at 20: $kept, $keptBelow; at 0: $leaked, $leakedBelow; $pen; $closed; $open"
+        if ($widest -ne 20 -or $off -ne 0 -or $kept -lt 1500 -or $keptBelow -ne 0 -or $leaked -lt 1500 -or $leakedBelow -lt 1500) {
+            throw $detail
+        }
+        $details += $detail
+    }
+    Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+    $details
+}
+
 Step 'Keyframes' {
     Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
     $process = Start-App
