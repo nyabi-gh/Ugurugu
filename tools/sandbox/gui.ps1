@@ -2119,14 +2119,21 @@ Step 'A wide brush keeps up with the pointer' {
             [Native]::Down()
             [Native]::Up()
         }
-        Start-Sleep -Seconds 1
-        $paper = Find-Paper $process
-        $w = $paper.Right - $paper.Left
-        $h = $paper.Bottom - $paper.Top
+        # The window shows the new canvas once it has been drawn, which takes
+        # longer the busier the Sandbox is: 1 s was not enough late in a full
+        # run (docs/rust/evidence.md section 143).
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Start-Sleep -Milliseconds 500
+            $paper = Find-Paper $process
+            $w = $paper.Right - $paper.Left
+            $h = $paper.Bottom - $paper.Top
+        } while ([Math]::Abs($w - $h) -gt 2 -and $clock.Elapsed.TotalSeconds -lt 30)
+        $resized = [int]$clock.ElapsedMilliseconds
         $canvasShot = Save-Screen 'wide-brush-canvas'
         if ([Math]::Abs($w - $h) -gt 2) {
             Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
-            throw "${brush}: the paper is $w x $h, not 4096 px square; $canvasShot"
+            throw "${brush}: the paper is $w x $h after $resized ms, not 4096 px square; $canvasShot"
         }
         Send-Keys $process 'b'
         # The pen's tab is the one shown at first.
@@ -2158,7 +2165,7 @@ Step 'A wide brush keeps up with the pointer' {
         }
         Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
         [pscustomobject]@{
-            Detail = "$brush ${size}px: paper $w x $h, $lead px ahead of the end, dark before $before, end shown after (ms): $($times -join ', '); $canvasShot; $shot"
+            Detail = "$brush ${size}px: paper $w x $h shown $resized ms after OK, $lead px ahead of the end, dark before $before, end shown after (ms): $($times -join ', '); $canvasShot; $shot"
             Failed = $before -gt 0 -or $size -ne 512 -or ($times | Where-Object { $_ -lt 0 -or $_ -gt 150 })
         }
     }
