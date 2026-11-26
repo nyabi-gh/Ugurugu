@@ -203,6 +203,12 @@ impl InputRouter {
                         {
                             if released.contains(button) {
                                 self.canvas_pointer = None;
+                                // egui saw none of the drag: its pointer is
+                                // still where the press was, and so would the
+                                // brush ring be until the pointer moves again.
+                                routed
+                                    .egui
+                                    .push(egui::Event::PointerMoved(to_points(sample.position)));
                                 routed.canvas.push(CanvasInput::End(sample));
                             } else {
                                 routed.canvas.push(CanvasInput::Extend(sample));
@@ -438,13 +444,38 @@ mod tests {
                 ],
             )],
         );
-        assert!(routed.egui.is_empty());
         assert!(matches!(
             routed.canvas[0],
             CanvasInput::Begin(Gesture::Draw, ..)
         ));
         assert!(matches!(routed.canvas[1], CanvasInput::Extend(..)));
         assert!(matches!(routed.canvas[2], CanvasInput::End(..)));
+        assert!(
+            !routed
+                .egui
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerButton { .. }))
+        );
+    }
+
+    #[test]
+    fn egui_learns_where_a_canvas_drag_ended() {
+        let mut router = InputRouter::default();
+        let routed = route(
+            &mut router,
+            vec![samples(
+                1,
+                vec![
+                    sample(150.0, Buttons::PRIMARY, 1),
+                    sample(300.0, Buttons::PRIMARY, 2),
+                    sample(300.0, Buttons::empty(), 3),
+                ],
+            )],
+        );
+        assert_eq!(
+            routed.egui,
+            [egui::Event::PointerMoved(egui::pos2(300.0, 0.0))]
+        );
     }
 
     #[test]
