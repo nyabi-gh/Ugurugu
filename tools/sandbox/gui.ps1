@@ -264,6 +264,31 @@ function Stop-Apps {
     Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
 }
 
+function Get-FreeMegabytes {
+    [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+}
+
+# CPU seconds each process has used so far, by id and name.
+function Get-ProcessSeconds {
+    $seconds = @{}
+    foreach ($process in Get-Process) {
+        if ($null -ne $process.CPU) {
+            $seconds["$($process.Id) $($process.ProcessName)"] = $process.CPU
+        }
+    }
+    $seconds
+}
+
+# The five processes that used the most CPU between two Get-ProcessSeconds.
+function Get-Busiest($Before, $After) {
+    $used = foreach ($key in $After.Keys) {
+        $from = if ($Before.ContainsKey($key)) { $Before[$key] } else { 0 }
+        [pscustomobject]@{ Name = ($key -split ' ', 2)[1]; Seconds = $After[$key] - $from }
+    }
+    ($used | Sort-Object Seconds -Descending | Select-Object -First 5 |
+        ForEach-Object { '{0} {1:0.0}' -f $_.Name, $_.Seconds }) -join ', '
+}
+
 function Save-Screen([string] $Name) {
     $script:shots++
     $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -2100,7 +2125,15 @@ Step 'A wide brush keeps up with the pointer' {
         $tab, $brush, $ahead = $pair
         Remove-Item -Recurse -Force (Join-Path $env:TEMP 'gui-recovery') -ErrorAction SilentlyContinue
         Remove-Item -Force (Join-Path $env:TEMP 'gui-settings.json') -ErrorAction SilentlyContinue
+        # What the Sandbox was busy with while this step ran, and the app's
+        # own frame and pen-up times: late in a full run the step is several
+        # times slower than alone (docs/rust/evidence.md section 143), and the
+        # app keeps only its last few logs.
+        $busyBefore = Get-ProcessSeconds
+        $freeBefore = Get-FreeMegabytes
+        $env:UGURUGU_LOG = 'debug,wgpu_core=warn,wgpu_hal=warn,naga=warn'
         $process = Start-App 2400 1500
+        Remove-Item Env:UGURUGU_LOG
         # Set-Field's Enter has left the dialog open in one run and gone
         # without the height field in the next, so the dialog is opened again
         # or confirmed as it is found.
@@ -2163,9 +2196,14 @@ Step 'A wide brush keeps up with the pointer' {
             Start-Sleep -Milliseconds 500
             $ms
         }
+        $appMegabytes = [int]((Get-AppProcess | Measure-Object WorkingSet64 -Sum).Sum / 1MB)
+        $busy = Get-Busiest $busyBefore (Get-ProcessSeconds)
         Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
+        $log = Get-ChildItem $logs -Filter '*.log' | Sort-Object LastWriteTime | Select-Object -Last 1
+        $kept = Join-Path $out "wide-brush-$($brush -replace ' ', '-').log"
+        Copy-Item $log.FullName $kept
         [pscustomobject]@{
-            Detail = "$brush ${size}px: paper $w x $h shown $resized ms after OK, $lead px ahead of the end, dark before $before, end shown after (ms): $($times -join ', '); $canvasShot; $shot"
+            Detail = "$brush ${size}px: paper $w x $h shown $resized ms after OK, $lead px ahead of the end, dark before $before, end shown after (ms): $($times -join ', '); free memory $freeBefore MB before and $(Get-FreeMegabytes) MB after, the app held $appMegabytes MB, CPU seconds used: $busy; $canvasShot; $shot; $kept"
             Failed = $before -gt 0 -or $size -ne 512 -or ($times | Where-Object { $_ -lt 0 -or $_ -gt 150 })
         }
     }
