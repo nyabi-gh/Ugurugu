@@ -21,6 +21,14 @@ ignore = [
     { id = "RUSTSEC-2026-0368", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
     { id = "RUSTSEC-2026-0369", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
     { id = "RUSTSEC-2026-0429", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
+    # Also zip 8.6.0. 0545 needs the `aes-crypto` feature and 0547 the
+    # `legacy-zip` feature, neither of which Velopack turns on; 0546 is in
+    # ZipArchive::extract and 0548 in ZipStreamReader and
+    # read_zipfile_from_stream, which it does not call.
+    { id = "RUSTSEC-2026-0545", reason = "zip aes-crypto feature, not enabled; velopack 1.2.161 needs zip 8" },
+    { id = "RUSTSEC-2026-0546", reason = "zip extract(), not called; velopack 1.2.161 needs zip 8" },
+    { id = "RUSTSEC-2026-0547", reason = "zip legacy-zip feature, not enabled; velopack 1.2.161 needs zip 8" },
+    { id = "RUSTSEC-2026-0548", reason = "zip ZipStreamReader, not called; velopack 1.2.161 needs zip 8" },
     # Unmaintained, not vulnerabilities, and Linux only. zvariant, zbus_names
     # and zvariant_derive became part of zbus 6; AccessKit (accesskit_unix
     # 0.21.1, which egui-winit 0.36.2 fixes) needs zbus 5, so moving our own
