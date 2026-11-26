@@ -2899,3 +2899,20 @@ Sandbox의 앱은 RTX 5080(Dx12)을 골랐다. 단계를 맞추느라 고치기 
 - 두 앱 모두 어댑터는 `NVIDIA GeForce RTX 5080 (DiscreteGpu, Dx12)`로 적혔다(.wsb는 vGPU를 끈다).
 
 **결론:** `5f3024b`는 gui 전체를 통과했다. 늦게 보이는 시간은 Sandbox 전체가 느려서가 아니라 앱의 한 프레임에서 쓰인다: 그 단계의 첫 앱이 4096² 캔버스를 처음 올린 프레임의 UI 뒤 구간이 2.1초였고, 나머지 약 0.6~0.9초는 두 앱에 공통이다. 문서를 그리는 시간(21ms)은 아니다. 그 프레임 안에서 올리기, 그리기, present 중 어디인지는 로그가 나누지 않아 모른다. 같은 단계의 두 번째 앱과 같은 앱의 다음 올리기는 빠르므로, 그 크기의 텍스처와 올리기 버퍼를 그 Sandbox에서 처음 잡을 때의 비용이라는 것은 가설이다. 그 단계만 돌린 실행(143절, 1061ms)의 `rest_ms`와 호스트의 값은 재지 않았다. `tools/sandbox/gui.ps1`.
+
+## 147. `v3.7.0`의 릴리스 실행이 권고 검사에서 멈춤 (2026-11-26)
+
+**질문:** 태그 `v3.7.0`의 릴리스 실행은 왜 실패했고, 그 권고들은 앱에 해당하는가.
+
+**방법:** 실행 45790148769의 실패한 단계 로그, 로컬 `cargo deny check advisories`(같은 날의 권고 DB), `cargo tree -p ugurugu -i zip@8.6.0 -e features --locked`, crates.io의 Velopack 1.2.161 소스에서 `ZipStreamReader`·`read_zipfile_from_stream`·`extract(` 검색.
+
+**결과:**
+
+- 실행은 18:14에 시작해 27초 뒤 "Verify release source"의 "Check dependency advisories"에서 끝났다. 빌드 셋과 게시는 건너뛰어져 릴리스와 `updates` 피드에 올라간 것이 없다. 같은 커밋 `5f3024b`의 main CI(45730694368)는 통과했었다: CI의 `cargo deny`는 권고를 빼고 돈다(`check bans licenses sources`, `BUILDING.md`).
+- CI 로그에 보인 것은 zip 8.6.0의 RUSTSEC-2026-0547·0548이고, 로컬 검사에서는 그 둘을 허용한 뒤 url 2.5.8의 RUSTSEC-2026-0592와 zip 8.6.0의 0545·0546이 더 나왔다.
+- url은 Velopack 1.2.161만 쓰고(`cargo tree -i url`), 2.5.9로 올라간다(`form_urlencoded` 1.2.3과 함께).
+- zip 8.6.0에 켜진 기능은 `deflate`, `deflate-flate2`, `deflate-flate2-zlib-rs`, `deflate-zopfli`, `flate2`, `_deflate-any`뿐이다: 0545의 `aes-crypto`와 0547의 `legacy-zip`은 없다.
+- Velopack 1.2.161의 `src`에서 zip을 쓰는 곳은 `app.rs`의 `ZipWriter`와 `bundle.rs`의 `ZipArchive`뿐이고, `ZipStreamReader`·`read_zipfile_from_stream`(0548)과 `extract(`(0546) 호출은 없다.
+- url을 올리고 넷을 허용한 뒤 `cargo deny --locked check`는 advisories, bans, licenses, sources 모두 ok였다.
+
+**결론:** 실패는 CI가 통과한 뒤에 올라온 권고 때문이고, 태그 전에 권고 검사를 로컬에서 돌리지 않아 태그 뒤에야 드러났다. zip의 넷은 앱이 쓰는 코드에 닿지 않아 B3-145의 앞선 넷과 같이 허용했고, url은 고친 판으로 올렸다. `v3.7.0`은 옮길 수 없어 릴리스 없이 남고, 수정은 3.7.1로 나간다. 태그 전에 `cargo deny --locked check advisories`를 돌리는 것을 `BUILDING.md`에 적었다. `deny.toml`, `Cargo.lock`.

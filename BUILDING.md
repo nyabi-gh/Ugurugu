@@ -115,7 +115,10 @@ updates in the folder `UGURUGU_UPDATE_FEED` names instead of GitHub.
 Pushing a `v3.*` tag builds and publishes a release with
 `.github/workflows/release-3.yml`, once main's CI has succeeded on that
 commit and no advisory is open; the release workflow runs no `cargo test`
-of its own, only the package trials on each OS.
+of its own, only the package trials on each OS. Run `cargo deny --locked
+check advisories` on the commit before pushing its tag: a `v3.*` tag cannot
+be moved, so a release that stops at an advisory can only go out under the
+next version, as 3.7.0 did.
 
 ## Ugurugu 3 (macOS)
 
