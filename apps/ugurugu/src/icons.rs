@@ -61,6 +61,10 @@ pub enum Glyph {
     MirrorView = 44,
     /// Changing the strokes in the selection, not the brush tool.
     Restyle = 45,
+    /// Inverting the selection area: filled around a hollow inner selection.
+    InvertSelection = 46,
+    /// Filling the selected area, distinct from the paint bucket tool.
+    FillSelection = 47,
 }
 
 /// A diamond, as a key is drawn on a timeline.
@@ -451,6 +455,32 @@ fn shapes(glyph: Glyph) -> Shapes {
                 lines.push(vec![[4.4, y], [19.6, y]]);
                 shapes.fills.push(circle([knob, y], 2.2, 12));
             }
+        }
+        Glyph::InvertSelection => {
+            // Filled outer area around an empty inner square, as Clip Studio
+            // Paint shows inverting a selection.
+            shapes
+                .fills
+                .push(vec![[4.6, 4.6], [19.4, 4.6], [19.4, 8.0], [4.6, 8.0]]);
+            shapes
+                .fills
+                .push(vec![[4.6, 16.0], [19.4, 16.0], [19.4, 19.4], [4.6, 19.4]]);
+            shapes
+                .fills
+                .push(vec![[4.6, 8.0], [8.0, 8.0], [8.0, 16.0], [4.6, 16.0]]);
+            shapes
+                .fills
+                .push(vec![[16.0, 8.0], [19.4, 8.0], [19.4, 16.0], [16.0, 16.0]]);
+        }
+        Glyph::FillSelection => {
+            // Selection corners around a filled square inside them.
+            lines.push(vec![[4.2, 8.0], [4.2, 4.2], [8.0, 4.2]]);
+            lines.push(vec![[16.0, 4.2], [19.8, 4.2], [19.8, 8.0]]);
+            lines.push(vec![[4.2, 16.0], [4.2, 19.8], [8.0, 19.8]]);
+            lines.push(vec![[16.0, 19.8], [19.8, 19.8], [19.8, 16.0]]);
+            shapes
+                .fills
+                .push(vec![[8.6, 8.6], [15.4, 8.6], [15.4, 15.4], [8.6, 15.4]]);
         }
         Glyph::Shape => {
             // A square, and a circle over its corner.

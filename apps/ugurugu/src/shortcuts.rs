@@ -406,21 +406,20 @@ macro_rules! actions {
     };
 }
 
-// 2.2.13's keys with Windows's standard ones as aliases, except where 3.0
+// 2.2.13's keys with Windows's standard ones as aliases, except where 3.x
 // already differs: Save As, Quit and exporting have keys, transforming is
-// Ctrl+T and so the animation bar Ctrl+Shift+T. The layer keys, the brush
-// size and swapping colours, which 2.2.13 had none for, follow Photoshop
-// and Clip Studio Paint, so exporting a GIF moved to Ctrl+Alt+E and a new
-// cel has no key (decisions.md section 9).
+// Ctrl+T and so the animation bar Ctrl+Shift+T. The layer, view, edit,
+// animation and panel keys follow Clip Studio Paint and Photoshop
+// conventions where available (decisions.md section 9).
 actions! {
     New "new" "file-new" [ctrl(Key::N)] [];
     Open "open" "file-open" [ctrl(Key::O)] [];
     Save "save" "file-save" [ctrl(Key::S)] [];
     SaveAs "saveAs" "file-save-as" [ctrl_shift(Key::S)] [];
-    InsertImage "insertImage" "file-insert-image" [] [];
+    InsertImage "insertImage" "file-insert-image" [ctrl_shift(Key::O)] [];
     Export "exportPng" "file-export-frame" [ctrl_shift(Key::E)] [];
     ExportGif "exportGif" "export-gif" [ctrl_alt(Key::E)] [];
-    ExportWebP "exportWebP" "export-webp" [] [];
+    ExportWebP "exportWebP" "export-webp" [ctrl_alt(Key::W)] [];
     CloseTab "closeTab" "file-close-tab" [ctrl(Key::W)] [ctrl(Key::F4)];
     Quit "quit" "file-quit" [ctrl(Key::Q)] [];
     Undo "undo" "edit-undo" [ctrl(Key::Z)] [alt(Key::Backspace)];
@@ -428,30 +427,30 @@ actions! {
     Cut "cutSelection" "edit-cut" [ctrl(Key::X)] [shift(Key::Delete)];
     Copy "copySelection" "edit-copy" [ctrl(Key::C)] [ctrl(Key::Insert)];
     Paste "paste" "edit-paste" [ctrl(Key::V)] [shift(Key::Insert)];
-    ImageSize "resizeImage" "edit-image-size" [] [];
-    CanvasSize "resizeCanvas" "edit-canvas-size" [] [];
-    Background "background" "edit-background" [] [];
-    PixelMode "pixelMode" "pixel-mode" [] [];
+    ImageSize "resizeImage" "edit-image-size" [ctrl_alt(Key::I)] [];
+    CanvasSize "resizeCanvas" "edit-canvas-size" [ctrl_alt(Key::C)] [];
+    Background "background" "edit-background" [ctrl_shift(Key::B)] [];
+    PixelMode "pixelMode" "pixel-mode" [ctrl_shift(Key::P)] [];
     SelectAll "selectAll" "edit-select-all" [ctrl(Key::A)] [];
     InvertSelection "invertSelection" "edit-invert-selection" [ctrl_shift(Key::I)] [];
     Deselect "deselectSelection" "edit-deselect" [ctrl(Key::D)] [];
     FillSelection "fillSelection" "edit-fill-selection" [alt(Key::Delete)] [];
-    Restyle "editStrokeProperties" "restyle-selected" [] [];
+    Restyle "editStrokeProperties" "restyle-selected" [ctrl_shift(Key::R)] [];
     DeleteSelected "deleteSelection" "delete-selected" [plain(Key::Delete)] [];
     Transform "transformSelection" "transform-selection" [ctrl(Key::T)] [];
-    FlipHorizontal "flipSelectionHorizontal" "flip-horizontal" [] [];
-    FlipVertical "flipSelectionVertical" "flip-vertical" [] [];
+    FlipHorizontal "flipSelectionHorizontal" "flip-horizontal" [shift(Key::H)] [];
+    FlipVertical "flipSelectionVertical" "flip-vertical" [shift(Key::V)] [];
     ApplyTransform "applySelectionTransform" "transform-apply" [plain(Key::Enter)] [];
     CancelTransform "cancelSelectionTransform" "transform-cancel" [] [];
     AddLayer "addLayer" "layer-add" [ctrl_shift(Key::N)] [];
-    AddGroup "addGroup" "layer-add-group" [] [];
-    Ungroup "ungroup" "layer-ungroup" [] [];
+    AddGroup "addGroup" "layer-add-group" [ctrl(Key::G)] [];
+    Ungroup "ungroup" "layer-ungroup" [ctrl_shift(Key::G)] [];
     DuplicateLayer "duplicateLayer" "layer-duplicate" [ctrl(Key::J)] [];
     MergeDown "mergeDown" "layer-merge" [ctrl(Key::E)] [];
-    LayerUp "moveLayerUp" "layer-up" [] [];
-    LayerDown "moveLayerDown" "layer-down" [] [];
-    ShowLayer "showLayer" "layer-show-hide" [] [];
-    DeleteLayer "deleteLayer" "layer-delete" [] [];
+    LayerUp "moveLayerUp" "layer-up" [ctrl(Key::CloseBracket)] [];
+    LayerDown "moveLayerDown" "layer-down" [ctrl(Key::OpenBracket)] [];
+    ShowLayer "showLayer" "layer-show-hide" [plain(Key::H)] [];
+    DeleteLayer "deleteLayer" "layer-delete" [ctrl(Key::Delete)] [];
     Escape "escapeCanvas" "escape-canvas" [plain(Key::Escape)] [];
     Settings "settings" "edit-settings" [ctrl(Key::Comma)] [];
     ZoomIn "zoomIn" "view-zoom-in" [ctrl(Key::Plus)] [ctrl(Key::Equals)];
@@ -462,19 +461,19 @@ actions! {
     // the US `=` key.
     TurnLeft "rotateCanvasLeft" "view-turn-left" [plain(Key::Minus)] [];
     TurnRight "rotateCanvasRight" "view-turn-right" [plain(Key::Equals)] [];
-    ResetTurn "resetCanvasRotation" "view-turn-reset" [] [];
+    ResetTurn "resetCanvasRotation" "view-turn-reset" [plain(Key::Num0)] [];
     Mirror "mirrorCanvas" "view-mirror" [plain(Key::M)] [];
-    Symmetry "symmetryRuler" "view-symmetry" [] [];
+    Symmetry "symmetryRuler" "view-symmetry" [ctrl(Key::Num2)] [];
     Animate "play" "view-animate" [plain(Key::P)] [];
-    AnimationTools "animationTools" "view-animation-tools" [] [];
+    AnimationTools "animationTools" "view-animation-tools" [ctrl_shift(Key::A)] [];
     PreviousFrame "previousFrame" "frame-previous" [plain(Key::Comma)] [];
     NextFrame "nextFrame" "frame-next" [plain(Key::Period)] [];
     PreviousKey "previousKey" "key-previous" [shift(Key::Comma)] [];
     NextKey "nextKey" "key-next" [shift(Key::Period)] [];
     ToggleKey "toggleKey" "key-toggle" [plain(Key::K)] [];
     OnionSkin "onionSkin" "onion-skin" [plain(Key::O)] [];
-    AnimationFolder "animationFolder" "animation-folder-make" [] [];
-    NewCel "newCel" "cel-new" [] [];
+    AnimationFolder "animationFolder" "animation-folder-make" [ctrl_alt(Key::F)] [];
+    NewCel "newCel" "cel-new" [ctrl_alt(Key::N)] [];
     Brush "brush" "tool-brush" [plain(Key::B)] [];
     Eraser "eraser" "tool-eraser" [plain(Key::E)] [];
     Select "lasso" "tool-select" [plain(Key::L)] [];
@@ -494,12 +493,12 @@ actions! {
     NextTab "nextTab" "window-next-tab" [ctrl(Key::Tab)] [ctrl(Key::PageDown)];
     PreviousTab "previousTab" "window-previous-tab" [ctrl_shift(Key::Tab)] [ctrl(Key::PageUp)];
     AnimationBar "showTimeline" "window-animation-bar" [ctrl_shift(Key::T)] [];
-    ToolSettings "toolSettings" "tool-settings" [] [];
-    WobbleDock "wobbleDock" "wobble-dock" [] [];
-    ColorDock "colorDock" "color-dock" [] [];
-    ColorHistory "colorHistory" "color-history" [] [];
-    Layers "layers" "layers" [] [];
-    Navigator "navigator" "navigator" [] [];
+    ToolSettings "toolSettings" "tool-settings" [plain(Key::F5)] [];
+    WobbleDock "wobbleDock" "wobble-dock" [plain(Key::F3)] [];
+    ColorDock "colorDock" "color-dock" [plain(Key::F6)] [];
+    ColorHistory "colorHistory" "color-history" [plain(Key::F4)] [];
+    Layers "layers" "layers" [plain(Key::F7)] [];
+    Navigator "navigator" "navigator" [plain(Key::F8)] [];
     ResetLayout "resetPanelLayout" "window-reset-layout" [] [];
     CheckUpdates "checkForUpdates" "help-check-updates" [] [];
     Help "help" "help-contents" [plain(Key::F1)] [];
@@ -725,7 +724,14 @@ mod tests {
             (alt(Key::Backspace), "Alt+Backspace"),
             (plain(Key::OpenBracket), "["),
             (plain(Key::CloseBracket), "]"),
+            (ctrl(Key::OpenBracket), "Ctrl+["),
+            (ctrl(Key::CloseBracket), "Ctrl+]"),
+            (ctrl(Key::Delete), "Ctrl+Delete"),
+            (ctrl(Key::Num2), "Ctrl+2"),
+            (plain(Key::Num0), "0"),
+            (shift(Key::H), "Shift+H"),
             (ctrl_alt(Key::E), "Ctrl+Alt+E"),
+            (ctrl_alt(Key::N), "Ctrl+Alt+N"),
         ] {
             assert_eq!(chord.text(), text);
             assert_eq!(Chord::parse(text), Some(chord), "{text}");

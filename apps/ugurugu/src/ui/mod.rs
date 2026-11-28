@@ -1298,9 +1298,10 @@ fn transform_box(
     ui.ctx().set_cursor_icon(icon);
 }
 
-/// The bar of selection actions under the selection, as 2.2.13's: transform,
-/// flip, apply and cancel, duplicate, delete and deselect. Hidden while a
-/// shape or the box is dragged.
+/// The bar of selection actions under the selection, ordered like Clip Studio
+/// Paint's selection launcher: deselect and invert, delete and duplicate,
+/// transform and flip (with apply and cancel while transforming), then fill
+/// and restyle. Hidden while a shape or the box is dragged.
 pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Panels) {
     const MARGIN: f32 = theme::space::M;
     const GAP: f32 = theme::space::S;
@@ -1321,7 +1322,7 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
     let size = ui
         .ctx()
         .memory(|memory| memory.area_rect(id))
-        .map_or(egui::vec2(300.0, 40.0), |rect| rect.size());
+        .map_or(egui::vec2(360.0, 40.0), |rect| rect.size());
     let x = ((low.x + high.x) / 2.0 - size.x / 2.0).clamp(
         area.left() + MARGIN,
         (area.right() - size.x - MARGIN).max(area.left() + MARGIN),
@@ -1365,6 +1366,39 @@ fn action_buttons(
         widgets::icon_button_tip(ui, glyph, 18.0, tr(name), &tip, true).clicked()
     };
     let button = |ui: &mut egui::Ui, action, name, tip| keyed(ui, action, name, tip, action);
+    if button(ui, Action::Deselect, "edit-deselect", "edit-deselect") {
+        canvas.edit_settled(Session::deselect);
+    }
+    if button(
+        ui,
+        Action::InvertSelection,
+        "edit-invert-selection",
+        "edit-invert-selection",
+    ) {
+        canvas.edit_settled(Session::invert_selection);
+    }
+    ui.separator();
+    if button(
+        ui,
+        Action::DeleteSelected,
+        "delete-selected",
+        "delete-selected",
+    ) {
+        canvas.delete_selected();
+    }
+    let duplicate = pending == Some(true);
+    let toggled = widgets::icon_toggle(
+        ui,
+        Glyph::Duplicate,
+        18.0,
+        tr("transform-duplicate"),
+        tr("transform-duplicate-tip"),
+        duplicate,
+    );
+    if toggled.clicked() {
+        canvas.set_duplicate(!duplicate);
+    }
+    ui.separator();
     if pending.is_none()
         && button(
             ui,
@@ -1387,7 +1421,6 @@ fn action_buttons(
         canvas.flip(false);
     }
     if pending.is_some() {
-        ui.separator();
         if button(
             ui,
             Action::ApplyTransform,
@@ -1412,17 +1445,13 @@ fn action_buttons(
         }
     }
     ui.separator();
-    let duplicate = pending == Some(true);
-    let toggled = widgets::icon_toggle(
+    if button(
         ui,
-        Glyph::Duplicate,
-        18.0,
-        tr("transform-duplicate"),
-        tr("transform-duplicate-tip"),
-        duplicate,
-    );
-    if toggled.clicked() {
-        canvas.set_duplicate(!duplicate);
+        Action::FillSelection,
+        "edit-fill-selection",
+        "edit-fill-selection-tip",
+    ) {
+        canvas.fill_selection();
     }
     let restyle = restyle::available(canvas)
         && button(
@@ -1431,18 +1460,6 @@ fn action_buttons(
             "restyle-selected",
             "restyle-selected-tip",
         );
-    if button(
-        ui,
-        Action::DeleteSelected,
-        "delete-selected",
-        "delete-selected",
-    ) {
-        canvas.delete_selected();
-    }
-    ui.separator();
-    if button(ui, Action::Deselect, "edit-deselect", "edit-deselect") {
-        canvas.edit_settled(Session::deselect);
-    }
     if restyle {
         restyle::open(canvas, panels);
     }

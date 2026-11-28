@@ -511,6 +511,8 @@ pub fn glyph(action: Action) -> Option<Glyph> {
         A::Restyle => Glyph::Restyle,
         A::DeleteSelected => Glyph::Delete,
         A::Deselect => Glyph::Deselect,
+        A::InvertSelection => Glyph::InvertSelection,
+        A::FillSelection => Glyph::FillSelection,
         A::Animate => Glyph::Play,
         A::AnimationBar => Glyph::MoveDown,
         A::OnionSkin => Glyph::OnionSkin,

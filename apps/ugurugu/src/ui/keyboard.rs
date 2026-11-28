@@ -635,3 +635,129 @@ fn a_frame_count_is_set_when_typing_ends_not_at_each_key() {
         steps
     );
 }
+
+#[test]
+fn csp_style_default_shortcuts_act() {
+    use crate::layout::Panel;
+    use ugu_core::document::LayerKind;
+
+    let mut window = Window::new();
+    let ctrl = Modifiers::COMMAND;
+
+    // Group and ungroup (Ctrl+G, Ctrl+Shift+G).
+    window.key(ctrl, Key::G);
+    let group_id = window.canvas.session().document().layers[0].id;
+    assert!(matches!(
+        window.canvas.session().document().layers[0].kind,
+        LayerKind::Group(_)
+    ));
+    window
+        .canvas
+        .edit_settled(|session| session.select_layer(group_id));
+    window.key(ctrl | Modifiers::SHIFT, Key::G);
+    assert!(matches!(
+        window.canvas.session().document().layers[0].kind,
+        LayerKind::Paint(_)
+    ));
+
+    // Move layer down/up (Ctrl+[, Ctrl+]), hide/show (H), and delete (Ctrl+Delete).
+    window.key(ctrl | Modifiers::SHIFT, Key::N);
+    let top = window.canvas.session().current_layer();
+    let bottom = window.canvas.session().document().layers[0].id;
+    assert_eq!(window.canvas.session().document().layers[1].id, top);
+    window.key(ctrl, Key::OpenBracket);
+    assert_eq!(window.canvas.session().document().layers[0].id, top);
+    window.key(ctrl, Key::CloseBracket);
+    assert_eq!(window.canvas.session().document().layers[1].id, top);
+
+    let visible = |window: &Window| {
+        window
+            .canvas
+            .session()
+            .document()
+            .layer(top)
+            .unwrap()
+            .visible
+    };
+    assert!(visible(&window));
+    window.key(NONE, Key::H);
+    assert!(!visible(&window));
+    window.key(NONE, Key::H);
+    assert!(visible(&window));
+
+    window.key(ctrl, Key::Delete);
+    assert_eq!(window.canvas.session().document().layers.len(), 1);
+    assert_eq!(window.canvas.session().document().layers[0].id, bottom);
+
+    // Canvas rotation reset (0) and symmetry toggle (Ctrl+2).
+    window.key(NONE, Key::Equals);
+    assert_ne!(window.canvas.angle(), 0.0);
+    window.key(NONE, Key::Num0);
+    assert_eq!(window.canvas.angle(), 0.0);
+
+    assert!(!window.canvas.symmetry().on);
+    window.key(ctrl, Key::Num2);
+    assert!(window.canvas.symmetry().on);
+    window.key(ctrl, Key::Num2);
+    assert!(!window.canvas.symmetry().on);
+
+    // Panel toggles (F3–F8).
+    for (key, panel) in [
+        (Key::F3, Panel::Wobble),
+        (Key::F4, Panel::ColorHistory),
+        (Key::F5, Panel::ToolSettings),
+        (Key::F6, Panel::Color),
+        (Key::F7, Panel::Layers),
+        (Key::F8, Panel::Navigator),
+    ] {
+        let before = window.panels.layout.is_open(panel);
+        window.key(NONE, key);
+        assert_eq!(window.panels.layout.is_open(panel), !before, "{panel:?}");
+        window.key(NONE, key);
+        assert_eq!(window.panels.layout.is_open(panel), before, "{panel:?}");
+    }
+}
+
+#[test]
+fn selection_launcher_buttons_follow_clip_studio_order() {
+    let mut window = Window::new();
+    window.canvas.edit(Session::select_all).unwrap();
+    window.frame(Vec::new());
+    let expected = [
+        tr("edit-deselect"),
+        tr("edit-invert-selection"),
+        tr("delete-selected"),
+        tr("transform-duplicate"),
+        tr("transform-selection"),
+        tr("flip-horizontal"),
+        tr("flip-vertical"),
+        tr("edit-fill-selection"),
+    ];
+    let lefts: Vec<f64> = expected
+        .iter()
+        .map(|label| {
+            let (_, node) = window
+                .tree
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label() == Some(*label)
+                        && node.supports_action(egui::accesskit::Action::Click)
+                })
+                .unwrap_or_else(|| panic!("selection launcher missing {label}"));
+            node.bounds().unwrap().x0
+        })
+        .collect();
+    assert!(
+        lefts.windows(2).all(|pair| pair[0] < pair[1]),
+        "selection launcher order: {expected:?} at {lefts:?}"
+    );
+    // Filling from the launcher commits a fill step on the selection.
+    window.click_named(tr("edit-fill-selection"));
+    assert_eq!(window.canvas.session().undo_label(), Some("Fill"));
+    // Deselecting from the launcher clears the selection.
+    window.click_named(tr("edit-deselect"));
+    assert!(window.canvas.session().selection().is_none());
+}
