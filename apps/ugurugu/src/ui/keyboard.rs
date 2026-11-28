@@ -701,7 +701,9 @@ fn csp_style_default_shortcuts_act() {
     window.key(ctrl, Key::Num2);
     assert!(!window.canvas.symmetry().on);
 
-    // Panel toggles (F3–F8).
+    // Panel shortcuts (F3–F8): a visible panel closes on first press, while a
+    // background tab (ColorHistory behind Color, Navigator behind Wobble)
+    // comes to the front first and closes on the next press.
     for (key, panel) in [
         (Key::F3, Panel::Wobble),
         (Key::F4, Panel::ColorHistory),
@@ -710,12 +712,61 @@ fn csp_style_default_shortcuts_act() {
         (Key::F7, Panel::Layers),
         (Key::F8, Panel::Navigator),
     ] {
-        let before = window.panels.layout.is_open(panel);
-        window.key(NONE, key);
-        assert_eq!(window.panels.layout.is_open(panel), !before, "{panel:?}");
-        window.key(NONE, key);
-        assert_eq!(window.panels.layout.is_open(panel), before, "{panel:?}");
+        if window.panels.layout.is_visible(panel) {
+            window.key(NONE, key);
+            assert!(!window.panels.layout.is_visible(panel), "{panel:?}");
+            window.key(NONE, key);
+            assert!(window.panels.layout.is_visible(panel), "{panel:?}");
+        } else {
+            window.key(NONE, key);
+            assert!(window.panels.layout.is_visible(panel), "{panel:?}");
+            window.key(NONE, key);
+            assert!(!window.panels.layout.is_visible(panel), "{panel:?}");
+            window.key(NONE, key);
+            assert!(window.panels.layout.is_visible(panel), "{panel:?}");
+        }
     }
+
+    // Pixel mode (Ctrl+Shift+P), background (Ctrl+Shift+B), image size
+    // (Ctrl+Alt+I), canvas size (Ctrl+Alt+C), animation tools/folder/cel
+    // (Ctrl+Shift+A, Ctrl+Alt+F, Ctrl+Alt+N), selection flip (Shift+H/V).
+    assert!(!window.canvas.session().pixel_mode());
+    window.key(ctrl | Modifiers::SHIFT, Key::P);
+    assert!(window.canvas.session().pixel_mode());
+    window.key(ctrl | Modifiers::SHIFT, Key::P);
+    assert!(!window.canvas.session().pixel_mode());
+
+    window.key(ctrl | Modifiers::SHIFT, Key::B);
+    assert!(window.panels.background.is_some());
+    window.key(NONE, Key::Escape);
+    window.frame(Vec::new());
+    assert!(window.panels.background.is_none());
+
+    window.key(ctrl | Modifiers::ALT, Key::I);
+    assert!(window.panels.resize.is_some());
+    window.key(NONE, Key::Escape);
+    window.frame(Vec::new());
+    assert!(window.panels.resize.is_none());
+
+    window.key(ctrl | Modifiers::SHIFT, Key::A);
+    assert!(window.panels.layout.animation_tools);
+    window.key(ctrl | Modifiers::ALT, Key::F);
+    assert!(window.canvas.session().folder().is_some());
+    let cels = |window: &Window| match &window.canvas.session().document().layers[0].kind {
+        LayerKind::Group(group) => group.children.len(),
+        LayerKind::Paint(_) => 0,
+    };
+    let before_cels = cels(&window);
+    window.key(ctrl | Modifiers::ALT, Key::N);
+    assert_eq!(cels(&window), before_cels + 1);
+
+    window.key(ctrl, Key::A);
+    window.key(Modifiers::SHIFT, Key::H);
+    assert!(window.canvas.session().pending().is_some());
+    window.key(Modifiers::SHIFT, Key::V);
+    assert!(window.canvas.session().pending().is_some());
+    window.key(NONE, Key::Escape);
+    assert!(window.canvas.session().pending().is_none());
 }
 
 #[test]
@@ -723,7 +774,26 @@ fn selection_launcher_buttons_follow_clip_studio_order() {
     let mut window = Window::new();
     window.canvas.edit(Session::select_all).unwrap();
     window.frame(Vec::new());
-    let expected = [
+    let find_x = |window: &Window, label: &str| {
+        let (_, node) = window
+            .tree
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label() == Some(label) && node.supports_action(egui::accesskit::Action::Click)
+            })
+            .unwrap_or_else(|| panic!("selection launcher missing {label}"));
+        node.bounds().unwrap().x0
+    };
+    let has_button = |window: &Window, label: &str| {
+        window.tree.as_ref().unwrap().nodes.iter().any(|(_, node)| {
+            node.label() == Some(label) && node.supports_action(egui::accesskit::Action::Click)
+        })
+    };
+
+    let idle_expected = [
         tr("edit-deselect"),
         tr("edit-invert-selection"),
         tr("delete-selected"),
@@ -732,32 +802,55 @@ fn selection_launcher_buttons_follow_clip_studio_order() {
         tr("flip-horizontal"),
         tr("flip-vertical"),
         tr("edit-fill-selection"),
+        tr("restyle-selected"),
     ];
-    let lefts: Vec<f64> = expected
+    let lefts: Vec<f64> = idle_expected
         .iter()
-        .map(|label| {
-            let (_, node) = window
-                .tree
-                .as_ref()
-                .unwrap()
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.label() == Some(*label)
-                        && node.supports_action(egui::accesskit::Action::Click)
-                })
-                .unwrap_or_else(|| panic!("selection launcher missing {label}"));
-            node.bounds().unwrap().x0
-        })
+        .map(|label| find_x(&window, label))
         .collect();
     assert!(
         lefts.windows(2).all(|pair| pair[0] < pair[1]),
-        "selection launcher order: {expected:?} at {lefts:?}"
+        "selection launcher order: {idle_expected:?} at {lefts:?}"
     );
-    // Filling from the launcher commits a fill step on the selection.
+
+    // While transforming, Transform and Restyle hide and Apply/Cancel sit
+    // beside the flip buttons before Fill.
+    window.click_named(tr("transform-selection"));
+    assert!(window.canvas.session().pending().is_some());
+    assert!(!has_button(&window, tr("transform-selection")));
+    assert!(!has_button(&window, tr("restyle-selected")));
+    let pending_expected = [
+        tr("edit-deselect"),
+        tr("edit-invert-selection"),
+        tr("delete-selected"),
+        tr("transform-duplicate"),
+        tr("flip-horizontal"),
+        tr("flip-vertical"),
+        tr("transform-apply"),
+        tr("transform-cancel"),
+        tr("edit-fill-selection"),
+    ];
+    let pending_lefts: Vec<f64> = pending_expected
+        .iter()
+        .map(|label| find_x(&window, label))
+        .collect();
+    assert!(
+        pending_lefts.windows(2).all(|pair| pair[0] < pair[1]),
+        "pending launcher order: {pending_expected:?} at {pending_lefts:?}"
+    );
+
+    // Filling from the launcher settles the pending transform and commits a fill.
     window.click_named(tr("edit-fill-selection"));
+    assert!(window.canvas.session().pending().is_none());
     assert_eq!(window.canvas.session().undo_label(), Some("Fill"));
+
+    // Inverting a full-canvas selection from the launcher clears the selection.
+    window.click_named(tr("edit-invert-selection"));
+    assert!(window.canvas.session().selection().is_none());
+
     // Deselecting from the launcher clears the selection.
+    window.canvas.edit(Session::select_all).unwrap();
+    window.frame(Vec::new());
     window.click_named(tr("edit-deselect"));
     assert!(window.canvas.session().selection().is_none());
 }

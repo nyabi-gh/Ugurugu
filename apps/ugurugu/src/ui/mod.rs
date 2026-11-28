@@ -1310,6 +1310,7 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
         return;
     }
     let pending = session.pending().map(|pending| pending.keep_source);
+    let can_restyle = restyle::available(canvas);
     let Some([left, top, right, bottom]) = canvas.selection_bounds() else {
         return;
     };
@@ -1322,7 +1323,7 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
     let size = ui
         .ctx()
         .memory(|memory| memory.area_rect(id))
-        .map_or(egui::vec2(360.0, 40.0), |rect| rect.size());
+        .map_or(egui::vec2(280.0, 40.0), |rect| rect.size());
     let x = ((low.x + high.x) / 2.0 - size.x / 2.0).clamp(
         area.left() + MARGIN,
         (area.right() - size.x - MARGIN).max(area.left() + MARGIN),
@@ -1345,17 +1346,19 @@ pub fn selection_actions(ui: &mut egui::Ui, canvas: &mut Canvas, panels: &mut Pa
                 .corner_radius(egui::CornerRadius::same(theme::radius::SURFACE))
                 .inner_margin(egui::Margin::same(theme::space::XS as i8))
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| action_buttons(ui, canvas, panels, pending));
+                    ui.horizontal(|ui| action_buttons(ui, canvas, panels, pending, can_restyle));
                 });
         });
 }
 
 /// `pending`: whether a transform is pending, and whether it duplicates.
+/// `can_restyle`: snapshotted before any click mutates `canvas` mid-row.
 fn action_buttons(
     ui: &mut egui::Ui,
     canvas: &mut Canvas,
     panels: &mut Panels,
     pending: Option<bool>,
+    can_restyle: bool,
 ) {
     ui.spacing_mut().item_spacing.x = 2.0;
     let keys = &panels.keys;
@@ -1453,7 +1456,7 @@ fn action_buttons(
     ) {
         canvas.fill_selection();
     }
-    let restyle = restyle::available(canvas)
+    let restyle = can_restyle
         && button(
             ui,
             Action::Restyle,

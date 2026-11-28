@@ -458,13 +458,14 @@ fn shapes(glyph: Glyph) -> Shapes {
         }
         Glyph::InvertSelection => {
             // Filled outer area around an empty inner square, as Clip Studio
-            // Paint shows inverting a selection.
+            // Paint shows inverting a selection. Each strip starts on a short
+            // edge so `wobbled()` keeps the triangle fan convex.
             shapes
                 .fills
-                .push(vec![[4.6, 4.6], [19.4, 4.6], [19.4, 8.0], [4.6, 8.0]]);
+                .push(vec![[4.6, 8.0], [4.6, 4.6], [19.4, 4.6], [19.4, 8.0]]);
             shapes
                 .fills
-                .push(vec![[4.6, 16.0], [19.4, 16.0], [19.4, 19.4], [4.6, 19.4]]);
+                .push(vec![[4.6, 19.4], [4.6, 16.0], [19.4, 16.0], [19.4, 19.4]]);
             shapes
                 .fills
                 .push(vec![[4.6, 8.0], [8.0, 8.0], [8.0, 16.0], [4.6, 16.0]]);

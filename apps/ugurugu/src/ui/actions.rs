@@ -622,10 +622,13 @@ pub fn run(
         return;
     }
     if let Some(panel) = panel(action) {
-        let open = !is_open(&panels.layout, panel);
         match panel {
-            Some(panel) => panels.layout.set_open(panel, open),
-            None => panels.layout.animation_bar = open,
+            // A panel behind another tab or in a collapsed dock comes into
+            // view on the first toggle, instead of closing unseen.
+            Some(panel) => panels
+                .layout
+                .set_open(panel, !panels.layout.is_visible(panel)),
+            None => panels.layout.animation_bar = !panels.layout.animation_bar,
         }
         return;
     }

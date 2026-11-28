@@ -705,6 +705,8 @@ mod tests {
             assert_eq!(keymap.key(action), action.default_key(), "{action:?}");
             assert_eq!(Action::from_id(action.id()), Some(action));
             for &key in action.default_key().iter().chain(action.aliases()) {
+                assert!(key.assignable(), "{action:?} {}", key.text());
+                assert_eq!(Chord::parse(&key.text()), Some(key), "{action:?}");
                 assert_eq!(keymap.action(key), Some(action), "{}", key.text());
             }
         }
@@ -895,6 +897,12 @@ mod tests {
         };
         for (logical, physical, modifiers, chord) in [
             (character("c"), KeyCode::KeyC, control, Some(ctrl(Key::C))),
+            (
+                character("c"),
+                KeyCode::KeyC,
+                control | ModifiersState::ALT,
+                Some(ctrl_alt(Key::C)),
+            ),
             (
                 character("v"),
                 KeyCode::KeyV,

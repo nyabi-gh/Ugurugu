@@ -206,6 +206,30 @@ impl Layout {
         !self.closed.contains(&panel)
     }
 
+    /// Whether `panel` is currently shown on screen: open, in front of its
+    /// group, and not inside a collapsed dock area.
+    pub fn is_visible(&self, panel: Panel) -> bool {
+        if !self.is_open(panel) {
+            return false;
+        }
+        if let Some(side) = self.side_of(panel)
+            && self.area(side).collapsed
+        {
+            return false;
+        }
+        self.group_of(panel)
+            .is_some_and(|group| self.front(group) == Some(panel))
+    }
+
+    fn group_of(&self, panel: Panel) -> Option<&Group> {
+        self.left
+            .groups
+            .iter()
+            .chain(self.right.groups.iter())
+            .chain(self.floating.iter().map(|floating| &floating.group))
+            .find(|group| group.panels.contains(&panel))
+    }
+
     /// Opens or closes `panel`. An opened panel comes to the front of its
     /// group, and its side unfolds.
     pub fn set_open(&mut self, panel: Panel, open: bool) {

@@ -1735,8 +1735,11 @@ impl Canvas {
 
     /// Fills the selection on the current layer.
     pub fn fill_selection(&mut self) {
-        self.edit(|_| ());
         self.notice = None;
+        if !self.apply_pending() {
+            return;
+        }
+        self.edit(|_| ());
         let before = self.key();
         let filled = self.tab.session.fill_selection(&self.tools);
         self.record_colors();
@@ -4982,5 +4985,32 @@ mod tests {
         assert!(full_render(&canvas).data_as_u8_slice() == full.data_as_u8_slice());
         canvas.set_onion_skin(false);
         assert!(canvas.display().data_as_u8_slice() == full.data_as_u8_slice());
+    }
+
+    #[test]
+    fn fill_selection_after_a_pending_transform_settles_the_split_and_matches_full_render() {
+        let (mut canvas, renders) = animated_canvas();
+        stroke_through(&mut canvas, &[[60.0, 40.0], [90.0, 60.0]]);
+        settle(&mut canvas, &renders);
+
+        canvas.edit(ugu_session::Session::select_all).unwrap();
+        canvas.begin_transform();
+        // Move pixels left and up so the transform expands the layer's tiles.
+        canvas
+            .tab
+            .session
+            .set_transform(ugu_core::ops::Affine::translation(-40.0, -25.0));
+        canvas.sync();
+        assert!(canvas.tab.preview.is_some());
+
+        canvas.tools_mut().color = ugu_core::ops::Rgba8([20, 140, 220, 255]);
+        canvas.fill_selection();
+        assert!(canvas.tab.session.pending().is_none());
+        assert!(canvas.tab.preview.is_none());
+        assert!(canvas.tab.session.take_ended().is_none());
+        settle(&mut canvas, &renders);
+
+        let full = full_render(&canvas);
+        assert_eq!(canvas.display().data_as_u8_slice(), full.data_as_u8_slice());
     }
 }
